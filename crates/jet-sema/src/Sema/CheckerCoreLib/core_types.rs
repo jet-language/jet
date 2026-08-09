@@ -246,8 +246,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
-        | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream"
-        | "GradTriple" | "SparseTensor"
+        | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VjpRun"
+        | "SparseTensor"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
@@ -1063,6 +1063,20 @@ pub(crate) fn core_generic_struct_field(
         return match field {
             "left" => Some(args[0].clone()),
             "right" => Some(args[1].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "VjpRun" && args.len() == 1 {
+        return match field {
+            "value" => Some(Type::Named("Tensor".to_string())),
+            "pull" => Some(Type::Fn {
+                params: vec![Type::Named("Tensor".to_string())],
+                ret: Some(Box::new(args[0].clone())),
+                effect_bound: None,
+                param_contract: None,
+                return_view_provenance: None,
+            }),
+            "grads" => Some(args[0].clone()),
             _ => None,
         };
     }

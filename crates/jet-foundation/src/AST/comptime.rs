@@ -1,4 +1,5 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -550,6 +551,28 @@ impl CtValue {
     }
 }
 
+/// A compiler-private opaque value that can cross the `CtValue` boundary while
+/// retaining identity. It is deliberately not a language value: only code
+/// that created the token can downcast it.
+#[derive(Clone)]
+pub struct CtOpaque(std::sync::Arc<dyn Any + Send + Sync>);
+
+impl CtOpaque {
+    pub fn new<T: Any + Send + Sync>(value: T) -> Self {
+        Self(std::sync::Arc::new(value))
+    }
+
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        self.0.downcast_ref::<T>()
+    }
+}
+
+impl fmt::Debug for CtOpaque {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<opaque>")
+    }
+}
+
 /// c139: a closure's captured state — the AST `Lambda` node plus every
 /// binding in scope where it was created (a tree-walker over-captures rather
 /// than tracking free variables, which is simpler and behaviorally
@@ -567,6 +590,9 @@ pub struct ClosureData {
     /// typed function value. Parsed comptime bodies run before full sema body
     /// elaboration, so the value boundary is the width authority here.
     pub return_type: Option<Type>,
+    /// Compiler-private identity carrier for values that need to retain a
+    /// shared runtime handle across the `CtValue` boundary.
+    pub opaque: Option<CtOpaque>,
 }
 
 impl PartialEq for ClosureData {

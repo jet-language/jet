@@ -116,6 +116,139 @@ fn first_string_literal_arg(args: &[crate::AST::CallArg]) -> Option<String> {
     }
 }
 
+fn compute_transform_wrt(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::ListLit(items, _) => items
+            .iter()
+            .map(|item| match item {
+                Expr::Ident(name, _) => Some(name.clone()),
+                Expr::Paren(inner, _) => match inner.as_ref() {
+                    Expr::Ident(name, _) => Some(name.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect(),
+        Expr::Paren(inner, _) => compute_transform_wrt(inner),
+        _ => None,
+    }
+}
+
+fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>> {
+    match expr {
+        Expr::Paren(inner, _) => compute_transform_parameter_names(inner, cx),
+        Expr::Ident(name, _) => cx.fn_param_names.get(name).cloned(),
+        Expr::Lambda(lambda) => Some(
+            lambda
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+        ),
+        Expr::MethodCall { method, args, .. }
+            if matches!(method.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp") =>
+        {
+            args.first()
+                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx))
+        }
+        Expr::Call(call)
+            if matches!(call.name.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp") =>
+        {
+            call.args
+                .first()
+                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx))
+        }
+        _ => None,
+    }
+}
+
+fn lower_compute_transform_call(
+    module: &str,
+    method: &str,
+    method_span: Span,
+    args: &[crate::AST::CallArg],
+    resolved_ret: Option<&Type>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    if module != "core.compute"
+        || !matches!(method, "gradient" | "value_and_gradient" | "vjp" | "jvp")
+    {
+        return None;
+    }
+    let function = args.first()?;
+    let lowered_function = lower_expr(&function.expr, cx, env);
+    let mut lowered_args = vec![lowered_function.clone()];
+    let mut value_args = Vec::new();
+    let mut wrt = None;
+    for arg in args.iter().skip(1) {
+        if arg
+            .label
+            .as_ref()
+            .is_some_and(|(label, _)| label == "wrt")
+        {
+            wrt = compute_transform_wrt(&arg.expr);
+        } else {
+            value_args.push(arg);
+            lowered_args.push(lower_expr(&arg.expr, cx, env));
+        }
+    }
+    let Some(parameter_names) = compute_transform_parameter_names(&function.expr, cx)
+        .or_else(|| match &lowered_function.ty {
+            Type::Fn {
+                param_contract: Some(contract),
+                ..
+            } => Some(contract.iter().map(|(name, _)| name.clone()).collect()),
+            _ => None,
+        })
+    else {
+        return None;
+    };
+    let primal_count = if method == "jvp" {
+        value_args.len() / 2
+    } else {
+        value_args.len()
+    };
+    let target_count = if value_args.is_empty() {
+        parameter_names.len()
+    } else {
+        primal_count
+    };
+    let targets = wrt
+        .map(|names| {
+            names
+                .into_iter()
+                .filter_map(|name| parameter_names.iter().position(|param| param == &name))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| (0..target_count).collect());
+    lowered_args.push(TExpr {
+        ty: Type::List(Box::new(Type::Int)),
+        kind: TExprKind::ListLit(
+            targets
+                .into_iter()
+                .map(|index| TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::IntLit(index as i64, None),
+                })
+                .collect(),
+        ),
+    });
+    let ty = resolved_ret
+        .cloned()
+        .unwrap_or_else(|| core_call_return_ty(module, method));
+    Some(TExpr {
+        ty,
+        kind: TExprKind::CoreCall {
+            module: module.to_string(),
+            method: method.to_string(),
+            widen_to_vec: vec![false; lowered_args.len()],
+            args: lowered_args,
+            source_span: method_span,
+        },
+    })
+}
+
 /// Route the public archive surface through the loaded source package. The
 /// package module itself is the only caller that may lower the internal ABI
 /// calls below; all other callers use the ordinary file-module TIR path.
@@ -1945,6 +2078,17 @@ pub(crate) fn lower_method_call(
                         },
                     };
                 }
+                if let Some(transform) = lower_compute_transform_call(
+                    &module,
+                    method,
+                    method_span,
+                    args,
+                    resolved_ret,
+                    cx,
+                    env,
+                ) {
+                    return transform;
+                }
                 // D-PIN1=A: `mem.pin(&place)` IS the exclusive borrow of
                 // `place`. Sema proved the no-move contract before lowering
                 // (I3), so every tier emits exactly what `&place` emits and
@@ -2058,6 +2202,17 @@ pub(crate) fn lower_method_call(
                     ) {
                         return source_call;
                     }
+                }
+                if let Some(transform) = lower_compute_transform_call(
+                    &submodule,
+                    method,
+                    method_span,
+                    args,
+                    resolved_ret,
+                    cx,
+                    env,
+                ) {
+                    return transform;
                 }
                 let targs: Vec<TExpr> = args
                     .iter()

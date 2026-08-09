@@ -1079,6 +1079,22 @@ impl<'a> Checker<'a> {
                     }
                 }
                 BindPattern::Tuple { elems, span } => {
+                    if let Type::Apply { name, args } = &it {
+                        if name == "VjpRun" && args.len() == 1 && elems.len() == 2 {
+                            let pull_ty = Type::Fn {
+                                params: vec![Type::Named("Tensor".to_string())],
+                                ret: Some(Box::new(args[0].clone())),
+                                effect_bound: None,
+                                param_contract: None,
+                                return_view_provenance: None,
+                            };
+                            let types = [Type::Named("Tensor".to_string()), pull_ty];
+                            for (element, ty) in elems.iter().zip(types.iter()) {
+                                self.declare_bound(&element.name, element.span, ty.clone(), b.mutable);
+                            }
+                            return;
+                        }
+                    }
                     let Type::Tuple(fields) = &it else {
                         self.diags.push(Diagnostic::error(
                             "E0313",

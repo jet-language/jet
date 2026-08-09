@@ -69,6 +69,12 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         {
             return Some(member.to_string());
         }
+        if name == "VjpRun"
+            && !cx.type_names.contains(name)
+            && matches!(member, "value" | "pull" | "grads")
+        {
+            return Some(member.to_string());
+        }
         return None;
     }
     let Type::Named(type_name) = recv_ty else {
@@ -286,6 +292,20 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             return match field {
                 "left" => Some(args[0].clone()),
                 "right" => Some(args[1].clone()),
+                _ => None,
+            };
+        }
+        if name == "VjpRun" && args.len() == 1 {
+            return match field {
+                "value" => Some(Type::Named("Tensor".to_string())),
+                "pull" => Some(Type::Fn {
+                    params: vec![Type::Named("Tensor".to_string())],
+                    ret: Some(Box::new(args[0].clone())),
+                    effect_bound: None,
+                    param_contract: None,
+                    return_view_provenance: None,
+                }),
+                "grads" => Some(args[0].clone()),
                 _ => None,
             };
         }

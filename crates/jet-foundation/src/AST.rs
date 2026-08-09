@@ -63,7 +63,7 @@ pub use expressions::{
 #[path = "AST/comptime.rs"]
 mod comptime;
 pub use comptime::{
-    canonical_view_provenance_map, ClosureData, CtFloat, CtKey, CtReport, CtValue, FuncSig, ViewProvenance,
+    canonical_view_provenance_map, ClosureData, CtFloat, CtKey, CtOpaque, CtReport, CtValue, FuncSig, ViewProvenance,
     ViewProvenanceCell, ViewProvenanceMap, ViewSource, ViewSourcePath,
     ViewSourceProjection,
 };

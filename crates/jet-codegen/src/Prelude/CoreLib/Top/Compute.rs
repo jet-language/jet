@@ -61,7 +61,27 @@ struct JetComputePlacementReceipt {
     reason: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
+struct JetComputeTrace {
+    // Traces are observations of a live per-call tape.  The transform state
+    // owns the strong tape handle; graph values keep only a weak back-link so
+    // nested tapes cannot retain one another through recorded values.
+    tape: std::sync::Weak<std::sync::Mutex<JetComputeTape>>,
+    node: usize,
+    parent: Option<Box<JetComputeTrace>>,
+}
+
+impl std::fmt::Debug for JetComputeTrace {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JetComputeTrace")
+            .field("node", &self.node)
+            .field("parent", &self.parent)
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug)]
 struct JetTensor {
     shape: Vec<i64>,
     strides: Vec<i64>,
@@ -69,6 +89,18 @@ struct JetTensor {
     device: JetComputeDevice,
     last_placement: JetComputePlacementReceipt,
     last_transfer: Option<JetComputeTransferReceipt>,
+    trace: Option<JetComputeTrace>,
+}
+
+impl PartialEq for JetTensor {
+    fn eq(&self, other: &Self) -> bool {
+        self.shape == other.shape
+            && self.strides == other.strides
+            && self.data == other.data
+            && self.device == other.device
+            && self.last_placement == other.last_placement
+            && self.last_transfer == other.last_transfer
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,6 +125,322 @@ impl JetShow for JetComputeError {
             | JetComputeError::Arithmetic(m)
             | JetComputeError::Serialization(m) => m.clone(),
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum JetComputeTapeRule {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Maximum,
+    Minimum,
+    Matmul,
+    Unary(String),
+    Reshape {
+        source_shape: Vec<i64>,
+    },
+    Broadcast {
+        source_shape: Vec<i64>,
+    },
+    ReduceToShape {
+        source_shape: Vec<i64>,
+    },
+    Transpose,
+    SumAxis {
+        axis: usize,
+        source_shape: Vec<i64>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetComputeTapeNode {
+    parents: Vec<Option<usize>>,
+    rule: Option<JetComputeTapeRule>,
+    values: Vec<JetTensor>,
+    output: JetTensor,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetComputeTape {
+    nodes: Vec<JetComputeTapeNode>,
+    inputs: Vec<JetTensor>,
+}
+
+#[derive(Clone, Debug)]
+struct JetComputeVjpState {
+    value: JetTensor,
+    tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+    output_node: Option<usize>,
+}
+
+enum JetComputeTransformResult {
+    Gradient(Vec<JetTensor>),
+    ValueAndGradient {
+        value: JetTensor,
+        gradients: Vec<JetTensor>,
+    },
+    Vjp {
+        value: JetTensor,
+        state: JetComputeVjpState,
+    },
+    Jvp {
+        value: JetTensor,
+        tangent: JetTensor,
+    },
+}
+
+struct JetComputeVjpRun<R> {
+    pub value: JetTensor,
+    pub pull: std::rc::Rc<dyn Fn(JetTensor) -> R>,
+    pub grads: std::rc::Rc<dyn Fn() -> R>,
+}
+
+impl<R: Clone> Clone for JetComputeVjpRun<R> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            pull: self.pull.clone(),
+            grads: self.grads.clone(),
+        }
+    }
+}
+
+impl<R> JetComputeVjpRun<R> {
+    fn grads_or_panic(&self) -> R {
+        (self.grads)()
+    }
+}
+
+fn jet_compute_untracked(tensor: &JetTensor) -> JetTensor {
+    let mut value = tensor.clone();
+    value.trace = None;
+    value
+}
+
+fn jet_compute_trace_node_for_tape(
+    trace: Option<&JetComputeTrace>,
+    tape: &std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+) -> Option<usize> {
+    let trace = trace?;
+    if std::sync::Weak::ptr_eq(&trace.tape, &std::sync::Arc::downgrade(tape)) {
+        return Some(trace.node);
+    }
+    jet_compute_trace_node_for_tape(trace.parent.as_deref(), tape)
+}
+
+fn jet_compute_trace_lanes(
+    trace: Option<&JetComputeTrace>,
+) -> Vec<(
+    std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+    usize,
+)> {
+    let mut lanes = Vec::new();
+    let mut current = trace;
+    while let Some(trace) = current {
+        if let Some(tape) = trace.tape.upgrade() {
+            lanes.push((tape, trace.node));
+        }
+        current = trace.parent.as_deref();
+    }
+    lanes
+}
+
+fn jet_compute_remove_trace_level(
+    tensor: &JetTensor,
+    tape: &std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+) -> JetTensor {
+    fn remove(
+        trace: JetComputeTrace,
+        tape: &std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+    ) -> (Option<JetComputeTrace>, bool) {
+        if std::sync::Weak::ptr_eq(&trace.tape, &std::sync::Arc::downgrade(tape)) {
+            return (trace.parent.map(|parent| *parent), true);
+        }
+        let (parent, removed) = match trace.parent {
+            Some(parent) => {
+                let (parent, removed) = remove(*parent, tape);
+                (parent.map(Box::new), removed)
+            }
+            None => (None, false),
+        };
+        (
+            Some(JetComputeTrace {
+                tape: trace.tape,
+                node: trace.node,
+                parent,
+            }),
+            removed,
+        )
+    }
+
+    let Some(trace) = tensor.trace.clone() else {
+        return tensor.clone();
+    };
+    let (trace, _) = remove(trace, tape);
+    let mut value = tensor.clone();
+    value.trace = trace.and_then(|trace| jet_compute_prune_trace(Some(trace)));
+    value
+}
+
+fn jet_compute_prune_trace(trace: Option<JetComputeTrace>) -> Option<JetComputeTrace> {
+    let trace = trace?;
+    let parent = trace
+        .parent
+        .and_then(|parent| jet_compute_prune_trace(Some(*parent)).map(Box::new));
+    if trace.tape.upgrade().is_none() {
+        return parent.map(|parent| *parent);
+    }
+    Some(JetComputeTrace {
+        tape: trace.tape,
+        node: trace.node,
+        parent,
+    })
+}
+
+fn jet_compute_tape_for_parents(
+    parents: &[&JetTensor],
+) -> Result<
+    Vec<(
+        std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+        Vec<Option<usize>>,
+    )>,
+    JetComputeError,
+> {
+    let nonempty = parents
+        .iter()
+        .map(|parent| jet_compute_trace_lanes(parent.trace.as_ref()))
+        .filter(|lanes| !lanes.is_empty())
+        .collect::<Vec<_>>();
+    let Some(first) = nonempty.first() else {
+        return Ok(Vec::new());
+    };
+    if nonempty.iter().skip(1).any(|lanes| {
+        !lanes.iter().any(|(tape, _)| {
+            first
+                .iter()
+                .any(|(first_tape, _)| std::sync::Arc::ptr_eq(first_tape, tape))
+        })
+    }) {
+        return Err(JetComputeError::Unsupported(
+            "autodiff values belong to different tapes".to_string(),
+        ));
+    }
+    let mut tapes = Vec::new();
+    for lanes in &nonempty {
+        for (tape, _) in lanes {
+            if !tapes
+                .iter()
+                .any(|existing| std::sync::Arc::ptr_eq(existing, tape))
+            {
+                tapes.push(tape.clone());
+            }
+        }
+    }
+    Ok(tapes
+        .into_iter()
+        .map(|tape| {
+            let ids = parents
+                .iter()
+                .map(|parent| {
+                    jet_compute_trace_node_for_tape(parent.trace.as_ref(), &tape)
+                })
+                .collect();
+            (tape, ids)
+        })
+        .collect())
+}
+
+fn jet_compute_record(
+    mut output: JetTensor,
+    parents: &[&JetTensor],
+    values: Vec<JetTensor>,
+    rule: JetComputeTapeRule,
+) -> Result<JetTensor, JetComputeError> {
+    let tapes = jet_compute_tape_for_parents(parents)?;
+    if tapes.is_empty() {
+        return Ok(output);
+    }
+    let mut recorded = Vec::with_capacity(tapes.len());
+    for (tape, parent_ids) in tapes {
+        let mut tape_guard = tape
+            .lock()
+            .map_err(|_| JetComputeError::Unsupported("autodiff tape is poisoned".to_string()))?;
+        let node = tape_guard.nodes.len();
+        tape_guard.nodes.push(JetComputeTapeNode {
+            parents: parent_ids,
+            rule: Some(rule.clone()),
+            values: values
+                .iter()
+                .map(|value| jet_compute_remove_trace_level(value, &tape))
+                .collect(),
+            output: jet_compute_remove_trace_level(&output, &tape),
+        });
+        recorded.push((tape.clone(), node));
+    }
+    let mut trace = None;
+    for (tape, node) in recorded.into_iter().rev() {
+        trace = Some(Box::new(JetComputeTrace {
+            tape: std::sync::Arc::downgrade(&tape),
+            node,
+            parent: trace,
+        }));
+    }
+    output.trace = trace.map(|trace| *trace);
+    Ok(output)
+}
+
+fn jet_compute_trace_inputs(
+    inputs: Vec<JetTensor>,
+) -> (
+    std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+    Vec<JetTensor>,
+) {
+    let values = inputs.clone();
+    let tape = std::sync::Arc::new(std::sync::Mutex::new(JetComputeTape {
+        nodes: Vec::new(),
+        inputs: values.clone(),
+    }));
+    let mut tracked = Vec::with_capacity(values.len());
+    let mut guard = tape
+        .lock()
+        .unwrap_or_else(|_| jet_panic("Compute.rs", line!(), "autodiff tape is poisoned"));
+    for (index, value) in values.iter().enumerate() {
+        let node = guard.nodes.len();
+        guard.nodes.push(JetComputeTapeNode {
+            parents: Vec::new(),
+            rule: None,
+            values: vec![value.clone()],
+            output: value.clone(),
+        });
+        let mut input = value.clone();
+        input.trace = Some(JetComputeTrace {
+            tape: std::sync::Arc::downgrade(&tape),
+            node,
+            parent: value.trace.clone().map(Box::new),
+        });
+        tracked.push(input);
+        debug_assert_eq!(index, node);
+    }
+    (tape, tracked)
+}
+
+fn jet_compute_empty_tape() -> std::sync::Arc<std::sync::Mutex<JetComputeTape>> {
+    std::sync::Arc::new(std::sync::Mutex::new(JetComputeTape {
+        nodes: Vec::new(),
+        inputs: Vec::new(),
+    }))
+}
+
+fn jet_compute_vjp_begin(
+    value: JetTensor,
+    tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+) -> JetComputeVjpState {
+    JetComputeVjpState {
+        output_node: jet_compute_trace_node_for_tape(value.trace.as_ref(), &tape),
+        value,
+        tape,
     }
 }
 
@@ -460,6 +808,7 @@ fn jet_compute_tensor_from_shape(
         device: receipt.selected,
         last_placement: receipt,
         last_transfer: None,
+        trace: None,
     })
 }
 
@@ -495,6 +844,7 @@ fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError
         device: receipt.selected,
         last_placement: receipt,
         last_transfer: None,
+        trace: None,
     })
 }
 
@@ -568,6 +918,11 @@ fn jet_compute_slice_checked(
     exclusive: bool,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor views are not differentiable; reshape or copy before transforming".to_string(),
+        ));
+    }
     let axis_len = tensor.shape.first().copied().ok_or_else(|| {
         JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
     })?;
@@ -612,6 +967,7 @@ fn jet_compute_slice_checked(
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
         last_transfer: tensor.last_transfer.clone(),
+        trace: tensor.trace.clone(),
     };
     jet_compute_validate_tensor(&slice)?;
     Ok(slice)
@@ -648,6 +1004,13 @@ fn jet_compute_view<'a>(
     file: &str,
     line: u32,
 ) -> &'a [f64] {
+    if tensor.trace.is_some() {
+        jet_panic(
+            file,
+            line,
+            "Tensor views are not differentiable; reshape or copy before transforming",
+        );
+    }
     let bounds = match jet_compute_window_bounds(tensor, start, end, exclusive) {
         Ok(bounds) => bounds,
         Err(error) => jet_panic(file, line, &error.jet_show()),
@@ -672,6 +1035,13 @@ fn jet_compute_view_mut<'a>(
     file: &str,
     line: u32,
 ) -> &'a mut [f64] {
+    if tensor.trace.is_some() {
+        jet_panic(
+            file,
+            line,
+            "Tensor mutation is not differentiable; use a pure Tensor function",
+        );
+    }
     let bounds = match jet_compute_window_bounds(tensor, start, end, exclusive) {
         Ok(bounds) => bounds,
         Err(error) => jet_panic(file, line, &error.jet_show()),
@@ -716,6 +1086,13 @@ fn jet_compute_tensor_placement(tensor: &JetTensor) -> String {
 }
 
 fn jet_compute_tensor_to_list(tensor: &JetTensor) -> Vec<f64> {
+    if tensor.trace.is_some() {
+        jet_panic(
+            "Compute.rs",
+            line!(),
+            "Tensor value reads have no registered autodiff rule",
+        );
+    }
     jet_compute_tensor_values(tensor)
 }
 
@@ -755,11 +1132,20 @@ fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetC
         .ok_or_else(|| JetComputeError::OutOfBounds("tensor index is outside storage".to_string()))
 }
 
-fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComputeError> {
+fn jet_compute_get_raw(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComputeError> {
     let offset = jet_compute_offset(tensor, indices)?;
     tensor.data.get(offset).ok_or_else(|| {
         JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
     }).copied()
+}
+
+fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor element reads have no registered autodiff rule".to_string(),
+        ));
+    }
+    jet_compute_get_raw(tensor, indices)
 }
 
 fn jet_compute_set(
@@ -767,6 +1153,11 @@ fn jet_compute_set(
     indices: &[i64],
     value: f64,
 ) -> Result<(), JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+        ));
+    }
     if !value.is_finite() {
         return Err(JetComputeError::Arithmetic(
             "Tensor values must be finite".to_string(),
@@ -822,14 +1213,23 @@ fn jet_compute_reshape(
             std::sync::Arc::new(jet_compute_tensor_values(tensor)),
         )
     };
-    Ok(JetTensor {
+    let output = JetTensor {
         shape: shape.clone(),
         strides,
         data,
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
         last_transfer: None,
-    })
+        trace: None,
+    };
+    jet_compute_record(
+        output,
+        &[tensor],
+        vec![tensor.clone()],
+        JetComputeTapeRule::Reshape {
+            source_shape: tensor.shape.clone(),
+        },
+    )
 }
 
 /// Matrix alias: rank-2 Tensor sharing the same storage law (D-COMPUTE-TYPE1).
@@ -878,8 +1278,8 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
         for j in 0..n {
             let mut sum = 0.0;
             for t in 0..k {
-                let av = jet_compute_get(a, &vec![i, t])?;
-                let bv = jet_compute_get(b, &vec![t, j])?;
+                let av = jet_compute_get_raw(a, &vec![i, t])?;
+                let bv = jet_compute_get_raw(b, &vec![t, j])?;
                 sum += av * bv;
                 if !sum.is_finite() {
                     return Err(JetComputeError::Arithmetic(
@@ -890,7 +1290,12 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
             jet_compute_set(&mut out, &vec![i, j], sum)?;
         }
     }
-    Ok(out)
+    jet_compute_record(
+        out,
+        &[a, b],
+        vec![a.clone(), b.clone()],
+        JetComputeTapeRule::Matmul,
+    )
 }
 
 fn jet_compute_device_cpu() -> JetComputeDevice {
@@ -914,6 +1319,7 @@ fn jet_compute_on_device(
         device: receipt.selected,
         last_placement: receipt,
         last_transfer: None,
+        trace: tensor.trace.clone(),
     })
 }
 
@@ -997,6 +1403,7 @@ fn jet_compute_materialize_broadcast(
             device: receipt.selected,
             last_placement: receipt,
             last_transfer: None,
+            trace: None,
         });
     }
     let mut data = Vec::with_capacity(n);
@@ -1020,7 +1427,7 @@ fn jet_compute_materialize_broadcast(
                 }
             })
             .collect::<Vec<_>>();
-        data.push(jet_compute_get(tensor, &source_coords)?);
+        data.push(jet_compute_get_raw(tensor, &source_coords)?);
     }
     let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
     Ok(JetTensor {
@@ -1030,6 +1437,7 @@ fn jet_compute_materialize_broadcast(
         device: receipt.selected,
         last_placement: receipt,
         last_transfer: None,
+        trace: None,
     })
 }
 
@@ -1044,7 +1452,15 @@ fn jet_compute_broadcast_to(
             shape, tensor.shape
         )));
     }
-    jet_compute_materialize_broadcast(tensor, shape)
+    let output = jet_compute_materialize_broadcast(tensor, shape)?;
+    jet_compute_record(
+        output,
+        &[tensor],
+        vec![tensor.clone()],
+        JetComputeTapeRule::Broadcast {
+            source_shape: tensor.shape.clone(),
+        },
+    )
 }
 
 fn jet_compute_transpose(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
@@ -1068,9 +1484,15 @@ fn jet_compute_transpose(tensor: &JetTensor) -> Result<JetTensor, JetComputeErro
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
         last_transfer: None,
+        trace: None,
     };
     jet_compute_validate_tensor(&out)?;
-    Ok(out)
+    jet_compute_record(
+        out,
+        &[tensor],
+        vec![tensor.clone()],
+        JetComputeTapeRule::Transpose,
+    )
 }
 
 fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetComputeError> {
@@ -1118,7 +1540,7 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
         let mut sum = 0.0;
         for k in 0..axis_len {
             coords[axis] = k;
-            sum += jet_compute_get(tensor, &coords)?;
+            sum += jet_compute_get_raw(tensor, &coords)?;
             if !sum.is_finite() {
                 return Err(JetComputeError::Arithmetic(
                     "sum_axis accumulation produced a non-finite value".to_string(),
@@ -1127,7 +1549,15 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
         }
         jet_compute_set(&mut out, &out_coords, sum)?;
     }
-    Ok(out)
+    jet_compute_record(
+        out,
+        &[tensor],
+        vec![tensor.clone()],
+        JetComputeTapeRule::SumAxis {
+            axis,
+            source_shape: tensor.shape.clone(),
+        },
+    )
 }
 
 fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
@@ -1166,14 +1596,21 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
         }
         data.push(output);
     }
-    Ok(JetTensor {
+    let output = JetTensor {
         shape: tensor.shape.clone(),
         strides: jet_compute_row_major_strides(&tensor.shape)?,
         data: std::sync::Arc::new(data),
         device: receipt.selected,
         last_placement: receipt,
         last_transfer: None,
-    })
+        trace: None,
+    };
+    jet_compute_record(
+        output,
+        &[tensor],
+        vec![tensor.clone()],
+        JetComputeTapeRule::Unary(op.to_string()),
+    )
 }
 
 fn jet_compute_binary(
@@ -1226,8 +1663,8 @@ fn jet_compute_binary(
                 }
             })
             .collect::<Vec<_>>();
-        let x = jet_compute_get(a, &left_coords)?;
-        let y = jet_compute_get(b, &right_coords)?;
+        let x = jet_compute_get_raw(a, &left_coords)?;
+        let y = jet_compute_get_raw(b, &right_coords)?;
         if op == "div" && y == 0.0 {
             return Err(JetComputeError::Arithmetic(
                 "division by zero in compute operation".to_string(),
@@ -1250,14 +1687,25 @@ fn jet_compute_binary(
         data.push(output);
     }
     let strides = jet_compute_row_major_strides(&shape)?;
-    Ok(JetTensor {
+    let output = JetTensor {
         shape,
         strides,
         data: std::sync::Arc::new(data),
         device: receipt.selected,
         last_placement: receipt,
         last_transfer: None,
-    })
+        trace: None,
+    };
+    let rule = match op {
+        "add" => JetComputeTapeRule::Add,
+        "sub" => JetComputeTapeRule::Sub,
+        "mul" => JetComputeTapeRule::Mul,
+        "div" => JetComputeTapeRule::Div,
+        "maximum" => JetComputeTapeRule::Maximum,
+        "minimum" => JetComputeTapeRule::Minimum,
+        _ => unreachable!("validated binary operation"),
+    };
+    jet_compute_record(output, &[a, b], vec![a.clone(), b.clone()], rule)
 }
 
 // ── #1137 / D-COMPUTE1: dense linalg on the Tensor CPU oracle ───────────────
@@ -1276,6 +1724,11 @@ fn jet_compute_eye(n: i64) -> Result<JetTensor, JetComputeError> {
 }
 
 fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "det has no registered autodiff rule".to_string(),
+        ));
+    }
     if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
         return Err(JetComputeError::RankMismatch(
             "det requires a square rank-2 tensor".to_string(),
@@ -1340,6 +1793,11 @@ fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
 }
 
 fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "inv has no registered autodiff rule".to_string(),
+        ));
+    }
     if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
         return Err(JetComputeError::RankMismatch(
             "inv requires a square rank-2 tensor".to_string(),
@@ -1363,7 +1821,7 @@ fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     let mut a = vec![0.0; matrix_len];
     for i in 0..n {
         for j in 0..n {
-            a[i * width + j] = jet_compute_get(tensor, &vec![i as i64, j as i64])?;
+            a[i * width + j] = jet_compute_get_raw(tensor, &vec![i as i64, j as i64])?;
             a[i * width + n + j] = if i == j { 1.0 } else { 0.0 };
         }
     }
@@ -1422,6 +1880,11 @@ fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
 }
 
 fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if a.trace.is_some() || b.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "solve has no registered autodiff rule".to_string(),
+        ));
+    }
     if a.shape.len() != 2 || a.shape[0] != a.shape[1] {
         return Err(JetComputeError::RankMismatch(
             "solve requires a square rank-2 coefficient tensor".to_string(),
@@ -1457,13 +1920,13 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetCompu
     let mut augmented = vec![vec![0.0; width]; n];
     for row in 0..n {
         for col in 0..n {
-            augmented[row][col] = jet_compute_get(a, &[row as i64, col as i64])?;
+            augmented[row][col] = jet_compute_get_raw(a, &[row as i64, col as i64])?;
         }
         for col in 0..rhs_cols {
             augmented[row][n + col] = if b.shape.len() == 1 {
-                jet_compute_get(b, &[row as i64])?
+                jet_compute_get_raw(b, &[row as i64])?
             } else {
-                jet_compute_get(b, &[row as i64, col as i64])?
+                jet_compute_get_raw(b, &[row as i64, col as i64])?
             };
         }
     }
@@ -1530,6 +1993,11 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetCompu
 
 /// Naive DFT on a rank-1 real tensor → interleaved [re, im, re, im, …] length 2n.
 fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "fft has no registered autodiff rule".to_string(),
+        ));
+    }
     jet_compute_validate_tensor(tensor)?;
     if tensor.shape.len() != 1 {
         return Err(JetComputeError::RankMismatch(
@@ -1733,24 +2201,6 @@ fn jet_compute_kernel_bounds_ok(
 
 // ── #1141 / D-COMPUTE-AUTODIFF1: reverse-mode VJP + JVP for dense ops ────────
 
-#[derive(Clone, Debug, PartialEq)]
-struct JetComputeGradTriple {
-    value: JetTensor,
-    grad_a: JetTensor,
-    grad_b: JetTensor,
-}
-
-impl JetShow for JetComputeGradTriple {
-    fn jet_show(&self) -> String {
-        format!(
-            "GradTriple(value={}, grad_a={}, grad_b={})",
-            self.value.jet_show(),
-            self.grad_a.jet_show(),
-            self.grad_b.jet_show()
-        )
-    }
-}
-
 /// Reverse-mode broadcast rule: axes introduced by broadcasting and axes with
 /// extent one are summed back into the operand's original shape.
 fn jet_compute_reduce_to_shape(
@@ -1811,61 +2261,600 @@ fn jet_compute_reduce_to_shape(
             ));
         }
     }
-    Ok(out)
+    jet_compute_record(
+        out,
+        &[tensor],
+        vec![tensor.clone()],
+        JetComputeTapeRule::ReduceToShape {
+            source_shape: tensor.shape.clone(),
+        },
+    )
 }
 
-fn jet_compute_vjp_add(
-    a: &JetTensor,
-    b: &JetTensor,
-    cot: &JetTensor,
-) -> Result<(JetTensor, JetTensor), JetComputeError> {
-    jet_compute_validate_tensor(a)?;
-    jet_compute_validate_tensor(b)?;
-    jet_compute_validate_tensor(cot)?;
-    let output_shape = jet_compute_broadcast_shape(&a.shape, &b.shape)?;
-    if cot.shape != output_shape {
-        return Err(JetComputeError::RankMismatch(
-            "add cotangent shape must equal the broadcast output".to_string(),
-        ));
-    }
-    Ok((
-        jet_compute_inherit_placement(
-            jet_compute_reduce_to_shape(cot, &a.shape)?,
-            a,
-        ),
-        jet_compute_inherit_placement(
-            jet_compute_reduce_to_shape(cot, &b.shape)?,
-            b,
-        ),
+fn jet_compute_zero_like(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    Ok(jet_compute_inherit_placement(
+        jet_compute_tensor_from_shape(tensor.shape.clone(), 0.0, JetComputeDevice::Cpu)?,
+        tensor,
     ))
 }
 
-fn jet_compute_vjp_mul(
-    a: &JetTensor,
-    b: &JetTensor,
-    cot: &JetTensor,
-) -> Result<(JetTensor, JetTensor), JetComputeError> {
-    jet_compute_validate_tensor(a)?;
-    jet_compute_validate_tensor(b)?;
-    jet_compute_validate_tensor(cot)?;
-    let output_shape = jet_compute_broadcast_shape(&a.shape, &b.shape)?;
-    if cot.shape != output_shape {
-        return Err(JetComputeError::RankMismatch(
-            "mul cotangent shape must equal the broadcast output".to_string(),
+fn jet_compute_tensor_from_values_like(
+    template: &JetTensor,
+    values: &[f64],
+) -> Result<JetTensor, JetComputeError> {
+    let expected = jet_compute_storage_len(&template.shape)?;
+    if values.len() != expected || values.iter().any(|value| !value.is_finite()) {
+        return Err(JetComputeError::Arithmetic(
+            "autodiff values do not match the Tensor shape".to_string(),
         ));
     }
-    let grad_a = jet_compute_binary("mul", b, cot)?;
-    let grad_b = jet_compute_binary("mul", a, cot)?;
-    Ok((
-        jet_compute_inherit_placement(
-            jet_compute_reduce_to_shape(&grad_a, &a.shape)?,
-            a,
+    let mut output = jet_compute_tensor_from_shape(
+        template.shape.clone(),
+        0.0,
+        JetComputeDevice::Cpu,
+    )?;
+    let Some(storage) = std::sync::Arc::get_mut(&mut output.data) else {
+        return Err(JetComputeError::Unsupported(
+            "autodiff output requires exclusive storage".to_string(),
+        ));
+    };
+    storage.clone_from_slice(values);
+    Ok(jet_compute_inherit_placement(output, template))
+}
+
+fn jet_compute_unary_vjp(
+    op: &str,
+    input: &JetTensor,
+    output: &JetTensor,
+    cot: &JetTensor,
+) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(input)?;
+    jet_compute_validate_tensor(output)?;
+    jet_compute_validate_tensor(cot)?;
+    if input.shape != output.shape || output.shape != cot.shape {
+        return Err(JetComputeError::RankMismatch(
+            "unary cotangent shape must equal the unary output".to_string(),
+        ));
+    }
+    let input_values = jet_compute_tensor_values(input);
+    match op {
+        "negate" => jet_compute_unary("negate", cot),
+        "abs" => {
+            let signs = input_values
+                .iter()
+                .map(|value| {
+                    if *value > 0.0 {
+                        1.0
+                    } else if *value < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect::<Vec<_>>();
+            let signs = jet_compute_tensor_from_values_like(input, &signs)?;
+            jet_compute_binary("mul", &signs, cot)
+        }
+        "exp" => jet_compute_binary("mul", output, cot),
+        "log" => jet_compute_binary("div", cot, input),
+        "sqrt" => {
+            let two = jet_compute_full(&output.shape, 2.0)?;
+            let denominator = jet_compute_binary("mul", &two, output)?;
+            jet_compute_binary("div", cot, &denominator)
+        }
+        _ => Err(JetComputeError::Unsupported(format!(
+            "unsupported unary derivative `{op}`"
+        ))),
+    }
+}
+
+fn jet_compute_rule_gradients(
+    rule: &JetComputeTapeRule,
+    values: &[JetTensor],
+    output: &JetTensor,
+    cot: &JetTensor,
+    active_tape: &std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+) -> Result<Vec<JetTensor>, JetComputeError> {
+    let cot = jet_compute_remove_trace_level(cot, active_tape);
+    match rule {
+        JetComputeTapeRule::Add => {
+            let a = jet_compute_reduce_to_shape(&cot, &values[0].shape)?;
+            let b = jet_compute_reduce_to_shape(&cot, &values[1].shape)?;
+            Ok(vec![
+                jet_compute_inherit_placement(a, &values[0]),
+                jet_compute_inherit_placement(b, &values[1]),
+            ])
+        }
+        JetComputeTapeRule::Sub => {
+            let a = jet_compute_reduce_to_shape(&cot, &values[0].shape)?;
+            let negative = jet_compute_unary("negate", &cot)?;
+            let b = jet_compute_reduce_to_shape(&negative, &values[1].shape)?;
+            Ok(vec![
+                jet_compute_inherit_placement(a, &values[0]),
+                jet_compute_inherit_placement(b, &values[1]),
+            ])
+        }
+        JetComputeTapeRule::Mul => {
+            let a_full = jet_compute_binary("mul", &values[1], &cot)?;
+            let b_full = jet_compute_binary("mul", &values[0], &cot)?;
+            let a = jet_compute_reduce_to_shape(&a_full, &values[0].shape)?;
+            let b = jet_compute_reduce_to_shape(&b_full, &values[1].shape)?;
+            Ok(vec![
+                jet_compute_inherit_placement(a, &values[0]),
+                jet_compute_inherit_placement(b, &values[1]),
+            ])
+        }
+        JetComputeTapeRule::Div => {
+            let a_full = jet_compute_binary("div", &cot, &values[1])?;
+            let denominator = jet_compute_binary("mul", &values[1], &values[1])?;
+            let numerator = jet_compute_binary("mul", &values[0], &cot)?;
+            let b_full = jet_compute_unary(
+                "negate",
+                &jet_compute_binary("div", &numerator, &denominator)?,
+            )?;
+            let a = jet_compute_reduce_to_shape(&a_full, &values[0].shape)?;
+            let b = jet_compute_reduce_to_shape(&b_full, &values[1].shape)?;
+            Ok(vec![
+                jet_compute_inherit_placement(a, &values[0]),
+                jet_compute_inherit_placement(b, &values[1]),
+            ])
+        }
+        JetComputeTapeRule::Maximum | JetComputeTapeRule::Minimum => {
+            let maximum = matches!(rule, JetComputeTapeRule::Maximum);
+            let output_values = jet_compute_tensor_values(output);
+            let left_value = if values[0].shape == output.shape {
+                values[0].clone()
+            } else {
+                jet_compute_materialize_broadcast(&values[0], &output.shape)?
+            };
+            let right_value = if values[1].shape == output.shape {
+                values[1].clone()
+            } else {
+                jet_compute_materialize_broadcast(&values[1], &output.shape)?
+            };
+            let left_values = jet_compute_tensor_values(&left_value);
+            let right_values = jet_compute_tensor_values(&right_value);
+            let mut left_mask = Vec::with_capacity(output_values.len());
+            let mut right_mask = Vec::with_capacity(output_values.len());
+            for ((output, a), b) in output_values
+                .iter()
+                .zip(left_values.iter())
+                .zip(right_values.iter())
+            {
+                if *a == *b {
+                    return Err(JetComputeError::Unsupported(
+                        "maximum/minimum has no derivative at a tie".to_string(),
+                    ));
+                }
+                let left_slot = if (maximum && *a == *output) || (!maximum && *a == *output) {
+                    1.0
+                } else {
+                    0.0
+                };
+                let right_slot = if (maximum && *b == *output) || (!maximum && *b == *output) {
+                    1.0
+                } else {
+                    0.0
+                };
+                left_mask.push(left_slot);
+                right_mask.push(right_slot);
+            }
+            let left_mask = jet_compute_tensor_from_values_like(output, &left_mask)?;
+            let right_mask = jet_compute_tensor_from_values_like(output, &right_mask)?;
+            let left = jet_compute_binary("mul", &left_mask, &cot)?;
+            let right = jet_compute_binary("mul", &right_mask, &cot)?;
+            Ok(vec![
+                jet_compute_reduce_to_shape(&left, &values[0].shape)?,
+                jet_compute_reduce_to_shape(&right, &values[1].shape)?,
+            ])
+        }
+        JetComputeTapeRule::Matmul => {
+            let (a, b) = jet_compute_vjp_matmul(&values[0], &values[1], &cot)?;
+            Ok(vec![a, b])
+        }
+        JetComputeTapeRule::Unary(op) => Ok(vec![jet_compute_unary_vjp(
+            op,
+            &values[0],
+            output,
+            &cot,
+        )?]),
+        JetComputeTapeRule::Reshape { source_shape } => Ok(vec![jet_compute_reshape(
+            &cot,
+            &source_shape.clone(),
+        )?]),
+        JetComputeTapeRule::Broadcast { source_shape } => Ok(vec![
+            jet_compute_reduce_to_shape(&cot, source_shape)?,
+        ]),
+        JetComputeTapeRule::ReduceToShape { source_shape } => Ok(vec![
+            jet_compute_broadcast_to(&cot, source_shape)?,
+        ]),
+        JetComputeTapeRule::Transpose => Ok(vec![jet_compute_transpose(&cot)?]),
+        JetComputeTapeRule::SumAxis { axis, source_shape } => {
+            let mut reduced_shape = source_shape.clone();
+            reduced_shape[*axis] = 1;
+            let cot = jet_compute_reshape(&cot, &reduced_shape)?;
+            Ok(vec![jet_compute_broadcast_to(&cot, source_shape)?])
+        }
+    }
+}
+
+fn jet_compute_reverse(
+    state: &JetComputeVjpState,
+    seed: &JetTensor,
+) -> Result<Vec<JetTensor>, JetComputeError> {
+    jet_compute_validate_tensor(&state.value)?;
+    jet_compute_validate_tensor(seed)?;
+    if state.value.shape != seed.shape {
+        return Err(JetComputeError::RankMismatch(
+            "VJP seed shape must equal the function output shape".to_string(),
+        ));
+    }
+    let (nodes, inputs) = {
+        let tape = state
+            .tape
+            .lock()
+            .map_err(|_| JetComputeError::Unsupported("autodiff tape is poisoned".to_string()))?;
+        (tape.nodes.clone(), tape.inputs.clone())
+    };
+    let mut cotangents: Vec<Option<JetTensor>> = vec![None; nodes.len()];
+    if let Some(output_node) = state.output_node {
+        let Some(slot) = cotangents.get_mut(output_node) else {
+            return Err(JetComputeError::Unsupported(
+                "VJP output node is outside its tape".to_string(),
+            ));
+        };
+        *slot = Some(jet_compute_untracked(seed));
+    }
+    for index in (0..nodes.len()).rev() {
+        let Some(cot) = cotangents[index].take() else {
+            continue;
+        };
+        let node = &nodes[index];
+        let Some(rule) = &node.rule else {
+            continue;
+        };
+        let gradients = jet_compute_rule_gradients(
+            rule,
+            &node.values,
+            &node.output,
+            &cot,
+            &state.tape,
+        )?;
+        for (parent, gradient) in node.parents.iter().zip(gradients) {
+            let Some(parent) = parent else {
+                continue;
+            };
+            let gradient = jet_compute_remove_trace_level(&gradient, &state.tape);
+            let Some(slot) = cotangents.get_mut(*parent) else {
+                return Err(JetComputeError::Unsupported(
+                    "VJP parent node is outside its tape".to_string(),
+                ));
+            };
+            *slot = Some(match slot.take() {
+                Some(previous) => jet_compute_binary("add", &previous, &gradient)?,
+                None => gradient,
+            });
+        }
+    }
+    let mut result = Vec::with_capacity(inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        let gradient = cotangents
+            .get(index)
+            .and_then(Option::as_ref)
+            .cloned()
+            .unwrap_or(jet_compute_zero_like(input)?);
+        result.push(jet_compute_inherit_placement(gradient, input));
+    }
+    Ok(result)
+}
+
+fn jet_compute_select_gradients(
+    all: Vec<JetTensor>,
+    targets: &[i64],
+) -> Result<Vec<JetTensor>, JetComputeError> {
+    targets
+        .iter()
+        .map(|target| {
+            let index = usize::try_from(*target).map_err(|_| {
+                JetComputeError::Unsupported("negative autodiff target index".to_string())
+            })?;
+            all.get(index).cloned().ok_or_else(|| {
+                JetComputeError::Unsupported("autodiff target index is outside the function signature".to_string())
+            })
+        })
+        .collect()
+}
+
+fn jet_compute_gradient_seed(state: &JetComputeVjpState) -> Result<JetTensor, JetComputeError> {
+    if jet_compute_tensor_numel(&state.value) != 1 {
+        return Err(JetComputeError::RankMismatch(
+            "compute.gradient requires a scalar Tensor output".to_string(),
+        ));
+    }
+    jet_compute_ones(&state.value.shape)
+}
+
+fn jet_compute_vjp_pull(
+    state: &JetComputeVjpState,
+    seed: &JetTensor,
+    targets: &[i64],
+) -> Result<Vec<JetTensor>, JetComputeError> {
+    jet_compute_select_gradients(jet_compute_reverse(state, seed)?, targets)
+}
+
+fn jet_compute_vjp_pull_or_panic(
+    state: &JetComputeVjpState,
+    seed: &JetTensor,
+    targets: &[i64],
+    context: &str,
+) -> Vec<JetTensor> {
+    match jet_compute_vjp_pull(state, seed, targets) {
+        Ok(values) => values,
+        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
+    }
+}
+
+fn jet_compute_gradient_or_panic(
+    state: &JetComputeVjpState,
+    targets: &[i64],
+    context: &str,
+) -> Vec<JetTensor> {
+    let seed = match jet_compute_gradient_seed(state) {
+        Ok(seed) => seed,
+        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
+    };
+    jet_compute_vjp_pull_or_panic(state, &seed, targets, context)
+}
+
+fn jet_compute_vjp_unit_grads_or_panic(
+    state: &JetComputeVjpState,
+    targets: &[i64],
+    context: &str,
+) -> Vec<JetTensor> {
+    jet_compute_gradient_or_panic(state, targets, context)
+}
+
+/// The one transform dispatcher used by AOT and the interpreter.  Engines
+/// marshal callable arguments and package the typed result; this function
+/// owns transform selection, scalar seeding, value detachment, and lazy VJP
+/// state creation.
+fn jet_compute_transform(
+    method: &str,
+    state: &JetComputeVjpState,
+    tangents: &[JetTensor],
+    targets: &[i64],
+) -> Result<JetComputeTransformResult, JetComputeError> {
+    let value = jet_compute_remove_trace_level(&state.value, &state.tape);
+    match method {
+        "gradient" => Ok(JetComputeTransformResult::Gradient(
+            jet_compute_vjp_pull(state, &jet_compute_gradient_seed(state)?, targets)?,
+        )),
+        "value_and_gradient" => Ok(JetComputeTransformResult::ValueAndGradient {
+            value,
+            gradients: jet_compute_vjp_pull(state, &jet_compute_gradient_seed(state)?, targets)?,
+        }),
+        "vjp" => Ok(JetComputeTransformResult::Vjp {
+            value,
+            state: state.clone(),
+        }),
+        "jvp" => Ok(JetComputeTransformResult::Jvp {
+            value,
+            tangent: jet_compute_jvp(state, tangents.to_vec())?,
+        }),
+        _ => Err(JetComputeError::Unsupported(format!(
+            "unknown autodiff transform `{method}`"
+        ))),
+    }
+}
+
+fn jet_compute_transform_or_panic(
+    method: &str,
+    state: &JetComputeVjpState,
+    tangents: &[JetTensor],
+    targets: &[i64],
+    context: &str,
+) -> JetComputeTransformResult {
+    match jet_compute_transform(method, state, tangents, targets) {
+        Ok(result) => result,
+        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
+    }
+}
+
+fn jet_compute_nested_gradient(
+    states: &[JetComputeVjpState],
+    targets: &[i64],
+) -> Result<Vec<Vec<JetTensor>>, JetComputeError> {
+    states
+        .iter()
+        .map(|state| {
+            let result = jet_compute_transform("gradient", state, &[], targets)?;
+            let JetComputeTransformResult::Gradient(values) = result else {
+                return Err(JetComputeError::Unsupported(
+                    "nested gradient did not return gradients".to_string(),
+                ));
+            };
+            Ok(values)
+        })
+        .collect()
+}
+
+fn jet_compute_nested_gradient_or_panic(
+    states: &[JetComputeVjpState],
+    targets: &[i64],
+    context: &str,
+) -> Vec<Vec<JetTensor>> {
+    match jet_compute_nested_gradient(states, targets) {
+        Ok(values) => values,
+        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
+    }
+}
+
+fn jet_compute_jvp_rule(
+    rule: &JetComputeTapeRule,
+    values: &[JetTensor],
+    output: &JetTensor,
+    tangents: &[JetTensor],
+) -> Result<JetTensor, JetComputeError> {
+    match rule {
+        JetComputeTapeRule::Add => jet_compute_binary("add", &tangents[0], &tangents[1]),
+        JetComputeTapeRule::Sub => jet_compute_binary("sub", &tangents[0], &tangents[1]),
+        JetComputeTapeRule::Mul => {
+            let left = jet_compute_binary("mul", &tangents[0], &values[1])?;
+            let right = jet_compute_binary("mul", &values[0], &tangents[1])?;
+            jet_compute_binary("add", &left, &right)
+        }
+        JetComputeTapeRule::Div => {
+            let left = jet_compute_binary("div", &tangents[0], &values[1])?;
+            let numerator = jet_compute_binary("mul", &values[0], &tangents[1])?;
+            let denominator = jet_compute_binary("mul", &values[1], &values[1])?;
+            let right = jet_compute_binary("div", &numerator, &denominator)?;
+            jet_compute_binary("sub", &left, &right)
+        }
+        JetComputeTapeRule::Maximum | JetComputeTapeRule::Minimum => {
+            let maximum = matches!(rule, JetComputeTapeRule::Maximum);
+            let output_values = jet_compute_tensor_values(output);
+            let left_value = if values[0].shape == output.shape {
+                values[0].clone()
+            } else {
+                jet_compute_materialize_broadcast(&values[0], &output.shape)?
+            };
+            let right_value = if values[1].shape == output.shape {
+                values[1].clone()
+            } else {
+                jet_compute_materialize_broadcast(&values[1], &output.shape)?
+            };
+            let left_tangent = if tangents[0].shape == output.shape {
+                tangents[0].clone()
+            } else {
+                jet_compute_broadcast_to(&tangents[0], &output.shape.to_vec())?
+            };
+            let right_tangent = if tangents[1].shape == output.shape {
+                tangents[1].clone()
+            } else {
+                jet_compute_broadcast_to(&tangents[1], &output.shape.to_vec())?
+            };
+            let left_values = jet_compute_tensor_values(&left_value);
+            let right_values = jet_compute_tensor_values(&right_value);
+            let left_tangents = jet_compute_tensor_values(&left_tangent);
+            let right_tangents = jet_compute_tensor_values(&right_tangent);
+            let mut left_mask = Vec::with_capacity(output_values.len());
+            let mut right_mask = Vec::with_capacity(output_values.len());
+            for (((output, a), b), (left, right)) in output_values
+                .iter()
+                .zip(left_values.iter())
+                .zip(right_values.iter())
+                .zip(left_tangents.iter().zip(right_tangents.iter()))
+            {
+                if *a == *b {
+                    return Err(JetComputeError::Unsupported(
+                        "maximum/minimum has no JVP at a tie".to_string(),
+                    ));
+                }
+                if (maximum && *a == *output) || (!maximum && *a == *output) {
+                    left_mask.push(1.0);
+                    right_mask.push(0.0);
+                } else {
+                    left_mask.push(0.0);
+                    right_mask.push(1.0);
+                }
+            }
+            let left_mask = jet_compute_tensor_from_values_like(output, &left_mask)?;
+            let right_mask = jet_compute_tensor_from_values_like(output, &right_mask)?;
+            let left = jet_compute_binary("mul", &left_mask, &left_tangent)?;
+            let right = jet_compute_binary("mul", &right_mask, &right_tangent)?;
+            jet_compute_binary("add", &left, &right)
+        }
+        JetComputeTapeRule::Matmul => {
+            let left = jet_compute_matmul(&tangents[0], &values[1])?;
+            let right = jet_compute_matmul(&values[0], &tangents[1])?;
+            jet_compute_binary("add", &left, &right)
+        }
+        JetComputeTapeRule::Unary(op) => jet_compute_unary_vjp(
+            op,
+            &values[0],
+            output,
+            &tangents[0],
         ),
-        jet_compute_inherit_placement(
-            jet_compute_reduce_to_shape(&grad_b, &b.shape)?,
-            b,
-        ),
-    ))
+        JetComputeTapeRule::Reshape { .. } => {
+            jet_compute_reshape(&tangents[0], &output.shape)
+        }
+        JetComputeTapeRule::Broadcast { .. } => {
+            jet_compute_broadcast_to(&tangents[0], &output.shape)
+        }
+        JetComputeTapeRule::ReduceToShape { .. } => {
+            jet_compute_reduce_to_shape(&tangents[0], &output.shape)
+        }
+        JetComputeTapeRule::Transpose => jet_compute_transpose(&tangents[0]),
+        JetComputeTapeRule::SumAxis { axis, .. } => jet_compute_sum_axis(&tangents[0], *axis as i64),
+    }
+}
+
+fn jet_compute_jvp(
+    state: &JetComputeVjpState,
+    input_tangents: Vec<JetTensor>,
+) -> Result<JetTensor, JetComputeError> {
+    let (nodes, inputs) = {
+        let tape = state
+            .tape
+            .lock()
+            .map_err(|_| JetComputeError::Unsupported("autodiff tape is poisoned".to_string()))?;
+        (tape.nodes.clone(), tape.inputs.clone())
+    };
+    if input_tangents.len() != inputs.len() {
+        return Err(JetComputeError::RankMismatch(
+            "JVP tangent count must equal the function input count".to_string(),
+        ));
+    }
+    for (input, tangent) in inputs.iter().zip(input_tangents.iter()) {
+        if input.shape != tangent.shape {
+            return Err(JetComputeError::RankMismatch(
+                "JVP tangent shapes must match their primal inputs".to_string(),
+            ));
+        }
+    }
+    let mut tangents: Vec<Option<JetTensor>> = vec![None; nodes.len()];
+    for (index, tangent) in input_tangents.into_iter().enumerate() {
+        if let Some(slot) = tangents.get_mut(index) {
+            *slot = Some(jet_compute_remove_trace_level(&tangent, &state.tape));
+        }
+    }
+    for (index, node) in nodes.iter().enumerate().skip(inputs.len()) {
+        let Some(rule) = &node.rule else {
+            continue;
+        };
+        let mut node_tangents = Vec::with_capacity(node.parents.len());
+        for (parent, value) in node.parents.iter().zip(node.values.iter()) {
+            node_tangents.push(
+                parent
+                    .and_then(|parent| tangents.get(parent).and_then(Option::as_ref).cloned())
+                    .unwrap_or(jet_compute_zero_like(value)?),
+            );
+        }
+        tangents[index] = Some(jet_compute_jvp_rule(
+            rule,
+            &node.values,
+            &node.output,
+            &node_tangents,
+        )?);
+    }
+    match state.output_node {
+        Some(node) => tangents
+            .get(node)
+            .and_then(Option::clone)
+            .ok_or_else(|| JetComputeError::Unsupported("JVP output tangent is unavailable".to_string())),
+        None => jet_compute_zero_like(&state.value),
+    }
+}
+
+fn jet_compute_jvp_or_panic(
+    state: &JetComputeVjpState,
+    input_tangents: Vec<JetTensor>,
+    context: &str,
+) -> JetTensor {
+    match jet_compute_jvp(state, input_tangents) {
+        Ok(value) => value,
+        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
+    }
 }
 
 fn jet_compute_vjp_matmul(
@@ -1895,151 +2884,14 @@ fn jet_compute_vjp_matmul(
     ))
 }
 
-fn jet_compute_vjp_add_value(
-    a: &JetTensor,
-    b: &JetTensor,
-    cot: &JetTensor,
-) -> Result<JetComputeGradTriple, JetComputeError> {
-    let value = jet_compute_add(a, b)?;
-    let (grad_a, grad_b) = jet_compute_vjp_add(a, b, cot)?;
-    Ok(JetComputeGradTriple {
-        value,
-        grad_a,
-        grad_b,
-    })
-}
-
-fn jet_compute_vjp_mul_value(
-    a: &JetTensor,
-    b: &JetTensor,
-    cot: &JetTensor,
-) -> Result<JetComputeGradTriple, JetComputeError> {
-    let value = jet_compute_mul(a, b)?;
-    let (grad_a, grad_b) = jet_compute_vjp_mul(a, b, cot)?;
-    Ok(JetComputeGradTriple {
-        value,
-        grad_a,
-        grad_b,
-    })
-}
-
-fn jet_compute_vjp_matmul_value(
-    a: &JetTensor,
-    b: &JetTensor,
-    cot: &JetTensor,
-) -> Result<JetComputeGradTriple, JetComputeError> {
-    let value = jet_compute_matmul(a, b)?;
-    let (grad_a, grad_b) = jet_compute_vjp_matmul(a, b, cot)?;
-    Ok(JetComputeGradTriple {
-        value,
-        grad_a,
-        grad_b,
-    })
-}
-
-/// Forward-mode JVP of elementwise add: `t_a + t_b` with the same
-/// broadcasting law as the primal operation.
-fn jet_compute_jvp_add(
-    a: &JetTensor,
-    b: &JetTensor,
-    t_a: &JetTensor,
-    t_b: &JetTensor,
-) -> Result<JetTensor, JetComputeError> {
-    jet_compute_validate_tensor(a)?;
-    jet_compute_validate_tensor(b)?;
-    jet_compute_validate_tensor(t_a)?;
-    jet_compute_validate_tensor(t_b)?;
-    if t_a.shape != a.shape || t_b.shape != b.shape {
-        return Err(JetComputeError::RankMismatch(
-            "add tangents must match their primal tensor shapes".to_string(),
-        ));
-    }
-    Ok(jet_compute_inherit_placement(jet_compute_add(t_a, t_b)?, a))
-}
-
-/// Forward-mode JVP of matrix multiplication:
-/// `matmul(t_a, b) + matmul(a, t_b)`.
-fn jet_compute_jvp_matmul(
-    a: &JetTensor,
-    b: &JetTensor,
-    t_a: &JetTensor,
-    t_b: &JetTensor,
-) -> Result<JetTensor, JetComputeError> {
-    jet_compute_validate_tensor(a)?;
-    jet_compute_validate_tensor(b)?;
-    jet_compute_validate_tensor(t_a)?;
-    jet_compute_validate_tensor(t_b)?;
-    if t_a.shape != a.shape || t_b.shape != b.shape {
-        return Err(JetComputeError::RankMismatch(
-            "matmul tangents must match their primal tensor shapes".to_string(),
-        ));
-    }
-    let left = jet_compute_matmul(t_a, b)?;
-    let right = jet_compute_matmul(a, t_b)?;
-    Ok(jet_compute_inherit_placement(jet_compute_add(&left, &right)?, a))
-}
-
-/// Forward-mode JVP of elementwise mul: `t_a * b + a * t_b`.
-fn jet_compute_jvp_mul(
-    a: &JetTensor,
-    b: &JetTensor,
-    t_a: &JetTensor,
-    t_b: &JetTensor,
-) -> Result<JetTensor, JetComputeError> {
-    jet_compute_validate_tensor(a)?;
-    jet_compute_validate_tensor(b)?;
-    jet_compute_validate_tensor(t_a)?;
-    jet_compute_validate_tensor(t_b)?;
-    if t_a.shape != a.shape || t_b.shape != b.shape {
-        return Err(JetComputeError::RankMismatch(
-            "mul tangents must match their primal tensor shapes".to_string(),
-        ));
-    }
-    let left = jet_compute_mul(t_a, b)?;
-    let right = jet_compute_mul(a, t_b)?;
-    Ok(jet_compute_inherit_placement(jet_compute_add(&left, &right)?, a))
-}
-
-/// Scalar-loss convenience: value + ∂/∂a + ∂/∂b of `sum(a * b)`.
-fn jet_compute_value_and_grad_mul(
-    a: &JetTensor,
-    b: &JetTensor,
-) -> Result<JetComputeGradTriple, JetComputeError> {
-    let value = jet_compute_mul(a, b)?;
-    if jet_compute_tensor_numel(&value) != 1 {
-        return Err(JetComputeError::RankMismatch(
-            "value_and_grad_mul requires a scalar loss; use vjp_mul for tensor outputs"
-                .to_string(),
-        ));
-    }
-    let ones = jet_compute_ones(&value.shape)?;
-    let (ga, gb) = jet_compute_vjp_mul(a, b, &ones)?;
-    Ok(JetComputeGradTriple {
-        value: jet_compute_inherit_placement(value, a),
-        grad_a: ga,
-        grad_b: gb,
-    })
-}
-
-fn jet_compute_grad_value(g: &JetComputeGradTriple) -> JetTensor {
-    g.value.clone()
-}
-
-fn jet_compute_grad_a(g: &JetComputeGradTriple) -> JetTensor {
-    g.grad_a.clone()
-}
-
-fn jet_compute_grad_b(g: &JetComputeGradTriple) -> JetTensor {
-    g.grad_b.clone()
-}
-
-fn jet_compute_grad_show(g: &JetComputeGradTriple) -> String {
-    g.jet_show()
-}
-
 // ── #1142: ML step + serialization over the Tensor oracle ───────────────────
 
 fn jet_compute_mse_loss(pred: &JetTensor, target: &JetTensor) -> Result<f64, JetComputeError> {
+    if pred.trace.is_some() || target.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "mse_loss has no registered autodiff rule".to_string(),
+        ));
+    }
     let diff = jet_compute_binary("sub", pred, target)?;
     let sq = jet_compute_mul(&diff, &diff)?;
     let n = jet_compute_numel(&sq.shape)? as f64;
@@ -2091,6 +2943,13 @@ fn jet_compute_sgd_step(
 }
 
 fn jet_compute_serialize(tensor: &JetTensor) -> String {
+    if tensor.trace.is_some() {
+        jet_panic(
+            "Compute.rs",
+            line!(),
+            "Tensor serialization has no registered autodiff rule",
+        );
+    }
     if let Err(error) = jet_compute_validate_tensor(tensor) {
         jet_panic(
             "core.compute.serialize",
@@ -2222,6 +3081,11 @@ impl JetShow for JetSparseCsr {
 }
 
 fn jet_compute_to_sparse(tensor: &JetTensor) -> Result<JetSparseCsr, JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "to_sparse has no registered autodiff rule".to_string(),
+        ));
+    }
     if tensor.shape.len() != 2 {
         return Err(JetComputeError::RankMismatch(
             "to_sparse requires a rank-2 tensor".to_string(),
@@ -2235,7 +3099,7 @@ fn jet_compute_to_sparse(tensor: &JetTensor) -> Result<JetSparseCsr, JetComputeE
     let mut values = Vec::new();
     for r in 0..rows {
         for c in 0..cols {
-            let v = jet_compute_get(tensor, &vec![r, c])?;
+            let v = jet_compute_get_raw(tensor, &vec![r, c])?;
             if v != 0.0 {
                 col_idx.push(c);
                 values.push(v);
@@ -2262,6 +3126,11 @@ fn jet_compute_sparse_mv(
     sparse: &JetSparseCsr,
     vector: &JetTensor,
 ) -> Result<JetTensor, JetComputeError> {
+    if vector.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "sparse_mv has no registered autodiff rule".to_string(),
+        ));
+    }
     jet_compute_validate_sparse(sparse)?;
     jet_compute_validate_tensor(vector)?;
     if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
@@ -2284,7 +3153,7 @@ fn jet_compute_sparse_mv(
         let mut acc = 0.0;
         for k in start..end {
             let c = sparse.col_idx[k];
-            acc += sparse.values[k] * jet_compute_get(vector, &[c])?;
+            acc += sparse.values[k] * jet_compute_get_raw(vector, &[c])?;
             if !acc.is_finite() {
                 return Err(JetComputeError::Arithmetic(
                     "sparse matrix-vector multiplication produced a non-finite value"
@@ -2345,6 +3214,11 @@ fn jet_compute_sparse_show(sparse: &JetSparseCsr) -> String {
 /// algorithm (tiled accumulation, f32 cast) so the SIMD profile is not a
 /// facade over the f64 triple loop.
 fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if a.trace.is_some() || b.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "matmul_f32_tile has no registered autodiff rule".to_string(),
+        ));
+    }
     if a.shape.len() != 2 || b.shape.len() != 2 {
         return Err(JetComputeError::RankMismatch(
             "matmul_f32_tile requires rank-2 tensors".to_string(),
@@ -2378,15 +3252,15 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
                 let t1 = (t0 + TILE).min(k);
                 for i in i0..i1 {
                     for j in j0..j1 {
-                        let mut acc = jet_compute_get(&out, &vec![i, j])? as f32;
+                        let mut acc = jet_compute_get_raw(&out, &vec![i, j])? as f32;
                         if !acc.is_finite() {
                             return Err(JetComputeError::Arithmetic(
                                 "f32 tile accumulator is non-finite".to_string(),
                             ));
                         }
                         for t in t0..t1 {
-                            let av = jet_compute_get(a, &vec![i, t])? as f32;
-                            let bv = jet_compute_get(b, &vec![t, j])? as f32;
+                            let av = jet_compute_get_raw(a, &vec![i, t])? as f32;
+                            let bv = jet_compute_get_raw(b, &vec![t, j])? as f32;
                             if !av.is_finite() || !bv.is_finite() {
                                 return Err(JetComputeError::Arithmetic(
                                     "f32 tile input is outside the finite f32 range"

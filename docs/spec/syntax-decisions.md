@@ -4986,6 +4986,25 @@ source span. Custom derivatives live once at the operation definition, are
 type/shape/effect checked, and may carry numerical validation evidence.
 Gradient execution inherits primal placement and determinism.
 
+**D-COMPUTE-GRAD1=E — current gradient surface** *(ratified 2026-08-08;
+supersedes the public spellings in D-COMPUTE-AUTODIFF1)*: `compute.gradient` is
+one name with two arities. With a function and Tensor values it returns the
+selected named gradient tuple; with only the function and optional `wrt:` it
+returns a derivative function that must be bound before it is called.
+`compute.value_and_gradient` follows the same direct and transform arities.
+Both forms lower to the same VJP core, and `wrt:` names are checked against the
+differentiated function's parameters.
+JVP retains the technical transform surface from D-COMPUTE-AUTODIFF1: bind
+`d_f :: compute.jvp(f)` before calling it with primal and tangent values.
+The differentiated function must be pure over its Tensor arguments; its effect
+row carries through the bound transform unchanged.
+
+**D-COMPUTE-VJP1=A — VJP run value and pull** *(ratified 2026-08-08)*:
+`compute.vjp(f, args...)` returns a `VjpRun` with `.value`, `.pull(seed)`, and
+`.grads`. `.grads` is the unit-seed pull for scalar output; non-scalar output
+requires an explicit seed. A `VjpRun` also destructures positionally as
+`(value, pull)`.
+
 **D-COMPUTE-BACKEND1=D — portable profiles and CPU oracle**: default compute
 policy is F32Strict + Reproducible. Fast math, reassociation, and nondeterministic
 reductions require named recorded profiles. Typed capability negotiation fails

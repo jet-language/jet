@@ -156,6 +156,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
                 | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
                 | "authorize_wrapped_import" | "commit_import_wrapped")
+            | ("core.compute", "gradient" | "value_and_gradient" | "vjp" | "jvp")
     )
 }
 
@@ -1116,47 +1117,6 @@ pub fn core_fixed_sig(
                 (read, Type::List(Box::new(Type::Int))),
             ],
             Some(result_ty(Type::Bool, Type::Named("ComputeError".to_string()))),
-        )),
-        ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => Some((
-            vec![
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Named("Tensor".to_string())),
-            ],
-            Some(result_ty(
-                Type::Named("Tensor".to_string()),
-                Type::Named("ComputeError".to_string()),
-            )),
-        )),
-        ("core.compute", "vjp_add" | "vjp_mul" | "vjp_matmul") => Some((
-            vec![
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Named("Tensor".to_string())),
-            ],
-            Some(result_ty(
-                Type::Named("GradTriple".to_string()),
-                Type::Named("ComputeError".to_string()),
-            )),
-        )),
-        ("core.compute", "value_and_grad_mul") => Some((
-            vec![
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Named("Tensor".to_string())),
-            ],
-            Some(result_ty(
-                Type::Named("GradTriple".to_string()),
-                Type::Named("ComputeError".to_string()),
-            )),
-        )),
-        ("core.compute", "grad_value" | "grad_a" | "grad_b") => Some((
-            vec![(read, Type::Named("GradTriple".to_string()))],
-            Some(Type::Named("Tensor".to_string())),
-        )),
-        ("core.compute", "grad_show") => Some((
-            vec![(read, Type::Named("GradTriple".to_string()))],
-            Some(Type::String),
         )),
         ("core.compute", "sparse_show") => Some((
             vec![(read, Type::Named("SparseTensor".to_string()))],

@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, Expr, Type};
+use crate::AST::{AccessConvention, Expr, ParamZone, Type};
 use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
@@ -113,6 +113,113 @@ fn compute_alias_return(name: &str, args: &[crate::AST::CallArg]) -> Option<Type
                 Type::compute_shape_type("Matrix", &[rows as u64, cols as u64]),
                 Type::Named("ComputeError".to_string()),
             ))
+        }
+        _ => None,
+    }
+}
+
+fn compute_tensor_type() -> Type {
+    Type::Named("Tensor".to_string())
+}
+
+fn is_compute_tensor(ty: &Type) -> bool {
+    matches!(ty, Type::Named(type_name) if type_name == "Tensor")
+}
+
+fn compute_gradient_value_type(output: &Type) -> Option<Type> {
+    match output {
+        ty if is_compute_tensor(ty) => Some(compute_tensor_type()),
+        Type::Tuple(fields) if fields.iter().all(|(_, ty)| is_compute_tensor(ty)) => {
+            Some(Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, _)| (name.clone(), Box::new(compute_tensor_type())))
+                    .collect(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn compute_tensor_tuple(names: &[String], value_type: &Type) -> Type {
+    Type::Tuple(
+        names
+            .iter()
+            .map(|name| (name.clone(), Box::new(value_type.clone())))
+            .collect(),
+    )
+}
+
+fn compute_wrt_names(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::ListLit(items, _) => items
+            .iter()
+            .map(|item| match item {
+                Expr::Ident(name, _) => Some(name.clone()),
+                Expr::Paren(inner, _) => match inner.as_ref() {
+                    Expr::Ident(name, _) => Some(name.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect(),
+        Expr::Paren(inner, _) => compute_wrt_names(inner),
+        _ => None,
+    }
+}
+
+fn compute_function_names(checker: &Checker<'_>, expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::Paren(inner, _) => compute_function_names(checker, inner),
+        Expr::Ident(name, _) => checker
+            .funcs
+            .get(name)
+            .map(|sig| sig.param_info.iter().map(|(name, _)| name.clone()).collect())
+            .or_else(|| {
+                let info = checker.lookup(name)?;
+                let Type::Fn {
+                    param_contract: Some(contract),
+                    ..
+                } = &info.ty
+                else {
+                    return None;
+                };
+                Some(contract.iter().map(|(name, _)| name.clone()).collect())
+            }),
+        Expr::Lambda(lambda) => Some(lambda.params.iter().map(|param| param.name.clone()).collect()),
+        Expr::MethodCall { method, args, .. }
+            if matches!(method.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp") =>
+        {
+            args.first()
+                .and_then(|arg| compute_function_names(checker, &arg.expr))
+        }
+        Expr::Call(call)
+            if matches!(call.name.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp") =>
+        {
+            call.args
+                .first()
+                .and_then(|arg| compute_function_names(checker, &arg.expr))
+        }
+        _ => None,
+    }
+}
+
+fn compute_function_identity(checker: &Checker<'_>, expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Paren(inner, _) => compute_function_identity(checker, inner),
+        Expr::Ident(name, _) if checker.funcs.contains_key(name) => Some(name.clone()),
+        Expr::MethodCall { method, args, .. }
+            if matches!(method.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp") =>
+        {
+            args.first()
+                .and_then(|arg| compute_function_identity(checker, &arg.expr))
+        }
+        Expr::Call(call)
+            if matches!(call.name.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp") =>
+        {
+            call.args
+                .first()
+                .and_then(|arg| compute_function_identity(checker, &arg.expr))
         }
         _ => None,
     }
@@ -393,6 +500,259 @@ fn core_compiler_return(name: &str) -> Type {
 }
 
 impl<'a> Checker<'a> {
+        fn infer_compute_transform(
+            &mut self,
+            name: &str,
+            span: Span,
+            args: &mut [crate::AST::CallArg],
+        ) -> Option<Type> {
+            let Some(first) = args.first_mut() else {
+                self.diags.push(wrong_core_arity(name, 1, 0, span));
+                return None;
+            };
+            let f_expr = first.expr.clone();
+            let f_ty = self.infer(&mut first.expr);
+            let Some(Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                ..
+            }) = f_ty
+            else {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` expects a function value"),
+                    "autodiff transforms differentiate a function over Tensor arguments".to_string(),
+                    "bind a Tensor function before passing it to the transform".to_string(),
+                    Some(span),
+                ));
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            };
+            if let Some(target) = compute_function_identity(self, &f_expr) {
+                self.fx_autodiff_obligations
+                    .push(crate::Sema::Effects::AutodiffObligation {
+                        method: name.to_string(),
+                        target,
+                        span,
+                    });
+            }
+            if effect_bound.as_ref().is_some_and(|row| !row.is_empty()) {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` needs a pure Tensor function"),
+                    "autodiff records only pure Tensor operations and cannot carry an effectful callable".to_string(),
+                    "remove the effect row from the differentiated function or differentiate a pure Tensor function".to_string(),
+                    Some(span),
+                ));
+            }
+            let output = ret.map(|ret| *ret).unwrap_or_else(unit_ty);
+            let gradient_output = name == "gradient" && compute_gradient_value_type(&output).is_some();
+            if !is_compute_tensor(&output) && !gradient_output {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` needs a function returning `Tensor`"),
+                    "the reverse and forward transforms have one Tensor output and keep Tensor storage law".to_string(),
+                    "return a Tensor from the differentiated function".to_string(),
+                    Some(span),
+                ));
+            }
+            if gradient_output && name != "gradient" {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` needs a function returning `Tensor`"),
+                    "only a gradient transform can differentiate a named Tensor tuple; value and pull surfaces require one Tensor output".to_string(),
+                    "return one Tensor from the differentiated function".to_string(),
+                    Some(span),
+                ));
+            }
+            if params
+                .iter()
+                .any(|param| !matches!(param, Type::Named(type_name) if type_name == "Tensor"))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` needs Tensor function arguments"),
+                    "autodiff records only pure Tensor operations".to_string(),
+                    "use a function whose parameters are all `Tensor`".to_string(),
+                    Some(span),
+                ));
+            }
+            let parameter_names = compute_function_names(self, &f_expr);
+            let mut value_indexes = Vec::new();
+            let mut wrt_expr = None;
+            for (index, arg) in args.iter().enumerate().skip(1) {
+                if arg
+                    .label
+                    .as_ref()
+                    .is_some_and(|(label, _)| label == "wrt")
+                {
+                    wrt_expr = Some(arg.expr.clone());
+                } else {
+                    value_indexes.push(index);
+                }
+            }
+            for index in &value_indexes {
+                let value_ty = self.infer(&mut args[*index].expr);
+                if !matches!(value_ty, Some(Type::Named(type_name)) if type_name == "Tensor") {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("argument {} to `compute.{name}` should be `Tensor`", index),
+                        "autodiff transforms record Tensor values, not scalar policy arguments".to_string(),
+                        "pass a Tensor value".to_string(),
+                        Some(args[*index].span),
+                    ));
+                }
+            }
+            if let Some(wrt) = &mut wrt_expr {
+                if compute_wrt_names(wrt).is_none() {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`wrt:` for `compute.{name}` must list parameter names"),
+                        "the differentiation target is selected by the function parameter name".to_string(),
+                        "write `wrt: [parameter]`".to_string(),
+                        Some(wrt.span()),
+                    ));
+                }
+                self.infer(wrt);
+            }
+            if wrt_expr.is_some() && !matches!(name, "gradient" | "value_and_gradient") {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`wrt:` is not supported by `compute.{name}`"),
+                    "`wrt:` selects named gradients on `compute.gradient` and `compute.value_and_gradient`".to_string(),
+                    "remove `wrt:` and provide the full VJP or JVP inputs".to_string(),
+                    Some(span),
+                ));
+            }
+            let expected_values = if name == "jvp" {
+                params.len().saturating_mul(2)
+            } else {
+                params.len()
+            };
+            let direct = !value_indexes.is_empty();
+            if name == "jvp" && direct {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    "`compute.jvp` is a function transform, not a direct call".to_string(),
+                    "the ratified JVP surface returns a callable that accepts primal and tangent values".to_string(),
+                    "bind `d_f :: compute.jvp(f)`, then call `d_f(primal..., tangent...)`".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+            if direct && value_indexes.len() != expected_values {
+                self.diags.push(wrong_core_arity(name, expected_values + 1, args.len(), span));
+            }
+            let Some(names) = parameter_names else {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` needs named Tensor parameters"),
+                    "named gradient fields come from the differentiated function signature".to_string(),
+                    "pass a named Tensor function or lambda".to_string(),
+                    Some(span),
+                ));
+                return None;
+            };
+            let mut selected = if let Some(wrt) = wrt_expr.as_ref().and_then(|expr| compute_wrt_names(expr)) {
+                let mut selected = Vec::new();
+                for target in wrt {
+                    let index = names.iter().position(|name| name == &target);
+                        let Some(index) = index else {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`wrt` names no parameter `{target}`; parameters are [{}]",
+                                    names.join(", ")
+                                ),
+                            "a differentiation target must name one function parameter".to_string(),
+                            "use a parameter name from the differentiated function".to_string(),
+                            Some(span),
+                        ));
+                        continue;
+                    };
+                    if !selected.contains(&index) {
+                        selected.push(index);
+                    }
+                }
+                selected
+            } else {
+                (0..params.len()).collect()
+            };
+            if selected.is_empty() {
+                selected = (0..params.len()).collect();
+            }
+            let Some(gradient_names) = selected
+                .iter()
+                .map(|index| names.get(*index).cloned())
+                .collect::<Option<Vec<_>>>()
+            else {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`compute.{name}` cannot name every Tensor parameter"),
+                    "gradient fields come from the differentiated function signature".to_string(),
+                    "pass a callable with named Tensor parameters".to_string(),
+                    Some(span),
+                ));
+                return None;
+            };
+            let gradient_value_type = compute_gradient_value_type(&output)
+                .unwrap_or_else(compute_tensor_type);
+            let gradient_ty = compute_tensor_tuple(&gradient_names, &gradient_value_type);
+            let run_ty = Type::Apply {
+                name: "VjpRun".to_string(),
+                args: vec![gradient_ty.clone()],
+            };
+            let direct_return = match name {
+                "gradient" => gradient_ty.clone(),
+                "value_and_gradient" => Type::Tuple(vec![
+                    ("value".to_string(), Box::new(compute_tensor_type())),
+                    ("gradients".to_string(), Box::new(gradient_ty.clone())),
+                ]),
+                "vjp" => run_ty.clone(),
+                "jvp" => Type::Tuple(vec![
+                    ("value".to_string(), Box::new(compute_tensor_type())),
+                    ("tangent".to_string(), Box::new(compute_tensor_type())),
+                ]),
+                _ => unreachable!("compute transform name"),
+            };
+            if direct {
+                return Some(direct_return);
+            }
+            let transform_params = if name == "jvp" {
+                params.iter().cloned().chain(params.iter().cloned()).collect()
+            } else {
+                params.clone()
+            };
+            let transform_return = match name {
+                "gradient" => gradient_ty.clone(),
+                "value_and_gradient" => Type::Tuple(vec![
+                    ("value".to_string(), Box::new(compute_tensor_type())),
+                    ("gradients".to_string(), Box::new(gradient_ty.clone())),
+                ]),
+                "vjp" => run_ty,
+                "jvp" => Type::Tuple(vec![
+                    ("value".to_string(), Box::new(compute_tensor_type())),
+                    ("tangent".to_string(), Box::new(compute_tensor_type())),
+                ]),
+                _ => unreachable!("compute transform name"),
+            };
+            Some(Type::Fn {
+                params: transform_params,
+                ret: Some(Box::new(transform_return)),
+                effect_bound: effect_bound.clone(),
+                param_contract: Some(
+                    names
+                        .iter()
+                        .map(|name| (name.clone(), ParamZone::Either))
+                        .collect(),
+                ),
+                return_view_provenance: None,
+            })
+        }
+
         pub(crate) fn infer_core_call(
             &mut self,
             module: &str,
@@ -438,6 +798,13 @@ impl<'a> Checker<'a> {
             }
             // D-EFF1: record the effect this Core call contributes to the enclosing
             // function's inferred set (erased in codegen; purely a sema fact).
+            if module == "core.compute" {
+                self.fx_compute_calls
+                    .push(crate::Sema::Effects::ComputeCallFact {
+                        method: name.to_string(),
+                        span,
+                    });
+            }
             if let Some(e) = core_effect(module, name) {
                 // D-EFFTREE1: Core calls (this module-call path) stay tagged with
                 // a bare root — real stdlib call sites are unchanged (no migration
@@ -599,6 +966,11 @@ impl<'a> Checker<'a> {
                 super::net_text_time::require_exact_labels(
                     "services.runtime", args, &[(1, "retention")], span, &mut self.diags,
                 );
+            }
+            if module == "core.compute"
+                && matches!(name, "gradient" | "value_and_gradient" | "vjp" | "jvp")
+            {
+                return self.infer_compute_transform(name, span, args);
             }
             let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len()) {
                 let mut params = vec![

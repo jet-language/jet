@@ -1,18 +1,50 @@
-// D-COMPUTE-AUTODIFF1 / #1141–#1143: VJP/JVP, sparse CSR, SIMD tile, profile.
+// D-COMPUTE-AUTODIFF1 / #1141–#1143: gradient/VJP/JVP, sparse CSR, SIMD tile, profile.
 use core.compute as compute
 
-fn run() {
-    a :: compute.from_list([2.0]) ?? panic("a")
-    b :: compute.from_list([4.0]) ?? panic("b")
-    g :: compute.value_and_grad_mul(a, b) ?? panic("vag")
-    print("grad:{compute.to_list(compute.grad_a(g))}")
+fn loss(w: Tensor, x: Tensor) => Tensor {
+    return compute.mul(w, x) ?? panic("loss")
+}
 
-    ta :: compute.ones([1]) ?? panic("ta")
-    tb :: compute.ones([1]) ?? panic("tb")
-    j :: compute.jvp_mul(a, b, ta, tb) ?? panic("jvp")
-    print("jvp:{compute.to_list(j)}")
-    va :: compute.vjp_add(a, b, ta) ?? panic("vjp")
-    print("vjp:{compute.to_list(compute.grad_a(va))}")
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    (dw, dx) :: compute.gradient(loss, w, x)
+    print("grad:{compute.to_list(dw)}")
+    print("grad_x:{compute.to_list(dx)}")
+
+    (value, selected) :: compute.value_and_gradient(loss, w, x, wrt: [w])
+    print("value:{compute.to_list(value)}")
+    print("selected_w:{compute.to_list(selected.w)}")
+
+    d_loss :: compute.gradient(loss)
+    (transform_w, transform_x) :: d_loss(w, x)
+    print("transform_w:{compute.to_list(transform_w)}")
+    print("transform_x:{compute.to_list(transform_x)}")
+
+    curvature :: compute.gradient(d_loss)
+    curvature_value :: curvature(w, x)
+    print("curvature_ww:{compute.to_list(curvature_value.w.w)}")
+    print("curvature_wx:{compute.to_list(curvature_value.w.x)}")
+    print("curvature_xw:{compute.to_list(curvature_value.x.w)}")
+    print("curvature_xx:{compute.to_list(curvature_value.x.x)}")
+
+    tw :: compute.ones([1]) ?? panic("tw")
+    tx :: compute.ones([1]) ?? panic("tx")
+    d_loss_jvp :: compute.jvp(loss)
+    (jvp_value, jvp_tangent) :: d_loss_jvp(w, x, tw, tx)
+    print("jvp_value:{compute.to_list(jvp_value)}")
+    print("jvp:{compute.to_list(jvp_tangent)}")
+
+    vjp_run :: compute.vjp(loss, w, x)
+    print("vjp_value:{compute.to_list(vjp_run.value)}")
+    vjp_pull :: vjp_run.pull(tw)
+    print("vjp:{compute.to_list(vjp_pull.w)}")
+    print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
+
+    (vjp_value, vjp_pull_fn) :: compute.vjp(loss, w, x)
+    vjp_pair :: vjp_pull_fn(tw)
+    print("vjp_pair_value:{compute.to_list(vjp_value)}")
+    print("vjp_pair_pull_w:{compute.to_list(vjp_pair.w)}")
 
     m := compute.matrix(2, 2, 0.0) ?? panic("m")
     compute.set(&m, [0, 0], 1.0) ?? panic("set")

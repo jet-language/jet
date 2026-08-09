@@ -1318,6 +1318,11 @@ pub(crate) struct Checker<'a> {
     /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
     /// into the `EffectSummary` for the post-pass E0747 check.
     fx_callback_obligations: Vec<CallbackObligation>,
+    /// D-AUTODIFF1: named differentiated functions whose solved effect rows
+    /// must be checked after the bundle effect graph closes.
+    fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+    /// D-AUTODIFF1: compute consumers used by this function body.
+    fx_compute_calls: Vec<Effects::ComputeCallFact>,
     /// D-CRYPTO-DIAG1: compiler-known crypto facts wait for the function's
     /// syntax/type/effect phases to finish before becoming diagnostics.
     fx_pending_diagnostics: Vec<Diagnostic>,

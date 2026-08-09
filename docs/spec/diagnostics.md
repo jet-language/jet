@@ -411,6 +411,7 @@ renumbered, and no new `W` code may be allocated.
 | L0507 | parse | prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68, D-BRANCH-LINT1=A) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
+| L1141 | sema  | autodiff transform result called inline; bind the derivative before calling it (D-COMPUTE-GRAD1=E) |
 | E0601 | sema  | `#Test` block in wrong position / none found |
 | E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | `use` target file / module not found |

@@ -2900,7 +2900,7 @@ impl<'a> EvalCtx<'a> {
                     return self.eval_core_data_call(method, args, &expr.ty, scope);
                 }
                 if module == "core.compute" {
-                    return self.eval_core_compute_call(method, args, *source_span, scope);
+                    return self.eval_core_compute_call(method, args, &expr.ty, *source_span, scope);
                 }
                 if module == "core.services" {
                     return self.eval_core_services_call(method, args, *source_span, scope);
@@ -3300,7 +3300,26 @@ impl<'a> EvalCtx<'a> {
                 })
             }
             TExprKind::Field { recv, field, .. } => {
+                let vjp_grads = field == "grads"
+                    && matches!(
+                        &recv.ty,
+                        Type::Apply { name, args }
+                            if name == "VjpRun" && args.len() == 1
+                    );
                 let r = self.eval_expr(recv, scope)?;
+                if vjp_grads {
+                    let CtValue::Struct { fields, .. } = &r else {
+                        return Err(unsupported("compute.vjp result", self.span()));
+                    };
+                    let Some(grads) = fields
+                        .iter()
+                        .find(|(name, _)| name == "grads")
+                        .map(|(_, value)| value.clone())
+                    else {
+                        return Err(unsupported("compute.vjp.grads", self.span()));
+                    };
+                    return self.call_callable(&grads, Vec::new());
+                }
                 // D-LAYOUT-FACTS1=B: `$layout` is a contextual projection of
                 // the TypeInfo value bound to a derive type parameter. It is
                 // not a second stored TypeInfo member; ordinary `.layout`

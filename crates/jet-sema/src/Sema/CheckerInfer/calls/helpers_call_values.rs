@@ -3,6 +3,29 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::type_fix_hint;
 use crate::Syntax;
+
+fn is_inline_compute_transform(checker: &Checker<'_>, expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner, _) => is_inline_compute_transform(checker, inner),
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if matches!(method.as_str(), "gradient" | "value_and_gradient" | "vjp" | "jvp")
+            && checker
+                .core_module_path_from_receiver(receiver)
+                .is_some_and(|(module, _)| module == "core.compute")
+            && args.iter().skip(1).all(|arg| {
+                arg.label
+                    .as_ref()
+                    .is_some_and(|(label, _)| label == "wrt")
+            }) => true,
+        Expr::CallValue { callee, .. } => is_inline_compute_transform(checker, callee),
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(super) fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
             crate::AST::CallArg {
@@ -47,6 +70,15 @@ impl<'a> Checker<'a> {
             args: &mut [crate::AST::CallArg],
             span: Span,
         ) -> Option<Type> {
+            if is_inline_compute_transform(self, callee) {
+                self.diags.push(Diagnostic::lint(
+                    "L1141",
+                    "an autodiff transform result is called inline".to_string(),
+                    "the transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested".to_string(),
+                    "bind the derivative first, then call the binding: `d_loss :: compute.gradient(loss)`".to_string(),
+                    Some(span),
+                ));
+            }
             let inline_loop = matches!(
                 callee.as_ref(),
                 Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
