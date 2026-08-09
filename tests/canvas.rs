@@ -313,11 +313,11 @@ const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() => Int {
 }
 
 fn run() {
-    taskgroup g {
-        t :: g.task => {
+    task.group g {
+        t :: task {
             worker()
         }
-        result :: g.all([t])
+        result :: task.all { worker() }
         print(result[0])
     }
 }
@@ -374,11 +374,10 @@ fn work() => Int {
 
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
-    taskgroup g {
-        t :: g.task => {
+    task.group g {
+        t :: task {
             sender.send(work())
         }
-        g.all([t])
         print(ch.receive() ?? panic("channel closed"))
     }
 }
@@ -3724,7 +3723,7 @@ fn canvas_projects_async_task_rail() {
     let path = write_fixture("task_rail", CANVAS_TASK_RAIL_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
 
-    for field in ["\"async\"", "\"kind\":\"taskgroup\"", "\"title\":\".task\""] {
+    for field in ["\"async\"", "\"kind\":\"structured_task_scope\"", "\"source\":\"task.group\""] {
         assert!(
             graph.contains(field),
             "task rail graph missing {field}: {graph}"
@@ -3787,10 +3786,9 @@ fn canvas_projects_task_flow_authoring_facts() {
         "\"task_flows\"",
         "\"kind\":\"structured_task_scope\"",
         "\"kind\":\"channel_create\"",
-        "\"kind\":\"taskgroup_spawn\"",
+        "\"kind\":\"task_spawn\"",
         "\"kind\":\"channel_send\"",
         "\"kind\":\"channel_receive\"",
-        "\"kind\":\"taskgroup_join_all\"",
         "\"rail\":\"async\"",
         "\"semantics\":\"core.tasks_source_truth\"",
     ] {
@@ -3839,8 +3837,8 @@ fn canvas_hardening_projection_suite_covers_blueprint_backlog_constructs() {
             CANVAS_TASK_RAIL_FIXTURE,
             [
                 "\"async\"",
-                "\"kind\":\"taskgroup\"",
-                "\"title\":\".task\"",
+                "\"kind\":\"structured_task_scope\"",
+                "\"source\":\"task.group\"",
                 "\"pins\"",
                 "\"wires\"",
             ],

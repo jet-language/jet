@@ -785,7 +785,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr_list(args, callees)
         }
         TExprKind::CoreClosureCall { kind } => match kind {
-            TCoreClosureKind::Spawn { .. } | TCoreClosureKind::SpawnGroup { .. } => true,
+            TCoreClosureKind::Spawn { .. } => true,
             TCoreClosureKind::UiButtonOnClick {
                 label,
                 executable,
@@ -3613,20 +3613,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::TaskCancel
         | THandleOp::TaskDetach
         | THandleOp::TaskPause
-        | THandleOp::TaskResume
-        | THandleOp::TaskTrace
-        | THandleOp::TaskException => {
+        | THandleOp::TaskResume => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
-        }
-        // D-VERDICT-1323-1: the list twins take a list of task handles.
-        THandleOp::TaskDetachAll
-        | THandleOp::TaskCancelAll
-        | THandleOp::TaskPauseAll
-        | THandleOp::TaskResumeAll
-        | THandleOp::TaskTraceAll => {
-            args.is_empty()
-                && matches!(&recv.ty, Type::List(inner)
-                    if matches!(inner.as_ref(), Type::Apply { name, .. } if name == "Task"))
         }
         THandleOp::ChannelReceive => {
             args.is_empty() && matches!(&recv.ty, Type::Apply { name, .. } if name == "Receiver")

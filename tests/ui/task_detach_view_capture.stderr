@@ -1,16 +1,16 @@
 Error [E2305]: a returned view cannot borrow from a temporary argument
-  --> tests/ui/task_detach_view_capture.jet:7:33
+  --> tests/ui/task_detach_view_capture.jet:5:21
     |
-  7 |     t :: tasks.spawn(() => peek([1, 2, 3]))
-    |                                 ^^^^^^^^^
+  5 |     t :: task peek([1, 2, 3])
+    |                     ^^^^^^^^^
  Why: the temporary owner is dropped at the end of this statement, while the returned view remains live
  Fix: store the owner in a named binding first, then pass that binding to the view-returning call
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_detach_view_capture.jet:7:22
+  --> tests/ui/task_detach_view_capture.jet:5:10
     |
-  7 |     t :: tasks.spawn(() => peek([1, 2, 3]))
-    |                      ^^^^^^^^^^
+  5 |     t :: task peek([1, 2, 3])
+    |          ^^^^^^^^^^^^^^^^^^^^
  Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 

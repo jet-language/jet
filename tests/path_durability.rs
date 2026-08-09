@@ -283,11 +283,10 @@ fn observe() => Int {{
     return 3
 }}
 fn run() {{
-    taskgroup g {{
-        a :: g.task => write_a()
-        b :: g.task => write_b()
-        observer :: g.task => observe()
-        g.all([a, b, observer])
+    task.group g {{
+        a :: task write_a()
+        b :: task write_b()
+        observer :: task observe()
     }}
 }}
 "#,

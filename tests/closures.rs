@@ -35,8 +35,6 @@ fn single_line_lambda_bodies_need_no_braces() {
     // S46: braces only for multi-statement bodies. One assignment or one void
     // call after `=>` is the brace-free form of the same block.
     let src = r#"
-use core.tasks as tasks
-
 struct Box {
     n: Int
 }
@@ -47,8 +45,8 @@ fn bump(box: Shared<Box>) {
 
 fn run() {
     box :: Shared.new(Box.{n: 0})
-    t :: tasks.spawn(() => bump(box))
-    t.wait()
+    t :: task bump(box)
+    t.join() ?? panic("task failed")
     print(box.read(b => b.n))
 }
 "#;

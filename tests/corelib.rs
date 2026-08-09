@@ -4321,17 +4321,17 @@ use core.time as time
 
 fn run() {{
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    lookup :: tasks.spawn(() => {{
+    lookup :: task {{
         ready_tx.send(1)
         if net.dns_a_at("{}", "service.example.test", 5000) == {{
             .Ok(_) -> print("unexpected DNS response")
             .Err(error) -> print(net.error_message(error))
         }}
-    }})
+    }}
     _ready :: ready_rx.receive() ?? panic("ready")
     time.sleep(50)
     lookup.cancel()
-    lookup.join()
+    lookup.join() ?? 0
 }}
 "#,
         addr
@@ -4445,18 +4445,18 @@ fn run() {
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    server :: tasks.spawn(() => {
+    server :: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)
         if stream.read(1) == {
             .Ok(_) -> print("unexpected read")
             .Err(error) -> print(net.error_message(error))
         }
-    })
+    }
     _client :: net.tcp_connect(address) ?? panic("connect")
     _ready :: ready_rx.receive() ?? panic("ready")
     server.cancel()
-    server.join()
+    server.join() ?? 0
 }
 
 "#,
@@ -4488,20 +4488,20 @@ fn run() {
     cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
     cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
     (accept_tx, accept_rx) :: tasks.channel<Int>()
-    cancelled_accept :: tasks.spawn(() => {
+    cancelled_accept :: task {
         accept_tx.send(1)
         if cancelled_listener.accept() == {
             .Ok(_) -> print("accept unexpectedly succeeded")
             .Err(error) -> print(net.error_message(error))
         }
-    })
+    }
     _accept_ready :: accept_rx.receive() ?? panic("accept ready")
     time.sleep(10)
     cancelled_accept.cancel()
     time.sleep(10)
     release_accept :: net.tcp_connect(cancelled_address) ?? panic("release accept")
     release_accept.close() ?? panic("release close")
-    cancelled_accept.join()
+    cancelled_accept.join() ?? 0
 
     ready_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
     ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
@@ -4513,17 +4513,17 @@ fn run() {
     print(net.ready_writable(write_ready))
     interest :: NetReadyInterest.Read
     (wait_tx, wait_rx) :: tasks.channel<Int>()
-    ready_wait :: tasks.spawn(() => {
+    ready_wait :: task {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
             .Ok(_) -> print("ready unexpectedly succeeded")
             .Err(error) -> print(net.error_message(error))
         }
-    })
+    }
     _wait_ready :: wait_rx.receive() ?? panic("wait ready")
     time.sleep(10)
     ready_wait.cancel()
-    ready_wait.join()
+    ready_wait.join() ?? 0
     ready_client.close() ?? panic("ready client close")
 }
 "#,
@@ -4588,17 +4588,17 @@ fn run() {
     socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     interest :: NetReadyInterest.Read
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    waiter :: tasks.spawn(() => {
+    waiter :: task {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
             .Ok(_) -> panic("udp unexpectedly ready")
             .Err(error) -> print(net.error_message(error))
         }
-    })
+    }
     _ready :: ready_rx.receive() ?? panic("ready")
     time.sleep(10)
     waiter.cancel()
-    waiter.join()
+    waiter.join() ?? 0
 
     closed :: net.udp_bind("127.0.0.1:0") ?? panic("closed bind")
     closed.close() ?? panic("close")
@@ -4723,7 +4723,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    server :: tasks.spawn(() => {
+    server :: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {
             .Ok(_) -> panic("zero limit looked like EOF")
@@ -4733,11 +4733,11 @@ fn run() {
         print("read:{bytes.len()}")
         eof :: receive(&stream, 4) ?? panic("eof")
         if eof.len() == 0 { print("eof") }
-    })
+    }
     client := net.tcp_connect(address) ?? panic("connect")
     _count :: send_four(&client) ?? panic("write")
     client.close() ?? panic("close")
-    server.join()
+    server.join() ?? 0
 }
 "#,
         &[],
@@ -4775,7 +4775,7 @@ fn send_four<T: Writer>(&stream: T) => Int ? IOError {{
 
 fn run() {{
     listener :: net.unix_listen("{socket}") ?? panic("listen")
-    server :: tasks.spawn(() => {{
+    server :: task {{
         stream := net.unix_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {{
             .Ok(_) -> panic("zero limit looked like EOF")
@@ -4793,7 +4793,7 @@ fn run() {{
         if eof.len() == 0 {{ print("eof") }}
         net.unix_write_all_bytes(&stream, [9]) ?? panic("reply")
         net.unix_close(&stream) ?? panic("server close")
-    }})
+    }}
     client := net.unix_connect("{socket}") ?? panic("connect")
     first_count :: send_four(&client) ?? panic("write")
     print("wrote:{{first_count}}")
@@ -4815,7 +4815,7 @@ fn run() {{
             }}
         }}
     }}
-    server.join()
+    server.join() ?? 0
 }}
 "#
     );
@@ -4896,20 +4896,20 @@ fn run() {{
 
     udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
     (udp_ready_tx, udp_ready_rx) :: tasks.channel<Int>()
-    udp_wait :: tasks.spawn(() => {{
+    udp_wait :: task {{
         udp_ready_tx.send(1)
         if net.udp_receive(udp, 8) == {{
             .Ok(_) -> panic("udp cancel returned data")
             .Err(error) -> print(net.error_message(error))
         }}
-    }})
+    }}
     _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
     udp_wait.cancel()
-    udp_wait.join()
+    udp_wait.join() ?? 0
 
     listener :: net.unix_listen("{socket}") ?? panic("unix listen")
     (unix_ready_tx, unix_ready_rx) :: tasks.channel<Int>()
-    unix_wait :: tasks.spawn(() => {{
+    unix_wait :: task {{
         unix_ready_tx.send(1)
         if net.unix_accept(listener) == {{
             .Ok(_) -> panic("unix cancel accepted stream")
@@ -4918,7 +4918,7 @@ fn run() {{
     }})
     _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
     unix_wait.cancel()
-    unix_wait.join()
+    unix_wait.join() ?? 0
 }}
 "#
     );
@@ -5170,18 +5170,18 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    client :: tasks.spawn(() => {
+    client :: task {
         stream := net.tcp_connect(address) ?? panic("connect")
         time.sleep(100)
         stream.close() ?? panic("close")
-    })
+    }
     stream := net.tcp_accept(listener) ?? panic("accept")
     net.set_read_timeout(&stream, 20) ?? panic("timeout")
     if stream.read(1) == {
         .Ok(_) -> print("unexpected read")
         .Err(error) -> print(net.error_message(error))
     }
-    client.join()
+    client.join() ?? 0
 }
 "#,
         &[],
@@ -5212,14 +5212,14 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    server :: tasks.spawn(() => {
+    server :: task {
         first := net.tcp_accept(listener) ?? return
         time.sleep(100)
         first.close() ?? return
         second := net.tcp_accept(listener) ?? return
         time.sleep(100)
         second.close() ?? return
-    })
+    }
 
     first := net.tcp_connect(address) ?? panic("first connect")
     net.set_read_timeout(&first, 0) ?? panic("zero timeout")
@@ -5237,7 +5237,7 @@ fn run() {
         }
     }
     second.close() ?? panic("second close")
-    server.join()
+    server.join() ?? 0
 }
 "#,
         &[],
@@ -5272,7 +5272,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    server :: tasks.spawn(() => {
+    server :: task {
         stream := net.tcp_accept(listener) ?? return
         loop {
             chunk := stream.read(65536) ?? return
@@ -5281,7 +5281,7 @@ fn run() {
             }
             time.sleep(15)
         }
-    })
+    }
     client := net.tcp_connect(address) ?? panic("connect")
     net.set_write_timeout(&client, 80) ?? panic("timeout")
     started := time.now()
@@ -5292,7 +5292,7 @@ fn run() {
     elapsed := time.now() - started
     print(elapsed < 300)
     client.close() ?? panic("close")
-    server.join()
+    server.join() ?? 0
 }
 "#,
         &[],
@@ -5657,7 +5657,7 @@ fn run() {{
     }}
 
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    blocked :: tasks.spawn(() => {{
+    blocked :: task {{
         tcp := net.tcp_connect("{address}") ?? panic("cancel tcp")
         ready_tx.send(1)
         if tls.client(^tcp, "localhost") == {{
@@ -5667,7 +5667,7 @@ fn run() {{
     }})
     _ready :: ready_rx.receive() ?? panic("ready")
     blocked.cancel()
-    blocked.join()
+    blocked.join() ?? 0
 }}
 "#
     );
@@ -7181,9 +7181,7 @@ fn run() {
             .header("Set-Cookie", "a=1")
             .header("Set-Cookie", "b=2"))
     )
-    serving :: tasks.spawn(() =>
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-    )
+    serving :: task server.serve_once_listener(listener, mux) ?? panic("serve")
     response :: client.get("http://{addr}/") ?? panic("get")
     cookies :: response.cookies()
     print(cookies.len())
@@ -9349,12 +9347,12 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) : tasks.channel<Int>()
-    producer :: tasks.spawn(() => {
+    producer :: task {
         loop i, 1..1000 {
             sender.send(i)
         }
-    })
-    producer.join()
+    }
+    producer.join() ?? 0
     total: Int = 0
     loop i, 1..1000 {
         total = total + (ch.receive() ?? panic("channel closed"))
@@ -9390,9 +9388,9 @@ fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i, 1..1000 {
         dup :: ~sender
-        tasks.spawn(() => {
+        task {
             dup.send(1)
-        })
+        }
     }
     total := 0
     loop i, 1..1000 {
@@ -9429,9 +9427,9 @@ fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i, 1..10000 {
         dup :: ~sender
-        tasks.spawn(() => {
+        task {
             dup.send(1)
-        })
+        }
     }
     total := 0
     loop i, 1..10000 {
@@ -9469,9 +9467,9 @@ fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i, 1..100000 {
         dup :: ~sender
-        tasks.spawn(() => {
+        task {
             dup.send(1)
-        })
+        }
     }
     total := 0
     loop i, 1..100000 {
@@ -9515,10 +9513,11 @@ fn slow_one() => Int {
 }
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => slow_one()
-        fast :: g.task => fast_nine()
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race {
+            slow_one(),
+            fast_nine()
+        }
         print(winner)
     }
 }
@@ -11634,10 +11633,10 @@ use core.time as time
 fn run() {
     (cancel_gate_started_tx, cancel_gate_started_rx) :: tasks.channel<Int>()
     (cancel_gate_release_tx, cancel_gate_release_rx) :: tasks.channel<Int>()
-    cancel_gate :: tasks.spawn(() => {
+    cancel_gate :: task {
         cancel_gate_started_tx.send(1)
         released :: cancel_gate_release_rx.receive() ?? panic("cancel gate")
-    })
+    }
     cancel_gate_started :: cancel_gate_started_rx.receive() ?? panic("cancel gate start")
 
     cancel_scope :: event.scope()
@@ -11657,10 +11656,10 @@ fn run() {
 
     (close_gate_started_tx, close_gate_started_rx) :: tasks.channel<Int>()
     (close_gate_release_tx, close_gate_release_rx) :: tasks.channel<Int>()
-    close_gate :: tasks.spawn(() => {
+    close_gate :: task {
         close_gate_started_tx.send(1)
         released :: close_gate_release_rx.receive() ?? panic("close gate")
-    })
+    }
     close_gate_started :: close_gate_started_rx.receive() ?? panic("close gate start")
 
     close_scope :: event.scope()

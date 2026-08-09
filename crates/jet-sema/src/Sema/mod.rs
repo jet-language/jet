@@ -1427,7 +1427,7 @@ pub(crate) struct Checker<'a> {
     /// `edit_disjoint` lends each callback parameter for that invocation only.
     /// Any store, return, or retaining call from the callback is E0212.
     lambda_params_are_lending_views: bool,
-    /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
+    /// M11: when true, lambda is being passed to canonical `task` — stricter capture rules (E1101).
     is_task_spawn: bool,
     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
     /// closure parameter — grants it write access with no `&` sigil (the API
@@ -1494,10 +1494,10 @@ pub(crate) struct Checker<'a> {
     /// Each entry is the (ptr, len) of the tail saved before entering a nested
     /// block, so `is_name_live_after` can walk up through all enclosing scopes.
     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
-    /// D-TASKSCOPE1=A: stack of active `taskgroup` scopes (innermost last).
+    /// D-CONC-SPAWN1=D: stack of active `task.group` scopes (innermost last).
     taskgroup_stack: Vec<TaskGroupCtx>,
-    /// True while inferring the body passed to `g.task => …` — suppresses L1101
-    /// (the taskgroup owns the handle until scope exit or an explicit join).
+    /// True while inferring a child body passed to `task.group` — suppresses L1101
+    /// (the group owns the handle until scope exit or an explicit join).
     in_taskgroup_spawn: bool,
     /// D-METHODMACRO1=A: top-level function names whose bare identifier was
     /// read as a VALUE (not called directly) while checking this one function
@@ -1950,7 +1950,7 @@ pub fn stmt_references_name_exact(stmt: &Stmt, name: &str) -> bool {
 }
 
 /// Same question as `stmt_references_name_exact`, but a use inside a lambda
-/// body counts. D-TASKBORROW1=A: a `taskgroup` child borrows through a lambda.
+/// body counts. D-TASKBORROW1=A: a `task.group` child borrows through a lambda.
 pub fn stmt_references_name_deep(stmt: &Stmt, name: &str) -> bool {
     Captures::stmt_uses_name_through_lambdas(stmt, name)
 }

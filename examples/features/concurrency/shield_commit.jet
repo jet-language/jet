@@ -1,7 +1,6 @@
 // D-SHIELDNAME1=A: cancellation is deferred inside `#Shield`. The race cancels
 // the losing task while it sleeps, but the shield lets the critical section
 // finish and print "committed" before cancellation lands at the block exit.
-use core.tasks as tasks
 use core.time as time
 
 fn shielded_commit() => Int {
@@ -16,10 +15,8 @@ fn shielded_commit() => Int {
 fn fast_seven() => Int = 7
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => shielded_commit()
-        fast :: g.task => fast_seven()
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race { shielded_commit(), fast_seven() }
         print(winner)
     }
 }

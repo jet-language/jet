@@ -1,10 +1,8 @@
-use core.tasks as tasks
-
 fn cross_task(cell: Cell<Int>) {
-    worker :: tasks.spawn(() => {
+    worker :: task {
         _ :: cell
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
 }
 
 fn cross_shared(cell: Cell<Int>) {

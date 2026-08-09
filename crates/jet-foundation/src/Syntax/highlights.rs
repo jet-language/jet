@@ -232,6 +232,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
+        HighlightToken {
+            text: KW_TASK,
+            kind: HighlightKind::Keyword,
+        },
         text: CTX_BLOCK,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -1144,7 +1148,7 @@ use super::{
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,
     KW_MARKER, KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB,
     KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF,
-    KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST, KW_TODO,
+    KW_TASK,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
     KW_VIA, VALIDATE_CHECK_FN,
     LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,

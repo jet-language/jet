@@ -407,7 +407,7 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
     }
 }
 
-/// c109 Phase 13: render a `tasks.spawn` lambda. It is `emit_lambda` minus the
+/// c109 Phase 13: render a canonical `task` lambda. It is `emit_lambda` minus the
 /// Fn-vs-FnMut and escape logic: ALWAYS `move`, NEVER `Box::new`. The clone-capture
 /// prelude is identical. Returns the full rendered closure string (wrapped in
 /// `{ <prep> <closure> }` when there are cloned captures).

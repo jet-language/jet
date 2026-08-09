@@ -130,24 +130,30 @@ pub const GRANT_BIND_SEPARATOR: &str = ":";
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
 
-/// D-TASKSCOPE1=A / D-NURSERY1=A / D-TASKGROUP-PARAM1=A: the compiler-private
-/// handle type bound by `taskgroup g { … }` and accepted as a direct
-/// named-function parameter. It routes `g.task` / `g.all` and carries the
-/// lexical group's internal collector through lowering; it is not a public
-/// first-class value.
+/// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
+pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";
+/// Compiler-only dispatch type for a `task` combinator that is not attached to
+/// a lexical `TaskGroup` handle.
+pub const INTERNAL_TASK_SURFACE_TYPE: &str = "\0jet.task.surface";
+/// Compiler-only dispatch type for a canonical combinator inside `task.group`.
+pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
+
+/// D-CONC-SPAWN1=D / D-TASKGROUP-PARAM1=A: the compiler-private handle type
+/// bound by `task.group g { … }` and accepted as a direct named-function
+/// parameter. It carries the lexical group's internal collector through
+/// lowering; it is not a public first-class value.
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
-/// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: scoped spawn method on a taskgroup
-/// handle — `g.task => expression` or `g.task => { … }`.
-pub const TASKGROUP_SPAWN_METHOD: &str = "task";
+/// Compiler-private dispatch method for canonical `task` spawn syntax.
+pub const TASKGROUP_SPAWN_METHOD: &str = "spawn";
 
-/// D-NURSERY1=A: join every task handle in a list — `g.all([h1, h2])`.
+/// Compiler-private dispatch method for `task.all { … }`.
 pub const TASKGROUP_ALL_METHOD: &str = "all";
 
-/// D-CONCCOMB1=A: first completed task wins — `g.race([h1, h2])`.
+/// Compiler-private dispatch method for `task.race { … }`.
 pub const TASKGROUP_RACE_METHOD: &str = "race";
 
-/// D-CONCCOMB1=A: first completed result — `g.any([h1, h2])` (v1: same join race).
+/// Compiler-private dispatch method for `task.any { … }`.
 pub const TASKGROUP_ANY_METHOD: &str = "any";
 
 /// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.
@@ -168,37 +174,12 @@ pub const SELECT_READ_METHOD: &str = "read";
 /// D-CONCSELECT1=A: block until one arm wins — `.wait()`.
 pub const SELECT_WAIT_METHOD: &str = "wait";
 
-/// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
-pub const METHOD_TASK_WAIT: &str = "wait";
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 pub const METHOD_TASK_PAUSE: &str = "pause";
 /// D-COROUTINE1=A: clear the paused marker in the control plane.
 pub const METHOD_TASK_RESUME: &str = "resume";
 /// D-COROUTINE1=A: request cancellation for a task in the control plane.
 pub const METHOD_TASK_CANCEL: &str = "cancel";
-/// D-COROUTINE1=A: inspect task control-plane state.
-pub const METHOD_TASK_TRACE: &str = "trace";
-
-// D-VERDICT-1323-1 (ratified 2026-07-30): the list twin of each single-task
-// method, so a group of handles is driven without writing a loop. Each name
-// means exactly what its single-handle counterpart means, applied in order.
-/// Spawn `n` tasks from one callable — `tasks.spawn_group(n, fn) => [Task<T>]`.
-pub const CORE_TASKS_SPAWN_GROUP: &str = "spawn_group";
-/// Wait for every task and return the results in list order (consumes).
-pub const METHOD_TASK_WAIT_ALL: &str = "wait_all";
-/// `join_all`'s method spelling — the same mechanism as `wait_all` (consumes).
-pub const METHOD_TASK_JOIN_ALL: &str = "join_all";
-/// Detach every task (consumes).
-pub const METHOD_TASK_DETACH_ALL: &str = "detach_all";
-/// Request cancellation for every task (borrows).
-pub const METHOD_TASK_CANCEL_ALL: &str = "cancel_all";
-/// Mark every task paused (borrows).
-pub const METHOD_TASK_PAUSE_ALL: &str = "pause_all";
-/// Clear the paused marker on every task (borrows).
-pub const METHOD_TASK_RESUME_ALL: &str = "resume_all";
-/// One control-plane trace line per task, in list order (borrows).
-pub const METHOD_TASK_TRACE_ALL: &str = "trace_all";
-
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
 /// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an

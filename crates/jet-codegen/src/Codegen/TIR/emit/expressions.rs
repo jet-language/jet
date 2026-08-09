@@ -3769,32 +3769,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
-                THandleOp::TaskTrace => format!("({}).trace()", recv),
-                THandleOp::TaskException => format!("({}).exception()", recv),
-                THandleOp::TaskDetachAll => {
-                    format!("{}jet_std::jet_task_detach_all({})", cx.root_prefix, recv)
-                }
-                THandleOp::TaskCancelAll => {
-                    format!("{}jet_std::jet_task_cancel_all(&({}))", cx.root_prefix, recv)
-                }
-                THandleOp::TaskPauseAll => {
-                    if args.is_empty() {
-                        format!("{}jet_std::jet_task_pause_all(&({}))", cx.root_prefix, recv)
-                    } else {
-                        format!(
-                            "{}jet_std::jet_task_pause_all_mode(&({}), {})",
-                            cx.root_prefix,
-                            recv,
-                            a(0)
-                        )
-                    }
-                }
-                THandleOp::TaskResumeAll => {
-                    format!("{}jet_std::jet_task_resume_all(&({}))", cx.root_prefix, recv)
-                }
-                THandleOp::TaskTraceAll => {
-                    format!("{}jet_std::jet_task_trace_all(&({}))", cx.root_prefix, recv)
-                }
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::ChannelClose => format!("({}).close()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
@@ -5097,16 +5071,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.root_prefix, spawn_closure
                 ),
             },
-            TCoreClosureKind::SpawnGroup {
-                count,
-                spawn_closure,
-                ..
-            } => format!(
-                "{}jet_std::jet_task_spawn_group({}, {})",
-                cx.root_prefix,
-                emit_tir_expr(count, cx),
-                spawn_closure
-            ),
             TCoreClosureKind::Serve { addr, closure } => format!(
                 "{}jet_http_serve(&({}), {})",
                 cx.root_prefix,
@@ -5154,7 +5118,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             }
         },
-        // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
+        // D-CONC-SPAWN1=D: `task.all { … }` — join each child in source order.
         TExprKind::TaskGroupAll { tasks } => {
             let list = emit_tir_expr(tasks, cx);
             format!("{}jet_std::jet_task_all({list})", cx.root_prefix)

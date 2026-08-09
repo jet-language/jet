@@ -4,14 +4,10 @@ fn eat(ps: ^[Particle]) => Int = ps.len()
 
 fn run() {
     particles := [Particle].{ .{position: 10, velocity: 2}, .{position: 20, velocity: 3} }
-    taskgroup g {
+    task.group g {
         left :: &particles[0]
-        a :: g.task => {
-            left.position += left.velocity
-            left.position
-        }
+        a :: task { left.position += left.velocity; left.position }
         n :: eat(^particles)
         print(n)
-        print(g.all([a]))
     }
 }

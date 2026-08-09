@@ -489,11 +489,11 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            TStmt::TaskGroup { group, body } => {
+            TStmt::TaskGroup { group, limit, body } => {
                 let mut run_body = |this: &mut Self| {
-                    let value = this.new_taskgroup();
+                    let value = this.new_taskgroup(limit.as_ref(), scope)?;
                     let index = Self::taskgroup_index(&value)
-                        .expect("new taskgroup always carries an evaluator index");
+                        .expect("new task group always carries an evaluator index");
                     scope.insert(group.name.clone(), value);
                     let body_result = this.exec_stmts(body, scope);
                     let close_result = this.close_taskgroup(index);

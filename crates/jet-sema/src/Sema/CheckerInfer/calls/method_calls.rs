@@ -367,16 +367,27 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_method_call(
-            &mut self,
-            receiver: &mut Box<Expr>,
-            method: &str,
-            span: Span,
-            owner_type_args: &mut Vec<Type>,
-            type_args: &mut Vec<Type>,
-            args: &mut Vec<crate::AST::CallArg>,
-            recv_type_out: &mut Option<String>,
+        &mut self,
+        receiver: &mut Box<Expr>,
+        method: &str,
+        span: Span,
+        owner_type_args: &mut Vec<Type>,
+        type_args: &mut Vec<Type>,
+        args: &mut Vec<crate::AST::CallArg>,
+        recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
+        {
+            return self.infer_task_surface_method(
+                receiver,
+                method,
+                span,
+                args,
+                recv_type_out,
+                resolved_ret_out,
+            );
+        }
         // D-ALLOC2: allocator methods operate through the runtime's audited
         // interior-mutable storage. `alloc` may coexist with existing views;
         // `reset` invalidates them. Do not run the ordinary owner-read check
@@ -387,10 +398,10 @@ impl<'a> Checker<'a> {
                 .lookup(name)
                 .is_some_and(|info| is_allocator_type(&info.ty)));
         self.check_call_receiver_evaluation(receiver, span);
-            // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
-            // range-shaped recovery long enough to point at the old spelling,
-            // but never admit it to the type system.
-            if method == Syntax::METHOD_VIEW {
+        // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
+        // range-shaped recovery long enough to point at the old spelling,
+        // but never admit it to the type system.
+        if method == Syntax::METHOD_VIEW {
                 self.infer(receiver);
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);

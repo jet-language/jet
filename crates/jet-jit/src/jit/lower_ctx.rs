@@ -4256,7 +4256,11 @@ impl LowerCtx<'_, '_> {
             } => {
                 self.lower_mixed_switch(subject, *class, arms, else_body.as_deref())?;
             }
-            TStmt::TaskGroup { group, body } => {
+            TStmt::TaskGroup {
+                group,
+                limit: _limit,
+                body,
+            } => {
                 let handle = self.call_host(self.host.conc.task_group_new, &[]);
                 let var = self.fresh_var(types::I64);
                 self.b.def_var(var, handle);
@@ -12110,43 +12114,6 @@ impl LowerCtx<'_, '_> {
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
-                TCoreClosureKind::SpawnGroup { count, .. } => {
-                    // D-VERDICT-1323-1: n identical spawn sites → list of handles.
-                    let count_v = self.lower_expr(count)?;
-                    let list = self.call_host(self.host.coll.list_new, &[]);
-                    let push = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_push, self.b.func);
-                    let header = self.b.create_block();
-                    let body = self.b.create_block();
-                    let done = self.b.create_block();
-                    let idx_ty = types::I64;
-                    self.b.append_block_param(header, idx_ty);
-                    let zero = self.b.ins().iconst(idx_ty, 0);
-                    self.b.ins().jump(header, &[zero]);
-
-                    self.b.switch_to_block(header);
-                    // Do not seal header yet — body jumps back.
-                    let idx = self.b.block_params(header)[0];
-                    let cont = self.b.ins().icmp(IntCC::SignedLessThan, idx, count_v);
-                    self.b.ins().brif(cont, body, &[], done, &[]);
-
-                    self.b.switch_to_block(body);
-                    self.b.seal_block(body);
-                    let saved_site = *self.spawn_site;
-                    let task = self.lower_spawn()?;
-                    *self.spawn_site = saved_site;
-                    self.b.ins().call(push, &[list, task]);
-                    let one = self.b.ins().iconst(idx_ty, 1);
-                    let next = self.b.ins().iadd(idx, one);
-                    self.b.ins().jump(header, &[next]);
-                    self.b.seal_block(header);
-
-                    self.b.switch_to_block(done);
-                    self.b.seal_block(done);
-                    *self.spawn_site = saved_site + 1;
-                    Ok(list)
-                }
                 TCoreClosureKind::Spawn { group, .. } => {
                     let group = match group {
                         Some(group) => Some(self.lower_expr(group)?),
@@ -16519,23 +16486,6 @@ impl LowerCtx<'_, '_> {
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
             }
-            THandleOp::TaskTraceAll => {
-                Ok(self.call_host(self.host.conc.task_trace_all, &[recv_val]))
-            }
-            THandleOp::TaskDetachAll
-            | THandleOp::TaskCancelAll
-            | THandleOp::TaskPauseAll
-            | THandleOp::TaskResumeAll => {
-                let host = match op {
-                    THandleOp::TaskDetachAll => self.host.conc.task_detach_all,
-                    THandleOp::TaskCancelAll => self.host.conc.task_cancel_all,
-                    THandleOp::TaskPauseAll => self.host.conc.task_pause_all,
-                    _ => self.host.conc.task_resume_all,
-                };
-                let host_ref = self.module.declare_func_in_func(host, self.b.func);
-                self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.ins().iconst(types::I8, 0))
-            }
             THandleOp::TaskCancel => {
                 let host_ref = self
                     .module
@@ -17215,12 +17165,6 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.conc.task_resume, self.b.func);
                 self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.ins().iconst(types::I8, 0))
-            }
-            THandleOp::TaskTrace => {
-                Ok(self.call_host(self.host.conc.task_trace, &[recv_val]))
-            }
-            THandleOp::TaskException => {
-                Ok(self.call_host(self.host.conc.task_exception, &[recv_val]))
             }
             THandleOp::ReflectValueTypeName => {
                 Ok(self.call_host(self.host.reflect_type_name, &[recv_val]))

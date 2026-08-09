@@ -18,7 +18,7 @@ fn run() {
     })
     server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr :: server.local_addr() ?? panic("address")
-    serving :: tasks.spawn(() => server.serve() ?? panic("serve"))
+    serving :: task server.serve() ?? panic("serve")
     time.sleep(20)
     client :: ws.connect("ws://{addr}/live") ?? panic("connect")
     client.send_text("ping") ?? panic("send")
@@ -26,5 +26,5 @@ fn run() {
     print(reply.text() ?? "missing")
     grace :: Duration.milliseconds(100) ?? panic("duration")
     server.shutdown(grace) ?? panic("shutdown")
-    serving.join()
+    serving.join() ?? panic("server failed")
 }

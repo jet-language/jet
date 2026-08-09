@@ -4,7 +4,6 @@
 // never printed. Under a cooperative model the sleep would return early and the
 // commit would still execute; the single deterministic "7" is the executable
 // proof that Jet unwinds the loser instead.
-use core.tasks as tasks
 use core.time as time
 
 fn slow_commit() => Int {
@@ -16,10 +15,8 @@ fn slow_commit() => Int {
 fn fast_seven() => Int = 7
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => slow_commit()
-        fast :: g.task => fast_seven()
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race { slow_commit(), fast_seven() }
         print(winner)
     }
 }

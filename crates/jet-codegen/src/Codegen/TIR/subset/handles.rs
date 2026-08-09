@@ -725,14 +725,6 @@ pub(crate) fn handle_method_return_ty(
 /// binding carries sema's `b.ty`), but kept total per the design principle.
 pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: Type) -> Type {
     match (module, method) {
-        ("core.tasks", "spawn") => Type::Apply {
-            name: "Task".to_string(),
-            args: vec![body_ty],
-        },
-        ("core.tasks", "spawn_group") => Type::List(Box::new(Type::Apply {
-            name: "Task".to_string(),
-            args: vec![body_ty],
-        })),
         ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
         ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
         _ => unit_type(),

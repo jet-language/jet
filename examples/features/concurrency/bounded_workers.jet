@@ -14,17 +14,17 @@ fn run() {
     second_sender :: ~sender
     (done_sender, done) :: tasks.channel<Int>()
     sender.send(10)
-    second :: tasks.spawn(() => {
+    second :: task {
         second_sender.send(20)
         done_sender.send(1)
-    })
+    }
 
     print("buffered first item")
     print(values.receive() ?? panic("value channel closed"))
     done.receive() ?? panic("done channel closed")
     print("second send completed")
     print(values.receive() ?? panic("value channel closed"))
-    second.join()
+    second.join() ?? panic("buffered sender failed")
 
     // A capacity-two channel starts with two tokens. A worker receives one
     // before work and sends it back after work, so at most two workers can be
@@ -36,15 +36,20 @@ fn run() {
     token_sender_three :: ~token_sender
     token_sender_four :: ~token_sender
     token_one :: tokens.receive() ?? panic("token channel closed")
-    first :: tasks.spawn(() => use_slot(token_one, token_sender))
+    first :: task use_slot(token_one, token_sender)
     token_two :: tokens.receive() ?? panic("token channel closed")
-    second_worker :: tasks.spawn(() => use_slot(token_two, token_sender_two))
+    second_worker :: task use_slot(token_two, token_sender_two)
     token_three :: tokens.receive() ?? panic("token channel closed")
-    third :: tasks.spawn(() => use_slot(token_three, token_sender_three))
+    third :: task use_slot(token_three, token_sender_three)
     token_four :: tokens.receive() ?? panic("token channel closed")
-    fourth :: tasks.spawn(() => use_slot(token_four, token_sender_four))
+    fourth :: task use_slot(token_four, token_sender_four)
 
-    leases := [first.join(), second_worker.join(), third.join(), fourth.join()]
+    leases := [
+        first.join() ?? panic("first worker failed"),
+        second_worker.join() ?? panic("second worker failed"),
+        third.join() ?? panic("third worker failed"),
+        fourth.join() ?? panic("fourth worker failed")
+    ]
     leases.sort()
     if leases != [1, 1, 2, 2] { panic("workers escaped the two-slot token pool") }
     print("worker limit: 2")

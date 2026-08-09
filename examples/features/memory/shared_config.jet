@@ -3,10 +3,8 @@
 // `T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read-
 // or write-locked view of the wrapped value, the lock scoped to the closure
 // call only. Cloning `Shared<T>` is always a cheap handle clone, never a deep
-// copy of `T` — that's what lets it cross a `tasks.spawn` boundary with no
+// copy of `T` — that's what lets it cross a `task` boundary with no
 // `take`, unlike an ordinary struct.
-use core.tasks as tasks
-
 struct AppConfig {
     name: String
     hits: Int
@@ -21,12 +19,12 @@ fn run() {
     config :: Shared.new(AppConfig.{name: "jet-server", hits: 0})
     // Every spawned task captures `config` with no `take` — a `Shared<T>` is
     // meant to be handed to as many concurrent tasks as needed.
-    t1 :: tasks.spawn(() => handle(1, config))
-    t2 :: tasks.spawn(() => handle(2, config))
-    t3 :: tasks.spawn(() => handle(3, config))
-    print(t1.wait())
-    print(t2.wait())
-    print(t3.wait())
+    t1 :: task handle(1, config)
+    t2 :: task handle(2, config)
+    t3 :: task handle(3, config)
+    print(t1.join() ?? panic("task 1 failed"))
+    print(t2.join() ?? panic("task 2 failed"))
+    print(t3.join() ?? panic("task 3 failed"))
     config.edit(c => { c.hits += 1 })
     total :: config.read(c => c.hits)
     print("hits={total}")

@@ -56,7 +56,7 @@ pub const LAYOUT_HANDLE_TYPE: &str = LAYOUT_TYPE;
 /// typed-literal construction whose body is a comma-separated sequence of
 /// `Constraint` elements (same separators as `[T].{ … }`). Binds `name` (a
 /// `Layout`) in the enclosing scope (the handle outlives the literal, unlike
-/// `taskgroup`/`region`, since solved values are read after layout is
+/// `task.group`/`region`, since solved values are read after layout is
 /// defined). Each element must be a `>=`/`<=`/`==` comparison of layout
 /// values (a `Constraint`); the parser desugars bare `box.anchor` reads
 /// (`left`/`right`/`top`/`bottom`/`width`/`height`) into
@@ -677,7 +677,7 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
 /// D-SCHEDULE1, amended by D-MARKER-NAME-HYGIENE1=A: `#Job fn` — a top-level
 /// function Jet can invoke by name with `jet run --task` (D-JPK-TASKRUN1),
 /// living beside `fn run()`. Bare marker, no arguments.
-pub const KW_TASK: &str = "Job";
+pub const KW_JOB: &str = "Job";
 
 /// D-JPK-TASKRUN1=A: lifecycle verbs a `#Job fn` must not reuse — they already
 /// name Jet's built-in entry points (`fn run`/`fn dev`/`fn build`/`fn test`).

@@ -549,7 +549,7 @@ pub(crate) fn lvalue_refs_name(lv: &LValue, name: &str) -> bool {
 /// Does `stmt` use `name` anywhere, including inside a lambda body?
 ///
 /// `stmt_refs_name` stops at the lambda boundary on purpose. The split-view
-/// planner needs the other answer: a `taskgroup` child that borrows a place
+/// planner needs the other answer: a `task.group` child that borrows a place
 /// uses it inside a lambda, and missing that use would end the place's live
 /// range too early and emit a borrow of a temporary instead of a real split.
 pub(crate) fn stmt_uses_name_through_lambdas(stmt: &Stmt, name: &str) -> bool {

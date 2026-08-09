@@ -990,6 +990,11 @@ impl<'a> Fmt<'a> {
                 args,
                 ..
             } => {
+                if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
+                    && self.fmt_task_surface_method(method, args)
+                {
+                    return;
+                }
                 self.fmt_expr(receiver, Prec::Postfix);
                 self.fmt_call_type_args(owner_type_args);
                 // S69 (D-SG3): keep an author-placed break before `.method(...)`.
@@ -1869,32 +1874,85 @@ impl<'a> Fmt<'a> {
         self.write(">");
     }
 
-    /// D-TASKSCOPE1=A / D-ARROW-CONTROL1: keep scoped task spawning light:
-    /// `group.task => expression` or `group.task => { … }`.
-    fn fmt_method_args(&mut self, method: &str, args: &[CallArg]) {
-        if method == Syntax::TASKGROUP_SPAWN_METHOD {
-            if let [CallArg {
+    /// D-CONC-SPAWN1=D: restore the one-word task surface from its compiler-
+    /// private method-call form.
+    fn fmt_task_surface_method(&mut self, method: &str, args: &[CallArg]) -> bool {
+        if method == "spawn" {
+            let [CallArg {
                 expr: Expr::Lambda(lam),
                 ..
             }] = args
+            else {
+                return false;
+            };
+            if !lam.params.is_empty() {
+                return false;
+            }
+            self.write(&format!("{} ", Syntax::KW_TASK));
+            match &lam.body {
+                crate::AST::LambdaBody::Expr(expr) => {
+                    self.fmt_expr(expr, Prec::OrFallback);
+                }
+                crate::AST::LambdaBody::Block(stmts) => {
+                    self.write("{");
+                    self.newline();
+                    self.with_indent(|f| f.fmt_block_stmts(stmts));
+                    self.end_block();
+                }
+            }
+            return true;
+        }
+        if !matches!(method, "all" | "race" | "any") {
+            return false;
+        }
+        let [CallArg {
+            expr: Expr::ListLit(branches, _),
+            ..
+        }] = args
+        else {
+            return false;
+        };
+        self.write(&format!("{}.{} {{", Syntax::KW_TASK, method));
+        for (index, branch) in branches.iter().enumerate() {
+            if index > 0 {
+                self.write(", ");
+            }
+            if let Expr::MethodCall {
+                receiver,
+                method: spawn_method,
+                args: spawn_args,
+                ..
+            } = branch
             {
-                if lam.params.is_empty() {
-                    self.write(" => ");
+                if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
+                    && spawn_method == "spawn"
+                    && let [CallArg {
+                        expr: Expr::Lambda(lam),
+                        ..
+                    }] = spawn_args.as_slice()
+                {
                     match &lam.body {
                         crate::AST::LambdaBody::Expr(expr) => {
-                            self.fmt_expr(expr, Prec::OrFallback.add_rhs())
+                            self.fmt_expr(expr, Prec::OrFallback);
+                            continue;
                         }
                         crate::AST::LambdaBody::Block(stmts) => {
                             self.write("{");
                             self.newline();
                             self.with_indent(|f| f.fmt_block_stmts(stmts));
                             self.end_block();
+                            continue;
                         }
                     }
-                    return;
                 }
             }
+            self.fmt_expr(branch, Prec::OrFallback);
         }
+        self.write("}");
+        true
+    }
+
+    fn fmt_method_args(&mut self, method: &str, args: &[CallArg]) {
         self.fmt_view_or_call_args(method, args);
     }
 

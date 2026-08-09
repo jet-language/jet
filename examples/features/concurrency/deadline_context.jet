@@ -3,17 +3,17 @@ use core.time as time
 
 fn run() {
     #Context(deadline: time.now() + 20) {
-        slow :: tasks.spawn(() => {
+        slow :: task {
             time.sleep(10)
             print("finished fast")
         })
-        slow.wait()
+        slow.join() ?? panic("fast task failed")
     }
     #Context(deadline: time.now() + 20) {
-        slow :: tasks.spawn(() => {
+        slow :: task {
             time.sleep(40)
             print("finished slow")
         })
-        slow.wait()
+        slow.join() ?? panic("slow task failed")
     }
 }

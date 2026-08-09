@@ -2504,7 +2504,7 @@ pub(crate) fn register_bundle_unit_metadata(
 
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
-/// lowering mis-gates `use core.tasks as tasks` spawn/channel calls.
+/// lowering mis-gates `use core.tasks as tasks` channel calls.
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,

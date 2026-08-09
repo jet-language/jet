@@ -1,16 +1,18 @@
 Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned task
-  --> tests/ui/task_detach_unsound.jet:7:22
+  --> tests/ui/task_detach_unsound.jet:5:14
     |
-  7 |     t :: tasks.spawn(() => greet)
-    |                      ^^^^^^^^^^^
- Why: this function can access the parameter, but it does not own the value; capture requires the move-capability marker `^`
- Fix: make the parameter owned with the move-capability marker `^`: `greet: ^fn()`
+  5 |     t :: task greet
+    |              ^^^^^
+    |              does not own the captured closure; a task may outlive the current frame
+
+ Why: task captures cross a scheduling boundary and need owned values.
+ Fix: make the task body owned, for example `t :: task ^greet`.
 
 Error [E1102]: this task returns `fn()`, which isn't sendable
-  --> tests/ui/task_detach_unsound.jet:7:22
+  --> tests/ui/task_detach_unsound.jet:5:14
     |
-  7 |     t :: tasks.spawn(() => greet)
-    |                      ^^^^^^^^^^^
+  5 |     t :: task greet
+    |              ^^^^^
  Why: the closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 

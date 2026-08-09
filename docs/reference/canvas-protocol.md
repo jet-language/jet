@@ -127,7 +127,7 @@ program meaning, plus an optional live Event projection:
   not execute never appear.
 - `interfaces`: trait and trait-impl facts for Canvas interface views and
   create-impl transactions.
-- `task_flows`: `core.tasks` spawn/join/channel/taskgroup facts for async rails.
+- `task_flows`: `task` spawn/join/channel/`task.group` facts for async rails.
 
 Each graph contains source-backed records:
 

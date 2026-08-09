@@ -2748,10 +2748,8 @@ impl<'a> EvalCtx<'a> {
                     };
                     return Ok(result);
                 }
-                // D-VERDICT-1323-1 / D-COROUTINE1=A: the task control plane
-                // reaches the evaluator's task table, which the shared handle
-                // dispatch has no access to. Each `*_all` twin is exactly its
-                // single-handle counterpart applied in order.
+                // D-COROUTINE1=A: task control reaches the evaluator's task
+                // table, which the shared handle dispatch cannot access.
                 {
                     use crate::Codegen::TIR::THandleOp as Op;
                     match op {
@@ -2779,64 +2777,17 @@ impl<'a> EvalCtx<'a> {
                         }
                         _ => {}
                     }
-                    let each = |this: &mut Self, value: &CtValue| -> Result<(), Diagnostic> {
-                        match op {
-                            Op::TaskCancel | Op::TaskCancelAll => this.cancel_task_value(value),
-                            Op::TaskPause | Op::TaskPauseAll => {
-                                this.set_task_paused_value(value, true)
-                            }
-                            Op::TaskResume | Op::TaskResumeAll => {
-                                this.set_task_paused_value(value, false)
-                            }
-                            Op::TaskDetach | Op::TaskDetachAll => this.detach_task_value(value),
-                            _ => unreachable!("guarded by the outer match"),
-                        }
-                    };
                     match op {
                         Op::TaskCancel | Op::TaskPause | Op::TaskResume | Op::TaskDetach => {
                             let receiver = r.clone();
-                            each(self, &receiver)?;
-                            return Ok(CtValue::Unit);
-                        }
-                        Op::TaskCancelAll
-                        | Op::TaskPauseAll
-                        | Op::TaskResumeAll
-                        | Op::TaskDetachAll => {
-                            let CtValue::List(tasks) = &r else {
-                                return Err(unsupported("task group receiver", self.span()));
-                            };
-                            for task in tasks.clone() {
-                                each(self, &task)?;
+                            match op {
+                                Op::TaskCancel => self.cancel_task_value(&receiver)?,
+                                Op::TaskPause => self.set_task_paused_value(&receiver, true)?,
+                                Op::TaskResume => self.set_task_paused_value(&receiver, false)?,
+                                Op::TaskDetach => self.detach_task_value(&receiver)?,
+                                _ => unreachable!(),
                             }
                             return Ok(CtValue::Unit);
-                        }
-                        Op::TaskTrace => return self.trace_task_value(&r.clone()),
-                        Op::TaskException => {
-                            let index = Self::task_index(&r)
-                                .ok_or_else(|| unsupported("task receiver", self.span()))?;
-                            let runtime =
-                                self.runtime.lock().expect("evaluator runtime poisoned");
-                            let cancel = match runtime.tasks.get(index) {
-                                Some(Some(task)) => {
-                                    task.cancel.load(std::sync::atomic::Ordering::Acquire)
-                                }
-                                _ => false,
-                            };
-                            return Ok(CtValue::Str(if cancel {
-                                "cancelled".to_string()
-                            } else {
-                                String::new()
-                            }));
-                        }
-                        Op::TaskTraceAll => {
-                            let CtValue::List(tasks) = &r else {
-                                return Err(unsupported("task group receiver", self.span()));
-                            };
-                            let mut traces = Vec::new();
-                            for task in tasks.clone() {
-                                traces.push(self.trace_task_value(&task)?);
-                            }
-                            return Ok(CtValue::List(traces));
                         }
                         _ => {}
                     }
@@ -4483,7 +4434,7 @@ impl<'a> EvalCtx<'a> {
                                     Diagnostic::error(
                                         "TASK_CANCELLED",
                                         "task cancelled".to_string(),
-                                        "the owning taskgroup stopped this task".to_string(),
+                                        "the owning task group stopped this task".to_string(),
                                         String::new(),
                                         Some(self.span()),
                                     )
@@ -4542,7 +4493,7 @@ impl<'a> EvalCtx<'a> {
                                 Diagnostic::error(
                                     "TASK_CANCELLED",
                                     "task cancelled".to_string(),
-                                    "the owning taskgroup stopped this task".to_string(),
+                                        "the owning task group stopped this task".to_string(),
                                     String::new(),
                                     Some(self.span()),
                                 )
@@ -5520,20 +5471,6 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Spawn { group, site, .. },
             } => self.eval_spawn(*site, group.as_deref(), scope),
-            // D-VERDICT-1323-1: n tasks from one callable — the same spawn the
-            // single form uses, repeated, so the group carries identical meaning.
-            TExprKind::CoreClosureCall {
-                kind: TCoreClosureKind::SpawnGroup { count, site, .. },
-            } => {
-                let CtValue::Int(count) = self.eval_expr(count, scope)? else {
-                    return Err(unsupported("spawn_group count", self.span()));
-                };
-                let mut tasks = Vec::new();
-                for _ in 0..count.max(0) {
-                    tasks.push(self.eval_spawn(*site, None, scope)?);
-                }
-                Ok(CtValue::List(tasks))
-            }
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Guard { executable, .. },
             } => {
@@ -5563,19 +5500,19 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::TaskGroupAll { tasks } => {
                 let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
-                    return Err(unsupported("taskgroup all list", self.span()));
+                    return Err(unsupported("task group all list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
             }
             TExprKind::TaskGroupRace { tasks } => {
                 let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
-                    return Err(unsupported("taskgroup race list", self.span()));
+                    return Err(unsupported("task group race list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Race)
             }
             TExprKind::TaskGroupAny { tasks } => {
                 let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
-                    return Err(unsupported("taskgroup any list", self.span()));
+                    return Err(unsupported("task group any list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Any)
             }

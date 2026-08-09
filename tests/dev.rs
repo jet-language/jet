@@ -1398,7 +1398,7 @@ fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
     ));
     fs::write(
         &unsupported_path,
-        "use core.tasks as tasks\nfn run() {\n    task :: tasks.spawn(() => 1)\n    task.cancel()\n}\n",
+        "fn run() {\n    handle :: task 1\n    handle.cancel()\n}\n",
     )
     .unwrap();
     let unsupported_file = unsupported_path.to_string_lossy().into_owned();
@@ -8253,14 +8253,14 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
 fn run() {
     (sender, ch) := tasks.channel<Int>()
     (ack_sender, ack) := tasks.channel<Int>()
-    slow := tasks.spawn(() => {
+    slow := task {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
                    ack_sender.send(1)
                }
                print(99)
-       })
+       }
     slow.cancel()
     sender.send(42)
     ack.receive() ?? panic("closed")
@@ -8282,11 +8282,11 @@ fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
     (sender, ch) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    slow :: task {
         ready_sender.send(1)
         ch.receive() ?? panic("closed")
         print(99)
-    })
+    }
     ready.receive() ?? panic("closed")
     slow.cancel()
     sender.send(42)
@@ -8304,11 +8304,11 @@ fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
 use core.time as time
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    slow :: task {
         ready_sender.send(1)
         time.sleep(200)
         print(99)
-    })
+    }
     ready.receive() ?? panic("closed")
     slow.cancel()
 }
@@ -8323,14 +8323,14 @@ fn cranelift_unshielded_select_cancel_does_not_unwind_native_frame() {
     let out = run_cranelift_without_fallback(
         r#"use core.tasks as tasks
 fn run() {
-    taskgroup g {
+    task.group g {
         (ready_sender, ready) :: tasks.channel<Int>()
         (_sender, ch) :: tasks.channel<Int>()
-        slow :: tasks.spawn(() => {
+        slow :: task {
             ready_sender.send(1)
             g.select().recv(ch).wait()
             print(99)
-        })
+        }
         ready.receive() ?? panic("closed")
         slow.cancel()
     }
@@ -8343,14 +8343,14 @@ fn run() {
 
 #[test]
 fn cranelift_wait_failures_return_compiler_diagnostics_not_process_exit() {
-    let join_cancelled = r#"use core.tasks as tasks
+    let join_cancelled = r#"use core.time as time
 use core.time as time
 fn run() {
-    child :: tasks.spawn(() => {
+    child :: task {
         time.sleep(200)
-    })
+    }
     child.cancel()
-    child.join()
+    child.join() ?? 0
 }
 "#;
     let RunOutcome::Problems(join_diags) =
@@ -8361,7 +8361,7 @@ fn run() {
     assert!(join_diags.iter().any(|d| d.code == "E0953"));
 }
 
-/// #1486 / I9: taskgroup rich panic under default jet run must match AOT golden
+/// #1486 / I9: task-group rich panic under default jet run must match AOT golden
 /// stderr (full panic block + trailing `panic: a task panicked`), including after
 /// a warm re-invoke that reinstalls compile-time string handles.
 #[test]

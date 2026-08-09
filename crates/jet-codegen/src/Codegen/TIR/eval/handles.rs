@@ -808,21 +808,12 @@ pub(super) fn eval_handle(
                 .ok_or_else(|| unsupported("task result", span)),
             _ => Err(unsupported("task receiver", span)),
         },
-        // D-VERDICT-1323-1 / D-COROUTINE1=A: the whole task control plane —
-        // both the single-handle methods and their `*_all` twins — is handled
-        // in `exprs.rs`, which can reach the evaluator's task table. Nothing
-        // routes here.
+        // D-COROUTINE1=A: task control is handled in `exprs.rs`, which can
+        // reach the evaluator's task table. Nothing routes here.
         THandleOp::TaskDetach
         | THandleOp::TaskPause
         | THandleOp::TaskResume
-        | THandleOp::TaskCancel
-        | THandleOp::TaskTrace
-        | THandleOp::TaskException
-        | THandleOp::TaskDetachAll
-        | THandleOp::TaskPauseAll
-        | THandleOp::TaskResumeAll
-        | THandleOp::TaskCancelAll
-        | THandleOp::TaskTraceAll => {
+        | THandleOp::TaskCancel => {
             Err(unsupported("task control outside the evaluator", span))
         }
         THandleOp::ChannelReceive => Err(unsupported("handle `ChannelReceive`", span)),

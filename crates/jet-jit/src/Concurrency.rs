@@ -504,8 +504,8 @@ where
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = take_pending_shield_exit();
             let out = f();
-            // Rich panic traps without Rust unwind (I1). Re-raise so g.all/join
-            // see Panicked; wait_status appends the AOT trailing line once.
+            // Rich panic traps without Rust unwind (I1). Re-raise so task.all/join
+            // see Panicked; `task.all`/`join` see Panicked; wait_status appends the AOT trailing line once.
             let rich = with_runtime_mut(|rt| rt.trapped.as_deref() == Some("__jet_rich_panic__"));
             set_active_runtime(None);
             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
@@ -567,7 +567,7 @@ extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
     with_runtime_mut(|rt| {
         rt.task_groups[group as usize]
             .as_ref()
-            .expect("jit taskgroup already closed")
+            .expect("jit task group already closed")
             .register(task);
     });
 }
@@ -636,29 +636,6 @@ extern "C" fn jet_jit_task_resume(task: i64) {
     });
 }
 
-extern "C" fn jet_jit_task_trace(task: i64) -> i64 {
-    with_runtime_mut(|rt| {
-        let ctrl = &rt.task_controls[task as usize];
-        let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
-        let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-        let text = jet_foundation::StructuralDebug::jet_task_control_trace(paused, cancel);
-        rt.heap.alloc_string(text)
-    })
-}
-
-extern "C" fn jet_jit_task_exception(task: i64) -> i64 {
-    with_runtime_mut(|rt| {
-        let ctrl = &rt.task_controls[task as usize];
-        let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-        let text = if cancel {
-            "cancelled".to_string()
-        } else {
-            String::new()
-        };
-        rt.heap.alloc_string(text)
-    })
-}
-
 extern "C" fn jet_jit_task_yield() {
     jet_scheduler_yield_now();
 }
@@ -667,23 +644,6 @@ extern "C" fn jet_jit_task_current_trace() -> i64 {
     with_runtime_mut(|rt| {
         let text = jet_scheduler_current_task_trace();
         rt.heap.alloc_string(text)
-    })
-}
-
-extern "C" fn jet_jit_task_trace_all(task_list: i64) -> i64 {
-    with_runtime_mut(|rt| {
-        let ids = task_ids_from_list(rt, task_list);
-        let lines: Vec<String> = ids
-            .iter()
-            .map(|id| {
-                let ctrl = &rt.task_controls[*id as usize];
-                let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
-                let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-                jet_foundation::StructuralDebug::jet_task_control_trace(paused, cancel)
-            })
-            .collect();
-        let handles: Vec<i64> = lines.into_iter().map(|t| rt.heap.alloc_string(t)).collect();
-        store_i64_list(rt, handles)
     })
 }
 
@@ -708,7 +668,7 @@ extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     }
 }
 
-/// D-NURSERY1=A: `g.all([h1, h2, …])` — returns a new `[Int]` list handle.
+/// D-CONC-SPAWN1=D: `task.all { … }` — returns a new `[Int]` list handle.
 extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
@@ -720,45 +680,7 @@ extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
     })
 }
 
-// D-VERDICT-1323-1: the task-group twins. Each marshals the JIT's list of task
-// ids into the same per-task operation its single-handle counterpart uses.
-extern "C" fn jet_jit_task_wait_all(task_list: i64) -> i64 {
-    jet_jit_task_all(task_list)
-}
-
-extern "C" fn jet_jit_task_detach_all(task_list: i64) {
-    with_runtime_mut(|rt| {
-        for id in task_ids_from_list(rt, task_list) {
-            let _ = rt.tasks[id as usize].take();
-        }
-    });
-}
-
-extern "C" fn jet_jit_task_cancel_all(task_list: i64) {
-    with_runtime_mut(|rt| {
-        for id in task_ids_from_list(rt, task_list) {
-            rt.task_controls[id as usize].cancel();
-        }
-    });
-}
-
-extern "C" fn jet_jit_task_pause_all(task_list: i64) {
-    with_runtime_mut(|rt| {
-        for id in task_ids_from_list(rt, task_list) {
-            rt.task_controls[id as usize].pause();
-        }
-    });
-}
-
-extern "C" fn jet_jit_task_resume_all(task_list: i64) {
-    with_runtime_mut(|rt| {
-        for id in task_ids_from_list(rt, task_list) {
-            rt.task_controls[id as usize].resume();
-        }
-    });
-}
-
-/// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first successful result.
+/// D-CONC-SPAWN1=D: `task.race { … }` — first successful result.
 extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
@@ -767,7 +689,7 @@ extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
     wait_status(|| jet_scheduler_race(entries))
 }
 
-/// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result.
+/// D-CONC-SPAWN1=D: `task.any { … }` — first completed result.
 extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
@@ -959,17 +881,9 @@ host_fns! {
     task_detach: "jet_jit_task_detach" => jet_jit_task_detach: sig_void_i64;
     task_pause: "jet_jit_task_pause" => jet_jit_task_pause: sig_void_i64;
     task_resume: "jet_jit_task_resume" => jet_jit_task_resume: sig_void_i64;
-    task_trace: "jet_jit_task_trace" => jet_jit_task_trace: sig_i64;
-    task_exception: "jet_jit_task_exception" => jet_jit_task_exception: sig_i64;
     task_yield: "jet_jit_task_yield" => jet_jit_task_yield: sig_void;
     task_current_trace: "jet_jit_task_current_trace" => jet_jit_task_current_trace: sig_noarg_i64;
     task_all: "jet_jit_task_all" => jet_jit_task_all: sig_i64;
-    task_wait_all: "jet_jit_task_wait_all" => jet_jit_task_wait_all: sig_i64;
-    task_trace_all: "jet_jit_task_trace_all" => jet_jit_task_trace_all: sig_i64;
-    task_detach_all: "jet_jit_task_detach_all" => jet_jit_task_detach_all: sig_void_i64;
-    task_cancel_all: "jet_jit_task_cancel_all" => jet_jit_task_cancel_all: sig_void_i64;
-    task_pause_all: "jet_jit_task_pause_all" => jet_jit_task_pause_all: sig_void_i64;
-    task_resume_all: "jet_jit_task_resume_all" => jet_jit_task_resume_all: sig_void_i64;
     task_race: "jet_jit_task_race" => jet_jit_task_race: sig_i64;
     task_any: "jet_jit_task_any" => jet_jit_task_any: sig_i64;
     select_wait: "jet_jit_select_wait" => jet_jit_select_wait: sig_i64_i64;
@@ -984,7 +898,3 @@ host_fns! {
     deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
     deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;
 }
-
-
-
-

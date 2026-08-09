@@ -1609,14 +1609,19 @@ fn emit_tir_stmt(
                 pad, cx.root_prefix, closure
             ));
         }
-        TStmt::TaskGroup { group, body } => {
+        TStmt::TaskGroup { group, limit, body } => {
             out.push_str(&format!("{}{{\n", pad));
-            out.push_str(&format!(
-                "{}    let {} = {}jet_std::JetTaskGroup::new();\n",
-                pad,
-                group.rust_place(),
-                cx.root_prefix
-            ));
+            let constructor = limit.as_ref().map_or_else(
+                || format!("{}jet_std::JetTaskGroup::new()", cx.root_prefix),
+                |value| {
+                    format!(
+                        "{}jet_std::JetTaskGroup::with_limit({})",
+                        cx.root_prefix,
+                        emit_tir_expr(value, cx)
+                    )
+                },
+            );
+            out.push_str(&format!("{}    let {} = {};\n", pad, group.rust_place(), constructor));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -1628,7 +1633,7 @@ fn emit_tir_stmt(
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. NOT wrapped in a
         // nested Rust block — `name` must stay a live Rust local for
         // statements AFTER this one (`NAME.value(v)`, `NAME.suggest(…)`),
-        // unlike `Region`/taskgroup, which are genuinely lexical.
+        // unlike `Region`/`task.group`, which are genuinely lexical.
         TStmt::Layout {
             handle,
             label,

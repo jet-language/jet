@@ -440,16 +440,6 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
-            if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
-                && method == Syntax::TASKGROUP_SPAWN_METHOD
-            {
-                note_core_usage(
-                    used,
-                    spans,
-                    "core.tasks::spawn",
-                    Some(*method_span),
-                );
-            }
             if matches!(
                 recv_type.as_deref(),
                 Some(crate::Syntax::TYPE_BIGINT)

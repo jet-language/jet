@@ -167,12 +167,11 @@ const CONTAINER_ALIASES = {
   "core.compress.zstd": "core.archive",
   "core.encoding": "core.encoding.json",
   "core.crypto.expert": "core.crypto",
-  // Task, TaskList and Duration are Jet types, but their workflow is the Core
+  // Task and Duration are Jet types, but their workflow is the Core
   // module a competitor answers with. Without these, a correctly read
   // Task.cancel could never defend core.tasks and the ledger accused #1468 of
   // gaps Jet ships.
   Task: "core.tasks",
-  TaskList: "core.tasks",
   Sender: "core.tasks",
   Receiver: "core.tasks",
   Duration: "core.time",
@@ -532,7 +531,6 @@ const TYPE_CONTAINER = {
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {
-  task_list_method_return: "TaskList",
   list_method_return: "List",
   iter_method_return: "Iter",
   view_method_return: "View",
@@ -544,6 +542,7 @@ const COLLECTION_METHOD_FUNCTIONS = {
   rng_method_return: "Rng",
   solver_method_return: "Solver",
   duration_method_return: "Duration",
+  result_method_return: "Result",
   task_method_return: "Task",
   receiver_method_return: "Receiver",
   sender_method_return: "Sender",
@@ -1120,8 +1119,8 @@ function fixedSignaturePairs(modules) {
 // a match on (method, nargs), an `if let "a" | "b" = method`, a bare
 // `method == "x"`, a `matches!(method, "a" | "b")`, and a name given as a
 // Syntax constant. Reading only string literals returned nothing at all for
-// duration_method_return and task_list_method_return, whose arms are entirely
-// constants, so Duration and TaskList vanished from the inventory while the
+// duration_method_return, whose arms are entirely constants, so Duration
+// vanished from the inventory while the
 // compiler shipped them.
 function methodNames(body, constants) {
   const methods = new Set();
@@ -2666,8 +2665,8 @@ function hostileFixtures() {
   results.push(rejects("a mapped table the reader cannot read",
     "the ledger reads no methods from", function () {
     // build_result is a helper with no method names. Mapping it stands in for
-    // the shipped state this gate was blind to: duration_method_return and
-    // task_list_method_return spell every method as a constant and returned
+    // the shipped state this gate was blind to: duration_method_return spells
+    // every method as a constant and returned
     // nothing at all while every fixture passed.
     COLLECTION_METHOD_FUNCTIONS.build_result = "LedgerFixture";
     try {

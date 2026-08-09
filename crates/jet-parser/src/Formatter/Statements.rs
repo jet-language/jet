@@ -531,9 +531,15 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-TASKSCOPE1=A: `taskgroup g { … }`.
-            Stmt::TaskGroup { name, body, .. } => {
-                self.write(&format!("{} {} {{", Syntax::KW_TASKGROUP, name));
+            // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }`.
+            Stmt::TaskGroup { name, limit, body, .. } => {
+                self.write(&format!("{}.{} {}", Syntax::KW_TASK, "group", name));
+                if let Some(limit) = limit {
+                    self.write("(limit: ");
+                    self.fmt_expr(limit, Prec::OrFallback);
+                    self.write(")");
+                }
+                self.write(" {");
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();

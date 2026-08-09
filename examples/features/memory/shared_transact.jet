@@ -6,8 +6,6 @@
 // locks at once, taken in a canonical order that cannot deadlock. No new marker
 // (I8): the same `#Transact` that already gives single-task rollback now spans
 // shared state. An irreversible effect inside is still rejected (E0746).
-use core.tasks as tasks
-
 struct Account {
     balance: Int
 }
@@ -28,8 +26,8 @@ fn run() {
     // Eight concurrent transfers of 100 each. Whatever order the runtime picks,
     // every transfer is atomic, so the final balances are deterministic and the
     // grand total is conserved exactly.
-    $[ t1..t8 ]$ :: tasks.spawn(() => transfer(from, to, 100))
-    $[ t1..t8 ]$.wait()
+    $[ t1..t8 ]$ :: task transfer(from, to, 100)
+    $[ t1..t8 ]$.join() ?? panic("transfer failed")
     from_bal :: from.read(a => a.balance)
     to_bal :: to.read(a => a.balance)
 

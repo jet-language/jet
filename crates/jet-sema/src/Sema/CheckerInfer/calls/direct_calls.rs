@@ -219,10 +219,10 @@ impl<'a> Checker<'a> {
             ) {
                 self.diags.push(Diagnostic::error(
                     "E0040",
-                    format!("`{}` is not in Jet; use `tasks.spawn` instead", call.name),
+                    format!("`{}` is not in Jet; use the `task` keyword instead", call.name),
                     "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
                         .to_string(),
-                    "import `core.tasks as tasks` and call `tasks.spawn(() => your_work())`"
+                    "write `task your_work()` or `task { … }`"
                         .to_string(),
                     Some(call.name_span),
                 ));

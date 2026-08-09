@@ -9,8 +9,6 @@ use jet::JitBackend::JitBackend;
 const QUEUE: &str = include_str!("../examples/features/memory/shared_guard_queue.jet");
 
 const CANCEL_WAIT: &str = r#"
-use core.tasks as tasks
-
 fn mark_started(started: Shared<Int>, began: Condition) {
     started_guard :: started.guard_edit()
     started_guard.value = 1
@@ -40,10 +38,11 @@ fn run() {
     changed := Condition.new()
     started := Shared.new(0)
     began := Condition.new()
-    taskgroup workers {
-        waiting :: workers.task => wait_until_cancel(shared, changed, started, began)
-        fast :: workers.task => finish_after_start(started, began)
-        print(workers.race([waiting, fast]))
+    task.group workers {
+        print(task.race {
+            wait_until_cancel(shared, changed, started, began),
+            finish_after_start(started, began)
+        })
     }
     reacquired :: shared.guard_edit()
     reacquired.value += 1
@@ -111,8 +110,6 @@ fn run() {
 "#;
 
 const TRANSACTION_DELTAS: &str = r#"
-use core.tasks as tasks
-
 struct Counter {
     value: Int
 }
@@ -125,11 +122,11 @@ fn increment(counter: Shared<Counter>) {
 
 fn run() {
     counter := Shared.new(Counter.{ value: 0 })
-    taskgroup workers {
-        first := workers.task => increment(counter)
-        second := workers.task => increment(counter)
-        first.join()
-        second.join()
+    task.group workers {
+        first := task increment(counter)
+        second := task increment(counter)
+        first.join() ?? panic("task failed")
+        second.join() ?? panic("task failed")
     }
     guard := counter.guard_read()
     print(guard.value.value)

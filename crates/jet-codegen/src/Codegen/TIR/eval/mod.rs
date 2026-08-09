@@ -883,6 +883,7 @@ struct EvalRuntime<'a> {
     clocks: Vec<i64>,
     channels: Vec<EvalChannel>,
     task_groups: Vec<Vec<usize>>,
+    task_group_limits: Vec<Option<i64>>,
     tasks: Vec<Option<EvalTask>>,
     web_apps: Vec<EvalWebApp>,
     completion_order: AtomicU64,
@@ -1042,6 +1043,7 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             channels: Vec::new(),
             task_groups: Vec::new(),
+            task_group_limits: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
@@ -1080,7 +1082,7 @@ impl<'a> EvalCtx<'a> {
             Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => Err(Diagnostic::error(
                 "TASK_CANCELLED",
                 "task cancelled".to_string(),
-                "the owning taskgroup stopped this task".to_string(),
+                "the owning task group stopped this task".to_string(),
                 String::new(),
                 Some(self.span()),
             )),
@@ -1122,26 +1124,6 @@ impl<'a> EvalCtx<'a> {
             task.paused.store(paused, Ordering::Release);
         }
         Ok(())
-    }
-
-    /// The evaluator twin of `JetTask::trace`. The rendering must match the
-    /// Prelude symbol byte for byte — it is user-visible output (I9).
-    pub(super) fn trace_task_value(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
-        let index = Self::task_index(value)
-            .ok_or_else(|| unsupported("task receiver", self.span()))?;
-        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-        let (paused, cancel) = match runtime.tasks.get(index) {
-            Some(Some(task)) => (
-                task.paused.load(Ordering::Acquire),
-                task.cancel.load(Ordering::Acquire),
-            ),
-            // Already joined or detached: the handle is gone, so neither flag
-            // is set, exactly as a dropped `JetTaskControl` would report.
-            _ => (false, false),
-        };
-        Ok(CtValue::Str(jet_foundation::StructuralDebug::jet_task_control_trace(
-            paused, cancel,
-        )))
     }
 
     /// The evaluator twin of `JetTask::detach`: drop the join handle so the
@@ -1302,7 +1284,7 @@ impl<'a> EvalCtx<'a> {
         let group = match group {
             Some(group) => Some(
                 Self::taskgroup_index(&self.eval_expr(group, scope)?)
-                    .ok_or_else(|| unsupported("taskgroup handle", self.span()))?,
+                    .ok_or_else(|| unsupported("task group handle", self.span()))?,
             ),
             None => None,
         };
@@ -1324,7 +1306,7 @@ impl<'a> EvalCtx<'a> {
         let sender = self
             .task_sender
             .as_ref()
-            .ok_or_else(|| unsupported("spawn outside a taskgroup", self.span()))?;
+            .ok_or_else(|| unsupported("spawn outside a task group", self.span()))?;
         let (completion, receiver) = mpsc::sync_channel(1);
         let completion_order = Arc::new(OnceLock::new());
         let cancel = Arc::new(AtomicBool::new(false));
@@ -1352,7 +1334,7 @@ impl<'a> EvalCtx<'a> {
                 cancel,
                 paused,
             })
-            .map_err(|_| unsupported("closed taskgroup", self.span()))?;
+            .map_err(|_| unsupported("closed task group", self.span()))?;
         Ok(CtValue::Struct {
             type_name: "__JetTirTask".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(task as i64))],
@@ -1380,14 +1362,27 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
-    fn new_taskgroup(&mut self) -> CtValue {
+    fn new_taskgroup(
+        &mut self,
+        limit: Option<&TExpr>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let limit = match limit {
+            Some(limit) => match self.eval_expr(limit, scope)? {
+                CtValue::Int(value) if value > 0 => Some(value),
+                CtValue::Int(_) => return Err(unsupported("non-positive task-group limit", self.span())),
+                _ => return Err(unsupported("task-group limit", self.span())),
+            },
+            None => None,
+        };
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.task_groups.len();
         runtime.task_groups.push(Vec::new());
-        CtValue::Struct {
+        runtime.task_group_limits.push(limit);
+        Ok(CtValue::Struct {
             type_name: "__JetTirTaskGroup".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
-        }
+        })
     }
 
     fn select_builder_value(
@@ -1691,7 +1686,7 @@ impl<'a> EvalCtx<'a> {
             .map(|value| self.take_task_entry(value))
             .collect::<Result<Vec<_>, _>>()?;
         if tasks.is_empty() {
-            return Err(unsupported("empty taskgroup combinator", self.span()));
+            return Err(unsupported("empty task group combinator", self.span()));
         }
         select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()).map(
             |mut values| {
@@ -1712,7 +1707,7 @@ impl<'a> EvalCtx<'a> {
                 runtime
                     .task_groups
                     .get_mut(index)
-                    .ok_or_else(|| unsupported("taskgroup handle", span))?,
+                    .ok_or_else(|| unsupported("task group handle", span))?,
             )
         };
         let mut first = None;

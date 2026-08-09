@@ -1,11 +1,10 @@
 use core.reactive as reactive
-use core.tasks as tasks
 
 fn run() {
     // E1102: `#Local` keeps the reactive box off task/channel/parallel crossings.
     #Local pending := reactive.signal(0)
-    worker :: tasks.spawn(() => {
+    worker :: task {
         pending.set(1)
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
 }

@@ -526,10 +526,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ServiceDelivery",
         ],
         "core.tasks" => &[
-            "spawn",
-            "spawn_group",
-            "join_all",
-            "wait_any",
             "yield_now",
             "current_task",
             "channel",

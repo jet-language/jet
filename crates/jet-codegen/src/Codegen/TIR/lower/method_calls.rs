@@ -1407,8 +1407,61 @@ pub(crate) fn lower_method_call(
             }
         }
     }
-    // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    // D-CONC-SPAWN1=D: parser-created `task` nodes outside a lexical group
+    // still lower through the existing spawn/select TIR nodes. The receiver is
+    // compiler-private and is never emitted or looked up as a Rust value.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE) {
+        if method == "spawn" {
+            if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+                let body_ty = lambda_body_ty(lam, cx, env);
+                let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+                cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                let spawn_closure = render_spawn_lambda(lam, cx, env);
+                return TExpr {
+                    ty: Type::Apply {
+                        name: "Task".to_string(),
+                        args: vec![body_ty],
+                    },
+                    kind: TExprKind::CoreClosureCall {
+                        kind: TCoreClosureKind::Spawn {
+                            group: None,
+                            site,
+                            spawn_closure,
+                            scoped: lam.meta.scoped_task_borrow,
+                        },
+                    },
+                };
+            }
+        }
+        if args.len() == 1 {
+            let tasks = lower_expr(&args[0].expr, cx, env);
+            let elem = taskgroup_result_elem(&tasks);
+            let ty = resolved_ret.cloned().unwrap_or_else(|| match method {
+                "all" => Type::List(Box::new(elem.clone())),
+                _ => elem,
+            });
+            let kind = match method {
+                "all" => TExprKind::TaskGroupAll {
+                    tasks: Box::new(tasks),
+                },
+                "race" => TExprKind::TaskGroupRace {
+                    tasks: Box::new(tasks),
+                },
+                "any" => TExprKind::TaskGroupAny {
+                    tasks: Box::new(tasks),
+                },
+                _ => return TExpr { ty, kind: TExprKind::Unit },
+            };
+            return TExpr { ty, kind };
+        }
+    }
+
+    // D-CONC-SPAWN1=D: compiler-private methods behind canonical `task.group`.
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_SPAWN_METHOD
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
@@ -1434,40 +1487,51 @@ pub(crate) fn lower_method_call(
             };
         }
     }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_ALL_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: Type::List(Box::new(elem)),
+            ty: resolved_ret
+                .cloned()
+                .unwrap_or_else(|| Type::List(Box::new(elem))),
             kind: TExprKind::TaskGroupAll {
                 tasks: Box::new(tasks),
             },
         };
     }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_RACE_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: elem,
+            ty: resolved_ret.cloned().unwrap_or(elem),
             kind: TExprKind::TaskGroupRace {
                 tasks: Box::new(tasks),
             },
         };
     }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_ANY_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: elem,
+            ty: resolved_ret.cloned().unwrap_or(elem),
             kind: TExprKind::TaskGroupAny {
                 tasks: Box::new(tasks),
             },
@@ -2057,26 +2121,6 @@ pub(crate) fn lower_method_call(
                             args: vec![joined],
                             source_span: method_span,
                             widen_to_vec: vec![false],
-                        },
-                    };
-                }
-                if module == "core.tasks" && method == "join_all" && args.len() == 1 {
-                    let tasks = lower_expr(&args[0].expr, cx, env);
-                    let elem = taskgroup_result_elem(&tasks);
-                    return TExpr {
-                        ty: Type::List(Box::new(elem)),
-                        kind: TExprKind::TaskGroupAll {
-                            tasks: Box::new(tasks),
-                        },
-                    };
-                }
-                if module == "core.tasks" && method == "wait_any" && args.len() == 1 {
-                    let tasks = lower_expr(&args[0].expr, cx, env);
-                    let elem = taskgroup_result_elem(&tasks);
-                    return TExpr {
-                        ty: elem,
-                        kind: TExprKind::TaskGroupAny {
-                            tasks: Box::new(tasks),
                         },
                     };
                 }
@@ -3351,34 +3395,11 @@ pub(crate) fn lower_method_call(
     // from `Collections::builtin_method_return`'s `Type::Apply` arms
     // (Source/Collections.rs), read off the receiver's already-resolved type
     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
-    // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`/`wait`
-    // → `T`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit; `trace` → `String`;
+    // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
+    // → `T`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
-        // D-VERDICT-1323-1 / I8: `handles.wait_all()` and `handles.join_all()` are
-        // the method spelling of `tasks.join_all`, so they lower to the same node
-        // every engine already drives. No second mechanism.
-        if matches!(method, "wait_all" | "join_all") {
-            let tasks = lower_expr(receiver, cx, env);
-            let elem = taskgroup_result_elem(&tasks);
-            return TExpr {
-                ty: Type::List(Box::new(elem)),
-                kind: TExprKind::TaskGroupAll {
-                    tasks: Box::new(tasks),
-                },
-            };
-        }
-        if method == "wait_any" {
-            let tasks = lower_expr(receiver, cx, env);
-            let elem = taskgroup_result_elem(&tasks);
-            return TExpr {
-                ty: elem,
-                kind: TExprKind::TaskGroupAny {
-                    tasks: Box::new(tasks),
-                },
-            };
-        }
         let recv_t = lower_expr(receiver, cx, env);
         // The element type `T` from the receiver's `Apply<T>` (the first type arg).
         let elem = match &recv_t.ty {
@@ -3387,18 +3408,11 @@ pub(crate) fn lower_method_call(
         };
         let elem = elem.unwrap_or_else(unit_type);
         let (op, ty) = match method {
-            "join" | "wait" => (THandleOp::TaskJoin, elem),
+            "join" => (THandleOp::TaskJoin, elem),
             "detach" => (THandleOp::TaskDetach, unit_type()),
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
-            "trace" => (THandleOp::TaskTrace, Type::String),
-            "exception" => (THandleOp::TaskException, Type::String),
-            "detach_all" => (THandleOp::TaskDetachAll, unit_type()),
-            "cancel_all" => (THandleOp::TaskCancelAll, unit_type()),
-            "pause_all" => (THandleOp::TaskPauseAll, unit_type()),
-            "resume_all" => (THandleOp::TaskResumeAll, unit_type()),
-            "trace_all" => (THandleOp::TaskTraceAll, Type::List(Box::new(Type::String))),
             "receive" => (
                 THandleOp::ChannelReceive,
                 Type::Result {

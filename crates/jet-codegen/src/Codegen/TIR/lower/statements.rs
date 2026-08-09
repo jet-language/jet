@@ -116,7 +116,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
             // Rust reference need the window type when this local crosses into
-            // a taskgroup child. AOT ignores this fact.
+            // a task group child. AOT ignores this fact.
             if let Some(elem) = elem_ty.clone() {
                 let handle = if candidate.write {
                     Some(Type::Apply {
@@ -1753,13 +1753,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         }
         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
         // internal collector. Helpers borrow this same value.
-        Stmt::TaskGroup { name, body, .. } => {
+        Stmt::TaskGroup { name, limit, body, .. } => {
             let mut scoped = clone_env(env);
             let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
             let group = TLocal::user(name);
             scoped.bind(name, group.clone(), Some(group_ty));
             TStmt::TaskGroup {
                 group,
+                limit: limit.as_ref().map(|value| lower_expr(value, cx, env)),
                 body: lower_stmts(body, cx, &mut scoped),
             }
         }

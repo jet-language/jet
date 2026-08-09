@@ -12,7 +12,7 @@ use std::collections::HashSet;
 /// matching emit arm for every one of these.
 ///
 /// Gating on `core_fixed_sig(...).is_some()` cleanly EXCLUDES the deferred calls:
-///   - **closure-taking** (`tasks.spawn`, `http.serve`, `scope.guard`) — not in the
+///   - **closure-taking** (`http.serve`, `scope.guard`) — not in the
 ///     table / typed `None` → Phase 11 lambdas;
 ///   - **polymorphic** math/random/io specials (`math.abs`/`min`/`max`/`clamp`,
 ///     `random.pick`/`shuffle`, `io.input`/`io.eprint`) — return type depends on the
@@ -25,9 +25,7 @@ use std::collections::HashSet;
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
-    // D-FANOUT3=C: direct `tasks.join_all` lowers to the existing
-    // TaskGroupAll node and Prelude `jet_task_all` semantics.
-    if module == "core.tasks" && matches!(method, "join_all" | "wait_any" | "yield_now" | "current_task")
+    if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
     {
         return true;
     }
@@ -337,14 +335,11 @@ pub(super) fn core_call_args_in_subset(
         .all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
-/// c109 Phase 13: is a closure-taking core call (`tasks.spawn`/`http.serve`/
-/// `scope.guard`) inside the subset? These are NOT in `core_fixed_sig` — each has a
+/// c109 Phase 13: is a closure-taking core call (`http.serve`/`scope.guard`)
+/// inside the subset? These are NOT in `core_fixed_sig` — each has a
 /// bespoke emit shape. We cover only
 /// the cleanest, byte-reproducible case for each, where the closure arg is a LITERAL
 /// in-subset lambda:
-///   - `tasks.spawn(<lambda>)` — 1 arg, a literal lambda (the `emit_spawn_lambda`
-///     `move |…|` form). A non-lambda spawn arg (a fn-value) takes the AST `arg(0)`
-///     path — excluded (its byte shape differs).
 ///   - `http.serve(addr, <lambda>)` — 2 args; arg0 (addr) any in-subset value, arg1 a
 ///     literal lambda (the `jet_http_serve(&(addr), <lambda>)` branch). The
 ///     router-handler branch needs an HTTPRouter value, which can only come from
@@ -360,9 +355,6 @@ pub(crate) fn core_closure_call_in_subset(
     let lambda_arg = |i: usize| matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals));
     let no_labels = args.iter().all(|a| a.label.is_none());
     match (module, method) {
-        ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
-        // D-VERDICT-1323-1: (count, body); the body is a spawn lambda like `spawn`.
-        ("core.tasks", "spawn_group") => args.len() == 2 && no_labels && lambda_arg(1),
         ("core.http", "serve") => {
             args.len() == 2
                 && no_labels

@@ -2470,11 +2470,11 @@ fn sum_range(first: Int, last: Int) => Int {
 }
 
 fn run() {
-    a :: tasks.spawn(() => sum_range(1, 25))
-    b :: tasks.spawn(() => sum_range(26, 50))
-    c :: tasks.spawn(() => sum_range(51, 75))
-    d :: tasks.spawn(() => sum_range(76, 100))
-    print(a.join() + b.join() + c.join() + d.join())
+    a :: task sum_range(1, 25)
+    b :: task sum_range(26, 50)
+    c :: task sum_range(51, 75)
+    d :: task sum_range(76, 100)
+    print((a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0) + (d.join() ?? 0))
 }
 ```
 
@@ -2485,10 +2485,10 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    task :: tasks.spawn(() => {
+    handle :: task {
         sender.send(42)
-    })
-    task.join()
+    }
+    handle.join() ?? panic("task failed")
     print(ch.receive() ?? panic("channel closed"))
 }
 ```
@@ -2501,18 +2501,17 @@ there's no combined channel value).
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
-| `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
-| `tasks.join_all(handles)` | `[T]` | Consume `[Task<T>]`, wait in list order, and return results in that order |
-| `tasks.wait_any(handles)` | `T` | Consume `[Task<T>]` and return the first finished result |
+| `task body` / `task { body }` | `Task<T>` | Run one zero-parameter child |
+| `task.all { … }` | `[T]` | Run every branch, fail-fast, and return results in source order |
+| `task.race { … }` | `T` | Return the first successful branch and cancel losers |
+| `task.any { … }` | `T` | Return the first completed branch and cancel the rest |
+| `task.group name(limit: n) { … }` | nothing | Own children and join them at scope close |
 | `tasks.yield_now()` | nothing | Cooperative yield at a scheduler wait point (`yield` is the stream keyword) |
 | `tasks.current_task()` | `String` | Control-plane trace of the running task (`paused=...,cancel=...`) |
-| `task.join()` | `T` | Wait for the task and consume the task handle |
-| `task.wait()` | `T` | Alias of `.join()` |
-| `task.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
-| `task.resume()` | nothing | Clear paused state on the task control plane |
-| `task.cancel()` | nothing | Request cancellation on the task control plane |
-| `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
-| `task.exception()` | `String` | `"cancelled"` after cancel; otherwise `""` |
+| `handle.join()` | `T ? TaskFailure` | Wait for the task and consume the task handle |
+| `handle.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
+| `handle.resume()` | nothing | Clear paused state on the task control plane |
+| `handle.cancel()` | nothing | Request cancellation on the task control plane |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
 | `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
 | `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
@@ -2524,21 +2523,19 @@ there's no combined channel value).
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 | `receiver.close()` | nothing | Close the receive half explicitly |
 
-Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
+Values crossing a task body or `send` must be sendable: no `View<T>` or string-view
 windows, no trait values, and no closure values with non-sendable captures.
 Copyable captures copy automatically; owned non-copyable captures move. A
 `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
-With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
-`task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
+With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`handle.join()` /
+`ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
 and `ProcessChild.wait()`) observe the inherited budget and report runtime
 **E3003** on exceed. Task cancellation wakes the same scheduler wait points.
 
-Use `tasks.join_all([first, second])` when code already owns free task handles
-and needs every result in handle-list order. The list and each handle are
-consumed. `taskgroup` remains the structured default: it owns child tasks until
-scope exit. Inside one, use `g.all`, `g.race`, and `g.any`; `race`/`any` cancel
-losers. `g.select()` races receivers and timers: `.recv(rx)` waits for a channel
+`task.group` remains the structured default: it owns child tasks until scope
+exit. Inside one, use `task.all`, `task.race`, and `task.any`; `race`/`any` cancel
+losers. The group handle's `select()` races receivers and timers: `.recv(rx)` waits for a channel
 value, `.after(ms: N)` is a unit timer arm, and `.after(ms: N, value: fallback)`
 is a typed timeout arm that can be mixed with same-`T` receive arms.
 

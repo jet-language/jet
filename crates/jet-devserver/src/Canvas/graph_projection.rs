@@ -320,14 +320,15 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
 fn task_flow_facts(src: &str) -> Vec<String> {
     let mut facts = Vec::new();
     for (needle, kind) in [
-        ("taskgroup", "structured_task_scope"),
-        ("tasks.spawn", "spawn_task"),
-        (".task =>", "taskgroup_spawn"),
+        ("task.group", "structured_task_scope"),
+        ("task ", "task_spawn"),
+        ("task.all", "task_all"),
+        ("task.race", "task_race"),
+        ("task.any", "task_any"),
         (".join(", "join_task"),
         ("tasks.channel", "channel_create"),
         (".send(", "channel_send"),
         (".receive(", "channel_receive"),
-        (".all(", "taskgroup_join_all"),
         ("#Context", "deadline_context"),
     ] {
         for span in text_matches(src, needle) {
@@ -950,7 +951,7 @@ fn project_stmt(
         Stmt::TaskGroup {
             name, body, span, ..
         } => {
-            add_region(g, ordinal, "taskgroup", name, *span);
+            add_region(g, ordinal, "task.group", name, *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 140, x + 230, y + 70);
         }
         Stmt::Layout {

@@ -2327,13 +2327,19 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.exit_memory_policy_region();
                 }
-                // D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — structured task scope.
+                // D-CONC-SPAWN1=D: `task.group g { … }` — structured task scope.
                 Stmt::TaskGroup {
                     name,
                     name_span,
+                    limit,
                     body,
                     ..
                 } => {
+                    if let Some(limit) = limit {
+                        if let Some(limit_ty) = self.infer(limit) {
+                            self.check_type_assignable(&Type::Int, &limit_ty, limit.span());
+                        }
+                    }
                     self.push_scope();
                     self.declare(
                         name,
@@ -2364,7 +2370,7 @@ impl<'a> Checker<'a> {
                     self.pop_scope();
                 }
                 // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a
-                // Cassowary-style constraint block. Unlike `region`/`taskgroup`,
+                // Cassowary-style constraint block. Unlike `region`/`task.group`,
                 // `name` is declared in the CURRENT scope (not pushed/popped
                 // around it) so the handle outlives the block — later code reads
                 // solved values (`NAME.value(v)`) or calls `NAME.suggest(...)`.

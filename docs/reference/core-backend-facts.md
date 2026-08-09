@@ -15,7 +15,7 @@ template or engine-specific public fallback is part of the path.
 | `core.http.*` | request/response owned | `Net` | `HTTPError` | may block | native | reachable Core runtime + audited network ABI |
 | `core.data` | table/series owned | pure / bridge | `DataError` | sync | all | reachable Core runtime + audited data ABI |
 | `core.compute` | `Tensor` owned | pure (CPU oracle) | `ComputeError` | sync | all | reachable Core runtime + CPU ABI; GPU E6 |
-| `core.services` | tree/endpoint owned | tasks/channels | `ServiceError` | sync mailboxes | all | reachable Core runtime over taskgroup ABI |
+| `core.services` | tree/endpoint owned | tasks/channels | `ServiceError` | sync mailboxes | all | reachable Core runtime over `task.group` ABI |
 | `core.archive` | bytes owned | pure | empty bytes / JSON `[]` on invalid input | sync | all native + interpreter | reachable ordinary-Jet package plus one dependency-free audited ABI kernel |
 
 The archive facts are also published per operation:

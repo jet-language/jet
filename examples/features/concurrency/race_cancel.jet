@@ -1,5 +1,4 @@
-// 167 — D-CONCCOMB1/A + D-RACEWIN1: race returns first success; losers cancelled at runtime.
-use core.tasks as tasks
+// 167 — D-CONC-SPAWN1=D: race returns first success; losers cancel at runtime.
 use core.time as time
 
 fn slow_one() => Int {
@@ -10,10 +9,8 @@ fn slow_one() => Int {
 fn fast_seven() => Int = 7
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => slow_one()
-        fast :: g.task => fast_seven()
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race { slow_one(), fast_seven() }
         print(winner)
     }
 }

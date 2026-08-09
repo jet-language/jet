@@ -416,13 +416,11 @@ fn run() {{
 fn a_pin_cannot_cross_a_task_boundary() {
     let src = format!(
         r#"{NODE}
-use core.tasks
-
 fn run() {{
     node := Node.{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
-    handle :: tasks.spawn(() => pinned.payload)
-    print("{{(handle.join())}}")
+    handle :: task pinned.payload
+    print("{{(handle.join() ?? 0)}}")
 }}
 "#
     );
@@ -566,17 +564,15 @@ fn cancelling_a_task_cannot_smuggle_a_pin_across_the_boundary() {
     // and must not become a cross-task escape hatch (criterion 4 + task law).
     let src = format!(
         r#"{NODE}
-use core.tasks
-
 fn run() {{
     node := Node.{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
-    handle :: tasks.spawn(() => {{
+    handle :: task {{
         pinned.hops += 1
         return pinned.payload
-    }})
+    }
     handle.cancel()
-    print("{{(handle.join())}}")
+    print("{{(handle.join() ?? 0)}}")
 }}
 "#
     );

@@ -21,10 +21,10 @@ fn consume(queue: Shared<WorkQueue>, changed: Condition) {
 fn run() {
     queue := Shared.new(WorkQueue.{ jobs: [1], capacity: 1 })
     changed := Condition.new()
-    taskgroup workers {
-        producer :: workers.task => produce(queue, changed)
+    task.group workers {
+        producer :: task produce(queue, changed)
         consume(queue, changed)
-        producer.join()
+        producer.join() ?? panic("producer failed")
     }
     print(queue.read(value => value.jobs.first() ?? 0))
 }

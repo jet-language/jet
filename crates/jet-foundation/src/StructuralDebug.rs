@@ -28,8 +28,8 @@ pub fn jet_debug_union(payload: String) -> String {
     payload
 }
 
-/// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
-/// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
+/// D-TASK-PAUSE-TIER1: one formatter for scheduler `paused=` / `cancel=` state.
+/// AOT scheduler and the TIR evaluator both call this (I9).
 pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
     format!("paused={paused},cancel={cancel}")
 }

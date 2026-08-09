@@ -2144,20 +2144,48 @@ impl<'a> Parser<'a> {
                     Some(t.span),
                 ))
             }
-            // D-TASKSCOPE1=A: `taskgroup g { … }` — structured task scope.
+            // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }` — structured task scope.
             TokKind::Ident(n)
-                if n == Syntax::KW_TASKGROUP
-                    && matches!(&self.peek2().kind, TokKind::Ident(_))
-                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+                if n == Syntax::KW_TASK
+                    && matches!(self.peek2().kind, TokKind::Dot)
+                    && matches!(&self.peek3().kind, TokKind::Ident(selector) if selector == "group")
+                    && matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(_)))
+                    && matches!(
+                        self.toks.get(self.pos + 4).map(|t| &t.kind),
+                        Some(TokKind::LBrace | TokKind::LParen)
+                    ) =>
             {
-                let start = self.bump().span; // `taskgroup`
+                let start = self.bump().span; // `task`
+                self.expect(TokKind::Dot, "after `task`")?;
+                self.expect_ident("for the `group` selector")?;
                 let (name, name_span) = self.expect_ident("for the task group name")?;
+                let limit = if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump();
+                    let (label, label_span) = self.expect_ident("for the group limit label")?;
+                    if label != "limit" {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            format!("task-group parameter `{label}` is not supported"),
+                            "the group parameter names the maximum number of active children"
+                                .to_string(),
+                            "write `limit: n`".to_string(),
+                            Some(label_span),
+                        ));
+                    }
+                    self.expect(TokKind::Colon, "after `limit`")?;
+                    let value = self.expr()?;
+                    self.expect(TokKind::RParen, "after the task-group limit")?;
+                    Some(value)
+                } else {
+                    None
+                };
                 self.expect(TokKind::LBrace, "after the task group name")?;
                 let body = self.block_stmts();
                 let end = self.toks[self.pos - 1].span.end;
                 return Ok(Stmt::TaskGroup {
                     name,
                     name_span,
+                    limit,
                     body,
                     span: Span::new(start.start, end),
                 });

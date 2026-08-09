@@ -1,9 +1,8 @@
-use core.tasks
 fn forward(greet: fn()) {
     // E1102 fires twice: `greet` is captured without `take`, and the task's
     // result is itself the same un-sendable closure.
     // E1103 fires at `.detach()`: the task has a sendability problem.
-    t :: tasks.spawn(() => greet)
+    t :: task greet
     t.detach()
 }
 fn run() {

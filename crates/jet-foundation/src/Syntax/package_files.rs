@@ -431,6 +431,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1, D-CTEFFECT1)
     KW_UNSAFE,
     KW_IMPURE,
+    KW_TASK,
     CTX_BLOCK,
     // D-CONC-SPAWN1=D: one reserved word owns task spawning and fan-out.
     KW_CONC_TASK,
@@ -441,7 +442,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Schedule-as-code (D-SCHEDULE1, card #505): `#Job fn` — `#Every(…)`
     // stays out of this list, matching MARKER_TARGET/MARKER_META (paren-arg
     // config markers aren't bare completion words).
-    KW_TASK,
+    KW_JOB,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
     KW_TEST,
     KW_BENCH,
@@ -628,7 +629,7 @@ use super::{
     KW_BREAK, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_CONC_TASK, KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP, KW_MARKER, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN,
-    KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TASK, KW_TEST,
+    KW_TASK,
     KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_FALSE,
     LIT_NULL, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BIT_SET, TYPE_BOOL,
     TYPE_BTREE_MAP, TYPE_BYTE_BUFFER, TYPE_CHAR, TYPE_DEQUE, TYPE_F32, TYPE_F64, TYPE_FLOAT,

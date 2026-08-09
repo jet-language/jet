@@ -504,7 +504,7 @@ impl<'a> Parser<'a> {
                 if crate::Policy::applied_rule(&name).is_some()
                     && !crate::Policy::rule_allows(&name, site)
                     && !(site == crate::Policy::RuleSite::Method
-                        && matches!(name.as_str(), Syntax::KW_TASK | Syntax::MARKER_EVERY))
+                        && matches!(name.as_str(), Syntax::KW_JOB | Syntax::MARKER_EVERY))
                 {
                     return Err(Self::wrong_rule_site(&marker, site, noun));
                 }
@@ -910,7 +910,7 @@ impl<'a> Parser<'a> {
                     )
                 {
                     if site == crate::Policy::RuleSite::Method
-                        && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::MARKER_EVERY)
+                        && matches!(marker.name.as_str(), Syntax::KW_JOB | Syntax::MARKER_EVERY)
                     {
                         return Err(Diagnostic::error(
                             "E0925",
@@ -1007,7 +1007,7 @@ impl<'a> Parser<'a> {
                             policy.push(declaration);
                         }
                     }
-                    Syntax::KW_TASK => {
+                    Syntax::KW_JOB => {
                         function.is_task = true;
                         function.task_span = Some(marker.span);
                         function.task_metadata = self.task_metadata_from_marker(&marker)?;
@@ -1279,7 +1279,7 @@ impl<'a> Parser<'a> {
                     | Syntax::MARKER_INLINE
                     | Syntax::MARKER_KERNEL
                     | Syntax::MARKER_DOC
-                    | Syntax::KW_TASK
+                    | Syntax::KW_JOB
                     | Syntax::MARKER_EVERY
                     | Syntax::MARKER_REPLAYABLE
                     | Syntax::MARKER_WASM_EXPORT

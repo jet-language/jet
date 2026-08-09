@@ -14,7 +14,7 @@ fn run() {
         response :: http_server.response(200, body)
         return response.trailers(^trailers)
     })
-    serving :: tasks.spawn(() => http_server.serve_once_listener(listener, mux) ?? panic("serve"))
+    serving :: task http_server.serve_once_listener(listener, mux) ?? panic("serve")
     stream :: net.tcp_connect(addr) ?? panic("connect")
     request := "".bytes()
     loop line,
@@ -34,5 +34,5 @@ fn run() {
     print(response.contains("X-Trace: first"))
     print(response.contains("x-trace: second"))
     print(response.contains("body"))
-    serving.join()
+    serving.join() ?? panic("server failed")
 }
