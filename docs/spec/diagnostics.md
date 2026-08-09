@@ -599,6 +599,7 @@ renumbered, and no new `W` code may be allocated.
 | E0956 | sema  | construct not yet supported in comptime evaluation; `core.compiler` is also explicitly compile-time-only and cannot be called from runtime code (D-FRONTENDAPI1) |
 | E0957 | sema  | `embed_file`/`embed_bytes` path or `find` glob not a literal, absolute, or escaping via `..` |
 | E0958 | sema  | **retired** (D-CTEFFECT1 2026-06-25): replaced by E3410 (Tier-2 effect without `#Impure` gate) |
+| E0959 | tooling | a compiler-owned layout byte fact is unavailable because no canonical target layout engine supplies it (D-LAYOUT-FACTS1=B) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | parse | member spread `.[…]` entry is not a bare identifier (D-SPREAD1) |
 | E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
@@ -1282,6 +1283,17 @@ runtime value it can't see.
 |------|------|-----|-----|
 | E2930 | this {role} has no accessible label | Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech. | Pass a real label, e.g. `ui.node_role("Submit", w, h, ui.aria_role_button())`. |
 | E2931 | two interactive nodes both have the label "{label}" | Assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3). | Give each interactive node a distinct, descriptive label. |
+
+## Compiler-owned layout fact diagnostics (D-LAYOUT-FACTS1=B)
+
+`T.$layout` and `T.reflect().layout` preserve typed optional byte facts. The
+inspect lens reports the same absence explicitly when the selected target has
+no canonical physical layout engine yet; it never turns absence into a false
+zero or a blank field.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0959 | `` `{type}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B) `` | D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists. | Read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts. |
 
 ## Layout constraint diagnostics (D-LAYOUT1 / D-LAYOUT-GATES1 / D-LAYOUT-CTOR1)
 

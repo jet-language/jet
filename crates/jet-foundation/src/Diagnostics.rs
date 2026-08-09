@@ -231,6 +231,25 @@ impl Diagnostic {
         )
     }
 
+    /// D-LAYOUT-FACTS1=B: physical byte values are optional facts. Tooling
+    /// uses this registered diagnostic when the typed layout model carries a
+    /// clean absence instead of printing an unexplained `unknown` value.
+    pub fn layout_byte_facts_unavailable(
+        type_name: &str,
+        member: &str,
+        span: Option<Span>,
+    ) -> Self {
+        Self::error(
+            "E0959",
+            format!(
+                "`{type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
+            ),
+            "D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists".to_string(),
+            "read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts".to_string(),
+            span,
+        )
+    }
+
     pub fn source_nesting_exceeded(depth: usize, span: Span) -> Self {
         Self::error(
             "E1403",

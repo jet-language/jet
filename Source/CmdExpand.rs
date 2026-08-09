@@ -49,6 +49,12 @@ const LENSES: &[Lens] = &[
         render_json: render_web_json,
     },
     Lens {
+        name: "effects",
+        summary: "resolved function effect rows (D-EFF1 / D-SEMINDEX1)",
+        render: render_effects,
+        render_json: render_effects_json,
+    },
+    Lens {
         name: "layout",
         summary: "D-LAYOUT-FACTS1 compiler-owned type layout facts",
         render: render_layout,
@@ -72,7 +78,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                             "E2104",
                             "`--facts` needs a lens name",
                             "the expand command must know which registered lens to project",
-                            "pass `--facts inline`, `--facts memory`, `--facts web`, or `--facts layout`",
+                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, or `--facts layout`",
                         );
                     }
                     if !json {
@@ -111,7 +117,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                         "E2941",
                         &format!("unknown expand lens `{name}`"),
                         "only registered lenses have checked semantic facts",
-                        "use `inline`, `memory`, `web`, or `layout`",
+                        "use `inline`, `memory`, `web`, `effects`, or `layout`",
                     );
                 }
                 if !json {
@@ -452,6 +458,67 @@ fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<E
     ])]
 }
 
+fn effect_row_text(effect: &jet_semindex::EffectFact) -> String {
+    let resolved = if effect.inferred.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{}]", effect.inferred.join(", "))
+    };
+    let maximal = if effect.maximal { " (maximal)" } else { "" };
+    format!("{}: resolved={}{}", effect.function, resolved, maximal)
+}
+
+fn render_effects(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
+    let index = jet_semindex::from_checked(bundle, facts);
+    index.effects().iter().map(effect_row_text).collect()
+}
+
+fn effect_provenance_json(provenance: &jet_semindex::EffectProvenance) -> ExpandValue {
+    expand_object(vec![
+        ("effect", expand_string(&provenance.effect)),
+        ("call_path", expand_string_list(&provenance.call_path)),
+        (
+            "spans",
+            ExpandValue::Array(
+                provenance
+                    .spans
+                    .iter()
+                    .map(|span| {
+                        expand_span(jet::Diagnostics::Span::new(span.start, span.end), None)
+                    })
+                    .collect(),
+            ),
+        ),
+    ])
+}
+
+fn render_effects_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+    let index = jet_semindex::from_checked(bundle, facts);
+    index
+        .effects()
+        .iter()
+        .map(|effect| {
+            expand_object(vec![
+                ("function", expand_string(&effect.function)),
+                ("direct", expand_string_list(&effect.direct)),
+                ("callees", expand_string_list(&effect.callees)),
+                ("inferred", expand_string_list(&effect.inferred)),
+                ("maximal", ExpandValue::Bool(effect.maximal)),
+                (
+                    "provenance",
+                    ExpandValue::Array(
+                        effect
+                            .provenance
+                            .iter()
+                            .map(effect_provenance_json)
+                            .collect(),
+                    ),
+                ),
+            ])
+        })
+        .collect()
+}
+
 /// D-METHODMACRO1=A: every `#Inline`/`#Inline(Always)` fn or method in the
 /// bundle, and the Rust attribute codegen emits for it. Functions with
 /// neither marker produce no line (the ballot: don't dump everything).
@@ -507,6 +574,61 @@ fn ct_to_expand(value: &jet::CtValue) -> ExpandValue {
     }
 }
 
+fn layout_has_unavailable_bytes(layout: &jet::CtValue) -> bool {
+    let top_level_missing = ["size", "alignment", "stride"].iter().any(|name| {
+        matches!(
+            ct_field(layout, name),
+            None | Some(jet::CtValue::Failed(jet::CtReport::Clean(_)))
+        )
+    });
+    if top_level_missing {
+        return true;
+    }
+    match ct_field(layout, "fields") {
+        Some(jet::CtValue::List(values)) => values.iter().any(|field| {
+            ["offset", "size"].iter().any(|name| {
+                matches!(
+                    ct_field(field, name),
+                    None | Some(jet::CtValue::Failed(jet::CtReport::Clean(_)))
+                )
+            })
+        }),
+        None => true,
+        Some(_) => false,
+    }
+}
+
+fn layout_byte_fact_diagnostic() -> jet::Diagnostics::Diagnostic {
+    jet::Diagnostics::Diagnostic::layout_byte_facts_unavailable("LayoutInfo", "size", None)
+}
+
+fn layout_unavailable_text() -> String {
+    let diagnostic = layout_byte_fact_diagnostic();
+    format!(
+        "unavailable[{}] {}; Why: {}; Fix: {}",
+        diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix
+    )
+}
+
+fn layout_byte_fact_json(layout: &jet::CtValue) -> ExpandValue {
+    if !layout_has_unavailable_bytes(layout) {
+        return expand_object(vec![("status", expand_string("available"))]);
+    }
+    let diagnostic = layout_byte_fact_diagnostic();
+    expand_object(vec![
+        ("status", expand_string("unavailable")),
+        (
+            "diagnostic",
+            expand_object(vec![
+                ("code", expand_string(&diagnostic.code)),
+                ("what", expand_string(&diagnostic.what)),
+                ("why", expand_string(&diagnostic.why)),
+                ("fix", expand_string(&diagnostic.fix)),
+            ]),
+        ),
+    ])
+}
+
 fn layout_text(layout: &jet::CtValue) -> String {
     let header = ["kind", "size", "alignment", "stride", "target", "guarantee", "source"]
         .iter()
@@ -529,7 +651,12 @@ fn layout_text(layout: &jet::CtValue) -> String {
             .join(","),
         _ => String::new(),
     };
-    format!("{header} fields=[{fields}]")
+    let status = if layout_has_unavailable_bytes(layout) {
+        format!(" byte_facts={}", layout_unavailable_text())
+    } else {
+        String::new()
+    };
+    format!("{header}{status} fields=[{fields}]")
 }
 
 struct LayoutRow {
@@ -602,6 +729,7 @@ fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> V
                 ("source", expand_string(&row.module)),
                 ("span", expand_span(row.span, location)),
                 ("layout", ct_to_expand(&row.layout)),
+                ("byte_facts", layout_byte_fact_json(&row.layout)),
             ])
         })
         .collect()
