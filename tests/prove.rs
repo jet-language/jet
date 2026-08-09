@@ -627,7 +627,7 @@ fn prove_solver_lens_emits_checked_certificate_evidence() {
 
 #[test]
 fn prove_solver_counterexample_is_checked_producer_evidence() {
-    let root = workspace("solver_counterexample");
+    let root = workspace("solver_counterexample_producer");
     fs::write(
         root.join("bad.jet"),
         "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) => Int { return value }\n",
@@ -752,7 +752,7 @@ fn prove_solver_lens_reports_a_verified_counterexample() {
     let root = workspace("solver_counterexample");
     fs::write(
         root.join("bad.jet"),
-        "#[Post(result > value, \"grows\")] fn unchanged(value: Int) => Int { return value }\n",
+        "#Post(result > value, \"grows\") fn unchanged(value: Int) => Int { return value }\n",
     )
     .unwrap();
     let out = Command::new(jet())

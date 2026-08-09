@@ -214,56 +214,43 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
     }
     let mut replay_authority = if let Some(path) = replay {
-        // Refuse statically unrecorded authority before touching the artifact.
-        // The artifact cannot turn an IO or unsupported Time operation into a
-        // replayable one, and the refusal must remain the typed E3623 report.
-        if let Err(status) = preflight_replay_target(&target, json) {
-            exit(status);
-        }
-        match crate::ProveReplay::prepare_replay(&identity, &path) {
-            Ok(authority) => {
-                let mut authority = authority;
-                // Validate the artifact envelope and semantic identity before
-                // inspecting the executable target. A malformed or stale
-                // artifact is a typed replay refusal (exit 1), never a child
-                // build/producer failure or ICE.
-                let time_sites = capture_sites_for_target(&target)
-                    .into_iter()
-                    .filter(|site| supported_time_capture_site(site))
-                    .count();
-                if time_sites == 0 {
-                    crate::ProveReplay::emit_diag(
-                        "E3623",
-                        "replay diverged from captured authority",
-                        "the target has no statically identified `core.time.now` call site for the captured Time record",
-                        "replay the matching target, or recapture a target with one supported Time call",
-                        json,
-                    );
-                    exit(ExitCodes::USER_ERROR);
-                }
-                std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
-                if !json {
-                    eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
-                }
-                Some(authority)
+        // Existing artifacts get schema/identity validation first. Missing
+        // artifacts keep authority preflight first, so unrecorded IO/time
+        // remains E3623 without opening a path that cannot be replayed.
+        let artifact_present = crate::ProveReplay::replay_artifact_is_present(&path);
+        let authority = if artifact_present {
+            let authority = prepare_replay_or_exit(&identity, &path, json);
+            if let Err(status) = preflight_replay_target(&target, json) {
+                exit(status);
             }
-            Err((code, why)) => {
-                let what = match code {
-                    "E3620" => "replay schema version is incompatible",
-                    "E3621" => "replay semantic identity does not match",
-                    "E3628" => "replay capture exceeded its artifact limit",
-                    _ => "replay artifact is corrupt",
-                };
-                let fix = match code {
-                    "E3620" => "use a reader for the artifact schema, or recapture with this Jet",
-                    "E3621" => "replay the exact target identity that produced the artifact",
-                    "E3628" => "recapture a bounded artifact with a recorded Time authority",
-                    _ => "recapture the target and keep the complete `.jetproof-replay` artifact",
-                };
-                crate::ProveReplay::emit_diag(code, what, &why, fix, json);
-                exit(ExitCodes::USER_ERROR);
+            authority
+        } else {
+            if let Err(status) = preflight_replay_target(&target, json) {
+                exit(status);
             }
+            prepare_replay_or_exit(&identity, &path, json)
+        };
+        // Both artifact validation and target authority checks must pass before
+        // the executable target is inspected by the normal producer.
+        let time_sites = capture_sites_for_target(&target)
+            .into_iter()
+            .filter(|site| supported_time_capture_site(site))
+            .count();
+        if time_sites == 0 {
+            crate::ProveReplay::emit_diag(
+                "E3623",
+                "replay diverged from captured authority",
+                "the target has no statically identified `core.time.now` call site for the captured Time record",
+                "replay the matching target, or recapture a target with one supported Time call",
+                json,
+            );
+            exit(ExitCodes::USER_ERROR);
         }
+        std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
+        if !json {
+            eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
+        }
+        Some(authority)
     } else {
         None
     };
@@ -528,6 +515,32 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         );
     }
     exit(exit_code);
+}
+
+fn prepare_replay_or_exit(
+    identity: &crate::ProveReplay::ReplayIdentity,
+    path: &str,
+    json: bool,
+) -> crate::ProveReplay::ReplayAuthority {
+    match crate::ProveReplay::prepare_replay(identity, path) {
+        Ok(authority) => authority,
+        Err((code, why)) => {
+            let what = match code {
+                "E3620" => "replay schema version is incompatible",
+                "E3621" => "replay semantic identity does not match",
+                "E3628" => "replay capture exceeded its artifact limit",
+                _ => "replay artifact is corrupt",
+            };
+            let fix = match code {
+                "E3620" => "use a reader for the artifact schema, or recapture with this Jet",
+                "E3621" => "replay the exact target identity that produced the artifact",
+                "E3628" => "recapture a bounded artifact with a recorded Time authority",
+                _ => "recapture the target and keep the complete `.jetproof-replay` artifact",
+            };
+            crate::ProveReplay::emit_diag(code, what, &why, fix, json);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
 }
 
 fn time_site_id_for_target(target: &Target) -> String {

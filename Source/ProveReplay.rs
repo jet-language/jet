@@ -301,6 +301,21 @@ pub(crate) fn finalize_safe_capture(
     Ok(())
 }
 
+/// Check artifact presence without opening its contents. Missing artifacts
+/// must still let target authority preflight report E3623 first.
+pub(crate) fn replay_artifact_is_present(artifact_path: &str) -> bool {
+    let Ok(path) = validate_replay_path(artifact_path) else {
+        return false;
+    };
+    if ensure_read_parent(&path).is_err() {
+        return false;
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata.is_file() && !metadata.file_type().is_symlink(),
+        Err(_) => false,
+    }
+}
+
 /// Validate an artifact and install its captured authorities for the normal
 /// proof producer. Replay is execution of the same producer under this
 /// adapter, not a successful early return that merely checks a file.
