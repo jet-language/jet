@@ -5,10 +5,7 @@
 //! it. Sema reads it to check declared bounds; the comptime evaluator reads
 //! the same table to decide which tier a call belongs to, instead of keeping
 //! a second hard-coded list of its own.
-
-use crate::Syntax;
 use std::collections::BTreeSet;
-
 /// A primitive effect. Closed, compiler-known set; each Core operation
 /// contributes exactly one. Ordered for deterministic diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -65,7 +62,6 @@ pub enum Effect {
     /// build-tier context (E1265), with no `#Impure` escape hatch.
     Secret,
 }
-
 impl Effect {
     /// The PascalCase surface spelling (D-CASING1).
     pub fn name(self) -> &'static str {
@@ -101,7 +97,6 @@ impl Effect {
             Effect::Secret => "Secret",
         }
     }
-
     /// Parse a user-written effect name; `None` if it is not a known effect.
     pub fn parse(s: &str) -> Option<Effect> {
         Some(match s {
@@ -137,7 +132,6 @@ impl Effect {
             _ => return None,
         })
     }
-
     /// Every effect — the maximal set, used for foreign (`extern`) calls whose
     /// body the compiler cannot inspect and for escaping function values. Each
     /// entry is a bare root, which (D-EFFTREE1 ancestor subsumption) covers
@@ -149,11 +143,9 @@ impl Effect {
             .collect()
     }
 }
-
 /// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
 /// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
 pub type EffectSet = BTreeSet<String>;
-
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
 /// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring
@@ -304,7 +296,6 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         _ => return None,
     })
 }
-
 /// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
 /// effect that, once performed, cannot be rolled back. These are rejected when
 /// reached directly inside a `#Transact { … }` block (E0746). The remaining
@@ -314,7 +305,6 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
 pub fn is_irreversible_effect(e: Effect) -> bool {
     matches!(e, Effect::Net | Effect::FS | Effect::Exec)
 }
-
 /// The effect carried by an ambient builtin call (`print`, `input`, …).
 pub fn builtin_effect(name: &str) -> Option<Effect> {
     if crate::Syntax::IMPURE_BUILTINS.contains(&name) {
