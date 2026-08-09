@@ -1,7 +1,7 @@
 # Failure: one report, three routes
 
-Status: proposal for owner decision. Ballots D-FAIL-* on card #1507.
-Date: 2026-08-06.
+Status: settled law, 2026-08-06. All eleven D-FAIL-* decisions on card #1507
+are ratified. This document records the final proposal and slate.
 
 ## Executive summary
 
@@ -69,13 +69,12 @@ delivers unhandled errors in the target's native shape — stderr and an exit
 code for a CLI, a typed error object for a web app, a host-visible value
 for a wasm module.
 
-Eleven ballots (D-FAIL-*) ask direction-level questions.
-Each stands alone. What does not change: `T ? E` and `?`/`??` spellings, the
+Eleven ratified decisions (D-FAIL-*) settle the failure law. What does not
+change: `T ? E` and `?`/`??` spellings, the
 optional/fallible whitespace canon, trap-on-overflow for sized widths,
 validate-block accumulation, `#Transact` rollback, the no-exceptions wall,
 and cancellation's one unwind engine. Task failure at join stays in the
-concurrency slate's lane (its proposed D-CONC-FAIL1 row, not yet a minted
-ballot); this proposal supplies the value it rides on.
+concurrency slate's lane; this proposal supplies the value it rides on.
 
 ## Glossary
 
@@ -251,16 +250,16 @@ not an error. Failure: no payload, failed verdict with a report — that is
 `T ? E`. The middle states exist in real programs and today have no home:
 
 ```jet
-// proposed — success with a note: the value is good, but something is worth saying
+// success with a note: the value is good, but something is worth saying
 resp :: fetch(url)?                 // resp carries "retried twice" as a note
 // notes ride the journey; nothing to unwrap, nothing extra to learn
 
-// proposed — failure with partial results: 90 of 100 rows imported
+// failure with partial results: 90 of 100 rows imported
 rows :: import_rows(file) ?? { save(err.partial ?? []) ; return report(err) }
 ```
 
-The views convert without ceremony because they are the same carrier
-(spellings proposed, direction-level): `.or_err("why")` turns an absence
+The views convert without ceremony because they are the same carrier:
+`.or_err("why")` turns an absence
 into a failure with a report; a failure read where an optional is wanted
 collapses to absence and logs its report to the journey. The everyday
 spellings `T?` and `T ? E` stay exactly as ratified
@@ -269,15 +268,15 @@ types to reconcile.
 
 This is the same shape the type system v2 gave numbers: one carrier,
 knowledge layered on top. Verdict and notes are knowledge about an outcome;
-they erase from the happy path and cost nothing when unused. Ballot:
-D-FAIL-CARRIER1.
+they erase from the happy path and cost nothing when unused. D-FAIL-CARRIER1=A
+settles this carrier.
 
 ## The surface
 
-The heart of the proposal. Before/after pairs from real programs. Each item
-is marked ratified, amended, or new.
+The heart of the settled law. Before/after pairs from real programs. Each
+item names its amendment or final decision.
 
-### 1. The default error is `Err`, a real value — amended (S80/D-ERR2)
+### 1. The default error is `Err`, a real value (D-FAIL-ERROR1=A; amends S80 and D-ERR2)
 
 S80 ratified a structured default error (message, optional code, optional
 source) with a builder spelling (`Error.message("…").code(n).with_source(e)`).
@@ -292,7 +291,7 @@ Before — today the only way to make a default error is a bare string:
 cfg :: parse(text) ?? return Err("parse failed")   // prose, no cause, no fields
 ```
 
-After — proposed:
+After:
 
 ```jet
 return Err("parse failed")                      // same line, now a real value
@@ -306,10 +305,9 @@ return Err("parse failed", cause: e)            // chains keep the old report
 
 `code` is a short string, so registered codes and app codes ride one field.
 In signatures the type is written `Err` (`Config ? Err`), and mostly it is
-not written at all: bare `T ?` already implies it (S34, kept). Ballot:
-D-FAIL-ERROR1.
+not written at all: bare `T ?` already implies it (S34, amended).
 
-### 2. Context rides the `?` itself — amended (D-ERRCTX1 delivery)
+### 2. Context rides the `?` itself (D-FAIL-CTX1=A; amends D-ERRCTX1)
 
 The `?` is where the error path already lives on the page, so that is where
 context belongs — not a method call dangling off the end of the line.
@@ -320,7 +318,7 @@ Before — context is a trailing method, and only for the default error type:
 text :: fs.read(path).context("reading config at {path}")?
 ```
 
-After — proposed: a note is a string written after the `?`:
+After: a note is a string written after the `?`:
 
 ```jet
 fn load_config(path: String) => Config ? {
@@ -336,9 +334,10 @@ error type. Notes are optional: a bare `?` still joins the journey
 automatically, so an unhandled failure prints where it traveled even when
 nobody wrote a word. This is the automatic-context propagation the owner
 asked for: Zig's error return traces made a product, plus human notes where
-they help. The `.context` method is deleted. Ballot: D-FAIL-CTX1.
+they help. The `.context` method is deleted. The journey renders on every
+tier.
 
-### 3. One conversion rail — amended (deletes D-ERR2's `Fallible` clause)
+### 3. One conversion rail (D-FAIL-CONV1=A; amends D-ERR2 and D-LIB3)
 
 Before — the diagnostic teaches a dead end:
 
@@ -354,7 +353,7 @@ fn get_user() => User ? Error {
 }
 ```
 
-After — proposed: the `Fallible` trait and `to_error` are deleted. Error
+After: the `Fallible` trait and `to_error` are deleted. Error
 conversion has exactly one mechanism, the already-ratified declared
 conversion (D-ERR-CONV), now usable with the default error as the target:
 
@@ -371,9 +370,7 @@ is not new here — it is the ratified, shipped declared-conversion form
 (D-ERR-CONV, `examples/features/errors/typed_error_families.jet`). It is
 deliberately lambda-shaped: a conversion *is* a function from source to
 target, written once, applied by `?` wherever the types demand it. `self`
-is the source value; the body returns the target. If that reading still
-grates, D-FAIL-CONV1 offers a respelled form (`impl StoreErr as Err`) as a
-genuine option.
+is the source value; the body returns the target. This spelling is final.
 
 E2402's text is rewritten to teach this. The `TryConvert::Fallible` sema arm
 and the trait constants are removed. One mechanism (I8), and it is the one
@@ -387,7 +384,7 @@ the working escape. E2402, E2406, D-LIB3's `?`-conversion registration, and
 the `Fallible` block in `docs/reference/syntax-surface.jet` are all amended
 in the same change.
 
-### 4. Every stop is a report — new (implements I4 at run time)
+### 4. Every stop is a report (D-FAIL-BREACH1=A; implements I4 at run time)
 
 Before — four renderers, tier-divergent wording, lost locations:
 
@@ -403,7 +400,7 @@ $ jet run port.jet          # n :: load() ?? panic("could not load the port")
 panic: panic                                                   # message lost
 ```
 
-After — proposed: one renderer in the Prelude (I9: engines marshal, the
+After: one renderer in the Prelude (I9: engines marshal, the
 Prelude owns meaning). Every stop — trap, contract, `require`, `panic`,
 `#Todo` — carries a registered code in the E30xx runtime family, the same
 what/why/fix voice as compile diagnostics, and the source arrow, on every
@@ -425,7 +422,7 @@ kept word-for-word as the `Stop` message line. E3001's registered rich frame
 — the source-line box and the debug-build safe locals (D-OBS1/D-OBS2) — is
 kept; the samples here are abbreviated.
 
-### 5. Contracts run everywhere and erase under proof — amended (D-PREPOST1: tier delivery plus a proof disposition)
+### 5. Contracts run everywhere and erase under proof (D-FAIL-TIER1=A; amends D-PREPOST1)
 
 Before — ratified text says "checked in every build"; reality:
 
@@ -438,7 +435,7 @@ $ jet build fee.jet && ./build/fee
   --> fee.jet:1            # arrow points at the marker, not the call
 ```
 
-After — proposed: contracts get a TIR node and a Prelude check, so AOT, JIT,
+After: contracts get a TIR node and a Prelude check, so AOT, JIT,
 and the interpreter all run them (I9). The report blames the right party at
 the right site: a `#Pre` breach points at the **call site** (the caller broke
 the promise); a `#Post` or `require` breach points at the **body** (the
@@ -466,11 +463,11 @@ attribution instead of colliding.
 
 Named amendment: D-PREPOST1 ratified "checked in every build" with one
 explicit opt-out, the per-module build-policy strip. Erasure-under-proof is
-a third disposition — proven, so not emitted — and this ballot names it as
+a third disposition — proven, so not emitted — and D-FAIL-TIER1 names it as
 an amendment to that clause, not a delivery detail. The explicit strip
 opt-out stays as ratified.
 
-### 6. The entry is fallible by default, and unit-fallible signatures lose their clutter — amended (S80 entry clause, S34, E0122, S36, the architecture exit table)
+### 6. The entry is fallible by default, and unit-fallible signatures lose their clutter (D-FAIL-EXIT1=A; D-FAIL-UNIT1=A)
 
 Before — a beginner's first `?` forces ceremony, and the ceremony is ugly:
 
@@ -480,7 +477,7 @@ fn run() => () ? CryptoError  → full E3001 frame, exit 70 (or 101 on Internal)
 fn run() => () ? StoreErr     → E0122: not allowed at the entry point
 ```
 
-After — proposed: `fn run()` is fallible by nature, because programs are.
+After: `fn run()` is fallible by nature, because programs are.
 No annotation, ever, for the default case:
 
 ```jet
@@ -499,8 +496,8 @@ function drops the `()` — a bare `?` clause means "returns nothing, can
 fail":
 
 ```jet
-fn run() ? StoreErr { ... }          // pinned entry family (proposed)
-fn save(path: String) ? IOError { ... }   // no arrow, no unit (proposed)
+fn run() ? StoreErr { ... }          // pinned entry family
+fn save(path: String) ? IOError { ... }   // no arrow, no unit
 ```
 
 The exit law underneath: an unhandled error at the process edge is a value
@@ -512,10 +509,10 @@ the raw Prelude panics are converted to reports, and the `CryptoError`
 special case is deleted. Named amendments: S80's entry clause (implicit
 fallible `run`; E0122's list dies), S34's bare-`?` rule extended to the
 whole return clause, the architecture exit table's producer column, S36's
-producer note, and E3001's registered entry text. Ballots: D-FAIL-EXIT1,
-D-FAIL-UNIT1.
+producer note, and E3001's registered entry text. D-FAIL-EXIT1 and
+D-FAIL-UNIT1 settle these amendments.
 
-### 7. The fallback can see the error, with no lambda — new
+### 7. The fallback can see the error, with no lambda (D-FAIL-BIND1=A)
 
 Before — `??` must swallow, or the code grows an eight-line arm table:
 
@@ -524,7 +521,7 @@ port :: read_port() ?? 8080          // why did it fail? gone.
 if result == { .Err(e) -> print("error") }   // e discarded in practice
 ```
 
-After — proposed: inside a `??` fallback, `err` simply names the failure:
+After: inside a `??` fallback, `err` simply names the failure:
 
 ```jet
 port :: read_port() ?? { warn("using default port: {err}") ; return 8080 }
@@ -536,14 +533,14 @@ On an optional's fallback there is no failure to name, so `err` there is a
 compile error. `?? value`, `?? return`, `?? panic(...)`, `?? break`,
 `?? next` all stay, and the ratified `?? (next)` value form
 (D-ORRETURN-CANON1) is untouched — no new binder grammar exists to collide
-with it. Ballot: D-FAIL-BIND1.
+with it.
 
-### 8. The program edge adapts to the target — new
+### 8. The program edge adapts to the target (D-FAIL-EDGE1=A)
 
 One program shape, many delivery shapes. Today the edge is native-only:
 report text and an exit code, emulated poorly or not at all elsewhere.
 
-Proposed: the edge boundary converts an unhandled error into the target's
+The edge boundary converts an unhandled error into the target's
 native failure shape, carrying the same report:
 
 ```text
@@ -557,8 +554,7 @@ test                  → a test failure naming the report
 The report is the constant; the delivery is target-native. This is the
 boundary law applied to the last boundary, and it replaces today's bare
 `throw new Error(msg)` divergence with design instead of emulation.
-D-FAIL-BREACH1 owns the report's words; this owns its delivery. Ballot:
-D-FAIL-EDGE1.
+D-FAIL-BREACH1 owns the report's words; D-FAIL-EDGE1 owns its delivery.
 
 ### 9. Deletions
 
@@ -580,8 +576,8 @@ D-FAIL-EDGE1.
 
 ## What it looks like
 
-One program, three levels. Today's code on the left of each pair; proposed
-lines are marked.
+One program, three levels. Current code is on the left of each pair. Settled
+lines follow.
 
 **Beginner — a tool that reads a file and reports failure well:**
 
@@ -592,9 +588,9 @@ fn run() => () ? {
     print(text)
 }
 
-// proposed: zero ceremony — run is fallible by nature
+// settled: zero ceremony — run is fallible by nature
 fn run() {
-    text :: fs.read("notes.txt")? "loading your notes"   // proposed note
+    text :: fs.read("notes.txt")? "loading your notes"   // note on the ?
     print(text)
 }
 // $ jet run notes.jet      (file missing)
@@ -606,10 +602,10 @@ fn run() {
 **Middle — a service with a typed error family:**
 
 ```jet
-enum ApiErr { NotFound, RateLimited, Upstream(Err) }   // Err spelling proposed
+enum ApiErr { NotFound, RateLimited, Upstream(Err) }
 
-impl IOError => ApiErr { return ApiErr.Upstream(Err("io: {self}")) }  // proposed target spelling
-impl Err => ApiErr { return ApiErr.Upstream(self) }                   // proposed
+impl IOError => ApiErr { return ApiErr.Upstream(Err("io: {self}")) }
+impl Err => ApiErr { return ApiErr.Upstream(self) }
 
 fn fetch(id: Int) => Record ? ApiErr {
     raw :: store.read(id)?               // IOError converts on the one rail
@@ -633,7 +629,7 @@ fn handle(id: Int) => Response {
 #Pre(amount > 0, "amount must be positive")
 fn debit(account: &Account, amount: Int) { ... }
 
-fn settle(batch: [Transfer]) ? Err {               // proposed: no arrow, no unit
+fn settle(batch: [Transfer]) ? Err {               // no arrow, no unit
     #Transact(t) {
         loop tr, batch {
             debit(&accounts[tr.from], tr.amount)   // proven when amount: Int(1..)
@@ -646,7 +642,7 @@ fn settle(batch: [Transfer]) ? Err {               // proposed: no arrow, no uni
 fn run() {
     result :: task settle(load_batch()?)           // concurrency slate spelling
     result.join()? "settling the day's batch"      // a panicked task arrives as a value
-}                                    // (the concurrency slate's proposed D-CONC-FAIL1 lane)
+}                                    // separate concurrency slate lane
 ```
 
 ## What this unlocks
@@ -662,13 +658,13 @@ fn run() {
 - **The middle states.** Success-with-notes and failure-with-partial-results
   get a home: batch jobs, imports, degraded fetches, and best-effort
   pipelines stop inventing side channels for "it mostly worked".
-- **Tests.** `.expect_fail(E3010)` (code proposed) asserts *which* failure, not just
+- **Tests.** `.expect_fail(E3010)` asserts *which* failure, not just
   "something stopped".
 - **Tooling.** `jet explain` covers runtime stops; the parity ledger tracks
   `.err.out` examples on every tier, so runtime failure becomes a tested
   dimension instead of a silent gap.
 - **Concurrency and services.** The join boundary (the concurrency slate's
-  proposed D-CONC-FAIL1), restart rules, and supervision all ride one value
+  concurrency failure decision), restart rules, and supervision all ride one value
   shape. That slate deletes the string-typed `task.exception()`; this model
   supplies the typed value that replaces it.
 - **Critical software.** Contracts that erase under proof are the SPARK
@@ -699,24 +695,38 @@ fn run() {
   surfacing as a value at the join — the concurrency slate's lane.
 - `.drop("reason")` as the sole spelled discard (D-MARK-DISCARD1).
 
-## Decisions for the owner
+## Settled decisions (2026-08-06)
 
-| Ballot | Question | Recommends |
-|---|---|---|
-| D-FAIL-MODEL1 | Adopt "one report, three routes" as the failure law? | adopt |
-| D-FAIL-CARRIER1 | One carrier under `T?` and `T ? E`, with notes and partial results? | one carrier |
-| D-FAIL-ERROR1 | The default error is a real value — name and constructor? | one word: `Err` |
-| D-FAIL-CTX1 | Where context is written for a passing failure? | a note on the `?` |
-| D-FAIL-CONV1 | Delete the `Fallible` trait; one conversion rail? | delete it |
-| D-FAIL-BREACH1 | Every stop is a registered report on every tier? | yes, one renderer |
-| D-FAIL-TIER1 | Contracts on every tier, erased under proof, blame at the right site? | yes |
-| D-FAIL-EXIT1 | Entry fallible by default; report+1 for errors, 70 for stops, 101 compiler-only? | yes |
-| D-FAIL-UNIT1 | Unit-fallible signature spelling? | `fn save() ? E` — no arrow, no unit |
-| D-FAIL-BIND1 | How a fallback sees the error? | ambient `err`, no lambda |
-| D-FAIL-EDGE1 | The program edge delivers errors in the target's native shape? | yes |
+| Decision | Settled outcome |
+|---|---|
+| D-FAIL-MODEL1 | A — one report, three routes; attribution picks the route |
+| D-FAIL-CARRIER1 | A — one carrier under `T?` and `T ? E`, with payload, verdict, and reports |
+| D-FAIL-ERROR1 | A — `Err` is the default error type and constructor; amends S80 and D-ERR2 |
+| D-FAIL-CONV1 | A — delete `Fallible`; keep declared `impl Source => Target`; amends D-ERR2 and D-LIB3 |
+| D-FAIL-CTX1 | A — note after `?`; automatic journey; delete `.context`; amends D-ERRCTX1 |
+| D-FAIL-BREACH1 | A — registered E30xx report and one Prelude renderer on every tier |
+| D-FAIL-TIER1 | A — contracts check on every tier, erase under proof, and blame the right site; amends D-PREPOST1 |
+| D-FAIL-EXIT1 | A — fallible `fn run()`, exit 1 for reported errors, 70 for stops, 101 for Jet defects |
+| D-FAIL-UNIT1 | A — `fn save(path) ? E`; no arrow and no unit; amends S80 and S34 |
+| D-FAIL-BIND1 | A — ambient `err` inside a fallible `??` fallback |
+| D-FAIL-EDGE1 | A — target-native delivery with one report; D-FAIL-BREACH1 owns report words |
 
-Each ballot stands alone; any subset can be adopted. Ratified decisions each
-one amends are named inside the ballot text.
+All eleven decisions are ratified. Their accepted terms are settled law.
+
+## Implementation slate
+
+The implementation children carry the settled terms once:
+
+- #1527 — D-FAIL-MODEL1, D-FAIL-CARRIER1
+- #1528 — D-FAIL-ERROR1
+- #1529 — D-FAIL-CONV1
+- #1530 — D-FAIL-BREACH1
+- #1531 — D-FAIL-TIER1
+- #1532 — D-FAIL-CTX1
+- #1533 — D-FAIL-EXIT1
+- #1534 — D-FAIL-UNIT1
+- #1535 — D-FAIL-BIND1
+- #1536 — D-FAIL-EDGE1
 
 ## Implementation shape
 
@@ -729,11 +739,11 @@ the one carrier; TIR nodes for contracts; the parity ledger gains the
 lost spans) which get their own cards.
 
 **Phase B — land the ratified-but-unbuilt on the substrate, built once.**
-Structured `Error` (S80 as amended), universal `.context` (D-ERRCTX1 as
-amended), the D-VALIDATE3 rule vocabulary, `Validate.over`, the E2402
-retext, entry-point relaxation, `#Todo` to a real stop.
+Structured `Err` (S80 as amended), the `?` note and journey (D-ERRCTX1 as
+amended), the D-VALIDATE3 rule vocabulary, `Validate.over`, the E2402 retext,
+entry-point relaxation, and `#Todo` to a real stop.
 
-**Phase C — balloted surface unifications, each a coherent greenfield
+**Phase C — implementation children, each a coherent greenfield
 migration.** The conversion-rail deletion, the breach code family with web
 parity, the exit law, the fallback binding. Each deletes its replaced form
 in the same change (greenfield rule; no aliases, no fallbacks).

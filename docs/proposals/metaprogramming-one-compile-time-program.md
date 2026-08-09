@@ -1,8 +1,8 @@
 # Metaprogramming — one compile-time program
 
 2026-08-06. A first-principles rebuild of everything Jet does before your
-program runs. Status: awaiting owner review. Ballot rows at the end. Nothing
-here is implemented yet. Every line marked "proposed" is not ratified.
+program runs. Status: settled law. All thirteen D-META decisions on card
+#1508 are ratified. This document records the final proposal and slate.
 
 ## Executive summary
 
@@ -42,11 +42,11 @@ patch — and the standard sets ship filled, starting with the `Mass` dimension
 Jet does not have. Beginners see no change at all: `#Codable` still reads
 `#Codable` when you write it, and most of the time you no longer need to.
 
-**The most visible change.** `$` becomes the one mark for compile time, in every
+**The most visible change.** `$` is the one mark for compile time, in every
 position:
 
 ```jet
-// today                          // proposed
+// before                         // settled
 #Known limit :: 1000              $limit :: 1000
 #Known if debug { … }             $if debug { … }
 #Known { … }                      $ { … }
@@ -54,18 +54,17 @@ T.reflect().name                  T.$name
 T.$layout                         T.$layout        (already ratified)
 ```
 
-One question comes with it, and `D-META-STAGE1` asks it: does the mark belong to
-the **binding** or to the **name**? If it belongs to the binding, uses stay plain
-and today's rule for carrying a value out of a compile-time block survives. If it
-belongs to the name, it is written at every mention and that rule has nothing
-left to say, because the name is the same name everywhere. Only the second
-reading actually deletes a concept.
+`D-META-STAGE1=B` settles the mark as part of the name. It is written at every
+mention. `$limit` is the same name inside and outside a compile-time block, so
+there is no value-carry rule. `#Known`, `#Known if`, and the `#Known` block
+retire in favour of `$`, `$if`, and `$ { … }`. The mark belongs to the name; a
+plain name and a marked name never denote the same binding.
 
-**What the ballots ask.** Thirteen direction ballots on card #1508. One adopts
-the model. Eleven decide a surface change each. One is a naming menu. Any subset
-works alone. Six ratified rulings are amended by name: `D-DSLBLOCK1=A`,
-`D-CTCORE1`, `D-VERDICT-1308-1`, `D-VERDICT-1308-2`, `D-CTMARKER1`, and
-`D-AUTODERIVE1=E`. No other ratified decision is touched.
+**Settled slate.** Thirteen decisions on card #1508 are ratified. The slate
+amends `D-DSLBLOCK1=A`, `D-CTCORE1`, `D-VERDICT-1308-1`,
+`D-VERDICT-1308-2`, `D-CTMARKER1`, `D-CTCODEGEN1` by retaining its filled-
+template rule, `D-METADEPTH1`, `D-AUTODERIVE1=E`,
+`D-AUTODERIVE-SYNTAX1`, and `D-RULEARG-TYPES1`. No other ratified law changes.
 
 **What does not change.** The walls hold. No macros. No AST mutation. No
 message loop. No comptime types. `S26` and `D-METAMUTATE1` survive — and this
@@ -80,8 +79,8 @@ model gives them a reason instead of a list.
   build entry.
 - **Declaration** — a named, typed thing written in Jet source. A `struct` is
   a declaration. This proposal makes a marker row one too.
-- **Registration** — the act that makes a name legal. Today it is a row in a
-  Rust table. Proposed: a declaration in Jet.
+- **Registration** — the act that makes a name legal. The settled form is a
+  declaration in Jet, read from the one registration table.
 - **Contribution** — what compile-time code hands back: a value, a fact, some
   source code, or a diagnostic.
 - **Stage** — when code runs. Jet has two: compile time and run time. `$` marks
@@ -238,18 +237,18 @@ Spelled out, because each one deletes a mechanism:
 ## The surface
 
 This is the point of the proposal. Every change below makes code shorter or
-clearer to read. Each is marked **ratified**, **amended**, or **new**.
+clearer to read. Each states settled law or an amendment to settled law.
 
-### S1 — `$` is the one compile-time sigil (amended)
+### S1 — `$` is the one compile-time sigil (D-META-STAGE1=B; amends D-VERDICT-1308-1/2 and retires D-CTMARKER1)
 
 Today, compile time is spelled four ways. A binding is `#Known x :: 5`. A branch
 is `#Known if`. A splice is `$name`. A compiler fact is `T.$layout`. Two of
 those already use `$`.
 
-Proposed: **`$` means compile time, in every position.**
+Settled: **`$` means compile time, in every position.**
 
 ```jet
-// today                                  // proposed
+// before                                 // settled
 #Known limit :: 1000                      $limit :: 1000
 #Known if debug { … } else { … }          $if debug { … } else { … }
 #Known { … }                              $ { … }
@@ -263,25 +262,13 @@ program runs, or stop the build. The name is the result. A binder introduces and
 a use consumes, so there is no circle — the obligation is discharged in one place
 and relied on in the others.
 
-**What it means at a use is the open question.** `D-META-STAGE1` asks it
-directly, because the answer decides whether this change deletes a concept or
-only renames one:
+`D-META-STAGE1=B` settles the mark as part of the name. It is written at every
+mention. `$limit` is the same name inside and outside a compile-time block, so
+there is nothing to carry out. `#Known`, `#Known if`, and the `#Known` block
+retire in favour of `$`, `$if`, and `$ { … }`. `D-CTMARKER1` retires outright.
+Implicit folding remains unchanged.
 
-- **The mark belongs to the binding.** Uses stay plain, as they are today:
-  `$limit :: 1000` then `print("{limit}")`. Today's rule for carrying a value
-  out of a compile-time block survives unchanged, so `$ratio` still means
-  "carry this out". Smallest migration, two rules remain.
-- **The mark belongs to the name.** It is written at every mention:
-  `$limit :: 1000` then `print("{$limit}")`. Now there is nothing to carry,
-  because the name is the same name inside and outside the block, and
-  `D-CTMARKER1` retires rather than being generalized. One rule, slightly
-  noisier code.
-
-Today's ratified behaviour is the first: `examples/features/comptime/comptime_block.jet`
-uses plain `limit` for a module-level binding and `$ratio` for one bound inside
-a `#Known { }` block. The second reading is the one that removes a rule.
-
-Two things hold either way:
+Two things follow:
 
 1. **`#Known` leaves the marker plane.** A marker applies a rule to a target.
    A stage is not a rule about a target, which is why `#Known` needed four legal
@@ -291,12 +278,10 @@ Two things hold either way:
    (`D-LAYOUT-FACTS1=B`). `T.$name` and `T.$fields` join it instead of needing a
    separate reflection call.
 
-Amends `D-VERDICT-1308-1` and `D-VERDICT-1308-2` (which made `#Known` and
-`#Known if` the spellings). Whether `D-CTMARKER1` is generalized or retired
-depends on the answer above. Implicit folding is untouched: an ordinary binding
-still folds when it can, and still says nothing when it cannot.
+This amends `D-VERDICT-1308-1` and `D-VERDICT-1308-2` and retires
+`D-CTMARKER1`. A marked name that cannot resolve reports the ordinary E0107.
 
-### S2 — Derive bodies are the implementation (new)
+### S2 — Derive bodies are the implementation (D-META-BODY1=A; D-META-CODE1=A)
 
 Today, from `examples/features/serde/user_derive.jet`:
 
@@ -314,7 +299,7 @@ impl $tname {{
 }
 ```
 
-Proposed:
+Settled:
 
 ```jet
 derive T.DebugText {
@@ -355,7 +340,7 @@ ratified `T.$layout`.
 mechanism. It is the same word, marked by the same sigil, and it is the reason
 this proposal needs no `for` keyword.
 
-### S3 — Rule rows are declarations (new, fulfills `D-VERDICT-1455-1`)
+### S3 — Rule rows are declarations (D-META-ONE1=A; D-META-REG1=A; fulfills `D-VERDICT-1455-1`)
 
 Today a marker row is a Rust macro call at `crates/jet-foundation/src/Policy.rs:854`:
 
@@ -364,7 +349,7 @@ rule!("Inline", sig!(mode: InlineMode = .Hint),
       &[RuleSite::Function, RuleSite::Method, RuleSite::Constant]);
 ```
 
-Proposed, in Prelude Jet source. A rule declaration is an ordinary Jet
+In Prelude Jet source, a rule declaration is an ordinary Jet
 declaration with named parameters. The rule's own arguments and the facts about
 the rule share one list, and `$` says which is which:
 
@@ -391,7 +376,7 @@ Three things fall out:
 - **The site set is data.** `$sites` is a list of enum members, so a program can
   read it. `Site` is already a real compiler enum (`RuleSite`, 18 members),
   published as a Prelude enum by `D-RULEARG-TYPES1=A`.
-- **The row is open-ended.** A new fact about rules is a new named optional
+- **The row is extensible.** A new fact about rules is a new named optional
   parameter, not a new clause in a declaration grammar.
 
 The user surface does not change one character. `#Inline` is still `#Inline`.
@@ -405,7 +390,7 @@ hand-parsed markers cannot return, because there is no second way to write one.
 `D-RULEARG-TYPES1=A` generates fourteen marker-argument enums from this table.
 It reads declarations instead, and generates exactly the same fourteen.
 
-### S4 — Users may declare rules (new)
+### S4 — Users may declare rules (D-META-USER1=A; D-META-FORM1=A)
 
 A rule with no body records a fact. A rule with a body contributes items or
 rejects the build. That is the whole difference between `#Inline` and
@@ -434,7 +419,7 @@ exactly like a derive body (S2). No verb is introduced for either.
 The four checks from `D-MARK-FORM1=A` — vocabulary, site, signature, duplicates
 — run unchanged. They read a declaration instead of a Rust row.
 
-### S5 — Generic modules stop leaking mangled names (new)
+### S5 — Generic modules stop leaking mangled names (D-META-MODNAME1=A)
 
 Today, from `examples/features/modules/generic_modules.jet`:
 
@@ -443,7 +428,7 @@ module three_ints = fixed_buffer<Int, 3>
 buffer :: M5Three4IntsBuffer.{items: fixed}     // a real line in a shipped example
 ```
 
-Proposed:
+Settled:
 
 ```jet
 module three_ints = fixed_buffer<Int, 3>
@@ -453,7 +438,7 @@ buffer :: three_ints.Buffer.{items: fixed}
 The instance is a module. Its types are its members. A user should never type a
 name the compiler minted.
 
-### S6 — `b.generate` uses the derive body form (amended)
+### S6 — `b.generate` uses the derive body form (D-META-CODE1=A; amends D-CTCODEGEN1)
 
 Today, from `examples/features/tooling/programmable_build/main.jet`:
 
@@ -461,7 +446,7 @@ Today, from `examples/features/tooling/programmable_build/main.jet`:
 b.generate("build_message", "fn generated_build_message() => String {{ ... }}")?
 ```
 
-Proposed:
+Settled:
 
 ```jet
 b.generate("build_message") {
@@ -472,45 +457,45 @@ b.generate("build_message") {
 Same block of items as a derive body, in the same `$` vocabulary. One way to
 write generated code at every rung, and no new kind of value.
 
-### S7 — Compile-time expressions where constants are legal (new)
+### S7 — Compile-time expressions where constants are legal (D-META-CONST1=A)
 
 ```jet
 // today: E0963 and E0035
 $LANES :: 8
 $BASE  :: 100
 
-buffer: [Int#($LANES * 2)]              // proposed
-enum Code { First = $BASE + 1 }         // proposed
+buffer: [Int#($LANES * 2)]              // settled
+enum Code { First = $BASE + 1 }         // settled
 ```
 
 The evaluator already exists. Two parsers refuse to call it. This is a
 capability gained by deleting code.
 
-### S8 — One effect model for compile-time code (amended)
+### S8 — One effect model for compile-time code (D-META-EFFECT1=A; amends D-CTCORE1)
 
 Compile-time purity has its own allowed-call list (`D-CTCORE1`), its own tier
 names, and its own diagnostics (E0951), beside the run-time effect system with
-its own (E3401). Proposed: compile-time code declares effects the same way
+its own (E3401). Compile-time code declares effects the same way
 run-time code does.
 
 ```jet
-fn load_schema() =[FS]=> String { … }     // proposed: same syntax at both stages
+fn load_schema() =[FS]=> String { … }     // same syntax at both stages
 ```
 
 Tier 0, 1, and 2 stay exactly as ratified in `D-CTEFFECT1`. They stop being a
 separate vocabulary and become what the effect set already says.
 
-### S9 — Open the closed tables, and fill them (new)
+### S9 — Closed tables become declarations, and ship filled (D-META-DSL1=A; D-META-ONE1=A)
 
 Declarations, not Rust rows:
 
 ```jet
-effect Py                                // proposed — D-FFI-PY1=A ratified this, it never shipped
-dimension Mass                           // proposed
-marker GraphQL<Row>($sites: [.Block]) { … }   // proposed — see D-META-DSL1
+effect Py                                // settled declaration
+dimension Mass                           // settled declaration
+marker GraphQL<Row>($sites: [.Block]) { … }   // settled declaration
 ```
 
-Opening a table is not enough. **The standard sets ship filled.** Jet has five
+Making a table writable is not enough. **The standard sets ship filled.** Jet has five
 dimensions today — Length, Time, Speed, Area, Temperature — and no `Mass`. A
 language that cannot weigh anything is not finished. The Prelude ships the seven
 SI base dimensions and the common derived ones, as declarations, so a user opens
@@ -520,7 +505,7 @@ the table only for a dimension nobody standardised. This lands on
 The marker type parameter on `GraphQL<Row>` is ratified law: `D-SQL-ARG1=B`
 ratified angle brackets and gave markers a type-parameter feature.
 
-### S10 — `jet inspect expand` gains a derive lens (new, no ballot)
+### S10 — `jet inspect expand` gains a derive lens (covered by card #1397)
 
 The lens table takes one more row. `Source/CmdExpand.rs:22-24` says adding a lens
 is "one row here… never new commands". Then §13's promise becomes true: you can
@@ -629,7 +614,7 @@ Today this is impossible without patching the compiler, or it lives in a build
 entry that only runs at the root, far from the function it judges.
 
 ```jet
-// proposed
+// settled
 marker NeedsTimeout($sites: [.Function]) {
     if not target.$params.has("timeout") {
         reject(code: "ORG_NET01",
@@ -657,7 +642,7 @@ impl $tname {{
 """)
 }
 
-// proposed
+// settled
 derive T.Describe {
     fn describe(self) => String {
         parts := [String].{}
@@ -672,7 +657,7 @@ derive T.Describe {
 ### Expert — the same verbs at build scope
 
 ```jet
-// proposed spelling of a shipped mechanism
+// settled spelling of a shipped mechanism
 fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     schema :: b.embed("schema/app.sql")?
 
@@ -762,38 +747,42 @@ Each item earns its place. None is kept because it shipped.
 
 ---
 
-## Decisions for the owner
+## Settled decisions (2026-08-06)
 
-Thirteen ballots, on card #1508. Each stands alone.
+| Decision | Settled outcome |
+|---|---|
+| `D-META-ONE1` | A — compile time is one Jet program; rules are Jet declarations; fulfills `D-VERDICT-1455-1` |
+| `D-META-REG1` | A — one registration table serves markers, planes, rights, and facts |
+| `D-META-NAME1` | A — `marker` declares a rule |
+| `D-META-FORM1` | A — one named-parameter list; `$` marks rule facts; no new clause grammar; typed arguments use `D-RULEARG-TYPES1` |
+| `D-META-USER1` | A — user rules record facts or add code; `D-METADEPTH1` rises to additive user rules; Law 1 forbids mutation and shadowing |
+| `D-META-CODE1` | A — generated code is real Jet code with typed holes; amends D-CTCODEGEN1 only by retaining its filled-template rule |
+| `D-META-BODY1` | A — a derive body is its implementation; compile-time control flow adds members |
+| `D-META-DSL1` | A — libraries may declare checked text blocks; amends D-DSLBLOCK1; Jet grammar stays closed |
+| `D-META-EFFECT1` | A — one effect model at both stages; amends D-CTCORE1; D-CTEFFECT1 tiers keep their meaning |
+| `D-META-CONST1` | A — any compile-time value is legal where a constant is legal; retire E0963/E0035 literal-only checks |
+| `D-META-MODNAME1` | A — generic-module members are reached through the instance; user code never names a mangled symbol |
+| `D-META-STAGE1` | B — `$` belongs to the name and appears at every mention; amends D-VERDICT-1308-1/2 and retires D-CTMARKER1 |
+| `D-META-AUTO1` | A — derive every structurally derivable trait unless refused; amends D-AUTODERIVE1=E and `D-AUTODERIVE-SYNTAX1`; refusal spelling stays |
 
-| Ballot | Asks | Recommendation |
-|---|---|---|
-| `D-META-ONE1` | Adopt the model. Rule rows move from Rust to Jet declarations. Fulfills `D-VERDICT-1455-1`. | A |
-| `D-META-STAGE1` | **Amends `D-VERDICT-1308-1/2`; may retire `D-CTMARKER1`.** One mark for compile time, and whether it belongs to the binding or the name. | B |
-| `D-META-BODY1` | What a derive body contains: the implementation itself. | A |
-| `D-META-FORM1` | How a rule declaration carries its facts: named parameters marked with the compile-time sigil, and no new keywords. | A |
-| `D-META-CODE1` | Generated code is written as code, not as a string. Retire `emit()` and `{{` escaping. | A |
-| `D-META-AUTO1` | **Amends `D-AUTODERIVE1=E`.** Everything derivable is derived unless refused; only the underivable stays opt-in. | A |
-| `D-META-USER1` | What a user-written rule may do: record facts and add code. Walks through the door the marker proposal left open. | A |
-| `D-META-DSL1` | **Amends `D-DSLBLOCK1=A`.** Open the text region to libraries; keep the grammar closed. | A |
-| `D-META-EFFECT1` | **Amends `D-CTCORE1`.** One effect model at both stages; the allow-list retires. | A |
-| `D-META-CONST1` | Compile-time expressions wherever a constant is legal. Retire E0963 and E0035 literal-only rules. | A |
-| `D-META-MODNAME1` | Generic-module instances expose members by name. Retire mangled names from user code. | A |
-| `D-META-REG1` | One registration table behind markers, planes, rights, and build facts. Touches three sibling proposals. | A |
-| `D-META-NAME1` | The word that declares a rule. Naming menu. | A |
+All thirteen decisions are ratified. Their accepted terms are settled law.
 
-Five ratified rulings are amended by name:
+## Implementation slate
 
-| Amended | By | What changes |
-|---|---|---|
-| `D-DSLBLOCK1=A` | `D-META-DSL1` | The text region opens to libraries; the grammar stays closed. |
-| `D-CTCORE1` | `D-META-EFFECT1` | The allowed-call list retires; the effect set carries the fact. |
-| `D-VERDICT-1308-1` | `D-META-STAGE1` | The explicit form moves from `#Known` to the sigil. Implicit folding is untouched. |
-| `D-VERDICT-1308-2` | `D-META-STAGE1` | `#Known if` becomes `$if`. |
-| `D-CTMARKER1` | `D-META-STAGE1` | Generalized if the mark belongs to the binding; retired outright if it belongs to the name. The ballot decides which. |
-| `D-AUTODERIVE1=E` | `D-META-AUTO1` | The default set widens from four traits to everything structurally derivable. Refusal spelling is unchanged. |
+The implementation children carry the settled terms once:
 
-No other ratified decision is touched.
+- #1537 — D-META-STAGE1
+- #1538 — D-META-REG1, D-META-NAME1, D-META-FORM1
+- #1539 — D-META-ONE1
+- #1540 — D-META-USER1
+- #1541 — D-META-CODE1, D-META-BODY1, D-META-MODNAME1
+- #1542 — D-META-DSL1
+- #1543 — D-META-EFFECT1
+- #1544 — D-META-CONST1
+- #1545 — D-META-AUTO1
+
+The derive lens in `jet inspect expand` remains owned by #1397. Spin-off
+cards #1509 and #1510 remain separate from this slate.
 
 This proposal introduces exactly **one new word**: the keyword that declares a
 rule, which `D-META-NAME1` picks. Everything else reuses ratified syntax. Facts
@@ -811,17 +800,17 @@ same code/what/why/fix signature `b.error` already has. `$loop` is the ratified
 declarations behind the existing spellings. Delete the ~30 hand-parsed paths.
 One vocabulary diagnostic replaces five. All tests stay green.
 
-**Phase B — land the ratified backlog on the new substrate.** The five open
+**Phase B — land the ratified backlog on the new substrate.** The five remaining
 marker cards (#1456, #1457, #1458, #1460, #1461) and the plane law
 (`D-TYPE2-PLANE1=A`) build once, on declarations, instead of twice on tables.
 
-**Phase C — the balloted surface changes.** Each is a greenfield migration that
+**Phase C — implementation children.** Each is a greenfield migration that
 deletes the replaced form: code-shaped derives, user markers, open tables,
 compile-time constants, one effect model.
 
 ---
 
-## Open items for verification
+## Out-of-scope verification notes
 
 Two ledgers disagree and one is wrong. `tests/jit_gaps.txt` marks
 `comptime/embed` and `comptime/find` covered. The tier-parity audit
