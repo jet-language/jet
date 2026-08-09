@@ -1264,12 +1264,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .collect();
                     // Return type comes from `cx.fn_types` (including extern rust /
                     // CModule entries registered in Context).
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: call_return_type(cx, &call.name),
                         kind: TExprKind::ExternCall {
                             wrapper,
                             args: eargs,
                         },
+                    };
+                    return match source_arg_order(&call.args) {
+                        Some(order) => preserve_source_arg_order(
+                            lowered,
+                            &order,
+                            call.args.len(),
+                            call.name_span.start as u32,
+                        ),
+                        None => lowered,
                     };
                 }
                 // c109 Phase 14: unqualified inline-module import (`emit_call`'s
@@ -3106,16 +3115,23 @@ pub(crate) fn preserve_source_arg_order(
     ast_arg_count: usize,
     site: u32,
 ) -> TExpr {
-    let Some(args) = call_args_mut(&mut call.kind) else {
-        return call;
+    let mut stmts = match &mut call.kind {
+        TExprKind::Call { args, .. }
+        | TExprKind::MethodCall { args, .. }
+        | TExprKind::FnFieldCall { args, .. }
+        | TExprKind::StaticCall { args, .. }
+        | TExprKind::ModuleCall { args, .. }
+        | TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::Call { args, .. },
+        } => bind_arg_temporaries(args, order, ast_arg_count, site),
+        TExprKind::CoreCall { args, .. } => {
+            bind_arg_temporaries(args, order, ast_arg_count, site)
+        }
+        TExprKind::ExternCall { args, .. } => {
+            bind_arg_temporaries(args, order, ast_arg_count, site)
+        }
+        _ => return call,
     };
-    // A `#Root` dot call (D-CALLDUAL1=E) lowers its receiver into slot 0 of the
-    // TIR argument list, while `order` was computed over the AST list the
-    // receiver was stripped from. Recovering the offset from the two lengths
-    // keeps this right for every node shape instead of special-casing one.
-    let offset = args.len().saturating_sub(ast_arg_count);
-    let order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
-    let mut stmts = bind_arg_temporaries(args, &order, site);
     if stmts.is_empty() {
         return call;
     }
@@ -3127,10 +3143,9 @@ pub(crate) fn preserve_source_arg_order(
     }
 }
 
-/// D-APILABEL1=A: can evaluating this argument be *observed*? Reading a place,
-/// a literal, or a borrow of one cannot, so moving such an argument across
-/// another has no effect anyone can see — and hoisting it into a temporary
-/// would be actively wrong, because that moves the place instead of passing it.
+/// D-APILABEL1=A: can evaluating this argument be *observed*? A place read can:
+/// an earlier supplied call may mutate the place before this argument reads it.
+/// Only values independent of runtime state may stay in declaration order.
 ///
 /// Conservative: anything not recognised here is assumed to have an effect.
 fn effect_free(e: &TExpr) -> bool {
@@ -3139,7 +3154,6 @@ fn effect_free(e: &TExpr) -> bool {
         | TExprKind::FloatLit(_)
         | TExprKind::BoolLit(_)
         | TExprKind::CharLit(_)
-        | TExprKind::Local(_)
         | TExprKind::Unit
         | TExprKind::DefaultLit
         | TExprKind::CtLit(_)
@@ -3148,62 +3162,123 @@ fn effect_free(e: &TExpr) -> bool {
             crate::Codegen::TIR::TStrPart::Lit(_) => true,
             crate::Codegen::TIR::TStrPart::Interp(inner, ..) => effect_free(inner),
         }),
-        TExprKind::Field { recv, .. } => effect_free(recv),
-        TExprKind::Borrow { place, .. } => effect_free(place),
-        TExprKind::Clone(inner) | TExprKind::Deref(inner) => effect_free(inner),
-        TExprKind::Unary { operand, .. } => effect_free(operand),
-        TExprKind::Binary { lhs, rhs, .. } => effect_free(lhs) && effect_free(rhs),
+        // Arithmetic can panic (division by zero, overflow, or negating the
+        // minimum integer). Keep it in written order rather than trying to
+        // duplicate sema's operator/type proof here.
+        TExprKind::Unary { .. } | TExprKind::Binary { .. } => false,
         _ => false,
     }
 }
 
-/// Whether this argument may be hoisted into a temporary at all.
-///
-/// What must never be hoisted is a **place**: binding `let t = bag` moves or
-/// copies it, so a `&bag` argument would have the callee write to the temporary
-/// and the caller's value would never change. That case is already excluded by
-/// `effect_free`, which is true of every place read — so a by-reference
-/// argument only reaches here when it is a computed value, and `&(t)` over a
-/// temporary holding that value is exactly right.
-///
-/// Only two decorations genuinely cannot move: an `Fn` coercion, whose `let`
-/// would be typed before the coercion rather than after, and a fixed-list
-/// widening, which emit applies to the original expression.
-fn hoistable(arg: &crate::Codegen::TIR::TCallArg) -> bool {
-    arg.fn_coerce.is_none() && !arg.widen_to_vec
+trait OrderedArg {
+    fn value(&self) -> &TExpr;
+    /// A borrowed place must remain a place: moving it into a temporary changes
+    /// ownership, while sema rejects any neighboring access that could make the
+    /// borrow's timing observable. Other arguments can be pinned.
+    fn can_bind(&self) -> bool {
+        true
+    }
+    fn take_for_binding(&mut self, replacement: TExpr) -> TExpr;
 }
 
-/// The argument list of any TIR node that takes one, so the D-APILABEL1 order
-/// rule is written once rather than per call shape.
-fn call_args_mut(kind: &mut TExprKind) -> Option<&mut Vec<crate::Codegen::TIR::TCallArg>> {
-    match kind {
-        TExprKind::Call { args, .. }
-        | TExprKind::MethodCall { args, .. }
-        | TExprKind::FnFieldCall { args, .. }
-        | TExprKind::StaticCall { args, .. }
-        | TExprKind::ModuleCall { args, .. } => Some(args),
-        // A call through a function value carries its arguments one level down.
-        TExprKind::FnValue { kind: crate::Codegen::TIR::TFnValueKind::Call { args, .. } } => {
-            Some(args)
+impl OrderedArg for crate::Codegen::TIR::TCallArg {
+    fn value(&self) -> &TExpr {
+        &self.value
+    }
+
+    fn can_bind(&self) -> bool {
+        !self.mut_borrow && (!self.borrow || self.clone || self.arc_clone)
+    }
+
+    fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+        let mut value = std::mem::replace(&mut self.value, replacement);
+        // Cloning is part of evaluating the supplied expression, so perform it
+        // in source order rather than leaving the wrapper on the later call.
+        if self.clone || self.arc_clone {
+            value = TExpr {
+                ty: value.ty.clone(),
+                kind: TExprKind::Clone(Box::new(value)),
+            };
+            self.clone = false;
+            self.arc_clone = false;
         }
-        _ => None,
+        value
+    }
+}
+
+impl OrderedArg for crate::Codegen::TIR::TExternArg {
+    fn value(&self) -> &TExpr {
+        &self.value
+    }
+
+    fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+        let mut value = std::mem::replace(&mut self.value, replacement);
+        if self.clone {
+            value = TExpr {
+                ty: value.ty.clone(),
+                kind: TExprKind::Clone(Box::new(value)),
+            };
+            self.clone = false;
+        }
+        value
+    }
+}
+
+impl OrderedArg for TExpr {
+    fn value(&self) -> &TExpr {
+        self
+    }
+
+    fn can_bind(&self) -> bool {
+        // Raw Core args do not carry the signature's Read/Move convention.
+        // A scalar place is Copy; a computed owning value is safe to move into
+        // the source-order temporary. Keep non-scalar places in the call so a
+        // later Core emit borrow cannot turn the temporary into an accidental
+        // move. Sema rejects a neighboring mutation that would make that Read
+        // place's exact borrow instant observable.
+        self.ty.is_scalar()
+            || matches!(
+                &self.kind,
+                TExprKind::Call { .. }
+                    | TExprKind::MethodCall { .. }
+                    | TExprKind::FnFieldCall { .. }
+                    | TExprKind::StaticCall { .. }
+                    | TExprKind::ModuleCall { .. }
+                    | TExprKind::FnValue { .. }
+                    | TExprKind::CoreCall { .. }
+                    | TExprKind::ExternCall { .. }
+                    | TExprKind::HostCall(_)
+                    | TExprKind::InlineBlock(_)
+                    | TExprKind::Clone(_)
+                    | TExprKind::StrLit(_)
+            )
+    }
+
+    fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+        std::mem::replace(self, replacement)
     }
 }
 
 /// Replace each listed argument with a read of a fresh temporary, and return
 /// the `let` statements that bind them — emitted in `order`, which is source
 /// order, not declaration order.
-fn bind_arg_temporaries(
-    args: &mut [crate::Codegen::TIR::TCallArg],
+fn bind_arg_temporaries<A: OrderedArg>(
+    args: &mut [A],
     order: &[usize],
+    ast_arg_count: usize,
     site: u32,
 ) -> Vec<TStmt> {
+    // A `#Root` dot call (D-CALLDUAL1=E) lowers its receiver into slot 0 of the
+    // TIR argument list, while `order` was computed over the AST list the
+    // receiver was stripped from. Recover the offset from the two lengths.
+    let offset = args.len().saturating_sub(ast_arg_count);
+    let order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
     // Only arguments that can actually be observed need pinning down. Count
     // them across the whole list, not just the written ones: a filled default
     // with an effect also has to run after every supplied argument, and it
     // sits in the call rather than in `order`. With fewer than two, nothing can
     // be observed out of order and the call stays a plain call.
-    let observable_total = args.iter().filter(|arg| !effect_free(&arg.value)).count();
+    let observable_total = args.iter().filter(|arg| !effect_free(arg.value())).count();
     if observable_total < 2 {
         return Vec::new();
     }
@@ -3212,7 +3287,7 @@ fn bind_arg_temporaries(
         .copied()
         .filter(|slot| {
             args.get(*slot)
-                .is_some_and(|arg| hoistable(arg) && !effect_free(&arg.value))
+                .is_some_and(|arg| arg.can_bind() && !effect_free(arg.value()))
         })
         .collect();
     if observable.is_empty() {
@@ -3229,21 +3304,22 @@ fn bind_arg_temporaries(
         // offset, so two calls can never collide and the name stays stable
         // across runs.
         let temp = format!("__jet_arg{site}_{step}");
-        let ty = arg.value.ty.clone();
-        let bound = std::mem::replace(
-            &mut arg.value,
-            TExpr {
-                ty: ty.clone(),
-                // A `user` slot, not `generated`: `TStmt::Let` spells its name
-                // through `mangle`, and only `TLocal::user` reads it back the
-                // same way. The name itself is unspellable in Jet source.
-                kind: TExprKind::Local(TLocal::user(&temp)),
-            },
-        );
+        let ty = arg.value().ty.clone();
+        let bound = arg.take_for_binding(TExpr {
+            ty: ty.clone(),
+            // A `user` slot, not `generated`: `TStmt::Let` spells its name
+            // through `mangle`, and only `TLocal::user` reads it back the
+            // same way. The name itself is unspellable in Jet source.
+            kind: TExprKind::Local(TLocal::user(&temp)),
+        });
         stmts.push(TStmt::Let {
             name: temp,
             kw: "let",
-            let_ty: crate::Codegen::TIR::TLetTy::plain(ty),
+            // Keep the raw expression's Rust type here. Call-boundary
+            // conversions (Fn boxing, fixed-list widening, union injection,
+            // and borrows) still belong to the original argument wrapper,
+            // which now reads this temporary.
+            let_ty: crate::Codegen::TIR::TLetTy::inferred(),
             init: bound,
             gc_promotion: None,
             gc_transferred: false,
@@ -3263,5 +3339,162 @@ fn compiler_fact_type(fact: &str) -> Type {
             Type::List(Box::new(Type::Named("FieldInfo".to_string())))
         }
         _ => Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod source_order_tests {
+    use super::*;
+    use crate::AST::BinOp;
+    use crate::Codegen::TIR::TExternArg;
+
+    fn int(value: i64) -> TExpr {
+        TExpr {
+            ty: Type::Int,
+            kind: TExprKind::IntLit(value, None),
+        }
+    }
+
+    fn division() -> TExpr {
+        TExpr {
+            ty: Type::Int,
+            kind: TExprKind::Binary {
+                op: BinOp::Div,
+                overflow: true,
+                line: 1,
+                lhs: Box::new(int(1)),
+                rhs: Box::new(int(0)),
+            },
+        }
+    }
+
+    fn print() -> TExpr {
+        TExpr {
+            ty: unit_type(),
+            kind: TExprKind::Print(Box::new(int(1))),
+        }
+    }
+
+    fn bump() -> TExpr {
+        TExpr {
+            ty: Type::Int,
+            kind: TExprKind::Call {
+                name: "bump".to_string(),
+                type_args: Vec::new(),
+                args: Vec::new(),
+            },
+        }
+    }
+
+    fn assert_division_then_print(lowered: TExpr) {
+        let TExprKind::InlineBlock(stmts) = lowered.kind else {
+            panic!("reordered call needs argument temporaries");
+        };
+        assert!(matches!(
+            &stmts[0],
+            TStmt::Let { init: TExpr { kind: TExprKind::Binary { op: BinOp::Div, .. }, .. }, .. }
+        ));
+        assert!(matches!(
+            &stmts[1],
+            TStmt::Let { init: TExpr { kind: TExprKind::Print(_), .. }, .. }
+        ));
+    }
+
+    #[test]
+    fn core_call_keeps_panicking_arithmetic_in_written_order() {
+        let call = TExpr {
+            ty: unit_type(),
+            kind: TExprKind::CoreCall {
+                module: "core.test".to_string(),
+                method: "ordered".to_string(),
+                args: vec![print(), division()],
+                source_span: Span::new(0, 1),
+                // The first source expression sits in slot 1 and widens at the
+                // call site. Its raw value must still be evaluated first.
+                widen_to_vec: vec![false, true],
+            },
+        };
+        assert_division_then_print(preserve_source_arg_order(call, &[1, 0], 2, 7));
+    }
+
+    #[test]
+    fn extern_call_uses_the_same_written_order_wrapper() {
+        let call = TExpr {
+            ty: unit_type(),
+            kind: TExprKind::ExternCall {
+                wrapper: "ordered".to_string(),
+                args: vec![
+                    TExternArg { value: print(), clone: false },
+                    TExternArg { value: division(), clone: false },
+                ],
+            },
+        };
+        assert_division_then_print(preserve_source_arg_order(call, &[1, 0], 2, 9));
+    }
+
+    #[test]
+    fn core_call_pins_a_local_read_after_an_earlier_call() {
+        let call = TExpr {
+            ty: unit_type(),
+            kind: TExprKind::CoreCall {
+                module: "core.test".to_string(),
+                method: "ordered".to_string(),
+                args: vec![
+                    TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::Local(TLocal::user("x")),
+                    },
+                    bump(),
+                ],
+                source_span: Span::new(0, 1),
+                widen_to_vec: vec![false, false],
+            },
+        };
+        let lowered = preserve_source_arg_order(call, &[1, 0], 2, 11);
+        let TExprKind::InlineBlock(stmts) = lowered.kind else {
+            panic!("reordered call needs argument temporaries");
+        };
+        assert!(matches!(
+            &stmts[0],
+            TStmt::Let { init: TExpr { kind: TExprKind::Call { name, .. }, .. }, .. }
+                if name == "bump"
+        ));
+        assert!(matches!(
+            &stmts[1],
+            TStmt::Let { init: TExpr { kind: TExprKind::Local(_), .. }, .. }
+        ));
+    }
+
+    #[test]
+    fn core_call_does_not_move_a_read_borrowed_string_place() {
+        let call = TExpr {
+            ty: unit_type(),
+            kind: TExprKind::CoreCall {
+                module: "core.test".to_string(),
+                method: "ordered".to_string(),
+                args: vec![
+                    TExpr {
+                        ty: Type::String,
+                        kind: TExprKind::Local(TLocal::user("key")),
+                    },
+                    bump(),
+                ],
+                source_span: Span::new(0, 1),
+                widen_to_vec: vec![false, false],
+            },
+        };
+        let lowered = preserve_source_arg_order(call, &[1, 0], 2, 13);
+        let TExprKind::InlineBlock(stmts) = lowered.kind else {
+            panic!("earlier call still needs an argument temporary");
+        };
+        assert_eq!(stmts.len(), 2);
+        let TStmt::ExprStmt(TExpr {
+            kind: TExprKind::CoreCall { args, .. },
+            ..
+        }) = &stmts[1]
+        else {
+            panic!("last statement must remain the Core call");
+        };
+        assert!(matches!(&args[0].kind, TExprKind::Local(local) if local.name == "key"));
     }
 }

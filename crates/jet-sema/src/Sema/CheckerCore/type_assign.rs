@@ -6,6 +6,7 @@ use crate::Sema::CheckerCoreLib::{
     core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
     phantom_fact_menu_diag, retired_acronym_spelling_diag,
 };
+use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
     edit_distance, option_used_where_plain_expected, result_used_where_plain_expected,
@@ -596,6 +597,41 @@ impl<'a> Checker<'a> {
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
             if want == got {
                 return false;
+            }
+            if let (
+                Type::Fn {
+                    params: want_params,
+                    ret: want_ret,
+                    ..
+                },
+                Type::Fn {
+                    params: got_params,
+                    ret: got_ret,
+                    ..
+                },
+            ) = (want, got)
+            {
+                // Keep ordinary function-shape mismatches on their existing
+                // generic diagnostic path. E0771 is only for the callable
+                // contract after parameters and return type already match.
+                if want_params == got_params && want_ret == got_ret {
+                    if fn_types_compatible(want, got) {
+                        return true;
+                    }
+                    self.diags.push(Diagnostic::error(
+                        "E0771",
+                        format!(
+                            "this needs {}, but the function value is {}",
+                            want.show(),
+                            got.show()
+                        ),
+                        "public labels and parameter zones are part of a function's callable type"
+                            .to_string(),
+                        format!("use `{}` here", want.name()),
+                        Some(span),
+                    ));
+                    return true;
+                }
             }
             if Type::compute_tensor_compatible(want, got) {
                 // The erased `Tensor` spelling is the storage boundary. A

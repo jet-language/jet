@@ -1521,7 +1521,19 @@ impl<'a> Checker<'a> {
                                     &rt,
                                     Type::Union(members) if members.iter().any(|m| m == &et)
                                 );
+                                // D-APILABEL1=A: a function returned through a
+                                // bare `fn` type may keep a more-specific source
+                                // contract, but the reverse direction is a mismatch.
+                                let reported = if matches!(
+                                    (&rt, &et),
+                                    (Type::Fn { .. }, Type::Fn { .. })
+                                ) {
+                                    self.check_type_assignable(&rt, &et, e.span())
+                                } else {
+                                    false
+                                };
                                 if et != rt
+                                    && !reported
                                     && !http_handler_lambda
                                     && !string_view_compatible
                                     && !union_member_widen

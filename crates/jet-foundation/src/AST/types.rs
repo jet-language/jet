@@ -388,10 +388,10 @@ impl PartialEq for Type {
             (Option(a), Option(b)) => a == b,
             (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
             // D-EFF2: effect_bound deliberately excluded from the comparison.
-            // D-APILABEL1=A: the call contract — public labels and zones — IS
+            // D-APILABEL1=A: the call contract — public labels and zones — is
             // callable identity, so `fn(*, force: Bool)` and `fn(Bool)` are
-            // different types. A type that declares no contract still matches
-            // one that does; only a declared contract constrains a caller.
+            // different types. Directional compatibility belongs in sema;
+            // symmetric equality must not erase either side's contract.
             (
                 Fn {
                     params: p1,
@@ -405,14 +405,7 @@ impl PartialEq for Type {
                     param_contract: c2,
                     ..
                 },
-            ) => {
-                p1 == p2
-                    && r1 == r2
-                    && match (c1, c2) {
-                        (Some(a), Some(b)) => a == b,
-                        _ => true,
-                    }
-            }
+            ) => p1 == p2 && r1 == r2 && c1 == c2,
             (Named(a), Named(b)) => a == b,
             (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
             (TraitObject(a), TraitObject(b)) => a == b,
@@ -568,6 +561,32 @@ fn effect_names(row: &[(String, Span)]) -> String {
     row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
 }
 
+fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)]>) -> String {
+    let contract = contract.unwrap_or(&[]);
+    let mut parts = Vec::with_capacity(params.len() + 2);
+    let mut star_done = false;
+    for (index, param) in params.iter().enumerate() {
+        let zone = contract.get(index).map(|(_, zone)| *zone);
+        if zone == Some(super::ParamZone::LabelOnly) && !star_done {
+            parts.push(crate::Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+            star_done = true;
+        }
+        let label = contract
+            .get(index)
+            .map(|(label, _)| label.as_str())
+            .filter(|label| !label.is_empty());
+        parts.push(label.map_or_else(|| param.name(), |label| format!("{label}: {}", param.name())));
+        if zone == Some(super::ParamZone::PositionalOnly)
+            && contract
+                .get(index + 1)
+                .is_none_or(|(_, next)| *next != super::ParamZone::PositionalOnly)
+        {
+            parts.push(crate::Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+        }
+    }
+    parts.join(", ")
+}
+
 impl Type {
     /// D-COMPUTE-TYPE1: preserve a fixed compute dimension in the type tree.
     pub fn compute_dimension_type(value: u64) -> Type {
@@ -700,12 +719,8 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound, .. } => {
-                let ps = params
-                    .iter()
-                    .map(|p| p.name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            Type::Fn { params, ret, effect_bound, param_contract, .. } => {
+                let ps = fn_param_names(params, param_contract.as_deref());
                 match (effect_bound, ret) {
                     (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
                     (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
@@ -779,12 +794,8 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound, .. } => {
-                let ps = params
-                    .iter()
-                    .map(|p| p.name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            Type::Fn { params, ret, effect_bound, param_contract, .. } => {
+                let ps = fn_param_names(params, param_contract.as_deref());
                 match (effect_bound, ret) {
                     (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
                     (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
@@ -980,6 +991,7 @@ impl Type {
 #[cfg(test)]
 mod tests {
     use super::{numeric_type_from_name, Dimension, InternalTag, TagMarker, Type};
+    use crate::AST::ParamZone;
 
     fn core_secret() -> Type {
         Type::Tagged {
@@ -1014,6 +1026,29 @@ mod tests {
 
         assert_ne!(core, local);
         assert_eq!(tainted_core, core);
+    }
+
+    #[test]
+    fn function_contract_is_identity_and_renders_in_type_names() {
+        let bare = Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: None,
+            return_view_provenance: None,
+        };
+        let labelled = Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: Some(vec![("force".to_string(), ParamZone::LabelOnly)]),
+            return_view_provenance: None,
+        };
+
+        assert_ne!(bare, labelled);
+        assert_eq!(bare.name(), "fn(Bool) => Int");
+        assert_eq!(labelled.name(), "fn(*, force: Bool) => Int");
+        assert_eq!(labelled.show(), "fn(*, force: Bool) => Int");
     }
 
     #[test]

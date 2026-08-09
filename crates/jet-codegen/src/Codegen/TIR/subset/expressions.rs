@@ -234,10 +234,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
             // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
             // local). No special exclusion remains — the Box-coercion is total.
-            // D-APILABEL1=A: a call-site LABEL is allowed. Sema binds labels by
-            // name and hands TIR an argument list already in declaration order,
-            // and the only lowering that reads `CallArg.label` is the D-ZIPPAD1
-            // zip family. So a labelled arg emits byte-identically to a bare one.
+            // D-APILABEL1=A: sema binds labels by name and hands TIR declaration-
+            // order arguments. Lowering has already used `source_index` to pin
+            // observable reordered expressions; this subset gate need not read
+            // the source-level `CallArg.label`.
             (is_print
                 || is_zip_family
                 || is_drop
@@ -265,7 +265,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     // shared `rust_param_type`). It stays EXCLUDED on the `is_extern` path
                     // only: extern args use `lower_extern_call_arg`, which does not carry
                     // the Arc form (the FFI boundary takes a `(…).clone()`, not an Arc).
-                    // Labels are sema-only (documentation), checked at their own position.
+                    // Labels do not change conversion coverage; lowering handles
+                    // source-order temporaries after this subset gate.
                     (!a.flags.shared_auto_clone || !is_extern)
                         && (is_zip_family || arg_conv_in_subset(a))
                         && expr_in_subset(&a.expr, cx, locals)

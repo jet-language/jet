@@ -1814,7 +1814,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
         ret: sig.return_type.clone().map(Box::new),
         effect_bound: None,
-        param_contract: None,
+        param_contract: Some(sig.param_call.clone()),
         return_view_provenance: sig.return_view_provenance.get(),
     }
 }
@@ -1824,11 +1824,13 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
         Type::Fn {
             params: wp,
             ret: wr,
+            param_contract: wc,
             ..
         },
         Type::Fn {
             params: gp,
             ret: gr,
+            param_contract: gc,
             ..
         },
     ) = (want, got)
@@ -1843,10 +1845,68 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
             return false;
         }
     }
-    match (wr, gr) {
+    let returns_match = match (wr, gr) {
         (None, None) => true,
         (Some(a), Some(b)) => a == b,
         _ => false,
+    };
+    if !returns_match {
+        return false;
+    }
+    let Some(want_contract) = wc else {
+        // A bare structural function type promises no particular calling
+        // surface, so retaining a more specific source contract is safe.
+        return true;
+    };
+    let Some(got_contract) = gc else {
+        return false;
+    };
+    want_contract.len() == got_contract.len()
+        && want_contract.iter().zip(got_contract).all(
+            |((want_label, want_zone), (got_label, got_zone))| {
+                let zone_accepts = matches!(
+                    (want_zone, got_zone),
+                    (crate::AST::ParamZone::PositionalOnly, crate::AST::ParamZone::PositionalOnly | crate::AST::ParamZone::Either)
+                        | (crate::AST::ParamZone::LabelOnly, crate::AST::ParamZone::LabelOnly | crate::AST::ParamZone::Either)
+                        | (crate::AST::ParamZone::Either, crate::AST::ParamZone::Either)
+                );
+                zone_accepts
+                    && (*want_zone == crate::AST::ParamZone::PositionalOnly
+                        || want_label == got_label)
+            },
+        )
+}
+
+#[cfg(test)]
+mod callable_contract_tests {
+    use super::fn_types_compatible;
+    use crate::AST::{ParamZone, Type};
+
+    fn callable(contract: Option<Vec<(&str, ParamZone)>>) -> Type {
+        Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: contract.map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|(label, zone)| (label.to_string(), zone))
+                    .collect()
+            }),
+            return_view_provenance: None,
+        }
+    }
+
+    #[test]
+    fn function_contract_assignability_is_directional() {
+        let bare = callable(None);
+        let labelled = callable(Some(vec![("force", ParamZone::LabelOnly)]));
+        let either = callable(Some(vec![("force", ParamZone::Either)]));
+
+        assert!(fn_types_compatible(&bare, &labelled));
+        assert!(!fn_types_compatible(&labelled, &bare));
+        assert!(fn_types_compatible(&labelled, &either));
+        assert!(!fn_types_compatible(&either, &labelled));
     }
 }
 

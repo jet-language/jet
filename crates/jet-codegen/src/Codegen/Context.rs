@@ -1226,14 +1226,14 @@ impl Cx {
             Type::Fn {
                 params,
                 ret,
-                param_contract: _,
+                param_contract,
                 effect_bound,
                 return_view_provenance,
             } => Type::Fn {
                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
                 effect_bound: effect_bound.clone(),
-                param_contract: None,
+                param_contract: param_contract.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(
@@ -4183,5 +4183,20 @@ mod tests {
             Some("RaylibWindow")
         );
         assert_eq!(raylib_handle_rust_type("RaylibColor"), Some("RaylibColor"));
+    }
+
+    #[test]
+    fn type_alias_expansion_preserves_function_parameter_contract() {
+        let source = "alias Callback<T> = fn(*, force: T) => Int;\nfn run() {}\n";
+        let (tokens, lex_diags) = crate::Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let program = crate::Parser::parse(&tokens).expect("parse failed");
+        let cx = build_cx(&program, source, "test.jet");
+
+        let expanded = cx.expand_type_aliases(&Type::Apply {
+            name: "Callback".to_string(),
+            args: vec![Type::Bool],
+        });
+        assert_eq!(expanded.name(), "fn(*, force: Bool) => Int");
     }
 }

@@ -203,9 +203,8 @@ pub(super) fn core_call_args_in_subset(
     cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> bool {
-    // D-TASKRUNTIME1=A: the bounded channel form has one required
-    // documentation label. Sema has already checked its name and integer
-    // type; lowering erases the label and carries the resolved tuple type.
+    // D-TASKRUNTIME1=A: the bounded channel form requires `capacity:`.
+    // Sema has bound the label and checked its integer type.
     if module == "core.tasks" && method == "channel" {
         return match args {
             [] => true,
@@ -218,9 +217,8 @@ pub(super) fn core_call_args_in_subset(
             _ => false,
         };
     }
-    // D-REGEX-LIT1=D: regex one-shot calls support the ordinary documentation-only
-    // labels (`pattern:`, `text:`). Sema has already checked each label against its
-    // positional parameter; lowering erases labels.
+    // D-REGEX-LIT1=D: regex one-shot calls support `pattern:` and `text:`.
+    // Sema binds each label; lowering preserves written expression order.
     if module == "core.regex" {
         return args
             .iter()
@@ -322,8 +320,7 @@ pub(super) fn core_call_args_in_subset(
             });
     }
     // D-SERVICE-AUTHORITY1=A: `services.runtime(store, retention: duration)`
-    // carries one documentation-only label. Sema validates the label and the
-    // emitter erases it; keep the same positional fact in the TIR gate.
+    // publishes `retention`. Sema binds it; keep that resolved shape in TIR.
     if module == "core.services" && method == "runtime" {
         return args.len() == 2
             && args.iter().enumerate().all(|(idx, arg)| {

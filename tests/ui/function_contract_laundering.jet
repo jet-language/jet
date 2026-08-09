@@ -1,0 +1,9 @@
+fn save(force: Bool) => Int = 1
+fn erase(action: fn(Bool) => Int) => fn(Bool) => Int = action
+fn labelled(action: fn(*, force: Bool) => Int) => fn(*, force: Bool) => Int = action
+fn use_label(action: fn(*, force: Bool) => Int) => Int = action(force: true)
+
+fn run() {
+    plain :: erase(labelled(save))
+    _ :: use_label(plain)
+}

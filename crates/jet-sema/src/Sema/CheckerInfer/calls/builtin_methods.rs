@@ -18,6 +18,34 @@ fn cell_inner(ty: &Type) -> Type {
 }
 
 impl<'a> Checker<'a> {
+        fn check_builtin_method_labels(&mut self, method: &str, args: &[CallArg]) {
+            // Zip labels name output fields rather than parameters. Map.merge's
+            // optional conflict callback is the only labelled builtin-method
+            // parameter; every other builtin method is positional.
+            if Self::zip_family_name(method) {
+                return;
+            }
+            for (index, arg) in args.iter().enumerate() {
+                let Some((label, label_span)) = &arg.label else {
+                    continue;
+                };
+                if method == "merge" && index == 1 && label == "conflict" {
+                    continue;
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0764",
+                    format!("`{method}` has no parameter labelled `{label}`"),
+                    "a label binds an argument to the parameter of that name".to_string(),
+                    if method == "merge" && args.len() == 2 {
+                        format!("`{method}` accepts `conflict`")
+                    } else {
+                        format!("`{method}` takes no labelled arguments")
+                    },
+                    Some(*label_span),
+                ));
+            }
+        }
+
         fn zip_sequence_elem(ty: &Type) -> Option<Type> {
             match ty {
                 Type::Tagged { inner, .. } => Self::zip_sequence_elem(inner),
@@ -458,6 +486,7 @@ impl<'a> Checker<'a> {
             span: Span,
             ret: Option<Type>,
         ) -> Option<Type> {
+            self.check_builtin_method_labels(method, args);
             let mut call_access = self.call_access_frame();
             let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
             self.with_call_access(&mut call_access, |checker| {
