@@ -3761,7 +3761,7 @@ impl<'a> Checker<'a> {
                             "E0904",
                             "`event.decision_hook` needs payload and error types".to_string(),
                             "`DecisionHook<T, E>` transforms or cancels a typed payload and preserves typed failures".to_string(),
-                            "call it with explicit type arguments: `event.decision_hook<Request, Error>(HookPolicy.FirstCancelElseTransform)`".to_string(),
+                            "call it with explicit type arguments: `event.decision_hook<Request, Err>(HookPolicy.FirstCancelElseTransform)`".to_string(),
                             Some(span),
                         ));
                         return None;

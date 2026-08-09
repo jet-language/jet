@@ -575,7 +575,7 @@ fn lower_function(
             let value = if let Some(ret) = &tir.ret {
                 if matches!(ret, Type::Result { ok, err }
                     if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
-                        && matches!(err.as_ref(), Type::Named(n) if n == "Error"))
+                        && matches!(err.as_ref(), Type::Named(n) if n == jet_foundation::Syntax::TYPE_ERR))
                 {
                     let tag = lctx.b.ins().iconst(types::I8, 1);
                     let unit = lctx.b.ins().iconst(types::I64, 0);

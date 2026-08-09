@@ -3797,6 +3797,8 @@ pub enum TLambdaBody {
 pub enum TTryConvert {
     /// Error types match — bare `jet_trace_err(x, …)?`.
     None,
+    /// D-FAIL-ERROR1=A: construct the default `Err` value from a message.
+    DefaultErr,
     /// Source error implements `Fallible` — `.map_err(|e| e.to_error())` (D-ERR2).
     Fallible,
     /// Declared `impl Source => Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);

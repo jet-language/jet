@@ -3910,7 +3910,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Try {
                 inner,
-                convert: _,
+                convert,
                 file,
                 line,
                 fn_name,
@@ -3934,6 +3934,18 @@ impl<'a> EvalCtx<'a> {
                                 sink.stderr.push_str(&frame);
                             }
                         }
+                        // D-FAIL-ERROR1=A: the evaluator marshals the same
+                        // String-to-Err conversion selected by sema.
+                        let e = if matches!(convert, crate::Codegen::TIR::TTryConvert::DefaultErr) {
+                            match *e {
+                                CtValue::Str(message) => Box::new(CtValue::from_jet_err(
+                                    &jet_foundation::Outcome::jet_err_from_message(message),
+                                )),
+                                other => Box::new(other),
+                            }
+                        } else {
+                            e
+                        };
                         // Propagate as a function return of the error value.
                         self.pending_return = Some(CtValue::failed(e));
                         Ok(CtValue::Unit)
@@ -4568,7 +4580,8 @@ impl<'a> EvalCtx<'a> {
                             fields: vec![("now".to_string(), CtValue::Int(0))],
                         });
                     }
-                    // D-ERRCTX1: `.context(msg)` — prepend message on Err only.
+                    // D-ERRCTX1: `.context(msg)` — the engine only marshals;
+                    // Outcome.rs owns the cause-chain meaning.
                     if leaf == "jet_context" || leaf.ends_with("jet_context") {
                         let msg = match argv.get(1) {
                             Some(CtValue::Str(s)) => s.clone(),
@@ -4577,13 +4590,14 @@ impl<'a> EvalCtx<'a> {
                         };
                         return Ok(match argv.first() {
                             Some(CtValue::Present(v)) => CtValue::Present(v.clone()),
-                            Some(CtValue::Failed(CtReport::Told(err))) => {
-                                CtValue::failed(Box::new(CtValue::Str(format!(
-                                    "{}: {}",
-                                    msg,
-                                    err.jet_show()
-                                ))))
-                            }
+                            Some(CtValue::Failed(CtReport::Told(err))) => err
+                                .to_jet_err()
+                                .map(|error| {
+                                    CtValue::failed(Box::new(CtValue::from_jet_err(
+                                        &jet_foundation::Outcome::jet_err_context(error, msg),
+                                    )))
+                                })
+                                .unwrap_or_else(|| CtValue::failed(err.clone())),
                             Some(other) => other.clone(),
                             None => CtValue::Unit,
                         });

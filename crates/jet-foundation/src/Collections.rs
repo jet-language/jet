@@ -435,7 +435,7 @@ pub fn builtin_method_return(
 fn build_result(ok: &str) -> Option<Option<Type>> {
     Some(Some(Type::Result {
         ok: Box::new(Type::Named(ok.to_string())),
-        err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
     }))
 }
 
@@ -443,17 +443,17 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
     match (method, arg_count) {
         ("generate", 2) => Some(Some(Type::Result {
             ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
         })),
         ("find", 1) => Some(Some(Type::List(Box::new(Type::String)))),
         ("embed", 1) => Some(Some(Type::String)),
         ("fetch", 2) => Some(Some(Type::Result {
             ok: Box::new(Type::String),
-            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
         })),
         ("plugin", 2) => Some(Some(Type::Result {
             ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
         })),
         ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
         ("legacy", 6..=17) => build_result(Syntax::TYPE_BUILD_ACTION),
@@ -1181,7 +1181,7 @@ fn option_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
         // failure. The payload rides through; only the report changes.
         ("or_err", 1) => Some(Some(Type::Result {
             ok: Box::new(inner.clone()),
-            err: Box::new(Type::Named(crate::Syntax::TYPE_ERROR.to_string())),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
         })),
         ("map", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         _ => None,

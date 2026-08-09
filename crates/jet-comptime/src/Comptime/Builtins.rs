@@ -802,7 +802,9 @@ pub fn apply_method(
         (CtValue::Present(payload), "or_err") => Ok(CtValue::Present(payload.clone())),
         (CtValue::Failed(CtReport::Clean(_)), "or_err") => {
             match args.into_iter().next() {
-                Some(why @ CtValue::Str(_)) => Ok(CtValue::failed(Box::new(why))),
+                Some(CtValue::Str(message)) => Ok(CtValue::failed(Box::new(
+                    CtValue::from_jet_err(&jet_foundation::Outcome::jet_err_from_message(message)),
+                ))),
                 _ => Err(unsupported("`.or_err` requires a string reason", span)),
             }
         }

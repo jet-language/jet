@@ -22,6 +22,9 @@
 // canonical surface entrypoint.
 // D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
 // call-site type-argument markers; they reuse the existing angle tokens.
+// D-FAIL-ERROR1=A: core_surface::TYPE_ERR owns the shared default-error type
+// and constructor name. core_surface::RETIRED_TYPE_ERROR exists only for the
+// E0432 teaching diagnostic; it never resolves as a type.
 //
 // D-APILABEL1=A adds the two parameter-zone separators
 // PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in

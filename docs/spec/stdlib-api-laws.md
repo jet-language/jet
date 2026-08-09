@@ -33,7 +33,7 @@ existing drift found during review.
 - Panics are reserved for programmer error (index out of bounds on a known-size slice).
 - The error type must carry enough context to write a helpful error message without
   inspecting source code (no opaque integer codes).
-- Use the most specific error type available; `Error` (the Fallible default) is a
+- Use the most specific error type available; `Err` (the Fallible default) is a
   last resort for heterogeneous error paths.
 
 ## Law 3 — Ownership / allocation

@@ -847,7 +847,7 @@ fn fallible_void_entry_error(ty: &Type, cx: &Cx) -> Option<EntryError> {
         return None;
     }
     match err.as_ref() {
-        Type::Named(n) if n == crate::Syntax::TYPE_ERROR => Some(EntryError::Generic),
+        Type::Named(n) if n == crate::Syntax::TYPE_ERR => Some(EntryError::Generic),
         Type::Named(n) if n == "CryptoError" && !cx.type_names.contains(n) => {
             Some(EntryError::Crypto)
         }

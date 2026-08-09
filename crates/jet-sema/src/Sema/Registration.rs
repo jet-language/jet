@@ -40,7 +40,7 @@ fn is_fallible_void_return(
         Type::Result { ok, err }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
                 && matches!(err.as_ref(), Type::Named(n)
-                    if n == Syntax::TYPE_ERROR
+                    if n == Syntax::TYPE_ERR
                         || (n == "CryptoError"
                             && !registry.contains(n)
                             && core_imports.values().any(|module| module == "core.crypto")))

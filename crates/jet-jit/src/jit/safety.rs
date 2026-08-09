@@ -497,7 +497,7 @@ fn jit_cell_value_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == "Unit" || n == "Error")
+    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR)
         || jit_value_type(ty)
 }
 
@@ -1126,7 +1126,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::Try { inner, convert, .. } => {
             matches!(
                 convert,
-                TIR::TTryConvert::None | TIR::TTryConvert::Typed(_)
+                TIR::TTryConvert::None
+                    | TIR::TTryConvert::DefaultErr
+                    | TIR::TTryConvert::Typed(_)
             ) && resident_safe_expr(inner, callees)
         }
         TExprKind::DecodeUnder { segment, inner } => {

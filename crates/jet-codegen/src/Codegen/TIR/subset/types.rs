@@ -467,7 +467,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
     matches!(
         name,
-        "HTTPRequest" | "HTTPResponse" | "Range" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
+        "Err" | "HTTPRequest" | "HTTPResponse" | "Range" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
             | "DataLineOptions"
             | "AsyncPolicy" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
@@ -564,9 +564,8 @@ pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
 /// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T ? E`) the subset
 /// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
 /// `()` (the ok payload of fallible `run`, rendered as `()`), or sema's
-/// default error type `Error` (`Type::Named("Error")`, which `cx.rust_type`
-/// lowers to plain `String` — its construction/binding is a String, so no clone/box
-/// decision the subset can't make).
+/// default error type `Err` (`Type::Named("Err")`, which `cx.rust_type`
+/// lowers to the Prelude-owned `JetErr`).
 pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
     // c109 Phase 30: a type-variable payload (`T` in a generic fn's `T?` return —
     // `largest<T: Comparable>() -> (T?)`). A type var renders via `cx.rust_type` to the
@@ -580,7 +579,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "Unit" {
             return true;
         }
-        if n == "Error" {
+        if n == crate::Syntax::TYPE_ERR {
             return true;
         }
         if n == "CryptoError" {

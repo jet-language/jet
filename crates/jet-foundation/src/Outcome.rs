@@ -21,6 +21,120 @@
 // payload. A verdict nobody reads costs no allocation and no branch.
 pub type JetOutcome<T, E> = Result<T, E>;
 
+// D-FAIL-ERROR1=A (ratified 2026-08-06) — one default error value on every tier.
+// Engines marshal the three source fields. Construction, projection, and report
+// rendering stay here so no engine owns error meaning.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErr {
+    message: String,
+    code: JetOutcome<String, JetAbsent>,
+    cause: JetOutcome<Box<JetErr>, JetAbsent>,
+}
+
+pub fn jet_err(
+    message: String,
+    code: JetOutcome<String, JetAbsent>,
+    cause: JetOutcome<JetErr, JetAbsent>,
+) -> JetErr {
+    JetErr {
+        message,
+        code,
+        cause: cause.map(Box::new),
+    }
+}
+
+/// D-FAIL-ERROR1=A: the only String-to-default-error conversion.
+pub fn jet_err_from_message(message: String) -> JetErr {
+    jet_err(message, Err(JetAbsent), Err(JetAbsent))
+}
+
+pub fn jet_err_message(error: &JetErr) -> String {
+    error.message.clone()
+}
+
+pub fn jet_err_code(error: &JetErr) -> JetOutcome<String, JetAbsent> {
+    error.code.clone()
+}
+
+pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
+    error.cause.as_ref().map(|cause| (**cause).clone()).map_err(|_| JetAbsent)
+}
+
+/// D-ERRCTX1=D over D-FAIL-ERROR1=A: add a human boundary without flattening
+/// the original error. The message is evaluated by the caller only on failure.
+pub fn jet_err_context(error: JetErr, message: String) -> JetErr {
+    jet_err(message, Err(JetAbsent), Ok(error))
+}
+
+pub fn jet_context<T, F: FnOnce() -> String>(
+    outcome: JetOutcome<T, JetErr>,
+    message: F,
+) -> JetOutcome<T, JetErr> {
+    outcome.map_err(|error| jet_err_context(error, message()))
+}
+
+pub fn jet_render_err(error: &JetErr) -> String {
+    fn render(error: &JetErr, out: &mut String, depth: usize) {
+        if depth == 0 {
+            match &error.code {
+                Ok(code) => out.push_str(&format!("Error [{code}]: {}", error.message)),
+                Err(JetAbsent) => out.push_str(&format!("Error: {}", error.message)),
+            }
+        } else {
+            out.push_str(&"  ".repeat(depth));
+            out.push_str("cause: ");
+            out.push_str(&error.message);
+        }
+        if let Ok(cause) = &error.cause {
+            out.push('\n');
+            render(cause, out, depth + 1);
+        }
+    }
+
+    let mut out = String::new();
+    render(error, &mut out, 0);
+    out
+}
+
+impl std::fmt::Display for JetErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&jet_render_err(self))
+    }
+}
+
+#[cfg(test)]
+mod err_tests {
+    use super::*;
+
+    #[test]
+    fn default_error_has_ratified_fields_and_report() {
+        let cause = jet_err_from_message("unexpected token at line 3".to_string());
+        let error = jet_err(
+            "parse failed".to_string(),
+            Ok("CFG404".to_string()),
+            Ok(cause),
+        );
+
+        assert_eq!(jet_err_message(&error), "parse failed");
+        assert_eq!(jet_err_code(&error), Ok("CFG404".to_string()));
+        assert_eq!(
+            jet_err_message(&jet_err_cause(&error).expect("cause")),
+            "unexpected token at line 3"
+        );
+        assert_eq!(
+            jet_render_err(&error),
+            "Error [CFG404]: parse failed\n  cause: unexpected token at line 3"
+        );
+
+        let contextual = jet_context::<(), _>(Err(error), || "loading config".to_string())
+            .expect_err("context preserves failure");
+        assert_eq!(
+            jet_render_err(&contextual),
+            "Error: loading config\n  cause: parse failed\n    cause: unexpected token at line 3"
+        );
+    }
+}
+
 /// The clean report: no payload, nothing to say. This is what `T?` puts on the
 /// stop side, which is why an absence is not a failure.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
@@ -46,7 +160,7 @@ pub trait JetOptionalView<T>: Sized {
     fn is_some_and(self, ask: impl FnOnce(T) -> bool) -> bool;
     /// D-FAIL-CARRIER1: lift a clean absence into a failure with a report.
     /// The payload rides through untouched; only the verdict changes.
-    fn or_err<E>(self, why: E) -> JetOutcome<T, E>;
+    fn or_err(self, why: String) -> JetOutcome<T, JetErr>;
     /// Read the payload without taking it; the clean report stays clean.
     fn map_ref<U>(&self, f: impl FnOnce(&T) -> U) -> JetOutcome<U, JetAbsent>;
     /// Pair two payloads; absent on either side is absent for the pair.
@@ -78,8 +192,8 @@ impl<T> JetOptionalView<T> for JetOutcome<T, JetAbsent> {
             Err(JetAbsent) => false,
         }
     }
-    fn or_err<E>(self, why: E) -> JetOutcome<T, E> {
-        self.map_err(|JetAbsent| why)
+    fn or_err(self, why: String) -> JetOutcome<T, JetErr> {
+        self.map_err(|JetAbsent| jet_err_from_message(why))
     }
     fn map_ref<U>(&self, f: impl FnOnce(&T) -> U) -> JetOutcome<U, JetAbsent> {
         match self {

@@ -6,7 +6,7 @@ pub(super) fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> b
         Type::Result { ok, err }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
                 && matches!(err.as_ref(), Type::Named(n)
-                    if n == Syntax::TYPE_ERROR
+                    if n == Syntax::TYPE_ERR
                         || (n == "CryptoError"
                             && !state.registry.contains(n)
                             && state.core_imports.values().any(|module| module == "core.crypto")))

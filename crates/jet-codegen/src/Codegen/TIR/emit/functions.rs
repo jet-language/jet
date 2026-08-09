@@ -188,7 +188,7 @@ fn is_fallible_void_return(ret: &Option<Type>, cx: &Cx) -> bool {
         Some(Type::Result { ok, err })
             if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
                 && matches!(err.as_ref(), Type::Named(n)
-                    if n == crate::Syntax::TYPE_ERROR
+                    if n == crate::Syntax::TYPE_ERR
                         || (n == "CryptoError" && !cx.type_names.contains(n)))
     )
 }

@@ -1929,6 +1929,13 @@ impl LowerCtx<'_, '_> {
         }
         let return_handle = match convert {
             TIR::TTryConvert::None => handle,
+            TIR::TTryConvert::DefaultErr => {
+                let message = self.result_payload(handle, &Type::String)?;
+                let absent = self.b.ins().iconst(types::I64, 0);
+                let error = self.call_host(self.host.err_new, &[message, absent, absent]);
+                let tag = self.b.ins().iconst(types::I8, 0);
+                self.call_host(self.host.result_new_i64, &[tag, error])
+            }
             TIR::TTryConvert::Typed(conv_fn) => {
                 let err_ty = inner
                     .ty
@@ -12561,6 +12568,18 @@ impl LowerCtx<'_, '_> {
             } => {
                 if Self::is_range_ty(&expr.ty) {
                     Err("jit Range literal needs the three-value ABI".to_string())
+                } else if matches!(&expr.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(field, _, _)| field == name)
+                            .map(|(_, value, _)| value)
+                            .ok_or_else(|| format!("jit Err literal missing `{name}`"))
+                    };
+                    let message = self.lower_expr(field("message")?)?;
+                    let code = self.lower_expr(field("code")?)?;
+                    let cause = self.lower_expr(field("cause")?)?;
+                    Ok(self.call_host(self.host.err_new, &[message, code, cause]))
                 } else {
                     self.lower_struct_lit(fields, as_trait.as_ref())
                 }
@@ -12579,6 +12598,15 @@ impl LowerCtx<'_, '_> {
                     };
                 }
                 let mut handle = self.lower_expr(recv)?;
+                if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
+                    let host = match field.as_str() {
+                        "message" => self.host.err_message,
+                        "code" => self.host.err_code,
+                        "cause" => self.host.err_cause,
+                        _ => return Err(format!("jit field `{field}` on `Err`")),
+                    };
+                    return Ok(self.call_host(host, &[handle]));
+                }
                 let record_ty = match &recv.ty {
                     Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                         let (list, start, _) = self.unpack_view_mut(handle)?;
@@ -12734,8 +12762,8 @@ impl LowerCtx<'_, '_> {
                 // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a clean
                 // absence into a failure. One packed carrier (0 = absent), so
                 // presence/absence reuse the same test `lower_option_enum_match`
-                // uses; the report ("Error" erases to `String`, Context.rs:1345)
-                // shares the I64 handle ABI with every `T` this covers.
+                // uses; the report handle shares the I64 ABI with every `T`
+                // this covers.
                 if method.name == jet_foundation::Syntax::METHOD_OUTCOME_OR_ERR
                     && args.len() == 1
                 {
@@ -12747,6 +12775,7 @@ impl LowerCtx<'_, '_> {
                             let packed = self.lower_expr(recv)?;
                             let why = self.lower_call_arg(&args[0])?;
                             let zero = self.b.ins().iconst(types::I64, 0);
+                            let why = self.call_host(self.host.err_new, &[why, zero, zero]);
                             let is_some =
                                 self.b.ins().icmp(IntCC::NotEqual, packed, zero);
                             let ok_payload = self.unpack_option_payload(packed, inner)?;
@@ -21336,6 +21365,7 @@ impl LowerCtx<'_, '_> {
 
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
     let fields: &[&str] = match type_name {
+        "Err" => &["message", "code", "cause"],
         "Range" => &["start", "end", "exclusive"],
         "DirEntry" => &["name", "path", "is_dir"],
         "Stat" => &[

@@ -23,6 +23,108 @@ fn field_path(expr: &Expr) -> Option<String> {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn default_err_value(
+        &mut self,
+        mut call: Call,
+        wrap_result: bool,
+    ) -> Expr {
+        let span = Span::new(
+            call.name_span.start,
+            call.args.last().map_or(call.name_span.end, |arg| arg.expr.span().end),
+        );
+        let mut message = None;
+        let mut code = None;
+        let mut cause = None;
+
+        if !(1..=3).contains(&call.args.len()) {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`Err` takes a message and optional `code:` and `cause:`, got {} arguments", call.args.len()),
+                "the default error stores one message, one optional code, and one optional cause"
+                    .to_string(),
+                "write `Err(\"message\")`, then add `code:` or `cause:` labels if needed"
+                    .to_string(),
+                Some(call.name_span),
+            ));
+        }
+
+        for (index, arg) in call.args.drain(..).enumerate() {
+            let label_span = arg.label.as_ref().map_or(arg.span, |(_, span)| *span);
+            match (index, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                (0, None) => message = Some(arg.expr),
+                (0, Some(_)) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0767",
+                        "`message` is the positional argument of `Err`".to_string(),
+                        "the short constructor starts with the error message"
+                            .to_string(),
+                        "remove the label and write `Err(\"message\", ...)`".to_string(),
+                        Some(label_span),
+                    ));
+                    message = Some(arg.expr);
+                }
+                (_, Some("code")) if code.is_none() => code = Some((label_span, arg.expr)),
+                (_, Some("cause")) if cause.is_none() => cause = Some((label_span, arg.expr)),
+                (_, Some("code" | "cause")) => {
+                    let name = arg.label.as_ref().unwrap().0.clone();
+                    self.diags.push(Diagnostic::error(
+                        "E0765",
+                        format!("`{name}:` is written twice in this call to `Err`"),
+                        "each constructor label sets one field".to_string(),
+                        format!("remove the second `{name}:` argument"),
+                        Some(label_span),
+                    ));
+                    self.infer(&mut { arg.expr });
+                }
+                (_, Some(name)) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0764",
+                        format!("`Err` has no parameter labelled `{name}`"),
+                        "the optional labels are `code:` and `cause:`".to_string(),
+                        "use `code:` or `cause:`, or remove the argument".to_string(),
+                        Some(label_span),
+                    ));
+                    self.infer(&mut { arg.expr });
+                }
+                (_, None) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0769",
+                        "optional `Err` arguments need labels".to_string(),
+                        "`code:` and `cause:` can appear in either order only because their labels identify them"
+                            .to_string(),
+                        "add `code:` or `cause:` before this argument".to_string(),
+                        Some(arg.span),
+                    ));
+                    self.infer(&mut { arg.expr });
+                }
+            }
+        }
+
+        let message = message.unwrap_or_else(|| Expr::Str(vec![StrPart::Lit(String::new())], span));
+        let optional = |value: Option<(Span, Expr)>| match value {
+            Some((value_span, value)) => Expr::Present(Box::new(value), value_span),
+            None => Expr::Absent(span),
+        };
+        let value = Expr::StructLit {
+            type_name: Syntax::TYPE_ERR.to_string(),
+            type_args: Vec::new(),
+            import_ns: None,
+            as_trait: None,
+            fields: vec![
+                ("message".to_string(), message.span(), message),
+                ("code".to_string(), span, optional(code)),
+                ("cause".to_string(), span, optional(cause)),
+            ],
+            inferred: false,
+            span,
+        };
+        if wrap_result {
+            Expr::Err(Box::new(value), span)
+        } else {
+            value
+        }
+    }
+
     pub(crate) fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
         self.infer(e)
             .map(|t| t.name())
@@ -372,6 +474,29 @@ impl<'a> Checker<'a> {
     }
 
     fn normalize_contextual_expr(&mut self, e: &mut Expr) {
+        // D-FAIL-ERROR1=A: labels make the default-error constructor
+        // unambiguous. Outside a Result expectation, the one-message form is
+        // also the constructor. In a Result expectation, one positional value
+        // remains the existing typed `Err(e)` arm until sema sees its type.
+        let err_constructor = match e {
+            Expr::Call(call)
+                if call.name == Syntax::LIT_ERR
+                    && !self.funcs.contains_key(&call.name)
+                    && (call.args.len() != 1
+                        || call.args.first().is_some_and(|arg| arg.label.is_some())
+                        || !matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))) =>
+            {
+                let wrap = matches!(self.expected_type.as_ref(), Some(Type::Result { .. }));
+                let placeholder = Expr::Absent(call.name_span);
+                let Expr::Call(call) = std::mem::replace(e, placeholder) else { unreachable!() };
+                Some(self.default_err_value(call, wrap))
+            }
+            _ => None,
+        };
+        if let Some(replacement) = err_constructor {
+            *e = replacement;
+        }
+
         // D-SHAPE3b: contextual Optional/Result spellings share one generic
         // literal path before sema lowers them to the existing dedicated nodes.
         // A user function still wins for bare `Ok`/`Err` calls.

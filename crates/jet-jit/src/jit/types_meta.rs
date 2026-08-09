@@ -827,6 +827,7 @@ impl<'a> JitMeta<'a> {
 /// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
     let fields: &[&str] = match type_name {
+        "Err" => &["message", "code", "cause"],
         // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
         // examples define user `Point { x: Int, … }` and core Float would win.
         "Size" => &["width", "height"],

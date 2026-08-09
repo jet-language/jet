@@ -969,16 +969,16 @@ fn mk() {
 
     #[test]
     fn covers_fallible_return_and_try() {
-        // A `T ? Error` return (default-error fallible) with `ok`/`err` over scalar
+        // A `T ? Err` return (default-error fallible) with `ok`/`err` over scalar
         // values and `?` propagation of a covered fallible call — all in-subset
-        // (Phase 8). (`Error` lowers to `String`; the constructors here take a scalar
-        // and a String literal. Full sema owns the resolved fallible types and
+        // (Phase 8). `Err` lowers to the Prelude value; the constructors here take
+        // a message. Full sema owns the resolved fallible types and
         // constructor rewrites consumed by the TIR gate. A
         // scalar-payload *error enum* literal is `Bad.Code(1)`, which parses as a
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
         // proven end-to-end by
         // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-        let src = "fn f(x: Int) => Int ? Error {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) => Int ? Error {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
+        let src = "fn f(x: Int) => Int ? Err {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) => Int ? Err {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
         assert!(covers_after_sema(src, "f"));
         assert!(covers_after_sema(src, "g"));
     }

@@ -395,9 +395,6 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
 }
 
 pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
-    if name == Syntax::TYPE_ERROR {
-        return true;
-    }
     match registry.types.get(name) {
         Some(TypeDef::Struct { fields, .. }) => {
             fields.iter().all(|(_, _, ty, _)| is_ffi_type(ty, registry))
