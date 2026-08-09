@@ -266,10 +266,9 @@ fn workspace_find_example_evaluates() {
     let src = std::fs::read_to_string(dir.join("workspace.jet")).unwrap();
     let plan = WorkspaceFile::evaluate(&src, &dir)
         .expect("workspace.jet with find() must evaluate without errors");
-    let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
-    assert!(names.contains(&"hello"), "expected hello, got {names:?}");
-    assert!(names.contains(&"ranker"), "expected ranker, got {names:?}");
-    assert_eq!(names.len(), 2, "expected 2 members, got {names:?}");
+    let mut names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["hello", "ranker"], "members: {:?}", plan.members);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
