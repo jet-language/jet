@@ -1313,18 +1313,27 @@ impl<'a> Checker<'a> {
                     // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
                     // will emit .to_vec() on the argument.
                     let fixed_widens = matches!((&param_ty, &arg_ty),
-                        (Type::List(pe), Type::FixedList { elem: ae, .. }) if pe == ae);
+                        (Type::List(pe), Type::FixedList { elem: ae, .. })
+                            if pe == ae && Type::obligations_satisfy(pe, ae));
                     let union_widens = matches!(
                         &param_ty,
-                        Type::Union(members) if members.iter().any(|m| m == &arg_ty)
+                        Type::Union(members) if members.iter().any(|m| {
+                            m == &arg_ty && Type::obligations_satisfy(m, &arg_ty)
+                        })
                     );
-                    let compatible = arg_ty == param_ty
+                    let exact_or_obligation_compatible =
+                        if matches!(&param_ty, Type::Fn { .. })
+                            && matches!(&arg_ty, Type::Fn { .. })
+                        {
+                            fn_types_compatible(&param_ty, &arg_ty)
+                        } else {
+                            arg_ty == param_ty
+                                && Type::obligations_satisfy(&param_ty, &arg_ty)
+                        };
+                    let compatible = exact_or_obligation_compatible
                         || fixed_widens
                         || union_widens
-                        || reads_expiring_secret_loan
-                        || (matches!(&param_ty, Type::Fn { .. })
-                            && matches!(&arg_ty, Type::Fn { .. })
-                            && fn_types_compatible(&param_ty, &arg_ty));
+                        || reads_expiring_secret_loan;
                     if !reported && !compatible {
                         // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `SQL`/
                         // `HTML` parameter — teach the injection-safety fix instead of

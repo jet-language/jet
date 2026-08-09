@@ -1,4 +1,5 @@
 use super::*;
+use crate::AST::KnowledgeVector;
 
 pub(crate) fn name_defined(
     name: &str,
@@ -126,7 +127,11 @@ pub(crate) fn register_distinct(
             is_comparable: d.is_comparable,
             is_printable: d.is_printable,
             is_codable_as_base: d.is_codable_as_base,
-            range: d.range.map(|(lo, hi, _)| (lo, hi)),
+            knowledge: d
+                .range
+                .map_or_else(KnowledgeVector::default, |(lo, hi, _)| {
+                    KnowledgeVector::from_interval(lo, hi)
+                }),
         },
     );
 }

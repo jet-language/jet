@@ -1825,12 +1825,18 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
         ret: sig.return_type.clone().map(Box::new),
         effect_bound: None,
-        param_contract: None,
+        param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),
         return_view_provenance: sig.return_view_provenance.get(),
     }
 }
 
 pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
+    fn carrier_compatible(want: &Type, got: &Type) -> bool {
+        match (want, got) {
+            (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
+            _ => want == got,
+        }
+    }
     let (
         Type::Fn {
             params: wp,
@@ -1850,15 +1856,16 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
         return false;
     }
     for (a, b) in wp.iter().zip(gp.iter()) {
-        if a != b {
+        if !carrier_compatible(a, b) {
             return false;
         }
     }
-    match (wr, gr) {
+    let return_compatible = match (wr, gr) {
         (None, None) => true,
-        (Some(a), Some(b)) => a == b,
+        (Some(a), Some(b)) => carrier_compatible(a, b),
         _ => false,
-    }
+    };
+    return_compatible && Type::obligations_satisfy(want, got)
 }
 
 /// D-TEST1: which parameter types the property-test runner can synthesize inputs

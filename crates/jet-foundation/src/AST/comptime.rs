@@ -163,8 +163,8 @@ pub struct FuncSig {
     pub param_info: Vec<(String, bool)>,
     /// D-APILABEL1=A: the public call contract, parallel to `params` — the
     /// label a caller writes and the zone that decides whether they may (or
-    /// must) write it. Public labels and zones are callable type identity;
-    /// the local names in `param_info` are not. Empty alongside `param_info`.
+    /// must) write it. It is projected as a callable obligation; the local
+    /// names in `param_info` are not. Empty alongside `param_info`.
     pub param_call: Vec<(String, ParamZone)>,
     /// S61: default expressions for parameters that have them, parallel to `params`.
     pub defaults: Vec<Option<Expr>>,
