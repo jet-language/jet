@@ -5750,6 +5750,10 @@ checks, and the fixed-list index proof.
 
 Amends: D-INTBIG1. E0130–E0133 retire with BigInt.
 
+The existing `BigInt` Syntax and editor-highlight rows remain as migration
+anchors until #1550 removes the implementation; retirement snapshots are owed
+to #1550.
+
 **2026-08-06 — D-TYPE2-REFINE1 = A — One spelling for value-range rules**
 *(card #1497, implementation card #1548)*. `distinct Int(1..6)` becomes the
 one spelling. The `#Invariant` marker retires, and the index prover reads range
@@ -5759,6 +5763,10 @@ fail with the same error shape.
 The range becomes an interval fact on the plane registry. The prover for
 fixed-list indexing consumes interval facts instead of parsed strings. The marker
 row retires under law zero with a replacement note.
+
+The `#Invariant` row remains only as a migration anchor until implementation
+card #1548 removes its parser and sema references. Its removal and any UI or
+formatter snapshot updates are owed to #1548.
 
 Amends: D-RANGETYPE1, D-REFINE1, and D-VERDICT-1455-1. Replacement: use
 `distinct Int(lo..hi)` for a named range and `Int(lo..hi)` inline.
@@ -5774,6 +5782,9 @@ The Time family is the one unit family with a fixed integer carrier, per the
 ratified nanosecond decision. Point and delta reuse the affine machinery
 temperatures already use. Timeout and schedule sites accept the Time delta type
 instead of reading raw suffix tables.
+
+The `Instant` Syntax row is registered now for I7 and editor-grammar coverage;
+its parser/sema behavior and UI or formatter snapshots are owed to #1552.
 
 Amends: D-TIMERES1 and D-QUANTITY-POINT1. Replacement: resolve Duration and
 Instant through the canonical Time quantity family.
@@ -5868,6 +5879,9 @@ stays the nominal wrapper. The same checking already ratified for range types
 applies unchanged, including the literal-only bounds rule from D-RANGE-VALUE1;
 only the requirement to pre-declare a name is removed.
 
+`Int(0..100)` is registered now, but is not parseable in every type position
+until #1549. Its UI and formatter snapshots are owed to #1549.
+
 Amends: D-RANGE-VALUE1.
 
 **2026-08-06 — D-TYPE2-IMAG1 = A — Imaginary literals ride the unit-literal path**
@@ -5880,6 +5894,10 @@ The suffix resolves through the same table-free literal machinery as unit suffix
 minting the imaginary component of the ratified Complex type. Only the suffix form
 is special: bare i is untouched, and shadowing risks are the same as any unit
 suffix in scope.
+
+The `Complex` and `i` Syntax rows are registered now; imaginary semantics and
+their UI or formatter snapshots are owed to #1556. No standalone `i` keyword row
+is added because it remains an ordinary identifier.
 
 Amends: none.
 

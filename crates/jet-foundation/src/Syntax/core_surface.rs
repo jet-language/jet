@@ -660,11 +660,14 @@ pub const METHOD_FRESH_NEW_RANDOM: &str = "new_random";
 /// / `shuffle(&list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
 
-/// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14):
-/// runtime numbers become checked durations through type-owned unit methods;
-/// whole-unit reads use one checked enum-taking method. Static unit literals
-/// remain unchanged.
+/// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14) /
+/// D-TYPE2-TIME1=A (ratified 2026-08-06): runtime numbers become checked
+/// durations through type-owned unit methods; whole-unit reads use one checked
+/// enum-taking method. Static unit literals remain unchanged. Duration is the
+/// canonical Time delta quantity.
 pub const DURATION_TYPE: &str = "Duration";
+/// D-TYPE2-TIME1=A (ratified 2026-08-06): the canonical Time point quantity.
+pub const TYPE_INSTANT: &str = "Instant";
 pub const DURATION_UNIT_TYPE: &str = "DurationUnit";
 pub const DURATION_RANGE_ERROR_TYPE: &str = "RangeError";
 pub const DURATION_CONSTRUCTORS: &[&str] = &[
@@ -699,8 +702,10 @@ pub fn duration_unit_for_constructor(method: &str) -> Option<&'static str> {
     }
 }
 
-/// D-BIGINT1 (ratified 2026-06-28): arbitrary-precision integer. Construct
-/// explicitly with `BigInt(100)` or `BigInt("…")`; fixed `Int` never promotes.
+/// D-BIGINT1 (ratified 2026-06-28) / D-TYPE2-NUM1=A (ratified 2026-08-06):
+/// arbitrary-precision integer. Construct explicitly with `BigInt(100)` or
+/// `BigInt("…")`; fixed `Int` never promotes. The D-TYPE2 form retires this
+/// spelling; #1550 owns removal of its implementation references.
 pub const TYPE_BIGINT: &str = "BigInt";
 
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
