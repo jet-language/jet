@@ -206,12 +206,13 @@ pub(super) fn taint_check_item(
     }
 }
 
-pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec<Diagnostic>) {
-    if f.name == Syntax::BUILTIN_PRINT
-        || f.name == Syntax::BUILTIN_PANIC
-        || f.name == Syntax::BUILTIN_REQUIRE
-        || f.name == Syntax::BUILTIN_REQUIRE_EQ
-    {
+pub(crate) fn register_func_item(
+    f: &Func,
+    st: &mut ModuleState,
+    diags: &mut Vec<Diagnostic>,
+    prelude_enabled: bool,
+) {
+    if f.name == Syntax::BUILTIN_REQUIRE_EQ {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", f.name),
@@ -220,6 +221,9 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
             Some(f.name_span),
         ));
         return;
+    }
+    if prelude_enabled && crate::Sema::Prelude::is_prelude_name(&f.name) {
+        diags.push(crate::Sema::Prelude::shadow_warning(&f.name, f.name_span));
     }
     if name_defined(&f.name, &st.funcs, &st.registry, &st.consts) {
         diags.push(Diagnostic::error(

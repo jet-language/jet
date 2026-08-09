@@ -13,21 +13,6 @@ pub type FieldTags = HashMap<(String, String), TagSet>;
 pub type FieldTypes = HashMap<(String, String), String>;
 pub type ReturnTypes = HashMap<String, String>;
 
-/// D-TAG-SURFACE1=A: credential log/print/serialize sinks. A `#Credential`
-/// value reaching `core.io.print`, `core.io.eprint`, `core.log.*`, or
-/// `core.encoding.*.to_string*` is E0722.
-fn is_credential_sink(module: &str, method: &str) -> bool {
-    match module {
-        "core.io" => matches!(method, "print" | "eprint"),
-        "core.log" => true, // all log methods are credential sinks
-        "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
-        | "core.encoding.yaml" | "core.encoding.cbor" | "core.encoding.xml" => {
-            matches!(method, "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical")
-        }
-        _ => false,
-    }
-}
-
 /// Per-function taint analyzer. Carries the program-level facts (which functions
 /// are exact-tag scrubbers, how Core aliases resolve to modules) and the running set of
 /// tainted locals while it walks one function body.
@@ -159,7 +144,7 @@ impl<'a> TaintCtx<'a> {
         if let Some(effect) = core_effect(module, method) {
             destinations.push(effect.name().to_string());
         }
-        if is_credential_sink(module, method) {
+        if crate::Syntax::credential_sink(module, method) {
             destinations.push("Log".to_string());
         }
         destinations
@@ -401,16 +386,15 @@ impl<'a> TaintCtx<'a> {
             }
             Expr::Tainted(inner, _, _) => self.check_expr(inner),
             Expr::Call(c) => {
-                let destinations = if matches!(c.name.as_str(), "print" | "eprint") {
+                let credential_sink = crate::Syntax::credential_sink("core.io", &c.name);
+                let destinations = if credential_sink {
                     vec!["Log".to_string()]
                 } else {
                     vec![c.name.clone()]
                 };
                 for argument in &c.args {
                     if let Some(tag) = self.denied_tag(&self.tags_of(&argument.expr), &destinations) {
-                        self.diags.push(if tag == crate::Syntax::KW_CREDENTIAL
-                            && destinations.iter().any(|destination| destination == "Log")
-                        {
+                        self.diags.push(if tag == crate::Syntax::KW_CREDENTIAL && credential_sink {
                             e0722(&c.name, c.name_span)
                         } else {
                             e0721(&tag, &c.name, &destinations, c.name_span)

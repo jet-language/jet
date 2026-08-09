@@ -12,15 +12,18 @@ pub mod CoreArchive;
 pub mod CoreModuleExports;
 pub mod Diagnostics;
 mod ExactUnitConversion;
+pub mod Effects;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;
 pub mod generated;
 pub mod JitBackend;
 pub mod JSON;
+pub mod LintPolicy;
 pub mod Numeric;
 pub mod OSTarget;
 pub mod Outcome;
+pub mod Prelude;
 pub mod JetTrace;
 pub mod PerformanceBudget;
 pub mod Persist;
@@ -40,6 +43,7 @@ pub mod WasmDebug;
 pub mod WebApp;
 pub mod WebPartition;
 pub mod XmlPull;
+pub mod XmlKernel;
 #[path = "BaseEncodingStrict.rs"]
 pub mod base_encoding_strict;
 #[path = "BaseEncodingDispatch.rs"]

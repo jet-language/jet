@@ -1,4 +1,5 @@
-//! Jetpack ref classifier: `name['#'selector]['@'source]` (D-JPK-REF1=A).
+//! Jetpack ref classifier: `name['#'selector]['@'source]` or
+//! `source.package` (D-JPK-REF1=A, D-MONOREF1=A).
 //!
 //! A ref reads like an address: the package first, then its source. `#` pins a
 //! version or channel. Bare `./`, `../`, and `/` paths need no provider word.
@@ -78,7 +79,7 @@ impl Source {
 ///
 /// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
 /// `…@github` source's kind can't be known during pure `evaluate_env`
-/// evaluation — it depends on whether the remote repo carries a `pkg.jet`,
+/// evaluation — it depends on whether the remote repo carries a `package.jet`,
 /// which only a realize-time probe (with the offline flag + source cache) can
 /// answer. `Provider::resolve_kind` turns `Infer` into a concrete `Nix`/`Core`
 /// when realization runs; it never reaches a provider.
@@ -93,7 +94,7 @@ pub enum ProviderKind {
     Cpan,
     Packagist,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
-    /// `pkg.jet` (U9). Only the typed `…@github` surface produces this.
+    /// `package.jet` (U9). Only the typed `…@github` surface produces this.
     Infer,
 }
 
@@ -381,7 +382,8 @@ fn provider_first(provider: &str, target: &str, raw: &str) -> RefError {
 }
 
 /// Classify a `name['#'selector]['@'source]` ref against built-in sources.
-/// This is the strict path for direct CLI refs.
+/// This is the strict path for direct CLI refs. A declared monorepo source also
+/// accepts D-MONOREF1's `source.package` form.
 pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
     classify_in(raw, &SourceTable::empty())
 }
@@ -432,13 +434,23 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
         });
     }
 
+    if let Some((source, package)) = raw.split_once('.') {
+        if !source.is_empty() && !package.is_empty() && table.upstream(source).is_some() {
+            return Ok(RefSpec {
+                source: Source::Named(source.to_string()),
+                package: package.to_string(),
+                raw: raw.to_string(),
+            });
+        }
+    }
+
     Err(RefError::MissingSeparator(raw.to_string()))
 }
 
 /// Classify a ref with workspace-member awareness (Slice B, D-MONOREF1=A).
 ///
 /// Resolution order, first match wins:
-///   1. source form `package@source` — via `classify_in`
+///   1. source forms `package@source` and `source.package` — via `classify_in`
 ///   2. local form  `./package` — via `classify_in`
 ///   3. path form   `infra/logging` — exact relative-path match in the index
 ///   4. bare form   `logging` — exact member-name match in the index
@@ -535,7 +547,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 // ──────────────────────────────────────────────
 // `target@provider` source refs (D-JPK-REF1=A; amends U6).
 //
-// The typed authoring surface (env.jet/pkg.jet `sources:`/`packages:`) writes source
+// The typed authoring surface (env.jet/package.jet `sources:`/`packages:`) writes source
 // refs as `target@provider` — `owner/repo/rev@github`, `channel@nixpkgs`.
 // Local paths are bare (`./local`, `../local`, `/opt/local`).
 //

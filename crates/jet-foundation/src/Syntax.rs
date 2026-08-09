@@ -482,3 +482,7 @@ mod predicates;
 pub use predicates::*;
 mod retirements;
 pub use retirements::*;
+mod sinks;
+pub use sinks::*;
+mod core_calls;
+pub use core_calls::*;

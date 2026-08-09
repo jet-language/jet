@@ -2040,6 +2040,7 @@
 
     impl JetMeasurement<f64> {
         pub fn new(value: f64, uncertainty: f64) -> Self {
+            let (value, uncertainty) = super::jet_measurement_kernel_new(value, uncertainty);
             JetMeasurement { value, uncertainty }
         }
         pub fn value(&self) -> f64 {
@@ -2050,43 +2051,39 @@
         }
         // Addition / subtraction: σ_z = sqrt(σ_a² + σ_b²)
         pub fn add(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            JetMeasurement {
-                value: self.value + other.value,
-                uncertainty: (self.uncertainty * self.uncertainty
-                    + other.uncertainty * other.uncertainty)
-                    .sqrt(),
-            }
+            let (value, uncertainty) = super::jet_measurement_kernel_add(
+                (self.value, self.uncertainty),
+                (other.value, other.uncertainty),
+            );
+            JetMeasurement { value, uncertainty }
         }
         pub fn sub(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            JetMeasurement {
-                value: self.value - other.value,
-                uncertainty: (self.uncertainty * self.uncertainty
-                    + other.uncertainty * other.uncertainty)
-                    .sqrt(),
-            }
+            let (value, uncertainty) = super::jet_measurement_kernel_sub(
+                (self.value, self.uncertainty),
+                (other.value, other.uncertainty),
+            );
+            JetMeasurement { value, uncertainty }
         }
         // Multiplication: σ_z = sqrt((b·σ_a)² + (a·σ_b)²)
         pub fn mul(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            JetMeasurement {
-                value: self.value * other.value,
-                uncertainty: ((other.value * self.uncertainty).powi(2)
-                    + (self.value * other.uncertainty).powi(2))
-                .sqrt(),
-            }
+            let (value, uncertainty) = super::jet_measurement_kernel_mul(
+                (self.value, self.uncertainty),
+                (other.value, other.uncertainty),
+            );
+            JetMeasurement { value, uncertainty }
         }
         // Division: σ_z = sqrt((σ_a/b)² + (a·σ_b/b²)²)
         pub fn div(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            JetMeasurement {
-                value: self.value / other.value,
-                uncertainty: ((self.uncertainty / other.value).powi(2)
-                    + (self.value * other.uncertainty / (other.value * other.value)).powi(2))
-                .sqrt(),
-            }
+            let (value, uncertainty) = super::jet_measurement_kernel_div(
+                (self.value, self.uncertainty),
+                (other.value, other.uncertainty),
+            );
+            JetMeasurement { value, uncertainty }
         }
     }
 
     impl super::JetShow for JetMeasurement<f64> {
         fn jet_show(&self) -> String {
-            format!("{:?} \u{00b1} {:?}", self.value, self.uncertainty)
+            super::jet_measurement_kernel_show((self.value, self.uncertainty))
         }
     }

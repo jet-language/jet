@@ -1,5 +1,6 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
 use std::any::Any;
+use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -504,6 +505,28 @@ pub enum CtValue {
     /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
     /// `Option.lift2`), stored, or returned. See `ClosureData` below.
     Closure(std::sync::Arc<ClosureData>),
+}
+
+/// The one `[U8]` conversion and rejection voice shared by every evaluator.
+pub fn as_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    let reject = || Diagnostic::e0956_unsupported("this `as_bytes` call", span);
+
+    match value {
+        CtValue::Bytes(bytes) => Ok(bytes.clone()),
+        CtValue::List(items) => {
+            let mut bytes = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    CtValue::Int(value) if (0..=255).contains(value) => {
+                        bytes.push(*value as u8)
+                    }
+                    _ => return Err(reject()),
+                }
+            }
+            Ok(bytes)
+        }
+        _ => Err(reject()),
+    }
 }
 
 /// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
@@ -1188,8 +1211,9 @@ fn ct_mangle(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtFloat, CtValue};
+    use super::{as_bytes, CtFloat, CtValue};
     use crate::AST::{BinOp, Type};
+    use crate::Diagnostics::Span;
 
     #[test]
     fn ct_float_preserves_width_native_equality_and_rounding() {
@@ -1248,5 +1272,25 @@ mod tests {
             value.serialize(),
             "user___JetUnion_Int_String::Int(3i64)"
         );
+    }
+
+    #[test]
+    fn as_bytes_uses_one_shared_rejection() {
+        let span = Span::new(4, 7);
+        for value in [
+            CtValue::Int(1),
+            CtValue::List(vec![CtValue::Int(256)]),
+            CtValue::List(vec![CtValue::Str("not a byte".to_string())]),
+        ] {
+            let error = as_bytes(&value, span)
+                .expect_err("invalid byte value must be rejected");
+            assert_eq!(error.code, "E0956");
+            assert_eq!(error.what, "this `as_bytes` call can't run at compile time yet");
+            assert_eq!(
+                error.why,
+                "the canonical TIR evaluator doesn't cover this construct yet"
+            );
+            assert_eq!(error.fix, "use a simpler form, or run via `jet build` / `jet run`");
+        }
     }
 }

@@ -18,9 +18,9 @@ fn write_single_file(root: &PathBuf, body: &str) -> PathBuf {
 
 fn write_project(root: &PathBuf, edition: &str, body: &str) -> PathBuf {
     fs::write(
-        root.join("pkg.jet"),
+        root.join("package.jet"),
         format!(
-            "payload: {{ name: \"enc\", version: \"0.1.0\", edition: \"{edition}\" }}\n"
+            "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"
         ),
     )
     .unwrap();

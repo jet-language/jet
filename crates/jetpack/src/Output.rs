@@ -7,6 +7,7 @@
 
 use super::RefSpec::RefError;
 use crate::Syntax;
+use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::Terminal::{ColorChoice, Theme as SharedTheme};
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -411,47 +412,47 @@ impl Theme {
         }
     }
 
-    /// A `jet explain`-style error block: a red headline, a why line, and a
-    /// fix pointer. Beginner-first voice (docs/spec/diagnostics.md diagnostics).
+    /// Render an operational Jetpack failure through the registered E1340 row.
     pub fn error(&self, headline: &str, why: &str, fix: &str) {
-        eprintln!();
-        eprintln!("  {} {}", self.red("error:"), self.bold(headline));
-        eprintln!("    {}", why);
-        if !fix.is_empty() {
-            eprintln!("    {} {}", self.gray("fix:"), fix);
-        }
-        eprintln!();
+        let why = if why.is_empty() {
+            "Jetpack cannot finish this command without the input or valid operation named above"
+        } else {
+            why
+        };
+        let fix = if fix.is_empty() {
+            "correct the named input or operation and run the command again"
+        } else {
+            fix
+        };
+        self.error_coded("E1340", headline, why, fix);
     }
 
-    /// A coded error block: `error[E1230]: <headline>`, matching the compiler's
-    /// `error[Exxxx]:` house style so `jet explain <code>` has a referent.
+    pub fn render_error_coded(&self, code: &str, what: &str, why: &str, fix: &str) -> String {
+        Diagnostic::error(
+            code,
+            what.to_string(),
+            why.to_string(),
+            fix.to_string(),
+            None,
+        )
+        .render_colored("", "", self.color)
+    }
+
+    /// Render a coded Jetpack failure through the shared terminal renderer.
     pub fn error_coded(&self, code: &str, headline: &str, why: &str, fix: &str) {
-        eprintln!();
-        eprintln!(
-            "  {} {}",
-            self.red(&format!("error[{code}]:")),
-            self.bold(headline)
-        );
-        eprintln!("    {}", why);
-        if !fix.is_empty() {
-            eprintln!("    {} {}", self.gray("fix:"), fix);
-        }
-        eprintln!();
+        eprint!("{}", self.render_error_coded(code, headline, why, fix));
     }
 
-    /// A coded warning block: `warning[L0205]: <headline>`.
+    /// Render a coded Jetpack warning through the shared terminal renderer.
     pub fn warning_coded(&self, code: &str, headline: &str, why: &str, fix: &str) {
-        eprintln!();
-        eprintln!(
-            "  {} {}",
-            self.yellow(&format!("warning[{code}]:")),
-            self.bold(headline)
+        let diagnostic = Diagnostic::lint(
+            code,
+            headline.to_string(),
+            why.to_string(),
+            fix.to_string(),
+            None,
         );
-        eprintln!("    {}", why);
-        if !fix.is_empty() {
-            eprintln!("    {} {}", self.gray("fix:"), fix);
-        }
-        eprintln!();
+        eprint!("{}", diagnostic.render_colored("", "", self.color));
     }
 }
 

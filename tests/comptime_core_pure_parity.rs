@@ -949,6 +949,115 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
 }
 
 #[test]
+fn registered_shared_kernel_edges_match_all_execution_tiers() {
+    let cases = [
+        (
+            "mime-one-kernel",
+            parity_source(
+                "mime_view()",
+                "use core.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+            ),
+        ),
+        (
+            "email-one-kernel",
+            parity_source(
+                "email_wire()",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() => String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+            ),
+        ),
+        (
+            "sketch-edge-kernel",
+            parity_source(
+                "sketch_edges()",
+                r#"use core.sketch.hll as hll
+use core.sketch.tdigest as tdigest
+use core.sketch.cms as cms
+use core.sketch.reservoir as reservoir
+fn sketch_edges() => String {
+    cardinality := hll.new()
+    empty_count :: cardinality.count()
+    cardinality.add("same")
+    cardinality.add("same")
+    distribution := tdigest.new()
+    empty_quantile :: distribution.quantile(0.5)
+    distribution.add(-1.0)
+    distribution.add(1.0)
+    frequencies := cms.new()
+    missing :: frequencies.count("missing")
+    frequencies.add("seen")
+    sample := reservoir.new(0)
+    sample.add("first")
+    sample.add("second")
+    return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
+}"#,
+            ),
+        ),
+        (
+            "time-duration-edge-kernel",
+            parity_source(
+                "time_duration_edges()",
+                r#"use core.time as time
+use core.time.date as date
+fn time_duration_edges() => String {
+    clamped :: date.new(2023, 2, 31)
+    leap_end :: date.new(2024, 1, 31).add_months(1)
+    negative_time :: time.from_unix_ms(-1)
+    fractional :: Duration.seconds(1.75) ?? panic("fractional duration")
+    negative :: Duration.milliseconds(-1500) ?? panic("negative duration")
+    left :: Duration.milliseconds(500) ?? panic("left")
+    right :: Duration.milliseconds(1500) ?? panic("right")
+    difference :: left.difference(right)
+    zero :: Duration.nanoseconds(0) ?? panic("zero")
+    return "{clamped.to_string()}|{leap_end.to_string()}|{negative_time.to_timestamp()}|{negative_time.to_unix_ms()}|{negative_time.format_rfc3339()}|{fractional.in(.Milliseconds) ?? panic("fractional read")}|{negative.in(.Seconds) ?? panic("negative read")}|{difference.in(.Milliseconds) ?? panic("difference read")}|{zero.is_zero()}"
+}"#,
+            ),
+        ),
+        (
+            "xml-edge-kernel",
+            parity_source(
+                "xml_edges()",
+                r#"use core.encoding.xml as xml
+fn xml_edges() => String {
+    document :: xml.parse("<catalog><book id=\"7\"><title>Hi</title></book></catalog>") ?? panic("parse")
+    root :: xml.root(document) ?? panic("root")
+    root_name :: xml.expanded_name(root) ?? panic("root name")
+    children :: xml.content(root) ?? panic("content")
+    book_name :: xml.expanded_name(children[0]) ?? panic("book name")
+    id :: (xml.attribute(children[0], "id") ?? panic("attribute")) ?? "missing"
+    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{xml.to_string(document)}"
+}"#,
+            ),
+        ),
+        (
+            "measurement-edge-kernel",
+            parity_source(MEASUREMENT_EXPR, MEASUREMENT_DECLS),
+        ),
+    ];
+    for (label, source) in cases {
+        let expected = check_aot_comptime(label, &source);
+        if label == "sketch-edge-kernel" {
+            assert_eq!(expected, "0|1|0.0|-1.0|1.0|0|1|1");
+        }
+        if label == "time-duration-edge-kernel" {
+            assert_eq!(
+                expected,
+                "2023-02-28|2024-02-29|-1|-1|1969-12-31T23:59:59.999000000Z|1750|-1|-1000|true"
+            );
+        }
+        if label == "xml-edge-kernel" {
+            assert_eq!(
+                expected,
+                "catalog|1|book|7|<catalog><book id=\"7\"><title>Hi</title></book></catalog>"
+            );
+        }
+        if label == "measurement-edge-kernel" {
+            assert_eq!(expected, "3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0");
+        }
+        check_dev_tiers(label, &source, &expected);
+    }
+}
+
+#[test]
 fn rustc_backed_integer_bit_queries_match_all_execution_tiers_exactly() {
     let source = format!(
         "{INTEGER_BIT_QUERIES_DECLS}\nfn run() {{\n    print(\"{{integer_bit_queries_view()}}\")\n}}\n"
@@ -1311,20 +1420,22 @@ fn public_transcript_covers_linalg_overflow_and_expect_exactly() {
 }
 
 const SOLVER_FN: &str = r#"fn solver_view() => String {
+    empty := solve.Solver.new(-1)
     ok_solver := solve.Solver.new(7)
     ok_solver.require(true)
     ok_solver.require(1 == 1)
     bad := solve.Solver.new(42)
     bad.require(true)
     bad.require(false)
+    bad.require(false)
     bad.require(true)
-    return "{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
+    return "{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
 }"#;
-const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() => String {\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(true)\n    return \"{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
-const SOLVER_EXPECTED: &str = "ok|0|failed|1";
+const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() => String {\n    empty := solve.Solver.new(-1)\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(false)\n    bad.require(true)\n    return \"{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+const SOLVER_EXPECTED: &str = "ok|0|ok|0|failed|2";
 
 #[test]
-fn rustc_backed_solver_matches_aot_comptime_and_dev_tiers() {
+fn registered_solver_edges_match_aot_comptime_and_dev_tiers() {
     let source = parity_source("solver_view()", SOLVER_DECLS);
     assert_eq!(
         check_aot_comptime("solver/require-status", &source),

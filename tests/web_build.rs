@@ -501,7 +501,7 @@ fn jet_cli_infers_web_target_from_file_marker() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a package's `pkg.jet` `target: "web"` makes
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a package's `package.jet` `target: "web"` makes
 /// `jet build <file>` infer the web backend even with no file-level marker
 /// and no `--target=` flag — the managed-package counterpart to the loose-
 /// file marker above.
@@ -515,8 +515,8 @@ fn jet_cli_infers_web_target_from_manifest() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: {\n    name: \"webproj\",\n    version: \"0.1.0\",\n    target: \"web\",\n}\n",
+        dir.join("package.jet"),
+        "name: \"webproj\"\nversion: \"0.1.0\"\ntarget: \"web\"\n",
     )
     .unwrap();
     fs::write(
@@ -533,17 +533,17 @@ fn jet_cli_infers_web_target_from_manifest() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet build (no --target flag) should infer web from pkg.jet target: \"web\":\nstdout: {}\nstderr: {}",
+        "jet build (no --target flag) should infer web from package.jet target: \"web\":\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
         dir.join("build/app.js").is_file(),
-        "no build/app.js — web backend wasn't inferred from pkg.jet"
+        "no build/app.js — web backend wasn't inferred from package.jet"
     );
     assert!(
         dir.join("build/app.wasm").is_file(),
-        "no build/app.wasm — web backend wasn't inferred from pkg.jet"
+        "no build/app.wasm — web backend wasn't inferred from package.jet"
     );
     let _ = fs::remove_dir_all(&dir);
 }

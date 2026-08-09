@@ -226,25 +226,20 @@ fn create_bundle() -> Result<PathBuf, String> {
 
 pub(crate) fn run_report(args: &[String]) -> i32 {
     if args.iter().any(|arg| arg == "--send" || arg.starts_with("--send=")) {
-        eprintln!("error: `jet report --send` is not available");
-        eprintln!(" why: Jet never uploads report bundles (D-REPORT-SEND1=A)");
-        eprintln!(" fix: run `jet report`, inspect `.jet/reports/…`, then attach that directory yourself");
+        crate::cli_error!(@full "E2104", "`jet report --send` is not available", "Jet never uploads report bundles (D-REPORT-SEND1=A)", "run `jet report`, inspect `.jet/reports/…`, then attach that directory yourself");
         return jet::ExitCodes::USAGE;
     }
     if !args.is_empty() {
-        eprintln!("error: `jet report` takes no arguments");
-        eprintln!(" fix: run `jet report` to write a private local bundle");
+        crate::cli_error!(@fix "E2104", "`jet report` takes no arguments", "run `jet report` to write a private local bundle");
         return jet::ExitCodes::USAGE;
     }
     match create_bundle() {
         Ok(path) => {
             println!("wrote local report bundle to {}", path.display());
-            0
+            jet::ExitCodes::OK
         }
         Err(error) => {
-            eprintln!("error: could not create local report bundle");
-            eprintln!(" why: {error}");
-            eprintln!(" fix: check write access to the current directory, then run `jet report` again");
+            crate::cli_error!(@full "E2105", "could not create local report bundle", error, "check write access to the current directory, then run `jet report` again");
             jet::ExitCodes::USER_ERROR
         }
     }

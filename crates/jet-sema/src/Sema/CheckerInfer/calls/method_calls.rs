@@ -411,7 +411,7 @@ impl<'a> Checker<'a> {
             // shadowing local of that name still resolves normally below).
             if method == "raw" {
                 if let Expr::Ident(n, _) = receiver.as_ref() {
-                    if (n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH) && self.lookup(n).is_none() {
+                    if Syntax::is_typed_text_type(n) && self.lookup(n).is_none() {
                         let type_name = n.clone();
                         if args.len() != 1 {
                             self.diags.push(Diagnostic::error(

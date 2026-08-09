@@ -63,9 +63,9 @@ pub const KW_PRIV: &str = "priv";
 /// public-by-default for following top-level items (D-VISDEFAULT1=C).
 pub const MARKER_PUB_FILE: &str = "PubFile";
 
-/// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables ambient
-/// prelude auto-imports (`print` / `input`). Expert escape hatch only — no
-/// library may inject into the no-prefix surface.
+/// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables the
+/// readable Core prelude. Expert escape hatch only — no library may inject into
+/// the no-prefix surface.
 pub const MARKER_NO_PRELUDE: &str = "NoPrelude";
 
 /// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
@@ -170,24 +170,13 @@ pub const STMT_SEP: &str = ";";
 pub const INTERP_OPEN: &str = "{";
 pub const INTERP_CLOSE: &str = "}";
 
-/// S9 (ratified): the built-in print function (adds a newline).
+/// S9 (ratified): the prelude-declared print function (adds a newline).
 pub const BUILTIN_PRINT: &str = "print";
 
-/// D-PRELUDE1 option B (ratified): `input` is ambient (no `use core.io` required).
-/// Both `print` and `input` form the interactive I/O subset. All other core.io
-/// members stay qualified behind `use core.io`.
+/// D-NAME-ALIAS1=A: `input` is prelude-declared (no `use core.io` required).
+/// `print` and `input` remain the interactive I/O subset. Other `core.io`
+/// members are opened through the readable prelude's explicit aliases.
 pub const BUILTIN_INPUT: &str = "input";
-
-/// D-PRELUDE-LAW1=A: complete closed no-prefix registry. The first group is
-/// always ambient; the second exists only under its ratified comptime gates.
-/// User declarations shadow these names and libraries cannot inject new ones.
-pub const PRELUDE_ALWAYS_IDENTS: &[&str] =
-    &["print", "input", "panic", "require"];
-pub const PRELUDE_COMPTIME_IDENTS: &[&str] =
-    &["embed_file", "embed_bytes", "find", "fetch"];
-pub const PRELUDE_IDENTS: &[&str] = &[
-    "print", "input", "panic", "require", "embed_file", "embed_bytes", "find", "fetch",
-];
 
 /// S11 (ratified): built-in type names (M1).
 pub const TYPE_INT: &str = "Int";
@@ -660,11 +649,14 @@ pub const METHOD_FRESH_NEW_RANDOM: &str = "new_random";
 /// / `shuffle(&list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
 
-/// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14):
-/// runtime numbers become checked durations through type-owned unit methods;
-/// whole-unit reads use one checked enum-taking method. Static unit literals
-/// remain unchanged.
+/// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14) /
+/// D-TYPE2-TIME1=A (ratified 2026-08-06): runtime numbers become checked
+/// durations through type-owned unit methods; whole-unit reads use one checked
+/// enum-taking method. Static unit literals remain unchanged. Duration is the
+/// canonical Time delta quantity.
 pub const DURATION_TYPE: &str = "Duration";
+/// D-TYPE2-TIME1=A (ratified 2026-08-06): the canonical Time point quantity.
+pub const TYPE_INSTANT: &str = "Instant";
 pub const DURATION_UNIT_TYPE: &str = "DurationUnit";
 pub const DURATION_RANGE_ERROR_TYPE: &str = "RangeError";
 pub const DURATION_CONSTRUCTORS: &[&str] = &[
@@ -699,8 +691,10 @@ pub fn duration_unit_for_constructor(method: &str) -> Option<&'static str> {
     }
 }
 
-/// D-BIGINT1 (ratified 2026-06-28): arbitrary-precision integer. Construct
-/// explicitly with `BigInt(100)` or `BigInt("…")`; fixed `Int` never promotes.
+/// D-BIGINT1 (ratified 2026-06-28) / D-TYPE2-NUM1=A (ratified 2026-08-06):
+/// arbitrary-precision integer. Construct explicitly with `BigInt(100)` or
+/// `BigInt("…")`; fixed `Int` never promotes. The D-TYPE2 form retires this
+/// spelling; #1550 owns removal of its implementation references.
 pub const TYPE_BIGINT: &str = "BigInt";
 
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
@@ -740,6 +734,17 @@ pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
 }
 pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
 pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
+
+/// D-LAYOUT-FACTS1=B: byte facts remain unavailable until a canonical target
+/// layout engine exists. Keep this vocabulary shared by sema and comptime so
+/// neither path turns the typed absence into a silent answer.
+pub fn is_layout_byte_fact(type_name: &str, field: &str) -> bool {
+    matches!(
+        (type_name, field),
+        (TYPE_LAYOUT_INFO, "size" | "alignment" | "stride")
+            | (TYPE_LAYOUT_FIELD, "offset" | "size")
+    )
+}
 
 /// Internal AST spelling for the typed selector in `T.$layout[.field]`.
 /// Keeping the selector in an existing `Expr::Ident` avoids a second AST

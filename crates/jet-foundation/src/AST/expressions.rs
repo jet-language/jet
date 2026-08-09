@@ -248,6 +248,13 @@ pub struct LambdaMeta {
     /// D-LOOPSTATE1: compiler-private carrier for a bare loop expression whose
     /// final value comes from `break value`.
     pub result_loop: bool,
+    /// D-CHOOSE-FIND1=A: a finite value loop must be paired with a written
+    /// exhaustion route (`?? ...`) before sema can accept the expression.
+    pub requires_exhaustion_route: bool,
+    /// Closing-brace span used by the exhaustion-route diagnostic.
+    pub exhaustion_span: Option<Span>,
+    /// Sema has attached and checked the written exhaustion route.
+    pub exhaustion_route_attached: bool,
     pub loop_result_type: Option<Type>,
     pub loop_label: Option<(String, Span)>,
     /// D-SHAREDGUARD1=A: sema-validated direct field path for a guard

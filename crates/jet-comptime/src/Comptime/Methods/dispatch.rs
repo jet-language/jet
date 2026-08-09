@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_foundation::Effects::{core_effect, Effect};
 use crate::AST::{
     AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp,
 };
@@ -21,13 +22,13 @@ use super::super::Builtins::{
 use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
-use crate::AST::CtValue;
+use crate::AST::{as_bytes, CtValue};
 use super::core_calls::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
+    apply_core_call, apply_data_line_call, apply_impure_core_call, as_float, display_core_pure_value,
     eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
     with_ambient_rng,
 };
-use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
+use super::repl_process::apply_repl_authorized_core_call;
 
 // Keep this seeded SplitMix64 stream byte-for-byte with the AOT `jet_rng_*`
 // helpers. `core.random`'s ambient interpreter RNG is intentionally separate.
@@ -78,60 +79,37 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
     unique
 }
 
-pub(crate) fn is_pure_tier2_call(module: &str, method: &str) -> bool {
-    matches!((module, method),
-        ("core.io", "style_force")
-        | ("core.net", "ip_addr" | "ip_to_string" | "ip_is_ipv4")
-        | ("core.net", "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string")
-        | ("core.net", "ready_readable" | "ready_writable")
-        | ("core.net", "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code")
-        | ("core.net", "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight")
-        | ("core.net", "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated")
+/// D-META-EFFECT1: which tier a Core call belongs to is read off its effect
+/// set, not off a list kept here. An ambient effect — one that reaches the
+/// build machine's filesystem, environment, terminal, processes, network,
+/// secrets, or a live store — is Tier 2: it needs `#Impure("reason")` and
+/// `--allow-impure`. Time and Rand stay outside this gate because determinism
+/// already governs them (E3403), and Log/GPU touch nothing the build can
+/// observe.
+fn is_ambient_effect(effect: Effect) -> bool {
+    matches!(
+        effect,
+        Effect::FS
+            | Effect::Env
+            | Effect::IO
+            | Effect::Exec
+            | Effect::Net
+            | Effect::Secret
+            | Effect::DB
+            | Effect::Browser
     )
 }
 
 pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
-    (matches!(
-        module,
-        "core.files"
-            | "core.env"
-            | "core.io"
-            | "core.exec"
-            | "core.net"
-            | "core.tls"
-            | "core.process"
-    ) && !is_pure_tier2_call(module, method))
-        || (module == "core.auth"
-            && matches!(
-                method,
-                // Storeful session APIs — must not const-fold into Ok(literals)
-                // while the runtime JET_AUTH_STORE stays empty (I9 / D-AUTH1).
-                "register_user"
-                    | "password_login"
-                    | "session_validate"
-                    | "magic_link_issue"
-                    | "magic_link_consume"
-                    | "oauth_begin"
-                    | "oauth_finish"
-            ))
-        || (matches!(module, "app" | "core.web")
-            && matches!(
-                method,
-                // Storeful live-query registry — same class of I9 fold bug as auth.
-                "live"
-                    | "subscribe"
-                    | "invalidate"
-                    | "transact_invalidate"
-                    | "signal_push"
-                    | "live_get"
-                    | "live_show"
-                    | "live_stats"
-                    // The sync publisher mutates a bounded session registry;
-                    // it must never be folded into an immutable binding.
-                    | "sync_over"
-                    | "sync"
-            ))
-        || (repl_mode && module == "core.random" && method != "rng")
+    // `app.live(…)` and friends are the web module's live-query registry under
+    // the entry alias; resolve the alias before asking for the fact.
+    let resolved = if module == "app" { "core.web" } else { module };
+    if core_effect(resolved, method).is_some_and(is_ambient_effect) {
+        return true;
+    }
+    // The REPL re-reads ambient randomness between lines, so a folded draw
+    // would go stale; the seeded constructor stays deterministic.
+    repl_mode && module == "core.random" && method != "rng"
 }
 
 pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnostic {

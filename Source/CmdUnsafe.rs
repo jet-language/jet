@@ -8,18 +8,14 @@ use jet_foundation::JSON::json_escape;
 
 pub(crate) fn run(args: &[String], json: bool, color: bool) {
     let Some(file) = args.iter().find(|argument| !argument.starts_with('-')) else {
-        eprintln!("error: `jet inspect unsafe` needs an entry file");
-        eprintln!(" fix: jet inspect unsafe Source/main.jet");
+        crate::cli_error!(@fix "E2104", "`jet inspect unsafe` needs an entry file", "jet inspect unsafe Source/main.jet");
         exit(jet::ExitCodes::USAGE);
     };
     let bundle = jet::Loader::load_entry_with_diagnostics(file).unwrap_or_else(|diagnostics| {
         if json {
-            print!("{{\"schema_version\":1,\"diagnostics\":[");
-            for (index, entry) in diagnostics.iter().enumerate() {
-                if index > 0 { print!(","); }
-                print!("{}", entry.diagnostic.to_json(&entry.file, &entry.source));
+            for entry in &diagnostics {
+                print!("{}", jet::render_all_json(&entry.file, &entry.source, std::slice::from_ref(&entry.diagnostic)));
             }
-            println!("]}}");
         } else {
             for (index, entry) in diagnostics.iter().enumerate() {
                 if index > 0 { eprint!("\n"); }
@@ -42,13 +38,10 @@ fn render_report_diagnostics(
     color: bool,
 ) -> ! {
     if json {
-        print!("{{\"schema_version\":1,\"diagnostics\":[");
-        for (index, entry) in report.diagnostics.iter().enumerate() {
-            if index > 0 { print!(","); }
+        for entry in &report.diagnostics {
             let source = module_source(bundle, &entry.source);
-            print!("{}", entry.diagnostic.to_json(&entry.source, &source));
+            print!("{}", jet::render_all_json(&entry.source, &source, std::slice::from_ref(&entry.diagnostic)));
         }
-        println!("]}}");
     } else {
         for (index, entry) in report.diagnostics.iter().enumerate() {
             if index > 0 { eprint!("\n"); }

@@ -1307,11 +1307,15 @@ impl<'a> Fmt<'a> {
                 let [Stmt::Loop { body, .. }] = stmts.as_slice() else {
                     unreachable!("result loop carrier has one bare loop")
                 };
-                self.write("loop {");
-                self.newline();
-                self.with_indent(|formatter| formatter.fmt_block_stmts(body));
-                self.newline();
-                self.write("}");
+                if lam.meta.requires_exhaustion_route {
+                    self.fmt_value_loop(body, lam.meta.exhaustion_route_attached);
+                } else {
+                    self.write("loop {");
+                    self.newline();
+                    self.with_indent(|formatter| formatter.fmt_block_stmts(body));
+                    self.newline();
+                    self.write("}");
+                }
                 debug_assert!(args.is_empty());
             }
             Expr::CallValue { callee, args, .. } => {
@@ -1354,6 +1358,147 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    fn fmt_value_loop(&mut self, body: &[Stmt], route_attached: bool) {
+        let controller = body
+            .first()
+            .expect("value loop carrier has one finite controller");
+        match controller {
+            Stmt::For {
+                var,
+                var2,
+                kind,
+                body,
+                span,
+                ..
+            } => {
+                self.write("loop ");
+                self.fmt_for_header(var, var2.as_ref(), kind);
+                let mut current = body.as_slice();
+                while let [Stmt::For {
+                    var,
+                    var2,
+                    kind,
+                    body,
+                    ..
+                }] = current
+                {
+                    self.write(", ");
+                    self.fmt_for_header(var, var2.as_ref(), kind);
+                    current = body;
+                }
+                self.fmt_value_loop_body(current, *span);
+            }
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                span,
+                ..
+            } => {
+                self.write("loop ");
+                self.fmt_binding(init);
+                self.write(", ");
+                self.fmt_expr(cond, Prec::OrFallback);
+                if let Some(step) = step {
+                    self.write(", ");
+                    self.fmt_stmt(step);
+                }
+                self.fmt_value_loop_body(body, *span);
+            }
+            _ => unreachable!("value loop starts with a finite controller"),
+        }
+        if route_attached && body.len() > 1 {
+            let route = body.last().expect("attached route is in the carrier");
+            self.write(" ?? ");
+            match route {
+                Stmt::BreakLabelValue(_, _, value, _) => {
+                    self.fmt_expr(value, Prec::OrFallback)
+                }
+                Stmt::Return(value, _) => {
+                    self.write("return");
+                    if let Some(value) = value {
+                        self.write(" ");
+                        self.fmt_expr(value, Prec::OrFallback);
+                    }
+                }
+                Stmt::Expr(value) => self.fmt_expr(value, Prec::OrFallback),
+                Stmt::BreakLabel(name, _) => self.write(&format!("break({name})")),
+                Stmt::ContinueLabel(name, _) => self.write(&format!("next({name})")),
+                _ => unreachable!("value loop route has a value or diverging statement"),
+            }
+        }
+    }
+
+    fn fmt_for_header(
+        &mut self,
+        var: &str,
+        var2: Option<&(String, crate::Diagnostics::Span)>,
+        kind: &ForKind,
+    ) {
+        if var2.is_some() {
+            self.write("(");
+        }
+        self.write(var);
+        if let Some((name, _)) = var2 {
+            self.write(", ");
+            self.write(name);
+            self.write(")");
+        }
+        self.write(", ");
+        match kind {
+            ForKind::Range {
+                start,
+                end,
+                step,
+                exclusive,
+            } => {
+                self.fmt_expr(start, Prec::OrFallback);
+                self.write(if *exclusive { "..<" } else { ".." });
+                self.fmt_expr(end, Prec::OrFallback);
+                if let Some(step) = step {
+                    self.write(", ");
+                    self.fmt_expr(step, Prec::OrFallback);
+                }
+            }
+            ForKind::In { collection, step } => {
+                self.fmt_expr(collection, Prec::OrFallback);
+                if let Some(step) = step {
+                    self.write(", ");
+                    self.fmt_expr(step, Prec::OrFallback);
+                }
+            }
+        }
+    }
+
+    fn fmt_value_loop_body(&mut self, body: &[Stmt], loop_span: crate::Diagnostics::Span) {
+        let body = if let [Stmt::Switch {
+            subject,
+            arms,
+            else_body: None,
+            span,
+        }] = body
+        {
+            if *span == loop_span
+                && crate::AST::is_subjectless_guard(subject, *span)
+                && arms.len() == 1
+            {
+                self.write(" if ");
+                self.fmt_expr(&arms[0].cond, Prec::OrFallback);
+                arms[0].body.as_slice()
+            } else {
+                body
+            }
+        } else {
+            body
+        };
+        self.write(" {");
+        self.newline();
+        self.with_indent(|formatter| formatter.fmt_block_stmts(body));
+        self.newline();
+        self.write("}");
+    }
+
     fn fmt_collecting_loop(&mut self, lam: &crate::AST::Lambda) {
         let crate::AST::LambdaBody::Block(stmts) = &lam.body else {
             unreachable!("collecting loops use block-backed compiler closures")
@@ -1374,39 +1519,7 @@ impl<'a> Fmt<'a> {
                         self.write(", ");
                     }
                     first_clause = false;
-                    if var2.is_some() {
-                        self.write("(");
-                    }
-                    self.write(var);
-                    if let Some((name, _)) = var2 {
-                        self.write(", ");
-                        self.write(name);
-                        self.write(")");
-                    }
-                    self.write(", ");
-                    match kind {
-                        ForKind::Range {
-                            start,
-                            end,
-                            step,
-                            exclusive,
-                        } => {
-                            self.fmt_expr(start, Prec::OrFallback);
-                            self.write(if *exclusive { "..<" } else { ".." });
-                            self.fmt_expr(end, Prec::OrFallback);
-                            if let Some(step) = step {
-                                self.write(", ");
-                                self.fmt_expr(step, Prec::OrFallback);
-                            }
-                        }
-                        ForKind::In { collection, step } => {
-                            self.fmt_expr(collection, Prec::OrFallback);
-                            if let Some(step) = step {
-                                self.write(", ");
-                                self.fmt_expr(step, Prec::OrFallback);
-                            }
-                        }
-                    }
+                    self.fmt_for_header(var, var2.as_ref(), kind);
                     if body.len() == 1 && matches!(body[0], Stmt::For { .. }) {
                         current = &body[0];
                         continue;

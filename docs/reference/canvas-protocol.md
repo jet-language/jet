@@ -13,8 +13,7 @@ The project document is the workspace/package layer above file graphs. It is
 read-only in v1. Its source truth is ordinary Jet project files:
 
 - single-file mode: the opened `.jet` file;
-- package mode: `package.jet` plus package source files (`pkg.jet` is accepted as
-  a migration input);
+- package mode: `package.jet` plus package source files;
 - workspace mode: `workspace.jet`, member `package.jet` files, member source files,
   env source, and `.jet/lock`.
 

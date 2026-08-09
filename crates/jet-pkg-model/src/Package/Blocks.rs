@@ -658,7 +658,7 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
     for name in &names {
         if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
             return Err(PackageParseError::BadEffectsBlock(format!(
-                "`{name}` isn't a known effect (see docs/spec — the ten-effect D-EFF4 vocabulary)"
+                "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"
             )));
         }
     }
@@ -800,41 +800,7 @@ fn parse_trust_decision(value: &str) -> Result<TrustDecision, PackageParseError>
 }
 
 pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, PackageParseError> {
-    let Some(lints_body) = block_body(body, Syntax::POLICY_FIELD_LINTS, '{', '}') else {
-        return Ok(None);
-    };
-    let mut deny = Vec::new();
-    for (key, value) in key_value_entries(&lints_body) {
-        if key == Syntax::LINTS_FIELD_DENY {
-            deny = parse_lint_code_list(value.trim())?;
-        } else {
-            return Err(err(format!(
-                "unknown `policy.lints` field `{key}` — allowed: `{}`",
-                Syntax::LINTS_FIELD_DENY,
-            )));
-        }
-    }
-    Ok(Some(deny))
-}
-
-fn parse_lint_code_list(value: &str) -> Result<Vec<String>, PackageParseError> {
-    let names = parse_string_list(value)
-        .map_err(|_| err(format!("`{}:` must be a list like `[L0504, L2401]`", Syntax::LINTS_FIELD_DENY)))?;
-    for name in &names {
-        if !is_lint_code_shape(name) {
-            return Err(err(format!("`{name}` isn't shaped like a lint code (`L` + 4 digits)")));
-        }
-    }
-    Ok(names)
-}
-
-fn is_lint_code_shape(s: &str) -> bool {
-    let mut chars = s.chars();
-    if chars.next() != Some('L') {
-        return false;
-    }
-    let rest: Vec<char> = chars.collect();
-    rest.len() == 4 && rest.iter().all(|c| c.is_ascii_digit())
+    jet_foundation::LintPolicy::parse_policy_lints(body).map_err(|detail| err(detail))
 }
 
 pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {

@@ -290,10 +290,6 @@ pub(super) fn run_project_task_with_mode(
     } else {
         empty_task_env()
     };
-    if let Some(authority) = &metadata.authority {
-        env.vars
-            .insert("JET_TASK_AUTHORITY".to_string(), authority.clone());
-    }
     for (name, value) in &metadata.limits {
         let key = task_limit_env_name(name);
         env.vars.insert(key, value.clone());
@@ -939,7 +935,7 @@ fn task_cache_key(
     identity.push_str(&format!("outputs={:?}\n", metadata.outputs));
     identity.push_str(&format!("skip={:?}\n", metadata.skip));
     identity.push_str(&format!("cwd={:?}\n", metadata.cwd));
-    identity.push_str(&format!("cache={:?}\nauthority={:?}\n", metadata.cache, metadata.authority));
+    identity.push_str(&format!("cache={:?}\n", metadata.cache));
     for (name, value) in &metadata.limits {
         identity.push_str(&format!("limit={name}:{value}\n"));
     }

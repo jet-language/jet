@@ -164,31 +164,21 @@ fn native_call_hook(name: &str, args: &[CtValue]) -> Option<Result<CtValue, Diag
     )
 }
 
-/// Strip call-site "at comptime" framing baked into evaluator `what` strings
-/// before surfacing them as a runtime-tier diagnostic (D-VERDICT-1254-1).
-fn strip_comptime_framing(what: &str) -> String {
-    let mut s = what
-        .strip_suffix(" can't run at compile time yet")
-        .unwrap_or(what)
-        .to_string();
-    if let Some(rest) = s.strip_suffix(" (impure tier)") {
-        s = rest.to_string();
-    }
-    s = s.replace(" at comptime", "");
-    s = s.replace(" at compile time", "");
-    while s.contains("  ") {
-        s = s.replace("  ", " ");
-    }
-    s.trim().to_string()
-}
-
-/// Rewrite shared-evaluator diagnostics that leaked comptime voice into the
-/// default `jet run` / whole-program deopt path. Keeps the code; only what /
-/// why / fix change. Comptime callers never hit this (D-VERDICT-1254-1).
+/// Rewrite shared-evaluator diagnostics that need runtime-tier voice into the
+/// default `jet run` / whole-program deopt path. E0956 already has one shared
+/// what/why/fix constructor, so it passes through unchanged.
+///
+/// D-META-EFFECT1 c3: E0951 retired into E3401 (the comptime purity gate and
+/// the run-time `=[]=>` check share one code now). This is still safe to
+/// rewrite unconditionally: a genuine run-time E3401 (a `=[]=>`-declared
+/// function's own body, or the whole-program effect fixpoint) is a sema-time
+/// diagnostic that fails the build before the deopt path ever runs, so any
+/// E3401 seen here can only be the shared evaluator's own purity gate firing
+/// during interpretation.
 fn rewrite_runtime_tier_diag(d: Diagnostic) -> Diagnostic {
     let construct = match d.code.as_str() {
-        "E0956" => strip_comptime_framing(&d.what),
-        "E0951" => d
+        "E0956" => return d,
+        "E3401" => d
             .what
             .strip_suffix(" is not allowed in comptime code")
             .unwrap_or(&d.what)
@@ -266,16 +256,16 @@ mod rewrite_tests {
     }
 
     #[test]
-    fn rewrite_e0951_uses_quick_run_voice() {
+    fn rewrite_e3401_comptime_leak_uses_quick_run_voice() {
         let d = Diagnostic::error(
-            "E0951",
+            "E3401",
             "core.files.read is not allowed in comptime code".to_string(),
             "impure".to_string(),
             "gate it".to_string(),
             None,
         );
         let out = rewrite_runtime_tier_diag(d);
-        assert_eq!(out.code, "E0951");
+        assert_eq!(out.code, "E3401");
         assert!(
             out.what.contains("core.files.read"),
             "construct must survive rewrite, got: {:?}",

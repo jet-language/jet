@@ -22,6 +22,7 @@ fn jet_env_table() -> &'static std::sync::RwLock<JetEnvEntries> {
 }
 
 fn jet_std_env_init() {
+    jet_ffi_install_reporter();
     let _ = jet_env_table();
     jet_observe_runtime_start();
 }

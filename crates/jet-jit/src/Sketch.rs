@@ -1,5 +1,4 @@
-//! `core.sketch` hosts (#729). `include!` canonical JetHyperLogLog / TDigest /
-//! CMS / ReservoirSampler from Prelude/Core.rs — no third algorithm.
+//! `core.sketch` marshalling hosts for the shared Prelude kernel.
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
@@ -7,11 +6,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::clone_string;
 
-/// Sketch runtime extracted by `build.rs` from `jet-codegen` Prelude/Core.rs.
 pub(crate) mod sketch_rt {
-    #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    include!(concat!(env!("OUT_DIR"), "/sketch_rt.rs"));
+    include!("../../jet-codegen/src/Prelude/Core/Sketch.rs");
 }
 
 #[derive(Clone)]
@@ -158,7 +154,6 @@ host_fns! {
     quantile: "jet_jit_sketch_quantile" => jet_jit_sketch_quantile: quant;
     sample: "jet_jit_sketch_sample" => jet_jit_sketch_sample: unary;
 }
-
 
 
 

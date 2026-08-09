@@ -179,8 +179,8 @@ pub(crate) fn eval_comptime_items(
     consts: &mut HashMap<String, Type>,
     base_dir: &std::path::Path,
     diags: &mut Vec<Diagnostic>,
-    // D-CTCORE1: module alias → Core path so the interpreter can evaluate
-    // whitelisted pure Core calls (e.g. `$value :: math.sqrt(4.0)`).
+    // D-META-EFFECT1: module alias → Core path so the interpreter can evaluate
+    // effect-approved Core calls (e.g. `$value :: math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {
@@ -243,7 +243,8 @@ pub(crate) fn eval_comptime_items(
                     if !crate::Comptime::check_build_time_io(&c.value, base_dir, diags) {
                         continue;
                     }
-                    // D-CTCORE1: evaluate_with_imports so Core whitelist calls work.
+                    // D-META-EFFECT1: evaluate_with_imports resolves Core calls
+                    // through the shared effect facts.
                     match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
                         &c.value,
                         &funcs,

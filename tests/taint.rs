@@ -429,3 +429,21 @@ fn run(n: Int) {
         codes(src)
     );
 }
+
+/// Card #1710: adding JSONL to the sink table catches a credential without a
+/// second sema match arm.
+#[test]
+fn tainted_credential_to_jsonl_is_e0722() {
+    let src = r#"
+use core.encoding.jsonl as jsonl
+fn run() {
+    rows :: #Credential [JSON.Null]
+    jsonl.to_string(rows)
+}
+"#;
+    assert!(
+        codes(src).iter().any(|code| code == "E0722"),
+        "credential reaching JSONL serialization must be E0722: {:?}",
+        codes(src)
+    );
+}

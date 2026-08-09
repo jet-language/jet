@@ -119,6 +119,15 @@ pub trait ReplAuthorizer {
     fn reset_session(&mut self) {}
 }
 
+pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
+    authorizer: &'short mut Option<&'long mut dyn ReplAuthorizer>,
+) -> Option<&'short mut (dyn ReplAuthorizer + 'short)> {
+    match authorizer {
+        Some(authorizer) => Some(&mut **authorizer),
+        None => None,
+    }
+}
+
 pub(super) struct Interp<'a> {
     pub(super) funcs: &'a HashMap<String, &'a Func>,
     pub(super) base_dir: &'a Path,
@@ -126,8 +135,8 @@ pub(super) struct Interp<'a> {
     /// `Some` in whole-program dev mode (E2-M4): `print`/`eprint` write here
     /// instead of being rejected. `None` in pure comptime mode (M9.5).
     pub(super) sink: Option<&'a mut DevSink>,
-    /// D-CTCORE1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
-    /// Enables the comptime interpreter to evaluate whitelisted pure Core calls.
+    /// D-META-EFFECT1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
+    /// Enables the comptime interpreter to evaluate effect-approved Core calls.
     /// Empty for contexts that have no `use` declarations (e.g. module-level consts).
     pub(super) core_imports: &'a HashMap<String, String>,
     /// D-DBG3: `Some` under `jet debug` — the source-level debugger driver,
@@ -315,6 +324,21 @@ impl<'a> Interp<'a> {
         if stmts.is_empty() {
             return Ok(Flow::Normal);
         }
+        // TIR intentionally erases `#Grant` to a plain Region. Keep REPL
+        // grant scope in this host frame before the bridge evaluates a body.
+        if self.repl_mode
+            && stmts
+                .iter()
+                .any(|stmt| matches!(stmt, Stmt::Grant { .. }))
+        {
+            for stmt in stmts {
+                match self.exec_stmt(stmt, scope)? {
+                    Flow::Normal => {}
+                    flow => return Ok(flow),
+                }
+            }
+            return Ok(Flow::Normal);
+        }
         let mut globals = self.globals.clone();
         for (k, v) in scope.iter() {
             globals.insert(k.clone(), v.clone());
@@ -329,6 +353,8 @@ impl<'a> Interp<'a> {
         let core_imports = self.core_imports;
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
+        let repl_grants = &self.repl_grants;
+        let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
         let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut req = super::TirBridge::BlockEvalRequest {
@@ -346,6 +372,8 @@ impl<'a> Interp<'a> {
             fuel,
             sink,
             repl_mode,
+            repl_grants,
+            repl_authorizer,
             allow_impure,
             impure_depth,
             emitted_fragments,
@@ -454,6 +482,18 @@ impl<'a> Interp<'a> {
             self.debugger = Some(dbg);
             res?;
         }
+        if self.repl_mode {
+            if let Stmt::Grant { caps, body, .. } = stmt {
+                let old_len = self.repl_grants.len();
+                self.repl_grants
+                    .extend(caps.iter().map(|(name, _)| name.clone()));
+                self.impure_depth += 1;
+                let result = self.exec_block(body, scope);
+                self.impure_depth -= 1;
+                self.repl_grants.truncate(old_len);
+                return result;
+            }
+        }
         self.exec_block(std::slice::from_ref(stmt), scope)
     }
 
@@ -478,6 +518,8 @@ impl<'a> Interp<'a> {
         let core_imports = self.core_imports;
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
+        let repl_grants = &self.repl_grants;
+        let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
         let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut mutated = HashMap::new();
@@ -498,6 +540,8 @@ impl<'a> Interp<'a> {
             fuel,
             sink,
             repl_mode,
+            repl_grants,
+            repl_authorizer,
             emitted_fragments,
             embed_inputs,
             mutated: Some(&mut mutated),

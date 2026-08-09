@@ -29,15 +29,15 @@ fn jetpack() -> Command {
     Command::new(jetpack_bin())
 }
 
-/// A minimal project: `pkg.jet` declaring `<pkg_kind>` for `app`, `env.jet`
+/// A minimal project: `package.jet` declaring `<pkg_kind>` for `app`, `env.jet`
 /// declaring `image.server { from: packages.app, … }`, and — when `built` is
 /// true — a fake executable already staged at `build/app` (the `jet build`
 /// output convention `jet image` reads from).
 fn write_project(dir: &Path, pkg_kind: &str, built: bool) {
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         format!(
-            "payload: {{ name: \"demo\", version: \"0.1.0\" }}\npackages: {{ app: {pkg_kind} }}\n"
+            "name: \"demo\"\nversion: \"0.1.0\"\npackages: {{ app: {pkg_kind} }}\n"
         ),
     )
     .unwrap();
@@ -102,7 +102,7 @@ fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
 
 /// I5: the committed typed-image fixture (the `.Oci` shape) is the executable
 /// spec — it parses, field-checks, and cross-checks clean against its own
-/// `pkg.jet`, capturing every `.Oci`-only field.
+/// `package.jet`, capturing every `.Oci`-only field.
 #[test]
 fn committed_oci_image_example_field_checks_clean() {
     let path =

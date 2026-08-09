@@ -1,12 +1,9 @@
 //! Integration tests for `workspace.jet` evaluation (D-WORKSPACE1=B, D-WORKSPACE2=A).
 //!
 //! Covers I4 snapshot requirements for E0995, E0996, E0997:
-//! - E0995: workspace.jet has no `module workspace { … }` declaration
+//! - E0995: workspace.jet has no `module workspace { … }` body
 //! - E0996: `members:` evaluated to something other than `[String]`
 //! - E0997: `find("…")` names a missing directory
-//!
-//! These diagnostics fire from `jetpack::WorkspaceFile::evaluate`, not from
-//! `jet check`, so coverage is via programmatic assertion rather than .stderr snapshots.
 
 use jetpack::WorkspaceFile;
 use std::path::{Path, PathBuf};
@@ -50,7 +47,7 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 }
 
 // ──────────────────────────────────────────────
-// E0995 — no `module workspace { … }`
+// E0995 — no `module workspace { … }` body
 // ──────────────────────────────────────────────
 
 #[test]
@@ -62,6 +59,10 @@ fn e0995_no_workspace_module_fires() {
         d.code, "E0995",
         "expected E0995, got {} — {:?}",
         d.code, d.what
+    );
+    assert_eq!(
+        d.render("workspace.jet", src),
+        include_str!("ui/workspace_e0995.stderr")
     );
 }
 
@@ -86,6 +87,10 @@ fn e0996_members_not_a_list() {
         "expected E0996, got {} — {:?}",
         d.code, d.what
     );
+    assert_eq!(
+        d.render("workspace.jet", src),
+        include_str!("ui/workspace_e0996.stderr")
+    );
 }
 
 #[test]
@@ -102,13 +107,17 @@ fn e0996_members_list_with_non_string_element() {
 
 #[test]
 fn e0997_find_missing_dir() {
-    let src = "module workspace { members: find(\"./definitely-no-such-packages\") }\n";
+    let src = "module workspace { members: find(\"./no-such-packages\") }\n";
     let d =
         WorkspaceFile::evaluate(src, Path::new("/tmp")).expect_err("find of missing dir must fail");
     assert_eq!(
         d.code, "E0997",
         "expected E0997, got {} — {:?}",
         d.code, d.what
+    );
+    assert_eq!(
+        d.render("workspace.jet", src),
+        include_str!("ui/workspace_e0997.stderr")
     );
 }
 
@@ -138,7 +147,7 @@ fn dot_form_classified_when_source_is_declared() {
 }
 
 #[test]
-fn colon_form_still_works() {
+fn source_form_still_works() {
     use jetpack::RefSpec::{classify_in, ProviderKind, Source, SourceTable};
 
     let table = SourceTable::from_decls([(
@@ -147,7 +156,7 @@ fn colon_form_still_works() {
         ProviderKind::default(),
     )]);
 
-    let r = classify_in("mono:ranker", &table).expect("colon form should still classify");
+    let r = classify_in("ranker@mono", &table).expect("source form should classify");
     assert!(matches!(r.source, Source::Named(_)));
     assert_eq!(r.package, "ranker");
 }
@@ -246,8 +255,8 @@ fn workspace_find_example_evaluates() {
     let ranker = packages.join("ranker");
     std::fs::create_dir_all(&hello).unwrap();
     std::fs::create_dir_all(&ranker).unwrap();
-    std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
-    std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
+    std::fs::write(hello.join("package.jet"), "name: \"hello\"\n").unwrap();
+    std::fs::write(ranker.join("package.jet"), "name: \"ranker\"\n").unwrap();
     std::fs::write(
         dir.join("workspace.jet"),
         "module workspace {\n    members: find(\"./packages\")\n}\n",
@@ -311,21 +320,21 @@ fn committed_monorepo_example_indexes_and_addresses_members() {
 // ──────────────────────────────────────────────
 
 #[test]
-fn find_discovers_packages_with_pkg_jet() {
+fn find_discovers_packages_with_package_jet() {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
     let tmp = std::env::temp_dir().join(format!("ws-find-test-{nanos}"));
-    // packages/hello/pkg.jet
+    // packages/hello/package.jet
     let hello = tmp.join("packages/hello");
     std::fs::create_dir_all(&hello).unwrap();
-    std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
-    // packages/ranker/pkg.jet
+    std::fs::write(hello.join("package.jet"), "name: \"hello\"\n").unwrap();
+    // packages/ranker/package.jet
     let ranker = tmp.join("packages/ranker");
     std::fs::create_dir_all(&ranker).unwrap();
-    std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
-    // packages/bare (no pkg.jet — should be ignored)
+    std::fs::write(ranker.join("package.jet"), "name: \"ranker\"\n").unwrap();
+    // packages/bare (no package.jet — should be ignored)
     std::fs::create_dir_all(tmp.join("packages/bare")).unwrap();
 
     let src = "module workspace { members: find(\"./packages\") }\n";

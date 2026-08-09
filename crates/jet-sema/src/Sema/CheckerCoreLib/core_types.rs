@@ -194,6 +194,9 @@ pub(crate) fn phantom_fact_menu_diag(name: &str, span: Span) -> Option<Diagnosti
 }
 
 pub(crate) fn core_type_known(name: &str) -> bool {
+    if Syntax::is_typed_text_type(name) {
+        return true;
+    }
     matches!(
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
@@ -216,7 +219,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
-        | "Clock" | "Rng" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
+        | "Clock" | "Rng" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
         | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
@@ -341,10 +344,6 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
         | "BrowserCapabilities"
         | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
-        // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
-        // expected-type elaboration of a string literal (E0149 guards a plain
-        // runtime `String` from filling this position).
-        | "SQL" | "HTML" | "Sh"
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
         // fallible, `?`-composed cursors over `[U8]`/`String`.
         | "Reader" | "Cursor"

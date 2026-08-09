@@ -74,7 +74,7 @@ Lint warnings use the same shape with `Warning [L02xx]:` instead of
 `Error [E02xx]:`. Lints do not block compilation; the driver prints them
 before continuing. This is the default and stays the default (D-LINTPOLICY1=A,
 the override law) — a team opts a named lint into a build failure only through
-`pkg.jet`'s `policy: { lints: { deny: […] } }`, which turns a matching lint
+`package.jet`'s `policy: { lints: { deny: […] } }`, which turns a matching lint
 into E1293 (see the package management diagnostics table). No other gate may
 duplicate this — it is the one surface for lint walls (I8).
 
@@ -181,6 +181,7 @@ renumbered, and no new `W` code may be allocated.
 | E0075 | sema | a yielding loop uses a break payload instead of its List result (D-LOOPSTATE1) |
 | E0076 | sema | ordinary-loop exits omit a result or use incompatible payload types (D-LOOPSTATE1) |
 | E0077 | parse | a scoped grant uses the retired body-binding arrow (D-ARROW-CONTROL1) |
+| E0078 | sema | a finite value loop is missing its exhaustion route, or uses bare immediate `?? next`/`?? break` (D-CHOOSE-FIND1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | callable `=>`, `=[Effects]=>`, `=`, or `{` split incorrectly from the declaration head (S6-R, D-ARROW-CONTROL1) |
@@ -390,7 +391,7 @@ renumbered, and no new `W` code may be allocated.
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type.{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0428 | parse | *retired by D-MARK-REPEAT1=A* (was: duplicate `#NoPrelude` marker in one file) |
-| E0429 | sema  | ambient `print`/`input` used under `#NoPrelude` (D-PRELUDEX1) |
+| E0429 | sema  | readable Core prelude name used under `#NoPrelude` (D-PRELUDEX1) |
 | E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
 | E0431 | parse | retired `Void` result type; use `()` (D-VOID1) |
 | E0501 | sema  | empty `[]` needs a context type           |
@@ -409,6 +410,7 @@ renumbered, and no new `W` code may be allocated.
 | L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
 | L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
 | L0507 | parse | prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68, D-BRANCH-LINT1=A) |
+| L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
 | L1141 | sema  | autodiff transform result called inline; bind the derivative before calling it (D-COMPUTE-GRAD1=E) |
@@ -536,7 +538,7 @@ renumbered, and no new `W` code may be allocated.
 | E4201 | sema  | HTTPS client TLS handshake failed before any response was received (D-TLS1) |
 | E4202 | sema  | HTTPS client certificate could not be trusted (D-TLS1) |
 | E4203 | sema  | HTTPS client could not find usable system certificate roots (D-TLS1) |
-| E3401 | sema  | impure call inside a `fn … =[]=>` / pure-eval context (call-trace path) |
+| E3401 | sema  | impure call inside a `fn … =[]=>` / pure-eval context, or reached from comptime evaluation (D-META-EFFECT1 c3, was E0951) — call-trace path |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
@@ -581,7 +583,7 @@ renumbered, and no new `W` code may be allocated.
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
 | E0928 | sema  | `#Job fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
-| E0951 | sema  | comptime code reaches an impure operation (shows call path) |
+| E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | $panic :: user-authored compile error (message verbatim) |
 | E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
@@ -693,13 +695,13 @@ renumbered, and no new `W` code may be allocated.
 | E1214 | jet   | `jetpack.toml` has a malformed line — not a valid `key = "value"` assignment or `[table]` header (D-JPK-FILES) |
 | E1215 | jet   | `jetpack.toml` contains an unknown table or key name, with a did-you-mean suggestion (D-JPK-FILES) |
 | E1216 | jet   | a `targets:` block has an unknown field (D-TGT3) |
-| E1217 | jet   | a dependency in `pkg.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
+| E1217 | jet   | a dependency in `package.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
-| E1220 | jet   | a transitive dependency uses an effect outside the `pkg.jet` `effects:` budget (D-EFFBUDGET1) |
-| E1221 | jet   | a malformed `effects:`/`grants:` block in `pkg.jet` (D-EFFBUDGET1) |
+| E1220 | jet   | a transitive dependency uses an effect outside the `package.jet` `effects:` budget (D-EFFBUDGET1) |
+| E1221 | jet   | a malformed `effects:`/`grants:` block in `package.jet` (D-EFFBUDGET1) |
 | E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
-| E1226 | jet   | a retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs (D-JPK-FILENAME2) |
+| E1226 | jet   | a retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs (D-ECO-FILEROOT1) |
 | E1227 | jet   | `jet` and the `jetpack`/`jetos` engine binary disagree on protocol version (D-JPK-DISPATCH1) |
 | E1228 | jet   | an engine verb needs an engine binary (`jetpack`/`jetos`) that isn't installed (D-JPK-DISPATCH1) |
 | E1229 | jet   | a role-module contribution uses the retired `module name { ns.path: Type.{ } }` form (D-JPK-MODBODY1) |
@@ -738,6 +740,7 @@ renumbered, and no new `W` code may be allocated.
 | E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
 | E1338 | jet   | a loadable `.jetlib` artifact's compiler-identity stamp doesn't match the running compiler — refused before mapping (D-LIB-REUSE1=B) |
 | E1339 | jet   | a loaded library declares an effect the load site's grant doesn't cover — refused before mapping (D-LIB-DYNTRUST1=A) |
+| E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
 | E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
 | E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
@@ -769,7 +772,7 @@ renumbered, and no new `W` code may be allocated.
 | E1290 | jetpack | real JetOS replacement proof was requested with fake/script VM tools (D-JOS-REALGUEST1) |
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E1292 | jet   | signing key generation needs cryptographic randomness (D-CRYPTO-KEYGEN-DIAG1, D-CRYPTO-KEYGEN-CODE2) |
-| E1293 | jet   | a lint denied by `pkg.jet` `policy.lints.deny` fired — build failure instead of a warning (D-LINTPOLICY1, the override law) |
+| E1293 | jet   | a lint denied by `package.jet` `policy.lints.deny` fired — build failure instead of a warning (D-LINTPOLICY1, the override law) |
 | E1295 | jetpack | `--affected-since <ref>` names a git ref that does not resolve (D-JPK-SELECTOR1) |
 | E1296 | jetpack | pnpm-style `--filter` pattern DSL rejected — use `-p` / `--affected` (D-JPK-SELECTOR1) |
 | E1297 | jetpack | `jetpack tool install` bin name collides with a project `#Job fn` (JPK-TOOL-COLLIDE, D-JPK-TOOLRUN1) |
@@ -779,11 +782,13 @@ renumbered, and no new `W` code may be allocated.
 | E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
 | E1316 | jetpack | ambiguous or unmatched typed package variant selection (E4-JP15, D-JPK-VARIANT1) |
 | E1317 | jetpack | a direct CLI ref uses retired provider-first order or the retired `path@` prefix (D-JPK-REF1) |
-| E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
+| E2001 | jet   | `package.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
 | E2103 | jet   | external completion could not read a verified JetCommandSchema record (D-SHAPE-CLI-CARRIER1, D-SHAPE-CLI-COMPLETE1) |
+| E2104 | jet   | a command has missing, malformed, or conflicting input |
+| E2105 | jet   | a driver file, tool, or operating-system operation failed |
 | E2110 | jet   | automatic GC or its trace failed safely (D-OPTGC1, cards #658/#659) |
 | E2111 | sema  | collector-owned graph escapes into an ownership-only function (D-OPTGC1, card #658) |
 | E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
@@ -841,6 +846,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0075 | This yielding loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary non-yielding loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
 | E0077 | This scoped grant uses the retired body binding. | The capability handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: FS, Net) { ... }`. |
+| E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
 | E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `=`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
@@ -852,7 +858,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 These enforce the compatibility contract in docs/spec/release-policy.md. An
 **edition** opts a project into a specific era of Jet syntax (D-REL3); the
 toolchain advertises the editions it supports in `jet --version`. **E2001** is
-fully reachable from a real `pkg.jet`. **E2002** and **L2001** read from the
+fully reachable from a real `package.jet`. **E2002** and **L2001** read from the
 deprecation registry in `crates/jet-pkg-model/src/Manifest.rs`
 (`DEPRECATIONS`); that registry is
 empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
@@ -862,7 +868,7 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet self upgrade`, or set `edition: "2026"` in `pkg.jet`. |
+| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet self upgrade`, or set `edition: "2026"` in `package.jet`. |
 | E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
 | L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
 
@@ -918,7 +924,7 @@ membership, profile, managed-file, service, or task state is applied.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1322 | the workspace member path escapes the workspace root | Membership is rooted in the workspace, including the physical target behind a symlink. | Use a relative path below the workspace root and remove escaping symlinks. |
-| E1323 | a member Package declares `members` (the diagnostic names its `package.jet` or `pkg.jet` source) | Membership has one level: the workspace root owns discovery, and source provenance makes the offending Package reviewable. | Remove the nested `members:` field from the named member manifest and declare those paths at the workspace root. |
+| E1323 | a member Package declares `members` (the diagnostic names its `package.jet` source) | Membership has one level: the workspace root owns discovery, and source provenance makes the offending Package reviewable. | Remove the nested `members:` field from the named member manifest and declare those paths at the workspace root. |
 | E1324 | two member paths resolve to one physical directory | Two spellings cannot create two Package identities. | Keep one member path for the directory. |
 | E1325 | two members claim the same Package name | Stable package references need one owner. | Rename one Package or remove the duplicate member. |
 | E1326 | a managed environment file declaration is invalid | Managed files are typed and plan before apply; unsafe paths or ambiguous ownership must fail closed. | Use a project-relative destination and a valid `source`/`content`, mode, and permission record. |
@@ -929,11 +935,12 @@ membership, profile, managed-file, service, or task state is applied.
 | E1331 | an environment import escapes its root | One environment graph cannot import files outside its project boundary. | Use a relative import directory without `..` or an escaping symlink. |
 | E1332 | preset or generation definitions conflict | Composition cannot silently choose one definition's packages, variables, parents, or collision choices over another's. | Merge equal facts or give them different names. |
 | E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
-| E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
+| E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet`, correct the path, or use `find("./packages")`. |
 | E1335 | an environment integration or package-generation provider fact is conflicting or lossy | Integrations and package generations lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the generation. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 | E1300 | `--profile` is retired | Profile answers how hard to optimize a build. A named environment composition is a preset, so one word never answers two questions. | Select the composition with `--preset <name>`, declared under `presets:`. |
 | E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
+| E1340 | {problem} | Jetpack could not complete the command because the named input, project fact, tool, or operating-system operation did not satisfy it. | Correct the named problem, then run the command again. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -1012,7 +1019,7 @@ CLI.
 | E0979 | A `jet os` target has no host, or its `host@root` selector has an empty half. | D-JPK-REF1 amends D-JPK-OSHOST1: a bare host selects `system.<host>` in `./config.jet`; both halves of `host@root` are required for an external root. | Write `jet os switch laptop` or `jet os switch laptop@../machines`. |
 | E0980 | A `jet os` host names a system the config doesn't define. | D-JPK-OSHOST1=C: the host selects one `system.<host>` contribution in `config.jet`. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
 | E0981 | The `jet os` config file doesn't exist. | A bare host loads `./config.jet`; `host@root` loads `root/config.jet` when `root` is a directory, or the file named by `root`. | Create it with `jet os init <host>`, or pass an external root as `host@root`. |
-| E0982 | `use <pkg>` named a package that is realized as an `executable`. | U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code. | Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `pkg.jet`. |
+| E0982 | `use <pkg>` named a package that is realized as an `executable`. | U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code. | Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `package.jet`. |
 | E0983 | `use <pkg>` named a `library` dependency the project declares but that hasn't been realized (its source isn't staged in the shared hangar store, and isn't on disk as a path dep). | U17: a `library` is consumed with the ordinary `use` form only after it is realized — `jet build`/`run` never realize on demand, keeping them offline and deterministic (the same flow as pre-fetched deps). | Run `jetpack build` to realize the library into the hangar, then `use <pkg>;` resolves it. |
 
 ## Concurrency diagnostics
@@ -1134,11 +1141,11 @@ output is machine-parseable with `--json`.
 | E2605 | `{name}` v{version} cannot be published from a dirty working tree. | The registry records the exact source revision that was published. A dirty tree means uncommitted changes would be silently excluded, making the published package unreproducible. | Commit or stash all uncommitted changes (`git status` to list them), then run `jet registry publish` again. Use `--force` to bypass with an explicit warning banner. |
 | E2606 | `jet registry yank` requires a version argument. | A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank. | Run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`. |
 | E2607 | `{source}` is malformed: `{detail}`. | Supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them. | Fix the malformed record and retry; use the parser contract in `spec.md` and UTF-8 text. |
-| E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet registry publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
+| E1217 | `{dep}` is in `package.jet` but has no locked revision. | A `--locked` build (and `jet registry publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
-| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `pkg.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `pkg.jet`. |
+| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `package.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `package.jet`. |
 | E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `effects:` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error. | Add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency. |
-| E1221 | `pkg.jet` has a malformed `effects:`/`grants:` block. | `effects: { allow: […], deny: […] }` and `grants: { "dep": […] }` only take effect names from the ten-effect vocabulary (D-EFF4), as lists. | Fix the field name or effect name; see docs/spec/syntax-decisions.md. |
+| E1221 | `package.jet` has a malformed `effects:`/`grants:` block. | `effects: { allow: […], deny: […] }` and `grants: { "dep": […] }` only take effect names from the closed vocabulary declared in `Prelude/Effects.jet`, as lists. | Fix the field name or effect name; see docs/spec/syntax-decisions.md. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
@@ -1152,10 +1159,9 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 E2702 is emitted only after parsing, effect checking, and ordinary typing have
 succeeded; those diagnostics win at the same call site. Dynamic or
 attacker-controlled values remain ordinary `CryptoError` results at runtime and
-never become E2702. Its machine projection is one `jet.diagnostic/v1` object
-with `code`, `class`, `severity`, `phase`, `what`, `why`, `fix`, a closed
-`reason`, `operation`, optional `expected`/`actual`, `primarySpan`, and an empty
-`relatedSpans` list. LSP carries the same object in diagnostic `data`. Neither
+never become E2702. Its machine projection is one `jet.report/v1` object with
+the standard report fields plus a closed `reason`, `operation`, and optional
+`expected`/`actual`. LSP carries the same object in diagnostic `data`. Neither
 projection may include secret material, ciphertext, parser offsets, operating
 system errors or paths, dependency errors, backend prose, or generated Rust.
 The closed `reason` spellings are `invalid_length`, `nonce_length`,
@@ -1338,7 +1344,7 @@ parse error (E0426) pointing at the new spelling —
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
 | E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type.{ uninit }` ``. | Write `` `{name} := <Type>.{ uninit }` ``. |
-| E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables the curated prelude auto-imports (`print` / `input`) ``. | Write `use core.io as io` and call `io.{name}(…)`, or remove `#NoPrelude`. |
+| E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables every readable Core prelude name ``. | Write a qualified Core call, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
 | E0431 | `` `Void` is retired ``. | `()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1. | Replace `Void` with `()`. |
 
@@ -1365,8 +1371,8 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 ## Comptime effect tiers (D-CTEFFECT1)
 
-Tier-0 (pure) calls are whitelisted Core builtins — always safe, no gate needed.
-Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
+Tier-0 (pure) calls have an empty shared effect set — always safe, no gate
+needed. Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
 Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--allow-impure`.
 
 | code | what | why | fix |
@@ -1417,6 +1423,7 @@ already-freed arena), these track the views themselves.
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
 | L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | L0507 | prefer an ordered arm table for this branch | one ordered arm table is Jet's normal form for multi-line and chained choices | write `if { condition -> body else -> body }` |
+| L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
@@ -1592,7 +1599,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3201 | C library `{lib}` was not found. | Jet looked for a `{lib}: c@…` dep in `pkg.jet`, then tried `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: c@system` in `deps:`. |
+| E3201 | C library `{lib}` was not found. | Jet looked for a `{lib}: c@…` dep in `package.jet`, then tried `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: c@system` in `deps:`. |
 | E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58). | Move the call inside `#Unsafe`, or change the type to a C-safe value type. |
 | E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |
@@ -1620,7 +1627,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … =[]=>` may only call other `fn … =[]=>`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `fn … =[]=>`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … =[]=>` may only call other `fn … =[]=>`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. Compile-time (`$` blocks, `$name :: expr` bindings) shares this same call-graph walk (D-META-EFFECT1 c3): the message reads `{call}` is not allowed in comptime code instead, since there is no enclosing `=[]=>` function name to report. | Mark `{call}` as `fn … =[]=>`, or remove the call from `{pure_fn}`; at compile time, compute the value at runtime instead. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
 | E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or remove the enclosing function's explicit empty effect bound. |
 
@@ -1649,6 +1656,8 @@ command/flag is within edit distance 2. Their golden transcripts live in
 | E2101 | Unknown or retired CLI route. Moved bare form: `` `{cmd}` moved under `jet {group}` ``. Invalid nested form: `` `{action}` isn't a jet {group} command ``. | Moved bare form: `infrequent commands live in a named area so daily Jet commands stay easy to scan`. Invalid nested form: `jet {group} accepts only commands in its named area`. | Moved bare form: ``run `jet {group} {cmd} {args}` ``. Invalid nested form: ``run `jet {group} help` ``. Human output renders these as Error/Why/Fix lines; JSON uses these exact message, why, and fix strings with control characters, quotes, and backslashes escaped. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 | E2103 | Couldn't read command metadata from `{program}`. | The path has no safe command basename, contains a control character, could not be opened once as a regular file, exceeded the 512 MiB bounded read, is not ELF/PE/Mach-O/Wasm, or its JetCommandSchema record is missing, malformed, duplicated, unsupported, nested inside another universal Mach-O container, or inconsistent across universal Mach-O slices. Completion discovery never executes the program and never accepts unverified metadata. | Rebuild the program with this Jet toolchain, then try again. Exits 1 (user error), not 2. |
+| E2104 | `{problem}` | Jet needs valid command input before it can run this command. | Correct the named argument or input, then run the command again. |
+| E2105 | `{problem}` | Jet could not complete the named file, tool, or operating-system operation. | Correct the named problem, then run the command again. |
 | E2110 | Automatic memory management failed, or its trace cannot be reported. | The private collector rejected an unsafe or impossible operation, or the trace is missing, unsafe to read, larger than 4 MiB, malformed, incompatible, stale, or incomplete. Reports never estimate promotions omitted by a bounded trace. | Check the trace path and retry with a smaller workload; for reports, run `jet run --gc-trace <file.jet>` before `jet gc report`. Exits 1 (user error). |
 | E2111 | A collector-owned graph cannot leave its scoped GC policy here. | The callee returns hidden traced storage, but the receiving function is governed by ordinary ownership. | Add `#Policy(gc)` to the receiving function or convert the graph to ordinary ownership before the boundary. |
 
@@ -1679,45 +1688,38 @@ exists but can't be evaluated to a valid `WorkspacePlan`.
 |------|------|-----|-----|
 | E0995 | `workspace.jet` has no `module workspace { … }` declaration. | `workspace.jet` is the monorepo index (D-WORKSPACE2=A); it must contain exactly one `module workspace { members: … }` body. | Write `module workspace { members: find("./packages") }` (or an explicit list) in `workspace.jet`. |
 | E0996 | `members:` evaluated to something other than a list of strings. | The `members:` value must evaluate to `[String]` — a list of relative package directory paths. | Use `find("./packages")` or a list literal like `["./packages/hello", "./packages/ranker"]`. |
-| E0997 | `find("…")` in `members:` names a directory that doesn't exist. | `find` scans that directory for subdirectories containing `package.jet` (or the explicit migration-era `pkg.jet`); the directory must exist relative to `workspace.jet`. | Create the directory or correct the path in `members: find("…")`. |
+| E0997 | `find("…")` in `members:` names a directory that doesn't exist. | `find` scans that directory for subdirectories containing `package.jet`; the directory must exist relative to `workspace.jet`. | Create the directory or correct the path in `members: find("…")`. |
 
 ### E0995 — No workspace module
 
 ```
-error[E0995]: `workspace.jet` must declare `module workspace { … }`
-  --> workspace.jet
-  |
-  = `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must
-    contain exactly one `module workspace { members: … }` declaration
-  = write `module workspace { members: find("./packages") }` in `workspace.jet`
+Error [E0995]: `workspace.jet` must declare `module workspace { … }`
+ Why: `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one `module workspace { members: … }` body
+ Fix: write `module workspace { members: find("./packages") }` in `workspace.jet`
 ```
 
 ### E0996 — members: not a list
 
 ```
-error[E0996]: `members:` must evaluate to a list of package paths
-  --> workspace.jet:2:14
-  |
-2 |     members: 42
-  |              ^^ not a `[String]`
-  |
-  = `members:` describes the packages in this workspace; it must be a `[String]`
-    list of relative paths or a `find("…")` call
-  = example: `members: find("./packages")` or `members: ["./pkg/hello"]`
+Error [E0996]: `members:` must evaluate to a list of package paths
+  --> workspace.jet:1:29
+    |
+  1 | module workspace { members: 42 }
+    |                             ^^
+ Why: The `members:` value must evaluate to a `[String]` — a list of relative package directory paths
+ Fix: example: `members: find("./packages")` or `members: ["./pkg/hello"]`
 ```
 
 ### E0997 — find dir missing
 
 ```
-error[E0997]: `find` can't read the directory `./no-such-packages`
-  --> workspace.jet:2:14
-  |
-2 |     members: find("./no-such-packages")
-  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-  = `members: find("<dir>")` scans that directory for package subdirectories;
-    it must exist relative to this file
-  = create the directory, or fix the path so it points at your packages folder
+Error [E0997]: `find` can't read the directory `/tmp/no-such-packages`
+  --> workspace.jet:1:29
+    |
+  1 | module workspace { members: find("./no-such-packages") }
+    |                             ^^^^
+ Why: `find` scans that directory for subdirectories containing `package.jet`; the directory must exist relative to `workspace.jet`
+ Fix: create the directory, or fix the path so it points at your packages folder
 ```
 
 ## Package management diagnostics (M12, D-JPK-FILES)
@@ -1734,7 +1736,7 @@ front-end `.jet` diagnostics).
 | E1214 | `jetpack.toml` line {n} is not a valid assignment or table header. | Every line in `jetpack.toml` must be `key = "value"` (inside a table), a `[table]` header, or a blank/comment line. Anything else can't be interpreted. | Fix the line so it is either `[table]`, `key = "value"`, or a blank or `#`-comment line. |
 | E1215 | `jetpack.toml` {kind} `{name}` is not recognized. | `jetpack.toml` only accepts the tables `[repo]` and `[sources]`, and the keys listed for each. An unknown name is usually a typo. | Did you mean `{suggestion}`? Check the allowed names for this table. |
 | E1225 | `jetpack.toml` `[packages]` is retired. | Monorepo member indexes now live in `workspace.jet` so package sets use Jet's module grammar instead of a second manifest shape. | Move the member list to `workspace.jet`: `module workspace { members: find("./packages") }`. |
-| E1226 | `{name}` is not the package manifest name — Jet reads `package.jet`. | The manifest filename is frozen to one spelling (D-JPK-FILES/D-JPK-FILENAME2) so tooling, docs, and every worked example never have to guess which file to read. `pkg.jet`, `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes. | Rename `{name}` to `package.jet`. |
+| E1226 | `{name}` is not the package manifest name — Jet reads `package.jet`. | The manifest filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read. `pkg.jet`, `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes. | Rename `{name}` to `package.jet`. |
 | E1227 | `jet` {jet_version} and `{engine}` {engine_version} disagree. | `jet` and its engine binaries (`jetpack`, `jetos`) ship as one toolchain and must match exactly — a version-skewed engine may not understand what `jet` sends it. `jet` checks this with an `--engine-protocol` handshake before running any engine verb. | Use matching `jet`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release. |
 | E1228 | `{verb}` needs the `{engine}` engine, which isn't installed. | `{verb}` is an engine verb — `jet` execs `{engine}` for it (D-JPK-DISPATCH1) rather than linking package-manager/OS logic into the compiler binary. | Install the matching Jet toolchain; the `{engine}` binary ships alongside `jet`. |
 | E1229 | Role namespace `{ns}` belongs in the module declaration name. | `module {name} { {ns}.{role}: {Type}.{ … } }` splits the role across two places; the canonical form puts it once, in the declaration name, so discovery-by-declaration (`module env.dev`) reads the role straight off the name (D-JPK-MODBODY1). | Write `module {ns}.{role} { … }` and move the contribution's fields up to the module body. |
@@ -1742,8 +1744,8 @@ front-end `.jet` diagnostics).
 | E1230 | `{query}` matches more than one workspace member. | A bare (`logging`) or path-form (`packages/logging`) ref with no `@source` suffix resolves against the workspace member index; this one is not unique (D-MONOREF1). | Address one member by its relative path (e.g. `infra/logging`), or use `package@source`. |
 | E1231 | `{query}` is not a workspace member. | A bare/path-form ref must name a member listed in `workspace.jet` `members:`; nothing in the index matched (D-MONOREF1). | Use one of the listed members (a did-you-mean is offered), fix the name, or add the package to `members:`. |
 | E1232 | A monorepo source could not be fetched. | Resolving a monorepo package fetches the source's workspace index and materializes only the addressed subtree; both the sparse subtree checkout and the full-clone fallback failed (D-MONOREF1). | Check the source URL/rev and network access; if the provider lacks partial-clone support the full clone should still work, so this usually means the rev or repo is unreachable. |
-| E1233 | In-repo dependency `{name}` is outside the workspace. | A member's `pkg.jet` depends on another in-repo package, but that package is not in the source repo's `workspace.jet` member index, so the sparse checkout can't include it (D-MONOREF1). | Add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref. |
-| E1234 | `{name}` {version} already exists in the registry index and is not yanked. | Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked, so anyone who already locked it keeps building the exact same bytes. | Bump the version in `pkg.jet` and publish again, or `jet registry yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse). |
+| E1233 | In-repo dependency `{name}` is outside the workspace. | A member's `package.jet` depends on another in-repo package, but that package is not in the source repo's `workspace.jet` member index, so the sparse checkout can't include it (D-MONOREF1). | Add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref. |
+| E1234 | `{name}` {version} already exists in the registry index and is not yanked. | Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked, so anyone who already locked it keeps building the exact same bytes. | Bump the version in `package.jet` and publish again, or `jet registry yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse). |
 | E1235 | Couldn't reach the registry index at `{url}`. | The git operation against the registry failed — network, auth, or a stale local clone. The registry is a git repo, so `jet registry publish`/`jet registry yank` clone/pull it, write the version line, then commit and push. | Check network access and credentials for `{url}`, or set `JET_REGISTRY_URL` to a reachable mirror. |
 | E1236 | A build step tried to reach the network without a locked fetch. | During a build, network access is denied except a locked `fetch(url, sha256:)`; an unpinned fetch would make the build unreproducible (D-JPK-ADAPTER1). | Add the source hash: `fetch("…", sha256: "…")`, or vendor the source with `jet registry vendor`. |
 | E1237 | A build step tried to write outside the output root. | A build may only install files under its own package output root; writing elsewhere would let a build mutate the machine or other packages (D-JPK-ADAPTER1). | Install into a path under the output root (no `..`, no absolute paths). |
@@ -1761,7 +1763,7 @@ front-end `.jet` diagnostics).
 | E1250 | Toolchain channel `{channel}` is pinned but not locked. | An `--offline`/CI build won't resolve a channel — it needs the exact toolchain version recorded in `.jet/lock`, and none is present (D-JPK-TOOLCHAIN1). Resolving a channel reaches the network, which offline/CI forbids. | Run `jet update jet` to resolve `{channel}` to an exact version, then commit `.jet/lock`. |
 | E1251 | Toolchain {channel} ({version}) isn't available for {platform}. | This project pins a Jet toolchain, but no prebuilt object for it was found for this platform. Jet realizes the pinned compiler as a prebuilt — it never builds the compiler from source and never silently falls back to a different `jet` (D-JPK-TOOLCHAIN1). | Move the pin with `jet update jet <channel>` to a toolchain your platform has, or install the pinned toolchain from the release page. |
 | E1252 | `jet init` refused: a `package.jet` already exists here. | `jet init` writes a fresh package manifest pinning the running toolchain; overwriting one would discard its dependencies, pins, and identity (D-JPK-TOOLCHAIN1). | Edit the existing manifest, or run `jet init` in an empty directory. |
-| E1253 | Inline dependency `{name}#{selector}` didn't resolve. | A manifest-less script's `use {name}#{selector};` has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy (D-JPK-SCRIPTDEP1). | Commit a copy at `.jet/inline-deps/{name}/<version>/`, or run `jet init` and depend on `{name}` through `pkg.jet` once you have a real source for it. |
+| E1253 | Inline dependency `{name}#{selector}` didn't resolve. | A manifest-less script's `use {name}#{selector};` has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy (D-JPK-SCRIPTDEP1). | Commit a copy at `.jet/inline-deps/{name}/<version>/`, or run `jet init` and depend on `{name}` through `package.jet` once you have a real source for it. |
 | E1254 | This project has no `jet dev` entry. | Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither. | Add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file. |
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
 | E1256 | `{cmd}` cannot project the foreign environment. | The bounded native evaluator could not translate the foreign `flake.nix`/`devenv.nix` surface into Jet facts (U16). Jet does not shell out to an installed Nix binary for this path. | Use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`. |
@@ -1777,7 +1779,7 @@ front-end `.jet` diagnostics).
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
 | E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no `#Impure` or `--allow-impure` escape hatch because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
 | E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
-| E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `pkg.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package. |
+| E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `package.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `package.jet`, or point `from:` at an existing executable package. |
 | E1268 | `` `jet image <name>` cannot use remote OCI reference `<ref>`. `` | D-JPK-IMAGE1: local OCI layouts are copied only after digest validation; remote registry transport is a separate trust boundary and is never faked. | Use `--push file:///path/to/layout`, or configure a verified registry transport. |
 | E1269 | `` `<field>` isn't shaped like <expected>. `` | D-JPK-IMAGE1: an `.Oci` image's `kind`/`expose`/`env_vars`/`files`/`base` fields each have one fixed shape (a bare leading-dot value, a list of ports, a string-keyed map, a list of paths, `oci("<ref>")`) — `Image` is a closed record, so a misshapen recognized field is rejected rather than silently ignored. | Rewrite the field to match its documented shape. |
 | E1270 | Adapter package could not be realized. | `Pkg.adapt(...)` turns source bytes into a normal package, so its string-valued `source:` must be a ref such as `"./vendor/tool"` and its recipe must be one of the supported U20 recipes: `Recipe.copy()`, `Recipe.prebuilt(bin:, as:)`, or finite `Recipe.build(steps: […])` actions (`.fetch`, `.exec`, `.install`, `.install_tree`). | Check the `Pkg.adapt(...)` source and recipe. |
@@ -1803,7 +1805,7 @@ front-end `.jet` diagnostics).
 | E1290 | jetos real VM proof needs real tools. | D-JOS-REALGUEST1=C requires actual installed-guest behavior before JetOS can claim NixOS replacement readiness. Script fixtures and fake QEMU tools may test harness plumbing, but they cannot close replacement acceptance. | Rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof. |
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
 | E1292 | Jet could not create the package-signing key. | The operating system could not provide cryptographic randomness. | Retry as a new operation on a supported host; no key files were created. |
-| E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `pkg.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
+| E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `package.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
 | E1294 | no task named `{name}`. | `jet run --task <name>` / `jetpack run <name>` only invoke `#Job fn`s (D-JPK-TASKRUN1). | Mark a function `#Job`, or check the spelling; the diagnostic lists declared tasks. |
 | E1295 | git ref `{ref}` not found. | `--affected-since` (D-JPK-SELECTOR1=C) diffs workspace member input hashes against a git baseline; that ref must resolve to a commit. | Pass a real branch, tag, or commit (a did-you-mean is offered when a close match exists). |
 | E1296 | `{flag}` is not a Jet workspace selector. | D-JPK-SELECTOR1=C rejects pnpm-style `--filter` pattern DSLs; Jet scopes workspace commands with exact `-p <member>` and computed `--affected` / `--affected-since <ref>` only. | Use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`. |
@@ -1840,66 +1842,38 @@ front-end `.jet` diagnostics).
 
 ## Machine-readable diagnostics (`--json`)
 
-Passing `--json` to `jet check`, `jet build`, or `jet test` makes the
-driver emit diagnostics as **data** instead of prose, for scripts, CI,
-and editors. This is decision **D-DX1** (ratified 2026-06-16): a single,
-**stable, versioned** schema, shared by the `--json` CLI flag, the future
-`jet fix` engine, and the LSP. The serializer lives in
-`crates/jet-foundation/src/Diagnostics.rs`
-(`to_json` / `render_all_json`); this section is its single source of
-truth. Adding a field is allowed any time; **removing or repurposing one
-requires bumping `schema_version`.**
+Decision D-REPORT-MACHINE1 defines one schema for every machine-readable
+report. `render_all_json` emits JSON Lines. Each report is one complete
+`jet.report/v1` object followed by `\n`. An empty report batch emits no bytes.
+The output never contains ANSI bytes.
 
-**Shape — JSON Lines.** One self-contained JSON object per diagnostic,
-each terminated by `\n`, matching `cargo --message-format=json`. A run
-with N diagnostics prints N lines on **stdout**; a clean run prints
-nothing on stdout. Human prose and the `jet explain` footer still go to
-**stderr** in the non-`--json` path, and `--json` emits **no ANSI ever**
-(scripts must never parse ANSI). Field order is fixed and numbers are
-integers, so the bytes are deterministic and snapshot-pinnable.
-
-**Fields (schema_version 1):**
+Every report has these fields:
 
 | Field | Type | Meaning |
-|-------|------|---------|
-| `schema_version` | integer | Schema version; `1` today. Bumped only for breaking changes. |
-| `code` | string | The diagnostic code, e.g. `"E0037"`. Pairs with `jet explain`. |
-| `severity` | string | `"error"` or `"warning"`. |
-| `message` | string | The one-line *what* (same text as the human `Error [...]:` line). |
-| `why` | string | The *why* — the rule behind the diagnostic. |
-| `fix` | string | The *fix* — the concrete next step (human text). |
-| `file` | string | Path of the source file the diagnostic is about. |
-| `span` | object \| null | Source location, or `null` for whole-file diagnostics. |
-| `suggestions` | array | Machine-applicable fixes (possibly empty). |
-| `detail` | string \| null | Extra indented detail (e.g. tool output), or `null`. |
+|---|---|---|
+| `schema` | string | Always `jet.report/v1`. |
+| `moment` | string | Report source, such as `compile` or `test`. |
+| `severity` | string | `error`, `warning`, or `stop`. |
+| `code` | string | Stable report code. |
+| `what` | string | One-line problem text. |
+| `why` | string | Rule that explains the problem. |
+| `fix` | string | Concrete next action. |
+| `detail` | string or null | Extra bounded detail. |
+| `file` | string or null | Source path when one exists. |
+| `line` / `col` | integer or null | One-based source position. |
+| `span` | object or null | Byte range with `start` and `end`. |
+| `fix_edits` | array | Machine-applicable replacements. |
+| `cause` | array | Causal report chain. |
 
-A **`span`** object carries both human and machine coordinates:
-`start_byte`, `end_byte` (byte offsets into the file, the range a fix
-slices), and 1-based `start_line` / `start_col` / `end_line` / `end_col`.
-
-A **`suggestions`** entry is `{ "message", "replacements": [...] }`, where
-each replacement is `{ "file", "span", "new_text" }` — apply `new_text`
-over the byte range `[start_byte, end_byte)` in `file`. This is the
-contract the future `jet fix` engine and LSP code actions consume; today
-it is populated from live teaching auto-corrects (e.g. E0037 "replace
-`println` with `print`"). Diagnostics with no mechanical fix emit
-`"suggestions": []` — the field is always present so consumers never
-special-case its absence.
-
-Example (`jet check`, one teaching error, wrapped for readability —
-the real output is one line):
+Example; real output stays on one line:
 
 ```json
-{"schema_version":1,"code":"E0037","severity":"error",
- "message":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`",
- "file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},
- "suggestions":[{"message":"replace `println` with `print`",
-   "replacements":[{"file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},"new_text":"print"}]}],
- "detail":null}
+{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[]}
 ```
 
-The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
-(blessed using `.claude/skills/verify/SKILL.md`).
+Command status and ledger objects can keep their command schemas. Any report
+inside them uses `jet.report/v1`. No consumer of the shared renderer retains
+its legacy diagnostic envelope.
 ### E0910 — Published schema breaking change
 
 `#PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A

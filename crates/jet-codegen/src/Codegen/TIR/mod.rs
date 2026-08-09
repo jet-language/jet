@@ -3452,14 +3452,17 @@ pub enum TExprKind {
     TaskGroupAny {
         tasks: Box<TExpr>,
     },
-    /// D-CONCSELECT1=A: `g.select()` — start a scoped fluent select builder.
+    /// D-SELECT-GENERIC1=A: `g.select()` starts a builder for one element type
+    /// `T`; sema accepts any `Receiver<T>` and requires all receive arms (and
+    /// typed timer values) in the chain to use that same `T`.
     SelectStart,
-    /// D-CONCSELECT1=A: `.recv(ch)` on a select builder.
+    /// D-SELECT-GENERIC1=A: `.recv(ch)` registers one `Receiver<T>` arm.
     SelectRecv {
         builder: Box<TExpr>,
         channel: Box<TExpr>,
     },
-    /// D-CONCSELECT1=A: `.after(ms: …)` on a select builder.
+    /// D-SELECT-GENERIC1=A: `.after(ms: …)` registers a timer arm carrying the
+    /// builder's same `T` when a value is supplied.
     SelectAfter {
         builder: Box<TExpr>,
         millis: Box<TExpr>,
@@ -3470,7 +3473,7 @@ pub enum TExprKind {
         builder: Box<TExpr>,
         stream: Box<TExpr>,
     },
-    /// D-CONCSELECT1=A: `.wait()` — multiplex until one arm wins.
+    /// D-SELECT-GENERIC1=A: `.wait()` returns the selected arm's `T` payload.
     SelectWait {
         builder: Box<TExpr>,
     },

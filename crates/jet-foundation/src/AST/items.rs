@@ -1056,7 +1056,6 @@ pub struct TaskMetadata {
     pub outputs: Vec<String>,
     pub skip: Option<TaskSkip>,
     pub cache: TaskCachePolicy,
-    pub authority: Option<String>,
     pub limits: BTreeMap<String, String>,
 }
 

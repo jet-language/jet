@@ -96,13 +96,16 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
             Some(span),
         ));
     }
-    if (tn != "SQL" && tn != "HTML" && tn != Syntax::TYPE_SH) || *got != Type::String {
+    let Some(typed_text_name) = Syntax::typed_text_name(tn) else {
+        return None;
+    };
+    if *got != Type::String {
         return None;
     }
     Some(Diagnostic::error(
         "E0149",
         format!("a runtime `String` can't be used as `{}`", tn),
-        if tn == Syntax::TYPE_SH {
+        if typed_text_name == Syntax::TYPE_SH {
             "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{value}` hole is exactly one argv item".to_string()
         } else {
             "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one".to_string()

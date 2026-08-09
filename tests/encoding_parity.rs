@@ -39,9 +39,9 @@ impl Scratch {
 
     fn write_project(&self, edition: &str, body: &str) -> PathBuf {
         fs::write(
-            self.dir.join("pkg.jet"),
+            self.dir.join("package.jet"),
             format!(
-                "payload: {{ name: \"enc\", version: \"0.1.0\", edition: \"{edition}\" }}\n"
+                "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"
             ),
         )
         .unwrap();
@@ -360,14 +360,14 @@ $b64url_n :: (base64.decode_url("aGk") ?? panic("b64url")).len()
 $b32_n :: (base32.decode("MZXQ====") ?? panic("b32")).len()
 
 fn run() {
-    print("{json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
-    print("{jsonl_n}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
-    print("{csv_n}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
-    print("{xml_text}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
-    print("{cbor_round}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
-    print("{b64_n}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
-    print("{b64url_n}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
-    print("{b32_n}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
+    print("{$json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
+    print("{$jsonl_n}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
+    print("{$csv_n}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
+    print("{$xml_text}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
+    print("{$cbor_round}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
+    print("{$b64_n}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
+    print("{$b64url_n}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
+    print("{$b32_n}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
 }
 "#;
 
@@ -427,7 +427,7 @@ fn gap() => String {
 }
 
 fn run() {
-    print("{root}|{packet}")
+    print("{$root}|{$packet}")
     print(gap())
 }
 "#;
@@ -1134,24 +1134,25 @@ fn assert_aot_dev_stream_parity_inner(label: &str, source: &str) {
 #[test]
 fn json_stream_reader_writer_matches_aot_and_default_dev() {
     let body = r#"
+use core.encoding.json as json
+
 fn run() {
     path := "@DIR@/json_stream_out.json"
-    output :: files.create(path) ?? panic("create")
-    writer :: fmt.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
+    out :: files.create(path) ?? panic("create")
+    writer :: json.writer(^out, canonical: true) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
-    writer.write(encoding.DataEvent.Key("ok")) ?? panic("key")
-    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("value b")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key a")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("value a")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
-    count := 0
-    loop count < 5 {
-        maybe :: reader.next() ?? panic("next")
-        if maybe == None { print("eof"); break }
+    loop event, reader {
         print("event")
-        count++
     }
+    print("eof")
     print(files.read(path) ?? panic("read"))
 }
 "#;

@@ -1885,7 +1885,7 @@ fn jetpack_enter_runs_command_in_project_env() {
 
 #[test]
 fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
-    // U16: `jet env -p <pkg>... -- cmd` needs no env.jet/pkg.jet at all — the
+    // U16: `jet env -p <pkg>... -- cmd` needs no env.jet/package.jet at all — the
     // ad-hoc package becomes an ordinary nixpkgs RefSpec, folded into an
     // otherwise-empty plan, trust-gated and realized exactly like a
     // manifest-declared ref.
@@ -2816,7 +2816,7 @@ fn core_provider_runs_first_party_package_without_nix() {
 #[test]
 fn typed_core_source_inferred_from_pack_jet() {
     // U9/D-JPK-REF1: a typed module declares a local source as a bare path.
-    // with no provider marker. The kind is *inferred* from `pkg.jet` in the
+    // with no provider marker. The kind is *inferred* from `package.jet` in the
     // target → realizes through the first-party `core` provider. U10 Chunk 3:
     // the package is discovered by module name — `module hello` in the source tree
     // — with no `env.jet` index. No nix on PATH proves no nix is involved.
@@ -2828,10 +2828,10 @@ fn typed_core_source_inferred_from_pack_jet() {
     let hello_bin = hello_pkg.join("bin");
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    // `pkg.jet` is both the U9 probe marker and the U10 package index.
+    // `package.jet` is both the U9 probe marker and the U10 package index.
     fs::write(
-        repo.join("pkg.jet"),
-        "payload: {\n    name: \"jet-pkgs\",\n    version: \"0.1.0\",\n}\npackages: {\n    hello: executable,\n}\n",
+        repo.join("package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {\n    hello: executable,\n}\n",
     )
     .unwrap();
     // The `module hello` declaration is the U10 Chunk 3 discovery target — no
@@ -2879,7 +2879,7 @@ fn core_provider_builds_library_package_without_nix() {
     // U10 Chunk 4: a `library` package realizes through the `core` provider
     // (no nix), staging its module source. Unlike an `executable`, it puts no
     // `bin/` on PATH — but `jetpack build` realizes it just the same. The kind
-    // comes from the repo's `pkg.jet` `packages:` index.
+    // comes from the repo's `package.jet` `packages:` index.
     let base = Scratch::new("core-library");
     let repo = base.join("jet-pkgs");
     let proj = base.join("proj");
@@ -2887,10 +2887,10 @@ fn core_provider_builds_library_package_without_nix() {
     let lib_pkg = repo.join("lib/mathlib");
     fs::create_dir_all(&lib_pkg).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    // `pkg.jet` declares the package as a `library` (the kind index).
+    // `package.jet` declares the package as a `library` (the kind index).
     fs::write(
-        repo.join("pkg.jet"),
-        "payload: {\n    name: \"jet-pkgs\",\n    version: \"0.1.0\",\n}\npackages: {\n    mathlib: library,\n}\n",
+        repo.join("package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {\n    mathlib: library,\n}\n",
     )
     .unwrap();
     // The library's source: a `module mathlib` discovered by name (Chunk 3),
@@ -2901,7 +2901,7 @@ fn core_provider_builds_library_package_without_nix() {
     )
     .unwrap();
     // A typed env references the library package; the source kind is inferred
-    // from `pkg.jet` → core.
+    // from `package.jet` → core.
     fs::write(
         proj.join("env.jet"),
         format!(
@@ -3237,7 +3237,7 @@ fn jetpack_toml_packages_fires_e1225_from_cli() {
     let root = Scratch::new("bad-toml-root3");
     fs::write(
         proj.join("jetpack.toml"),
-        "[packages]\ngreeter = \"packages/greeter/pkg.jet\"\n",
+        "[packages]\ngreeter = \"packages/greeter/package.jet\"\n",
     )
     .unwrap();
     fs::write(
@@ -3544,7 +3544,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
 
     let legacy_project = Scratch::new("transition-cli-legacy");
     let originals = [
-        ("pkg.jet", "payload: { name: \"demo\", version: \"0.1.0\" }\n"),
+        ("pkg.jet", "name: \"demo\"\nversion: \"0.1.0\"\n"),
         ("env.jet", "module env.dev { tools: [\"git@nixpkgs\"] }\n"),
         ("workspace.jet", "module workspace { members: [] }\n"),
         ("config.jet", "Config.{ }\n"),
@@ -3586,7 +3586,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
 
 
 #[test]
-fn mono_example_has_two_pkg_jet_members() {
+fn mono_example_has_two_package_jet_members() {
     // D-WORKSPACE1: the committed monorepo example now uses workspace.jet
     // instead of the retired jetpack.toml [packages] index.
     let mono = mono_example_dir();
@@ -3594,15 +3594,15 @@ fn mono_example_has_two_pkg_jet_members() {
         mono.join("workspace.jet").exists(),
         "workspace.jet missing from mono example"
     );
-    let greeter_pkg = mono.join("packages/greeter/pkg.jet");
-    let logger_pkg = mono.join("packages/logger/pkg.jet");
+    let greeter_pkg = mono.join("packages/greeter/package.jet");
+    let logger_pkg = mono.join("packages/logger/package.jet");
     assert!(
         greeter_pkg.exists(),
-        "packages/greeter/pkg.jet missing: {greeter_pkg:?}"
+        "packages/greeter/package.jet missing: {greeter_pkg:?}"
     );
     assert!(
         logger_pkg.exists(),
-        "packages/logger/pkg.jet missing: {logger_pkg:?}"
+        "packages/logger/package.jet missing: {logger_pkg:?}"
     );
     let workspace_src = fs::read_to_string(mono.join("workspace.jet")).unwrap();
     assert!(
@@ -3661,10 +3661,10 @@ fn jet_build_reports_source_states() {
 #[test]
 fn jet_build_rejects_cache_after_manifest_semantics_change() {
     let (base, proj, root) = core_hello_project("truth-manifest-identity");
-    let manifest = base.join("jet-pkgs/pkg.jet");
+    let manifest = base.join("jet-pkgs/package.jet");
     fs::write(
         &manifest,
-        "payload: { name: \"demo\", version: \"1.0.0\" }\npackages: { hello: executable }\n",
+        "name: \"demo\"\nversion: \"1.0.0\"\npackages: { hello: executable }\n",
     )
     .unwrap();
     let run = || {
@@ -3679,7 +3679,7 @@ fn jet_build_rejects_cache_after_manifest_semantics_change() {
     assert!(run().status.success());
     fs::write(
         &manifest,
-        "payload: { name: \"demo\", version: \"2.0.0\" }\npackages: { hello: executable }\n",
+        "name: \"demo\"\nversion: \"2.0.0\"\npackages: { hello: executable }\n",
     )
     .unwrap();
     let rejected = run();
@@ -3712,8 +3712,8 @@ fn two_process_reverse_package_order_does_not_deadlock() {
         }
     }
     fs::write(
-        repo.join("pkg.jet"),
-        "payload: { name: \"pair\", version: \"1.0.0\" }\npackages: { a: executable, b: executable }\n",
+        repo.join("package.jet"),
+        "name: \"pair\"\nversion: \"1.0.0\"\npackages: { a: executable, b: executable }\n",
     )
     .unwrap();
     let write_project = |name: &str, packages: &[&str]| {

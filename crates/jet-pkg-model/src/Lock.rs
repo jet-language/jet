@@ -37,14 +37,14 @@ pub struct LockedPackage {
     pub content_hash: Option<String>,
     /// Direct dependency names.
     pub dependencies: Vec<String>,
-    /// D-RINGLAYER1=A: optional `runtime:` ceiling from `pkg.jet` payload.
+    /// D-RINGLAYER1=A: optional `runtime:` ceiling from `package.jet` payload.
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-RINGLAYER1=A M2: minimum runtime profile inferred at last build.
     pub inferred_layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-EFFBUDGET1: this dependency's effect provenance — the effect names
     /// (D-EFF4 vocabulary) its code was found to use at the last build.
     pub effects: Vec<String>,
-    /// D-EFFBUDGET1: effect names granted to this dependency via `pkg.jet`'s
+    /// D-EFFBUDGET1: effect names granted to this dependency via `package.jet`'s
     /// `grants: { … }` block — recorded so an audited exception is a diff.
     pub effect_grants: Vec<String>,
     /// D-JPK-CACHE1=A (U24/A4): the realized-output envelope — the same field
@@ -2034,7 +2034,7 @@ pub fn verify_all_manifest_deps_locked(
 pub fn e1217(dep_name: &str) -> Diagnostic {
     Diagnostic::error(
         "E1217",
-        format!("`{}` is in {} but has no locked revision", dep_name, Syntax::PAYLOAD_FILE),
+        format!("`{}` is in {} but has no locked revision", dep_name, Syntax::PACKAGE_FILE),
         format!(
             "a `--locked` build (and `jet registry publish`) requires every dependency to be pinned in {} to a resolved version, so the build is reproducible. `{}` is declared but not pinned.",
             Syntax::UNIFIED_LOCK_FILE, dep_name
@@ -2138,7 +2138,7 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
         "the lock file is out of date".to_string(),
         format!(
             "`{}` changed since `{}` was last written",
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
             Syntax::UNIFIED_LOCK_FILE
         ),
         format!("run `jet fetch` to update `{}`", Syntax::UNIFIED_LOCK_FILE),

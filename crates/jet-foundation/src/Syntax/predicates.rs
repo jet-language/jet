@@ -17,6 +17,10 @@ pub fn is_stdlib_dsl_block_marker(name: &str) -> bool {
 /// D-UNITLIT1: a literal suffix shaped `e` + digits is reserved for float
 /// exponent notation (`1e5`) and may never resolve as a unit name.
 pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
+/// D-TYPE2-IMAG1=A (ratified 2026-08-06): numeric suffix `i` mints the
+/// imaginary component of Complex through the existing unit-literal path;
+/// bare `i` remains an ordinary identifier.
+pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 
 // D-TRAILBLOCK2=A (amends D-TRAILBLOCK1): no new token — code arguments are
 // ordinary `() => { … }` lambdas inside call parentheses. A bare `{` after a
