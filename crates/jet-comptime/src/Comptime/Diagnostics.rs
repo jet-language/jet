@@ -89,14 +89,7 @@ pub(super) fn early_return_sentinel(encoded_val: &str, span: Span) -> Diagnostic
 }
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        format!("{} can't run at compile time yet", what),
-        "comptime evaluates a pure subset of Jet; this construct isn't supported there yet"
-            .to_string(),
-        "compute this value at runtime, or use a simpler comptime expression".to_string(),
-        Some(span),
-    )
+    Diagnostic::e0956_unsupported(what, span)
 }
 
 pub(super) fn unsupported_expr(e: &Expr) -> Diagnostic {
