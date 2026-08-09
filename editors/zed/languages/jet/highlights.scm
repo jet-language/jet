@@ -105,7 +105,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: () BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Cache Char Computed Condition DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Key Measurement PriorityQueue Ptr SelectBuilder Set Shared Shared.Weak SharedGuard Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error WatchEvent WatchHandle WatchSet YAML
+; type.builtin: () BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Cache Char Complex Computed Condition DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON JSONError Key Measurement PriorityQueue Ptr SelectBuilder Set Shared Shared.Weak SharedGuard Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"

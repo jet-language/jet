@@ -1,10 +1,8 @@
-//! #1254 — runtime-tier E0956 must not speak in comptime voice.
+//! #1629 — runtime-tier E0956 uses the shared diagnostic voice.
 //!
 //! Default `jet run` shares the TIR evaluator with comptime. When that
-//! evaluator hits an unsupported construct it emits E0956 with comptime
-//! what/why/fix. The runtime-role boundary rewrites those fields so a
-//! plain `jet run` user is told about Jet's quick-run gap, not that their
-//! (non-comptime) program "can't run at compile time."
+//! evaluator hits an unsupported construct, every tier renders the same
+//! E0956 what/why/fix text.
 
 use std::fs;
 use std::process::Command;
@@ -30,26 +28,16 @@ fn skip_if_cranelift_host_unsupported() -> bool {
     }
 }
 
-fn assert_no_comptime_voice(what: &str, why: &str, fix: &str) {
-    for (label, text) in [("what", what), ("why", why), ("fix", fix)] {
-        let lower = text.to_ascii_lowercase();
-        assert!(
-            !lower.contains("comptime") && !lower.contains("compile time"),
-            "runtime-tier E0956 {label} must not mention comptime/compile time, got: {text:?}"
-        );
-    }
-}
-
 #[test]
-fn jet_run_e0956_uses_quick_run_voice() {
+fn jet_run_e0956_uses_shared_voice() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
     let dir = common::unique_tmp("run_tier_e0956");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("watcher_gap.jet");
-    // Stand-in unsupported Core call under whole-program deopt — proves runtime-tier
-    // E0956 voice rewrite (was `event.scope` before EventLite closed that gap).
+    // Stand-in unsupported Core call under whole-program deopt — proves shared
+    // E0956 voice (was `event.scope` before EventLite closed that gap).
     fs::write(
         &file,
         r#"use core.watcher as watcher
@@ -77,21 +65,20 @@ fn run() {
         d.what
     );
     assert!(
-        d.what.contains("quick-run"),
-        "what must name quick-run mode, got: {:?}",
+        d.what.contains("can't run at compile time yet"),
+        "what must use shared E0956 voice, got: {:?}",
         d.what
     );
     assert!(
-        d.why.contains("gap in Jet") && d.why.contains("not a mistake"),
-        "why must blame Jet's gap, got: {:?}",
+        d.why == "the canonical TIR evaluator doesn't cover this construct yet",
+        "why must use shared E0956 voice, got: {:?}",
         d.why
     );
     assert!(
-        d.fix.contains("jet run --release"),
-        "fix must point at jet run --release, got: {:?}",
+        d.fix == "use a simpler form, or run via `jet build` / `jet run`",
+        "fix must use shared E0956 voice, got: {:?}",
         d.fix
     );
-    assert_no_comptime_voice(&d.what, &d.why, &d.fix);
 }
 
 #[test]

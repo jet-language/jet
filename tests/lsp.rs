@@ -1263,7 +1263,7 @@ fn lsp_budget_reports_projects_canonical_report_without_measuring() {
     let root = std::env::temp_dir().join(format!("lsp_budget_projection_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    std::fs::write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     let source = r#"module perf.package {
     budgets: [Budget.{ name: "api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }]
 }
@@ -3179,19 +3179,30 @@ fn c44_impure_builtins_complete() {
 /// D-PRELUDE-LAW1=A: one exact closed registry drives every no-prefix consumer.
 #[test]
 fn c44_prelude_idents_canonical() {
-    use jet::Syntax;
+    use jet_foundation::Prelude as CorePrelude;
+    use jet_foundation::Prelude::Target;
+    let names: Vec<&str> = CorePrelude::names().collect();
     assert_eq!(
-        Syntax::PRELUDE_ALWAYS_IDENTS,
-        &["print", "input", "panic", "require"]
+        names,
+        [
+            "print", "input", "panic", "require", "assert", "assert_eq", "eprint", "Clock",
+            "Instant", "Date", "Duration", "Path", "read_file", "write_file", "file_exists",
+            "embed_file", "embed_bytes", "find", "fetch",
+        ]
     );
-    assert_eq!(
-        Syntax::PRELUDE_COMPTIME_IDENTS,
-        &["embed_file", "embed_bytes", "find", "fetch"]
-    );
-    assert_eq!(
-        Syntax::PRELUDE_IDENTS,
-        &["print", "input", "panic", "require", "embed_file", "embed_bytes", "find", "fetch"]
-    );
+    for name in ["print", "input", "panic", "require"] {
+        assert_eq!(
+            CorePrelude::entry(name).map(|entry| entry.target),
+            Some(Target::Builtin),
+            "always-ambient ident must stay a builtin: {name:?}"
+        );
+    }
+    let comptime: Vec<&str> = CorePrelude::entries()
+        .iter()
+        .filter(|entry| entry.target == Target::Comptime)
+        .map(|entry| entry.name)
+        .collect();
+    assert_eq!(comptime, ["embed_file", "embed_bytes", "find", "fetch"]);
 }
 
 // ── Warm-session latency/memory measurement ──────────────────────────────────

@@ -772,6 +772,8 @@ impl<'a> Checker<'a> {
         span: Span,
         elem: Option<&Type>,
     ) -> Option<Type> {
+        // D-SELECT-GENERIC1=A: the language contract is Receiver<T>, not
+        // Receiver<Int>. Codegen and every runtime tier carry this same T.
         if args.len() != 1 {
             self.diags.push(Diagnostic::error(
                 "E0104",

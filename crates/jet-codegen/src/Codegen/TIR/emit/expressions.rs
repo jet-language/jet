@@ -141,7 +141,7 @@ fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
 
 /// `{symbol}({arg_str})` — the one shape every plain Prelude call collapses
 /// to, whether the args came from `THostCall::Helper` here or the #1635 data
-/// table `PLAIN_CORE_CALLS` a `core.*` call is looked up in
+/// table `Syntax::AOT_CORE_CALLS` that a `core.*` call uses
 /// (`Codegen/TIR/emit/core_calls.rs::emit_plain_core_call`).
 pub(crate) fn emit_symbol_call(symbol: &str, arg_str: &str) -> String {
     format!("{symbol}({arg_str})")

@@ -52,7 +52,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jet-pkg-model` | **L1**, shared read-only package/config data model: `pkg.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus the pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
+| `jet-pkg-model` | **L1**, shared read-only package/config data model: `package.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus the pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
 | `jet-env-model` | **L2**, the shared pure plan model (card #367 slice 4): `ModuleEval` (the computed-modules evaluator) and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
 | `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes | package/JetOS diagnostics |
 | `jetos` | `jetos` binary front door for OS workflows; still dispatches into `jetpack`'s `os` verb (JetOS realization hasn't physically relocated out of `jetpack::JetOS` — that's a distinct, still-open scope gate, not part of slice 4) | package/JetOS diagnostics (via `jetpack`) |
@@ -526,19 +526,24 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   depend on either responsibility. Another backend replaces the codegen and
   binary-build edges without changing the front end.
 - **R8 — Small, self-contained binaries.** The root binary build path in
-  `Source/CmdCompile.rs` calls `rustc` directly with `strip=symbols` and thin LTO,
-  so the linker keeps only
-  what the program uses ("only link what's needed"). Output is one
-  self-contained native binary. Floor: Rust's std links a baseline
+  `Source/CmdCompile.rs` calls `rustc` directly with `strip=symbols` and thin LTO.
+  It links a content-addressed runtime `rlib`, so rustc does not compile the
+  fixed embedded runtime for each program. The cache key includes the exact
+  runtime bytes, rustc identity, target and profile flags, and explicit profile
+  environment.
+  The linker keeps only what the program uses ("only link what's needed"). The
+  output is one self-contained native binary. Rust's std links a baseline
   (low-hundreds-of-KB), accepted as the cost of a beginner-friendly
   std-backed runtime — we do NOT pursue `no_std` in v1 (it would remove
   the conveniences priority #2 depends on). A size-minimal profile
   (`opt-level="z"`, possibly `panic=abort`) is decision S15, exposed
   later as `jet build --small`; the default leans toward speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
-  runs a single file with no manifest, no project folder, no config.
-  The compiler invokes `rustc` on one generated `.rs` file — it never
-  creates or requires a Cargo project for user code. Agents must not add
+  runs a single file with no manifest, no project folder, and no config.
+  The generated `.rs` file remains a complete standalone program for audits.
+  Native builds can split its marked fixed-runtime block into Jet's hidden
+  cached `rlib`, then compile and link the generated user program. This process
+  does not create or require a Cargo project for user code. Agents must not add
   a mandatory project structure, lockfile, or manifest for users; any
   future multi-file/package story is opt-in and post-v1 (see roadmap).
 - **R10 — Std is pay-for-what-you-call.** M10 standard-library modules are
@@ -598,6 +603,80 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   JIT is a performance tier; semantic parity across AOT, JIT, interpreter, and
   web is mandatory. (D-ONECORE1=A, ratified 2026-07-24; I9 owner-directed
   2026-07-29; dumb-adapter rule owner-directed 2026-07-29.)
+
+  The comptime Core registry uses the following namespace classification. This
+  table covers every `core_calls.rs` namespace and its compatibility aliases.
+  `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
+  `Intrinsic` means that the evaluator implements a language value operation,
+  not a second Core policy. `Host` means that the call crosses an effect or
+  capability boundary. `Copied` marks remaining I9 migration work.
+
+  | Namespace | Class | Current semantic home or required action |
+  |---|---|---|
+  | `core.archive` | Host | Package bridge; comptime rejects unsupported host work. |
+  | `core.args` | Kernel | `Prelude/CoreLib/Top/Args.rs`; `ArgsLite` marshals values. |
+  | `core.auth` | Kernel | `AuthSession.rs` and `CryptoEntropy.rs`; `AuthLite` marshals values. |
+  | `core.color` | Intrinsic | `CtValue` constructor and field projection only. |
+  | `core.compress.gzip` | Host | Native compression boundary; comptime rejects unavailable calls. |
+  | `core.compress.zstd` | Host | Native compression boundary; comptime rejects unavailable calls. |
+  | `core.compute` | Kernel | `Prelude/CoreLib/Top/Compute.rs`; `ComputeLite` marshals values. |
+  | `core.crypto` | Copied | Move `CryptoLite` algorithms to Prelude kernels. |
+  | `core.crypto.expert` | Copied | Move expert crypto calls to the same Prelude kernels as AOT. |
+  | `core.data` | Kernel | `DataStats.rs` and `DataPlot.rs`; comptime marshals values. |
+  | `core.email` | Kernel | `Prelude/CoreLib/Email.rs`; `EmailAdapter` marshals values. |
+  | `core.encoding` | Copied | Move shared encoding value rules from `EncodingLite` to Prelude kernels. |
+  | `core.encoding.base32` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.base64` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.cbor` | Copied | Move CBOR rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.csv` | Copied | Move CSV rules to the Prelude encoding kernel. |
+  | `core.encoding.hex` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.json` | Copied | Move JSON rules to the Prelude encoding kernel. |
+  | `core.encoding.jsonl` | Copied | Move JSONL rules to the Prelude encoding kernel. |
+  | `core.encoding.toml` | Copied | Move TOML rules to the Prelude encoding kernel. |
+  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime/JIT marshal `DataTree` values. |
+  | `core.encoding.yaml` | Copied | Move YAML rules to the Prelude encoding kernel. |
+  | `core.env` | Host | Explicit comptime environment capability and policy boundary. |
+  | `core.event` | Copied | Move `EventLite` state transitions to the reactive Prelude kernel. |
+  | `core.exec` | Host | Process execution boundary; comptime rejects or uses explicit policy. |
+  | `core.files` | Host | Explicit comptime filesystem capability and policy boundary. |
+  | `core.fmt` | Copied | Move formatting rules to `Prelude/CoreLib/Top/DataFmt.rs`. |
+  | `core.io` | Host | I/O capability boundary; pure progress values use `Core/Progress.rs`. |
+  | `core.json` | Compatibility alias | Route to `core.encoding.json`; do not add semantics. |
+  | `core.linalg` | Copied | Move linear-algebra arithmetic to its Prelude kernel. |
+  | `core.math` | Mixed | `MathLibPure.rs` is shared; move remaining inline rules or keep true numeric intrinsics. |
+  | `core.measurement` | Compatibility alias | Route to `core.science.measurement`; do not add semantics. |
+  | `core.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
+  | `core.net` | Mixed | Host network calls stay capability-bound; move pure value rules to Prelude. |
+  | `core.path` | Copied | Move lexical path rules to the same Prelude kernel as AOT. |
+  | `core.perf` | Host | Runtime performance capability; comptime rejects unavailable calls. |
+  | `core.process` | Host | Process capability boundary and REPL host adapter. |
+  | `core.random` | Copied | Move deterministic seeded RNG rules to the Prelude kernel; ambient RNG stays host-bound. |
+  | `core.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
+  | `core.reactive.loadable` | Copied | Move loadable state rules to the reactive Prelude kernel. |
+  | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
+  | `core.regex` | Copied | Move `RegexLite` matching rules to the shared regex kernel. |
+  | `core.science.measurement` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
+  | `core.services` | Kernel | `ServiceAuthority.rs` and `Services.rs`; `ServicesLite` marshals values. |
+  | `core.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
+  | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
+  | `core.testing` | Mixed | Shared deterministic capabilities call Prelude; harness and host work stay adapters. |
+  | `core.text` | Copied | Move Unicode and text rules from `TextLite` to Prelude kernels. |
+  | `core.text.unicode` | Copied | Move Unicode rules from `TextLite` to Prelude kernels. |
+  | `core.time` | Mixed | Civil and duration rules live in `Prelude/Core/Time.rs` and `Duration.rs`; ambient clock reads remain host effects. |
+  | `core.time.date` | Mixed | `Prelude/Core/Time.rs` owns calendar rules; `today` reads the host clock. |
+  | `core.time.datetime` | Mixed | `Prelude/Core/Time.rs` owns datetime/zone rules; `now` reads the host clock. |
+  | `core.time.duration` | Kernel | `Prelude/Core/Duration.rs`; all tiers use one checked nanosecond arithmetic kernel. |
+  | `core.time.instant` | Host | Monotonic clock read stays a host adapter; elapsed math uses Prelude. |
+  | `core.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
+  | `core.ui` | Intrinsic | `CtValue` constructors and field projection only. |
+  | `core.units` | Intrinsic | Exact unit conversion uses the foundation kernel. |
+  | `core.url` | Copied | Move URL parse and render rules to `JetStd/UrlMime.rs`. |
+  | `core.xml` | Compatibility alias | Route to `core.encoding.xml`; do not add semantics. |
+
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
 
 ## Exit codes (stable contract)

@@ -1,0 +1,23 @@
+Error [E0078]: this finite value loop needs a written exhaustion route
+  --> tests/ui/value_loop_exhaustion_route.jet:4:5
+    |
+  4 |     }
+    |     ^
+ Why: the source can end without a matching break, so the expression must state what exhaustion means
+ Fix: add `?? fallback` after the closing `}`, or use the labeled loop form for `next` or `break`
+
+Error [E0078]: this finite value loop cannot use `?? next` after its closing brace
+  --> tests/ui/value_loop_exhaustion_route.jet:11:10
+    |
+ 11 |     } ?? next
+    |          ^^^^
+ Why: the route would control the loop that just closed; use a labeled loop to name the target
+ Fix: write a labeled search such as `found :: loop { ... break(found, value) }`
+
+Error [E0078]: this finite value loop cannot use `?? break` after its closing brace
+  --> tests/ui/value_loop_exhaustion_route.jet:18:10
+    |
+ 18 |     } ?? break
+    |          ^^^^^
+ Why: the route would control the loop that just closed; use a labeled loop to name the target
+ Fix: write a labeled search such as `found :: loop { ... break(found, value) }`

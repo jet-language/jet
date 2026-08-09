@@ -194,75 +194,46 @@ fn jet_rng_shuffle<T>(r: &mut jet_std::Rng, xs: &mut Vec<T>) {
         xs.swap(i, j);
     }
 }
-// D-SOLVER-LIB1=A: explicit finite solver state. Constraints are ordinary Bool
-// values recorded in insertion order; no unification or hidden backtracking.
-fn jet_solver_new(seed: i64) -> jet_std::Solver {
-    jet_std::Solver {
-        seed,
-        checked: 0,
-        failures: 0,
-    }
-}
-fn jet_solver_require(s: &mut jet_std::Solver, ok: bool) {
-    s.checked += 1;
-    if !ok {
-        s.failures += 1;
-    }
-}
-fn jet_solver_failure_count(s: &jet_std::Solver) -> i64 {
-    s.failures
-}
-fn jet_solver_status(s: &jet_std::Solver) -> String {
-    if s.failures == 0 {
-        "ok".to_string()
-    } else {
-        "failed".to_string()
-    }
-}
 // D-TIMERES1=A / D-SHAPE-DURATIONCONVERT1=A: one checked nanosecond unit
 // model for every runtime constructor and whole-unit read.
 fn jet_duration_from_int(
     n: i64,
     unit: jet_std::DurationUnit,
 ) -> Result<jet_std::Duration, jet_std::RangeError> {
-    n.checked_mul(unit.nanoseconds())
+    jet_duration_kernel_from_int(n, unit.nanoseconds())
         .map(|ns| jet_std::Duration { ns })
         .ok_or_else(|| jet_std::RangeError {
-            reason: "duration is outside the supported range".to_string(),
+            reason: jet_duration_kernel_int_error_reason().to_string(),
         })
 }
 fn jet_duration_from_float(
     n: f64,
     unit: jet_std::DurationUnit,
 ) -> Result<jet_std::Duration, jet_std::RangeError> {
-    let ns = n * unit.nanoseconds() as f64;
-    if !ns.is_finite() || ns < i64::MIN as f64 || ns >= 9_223_372_036_854_775_808.0 {
-        return Err(jet_std::RangeError {
-            reason: "duration must be finite and inside the supported range".to_string(),
-        });
-    }
-    Ok(jet_std::Duration {
-        ns: ns.trunc() as i64,
-    })
+    jet_duration_kernel_from_float(n, unit.nanoseconds())
+        .map(|ns| jet_std::Duration { ns })
+        .ok_or_else(|| jet_std::RangeError {
+            reason: jet_duration_kernel_float_error_reason().to_string(),
+        })
 }
 fn jet_duration_in(
     d: &jet_std::Duration,
     unit: &jet_std::DurationUnit,
 ) -> Result<i64, jet_std::RangeError> {
-    Ok(d.ns / unit.nanoseconds())
+    Ok(jet_duration_kernel_in(d.ns, unit.nanoseconds()))
 }
 fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
     d.as_millis()
 }
 fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
-    d.ns == 0
+    jet_duration_kernel_is_zero(d.ns)
 }
 fn jet_duration_total_seconds(d: &jet_std::Duration) -> i64 {
-    d.ns / 1_000_000_000
+    jet_duration_kernel_total_seconds(d.ns)
 }
 fn jet_duration_difference(a: &jet_std::Duration, b: &jet_std::Duration) -> jet_std::Duration {
     jet_std::Duration {
-        ns: a.ns.saturating_sub(b.ns),
+        ns: jet_duration_kernel_difference(a.ns, b.ns),
     }
 }
 

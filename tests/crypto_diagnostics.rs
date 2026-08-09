@@ -36,17 +36,16 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let json = String::from_utf8(output.stderr).unwrap();
-    assert!(json.starts_with("{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\""), "{json}");
+    assert!(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""), "{json}");
     for field in [
-        "\"class\":\"user\"",
-        "\"phase\":\"sema\"",
+        "\"code\":\"E2702\"",
         "\"what\":\"crypto API misuse\"",
         "\"reason\":\"output_length\"",
         "\"operation\":\"hkdf_sha256\"",
         "\"expected\":\"0..8160\"",
         "\"actual\":8161",
-        "\"primarySpan\":",
-        "\"relatedSpans\":[]",
+        "\"span\":",
+        "\"cause\":[]",
     ] {
         assert!(json.contains(field), "missing {field}: {json}");
     }
@@ -86,7 +85,7 @@ fn e2702_json_redacts_an_absolute_input_to_its_project_path() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stderr).unwrap();
-    assert!(json.contains("\"primarySpan\":{\"file\":\"src/main.jet\""), "{json}");
+    assert!(json.contains("\"file\":\"src/main.jet\""), "{json}");
     assert!(!json.contains(&root.to_string_lossy().into_owned()), "absolute path leaked: {json}");
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -120,7 +119,8 @@ fn multiple_e2702_diagnostics_are_independent_json_lines() {
     let lines = json.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2, "{json}");
     for (line, actual) in lines.into_iter().zip([8161, 8162]) {
-        assert!(line.starts_with("{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\""), "{line}");
+        assert!(line.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""), "{line}");
+        assert!(line.contains("\"code\":\"E2702\""), "{line}");
         assert!(line.contains("\"reason\":\"output_length\""), "{line}");
         assert!(line.contains("\"operation\":\"hkdf_sha256\""), "{line}");
         assert!(line.contains(&format!("\"actual\":{actual}")), "{line}");

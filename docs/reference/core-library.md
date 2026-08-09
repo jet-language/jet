@@ -2575,7 +2575,7 @@ instead of a module function call (D-TESTKIT1).
 
 `jet test <dir>` walks every subdirectory (skipping `build/` and dotdirs),
 running every `.jet` file found, in sorted path order. A directory that has a
-`pkg.jet` manifest is still treated as a project root (its single entry file
+`package.jet` manifest is still treated as a project root (its single entry file
 runs), same as before.
 
 Tests run in parallel by default — one thread per test, with its own

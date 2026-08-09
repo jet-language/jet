@@ -91,13 +91,7 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
 pub use exprs::{stable_place_address, tir_place_address_key};
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        format!("{what} can't run at compile time yet"),
-        "the canonical TIR evaluator doesn't cover this construct yet".to_string(),
-        "use a simpler form, or run via `jet build` / `jet run`".to_string(),
-        Some(span),
-    )
+    Diagnostic::e0956_unsupported(what, span)
 }
 
 pub(super) fn progress_now() -> f64 {
@@ -727,6 +721,10 @@ pub(super) struct EvalCtx<'a> {
     /// Keep calls inside a codec-sensitive named deopt on canonical TIR.
     pub(super) prefer_tir_calls: bool,
     pub(super) repl_mode: bool,
+    /// Lexical REPL capabilities forwarded from the frontend. Authorization
+    /// decisions remain in the shared Comptime host seam.
+    pub(super) repl_grants: Vec<String>,
+    pub(super) repl_authorizer: Option<&'a mut dyn Comptime::ReplAuthorizer>,
     pub(super) pending_return: Option<CtValue>,
     /// `defer close(^…)` exprs scheduled in the current eval frame (LIFO).
     pub(super) deferred_closes: Vec<&'a TExpr>,
@@ -815,6 +813,14 @@ struct EvalStream<'a> {
     args: Vec<CtValue>,
 }
 
+const TIR_SELECT_BUILDER: &str = "__JetTirSelectBuilder";
+const TIR_SELECT_AFTER: &str = "__JetTirSelectAfter";
+
+struct EvalChannel {
+    channel: crate::scheduler::JetSchedulerChannel<CtValue>,
+    sender: crate::scheduler::JetSchedulerSender<CtValue>,
+}
+
 struct EvalRuntime<'a> {
     callables: Vec<EvalCallable<'a>>,
     streams: Vec<EvalStream<'a>>,
@@ -822,6 +828,7 @@ struct EvalRuntime<'a> {
     shared_guards: Vec<Arc<shared_protocol::JetSharedPermit>>,
     shared_conditions: Vec<Arc<shared_protocol::JetConditionProtocol>>,
     clocks: Vec<i64>,
+    channels: Vec<EvalChannel>,
     task_groups: Vec<Vec<usize>>,
     tasks: Vec<Option<EvalTask>>,
     web_apps: Vec<EvalWebApp>,
@@ -961,6 +968,7 @@ struct EvalTaskConfig<'a> {
     runtime_execution: bool,
     prefer_tir_calls: bool,
     repl_mode: bool,
+    repl_grants: Vec<String>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
@@ -979,6 +987,7 @@ impl EvalRuntime<'_> {
             shared_guards: Vec::new(),
             shared_conditions: Vec::new(),
             clocks: Vec::new(),
+            channels: Vec::new(),
             task_groups: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
@@ -1111,6 +1120,7 @@ impl<'a> EvalCtx<'a> {
             runtime_execution: self.runtime_execution,
             prefer_tir_calls: self.prefer_tir_calls,
             repl_mode: self.repl_mode,
+            repl_grants: self.repl_grants.clone(),
             struct_fields: self.struct_fields.clone(),
             struct_field_types: self.struct_field_types.clone(),
             codec_migrations: self.codec_migrations.clone(),
@@ -1170,6 +1180,8 @@ impl<'a> EvalCtx<'a> {
             runtime_execution: config.runtime_execution,
             prefer_tir_calls: config.prefer_tir_calls,
             repl_mode: config.repl_mode,
+            repl_grants: config.repl_grants,
+            repl_authorizer: None,
             pending_return: None,
             deferred_closes: Vec::new(),
             pending_flow: None,
@@ -1323,6 +1335,241 @@ impl<'a> EvalCtx<'a> {
             type_name: "__JetTirTaskGroup".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
         }
+    }
+
+    fn select_builder_value(
+        receivers: Vec<usize>,
+        afters: Vec<(i64, CtValue)>,
+    ) -> CtValue {
+        CtValue::Struct {
+            type_name: TIR_SELECT_BUILDER.to_string(),
+            fields: vec![
+                (
+                    "receivers".to_string(),
+                    CtValue::List(
+                        receivers
+                            .into_iter()
+                            .map(|index| CtValue::Int(index as i64))
+                            .collect(),
+                    ),
+                ),
+                (
+                    "afters".to_string(),
+                    CtValue::List(
+                        afters
+                            .into_iter()
+                            .map(|(ms, value)| CtValue::Struct {
+                                type_name: TIR_SELECT_AFTER.to_string(),
+                                fields: vec![
+                                    ("ms".to_string(), CtValue::Int(ms)),
+                                    ("value".to_string(), value),
+                                ],
+                            })
+                            .collect(),
+                    ),
+                ),
+            ],
+        }
+    }
+
+    fn select_builder_parts(
+        value: &CtValue,
+    ) -> Option<(Vec<usize>, Vec<(i64, CtValue)>)> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != TIR_SELECT_BUILDER {
+            return None;
+        }
+        let receivers = fields.iter().find_map(|(name, value)| {
+            (name == "receivers").then(|| match value {
+                CtValue::List(values) => values
+                    .iter()
+                    .map(|value| match value {
+                        CtValue::Int(index) => usize::try_from(*index).ok(),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>(),
+                _ => None,
+            })
+        })??;
+        let afters = fields.iter().find_map(|(name, value)| {
+            (name == "afters").then(|| match value {
+                CtValue::List(values) => values
+                    .iter()
+                    .map(|value| {
+                        let CtValue::Struct { type_name, fields } = value else {
+                            return None;
+                        };
+                        if type_name != TIR_SELECT_AFTER {
+                            return None;
+                        }
+                        let ms = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+                            ("ms", CtValue::Int(ms)) => Some(*ms),
+                            _ => None,
+                        })?;
+                        let payload = fields
+                            .iter()
+                            .find_map(|(name, value)| (name == "value").then(|| value.clone()))?;
+                        Some((ms, payload))
+                    })
+                    .collect::<Option<Vec<_>>>(),
+                _ => None,
+            })
+        })??;
+        Some((receivers, afters))
+    }
+
+    pub(super) fn new_eval_channel(&mut self, capacity: Option<i64>) -> CtValue {
+        let channel = match capacity {
+            Some(capacity) => {
+                crate::scheduler::JetSchedulerChannel::bounded(capacity.max(1) as usize)
+            }
+            None => crate::scheduler::JetSchedulerChannel::new(),
+        };
+        let sender = channel.sender();
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let index = runtime.channels.len();
+        runtime.channels.push(EvalChannel { channel, sender });
+        let sender_value = CtValue::Struct {
+            type_name: "Sender".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+        };
+        let receiver_value = CtValue::Struct {
+            type_name: "Receiver".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+        };
+        CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: vec![
+                (crate::Codegen::mangle("sender"), sender_value),
+                (crate::Codegen::mangle("receiver"), receiver_value),
+            ],
+        }
+    }
+
+    pub(super) fn send_eval_channel(
+        &self,
+        index: usize,
+        value: CtValue,
+    ) -> Result<(), Diagnostic> {
+        let sender = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .channels
+            .get(index)
+            .map(|channel| channel.sender.clone())
+            .ok_or_else(|| unsupported("channel sender", self.span()))?;
+        sender.send(value);
+        Ok(())
+    }
+
+    pub(super) fn receive_eval_channel(
+        &self,
+        index: usize,
+    ) -> Result<CtValue, Diagnostic> {
+        self.task_wait_cancel_check()?;
+        let channel = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .channels
+            .get(index)
+            .map(|channel| channel.channel.clone())
+            .ok_or_else(|| unsupported("channel receiver", self.span()))?;
+        let value = channel.receive();
+        self.task_wait_cancel_check()?;
+        Ok(match value {
+            Some(value) => CtValue::Present(Box::new(value)),
+            None => CtValue::failed(Box::new(CtValue::Enum {
+                type_name: "Closed".to_string(),
+                variant: "Closed".to_string(),
+                args: Vec::new(),
+            })),
+        })
+    }
+
+    pub(super) fn close_eval_channel(&self, index: usize) -> Result<(), Diagnostic> {
+        let channel = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .channels
+            .get(index)
+            .map(|channel| channel.channel.clone())
+            .ok_or_else(|| unsupported("channel", self.span()))?;
+        channel.close();
+        Ok(())
+    }
+
+    pub(super) fn new_eval_select(&self) -> CtValue {
+        Self::select_builder_value(Vec::new(), Vec::new())
+    }
+
+    pub(super) fn eval_select_recv(
+        &self,
+        builder: CtValue,
+        receiver: usize,
+    ) -> Result<CtValue, Diagnostic> {
+        let (mut receivers, afters) = Self::select_builder_parts(&builder)
+            .ok_or_else(|| unsupported("select builder", self.span()))?;
+        let valid = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .channels
+            .get(receiver)
+            .is_some();
+        if !valid {
+            return Err(unsupported("select receiver", self.span()));
+        }
+        receivers.push(receiver);
+        Ok(Self::select_builder_value(receivers, afters))
+    }
+
+    pub(super) fn eval_select_after(
+        &self,
+        builder: CtValue,
+        millis: i64,
+        value: CtValue,
+    ) -> Result<CtValue, Diagnostic> {
+        let (receivers, mut afters) = Self::select_builder_parts(&builder)
+            .ok_or_else(|| unsupported("select builder", self.span()))?;
+        afters.push((millis, value));
+        Ok(Self::select_builder_value(receivers, afters))
+    }
+
+    pub(super) fn eval_select_wait(&self, builder: CtValue) -> Result<CtValue, Diagnostic> {
+        let (receiver_ids, after_values) = Self::select_builder_parts(&builder)
+            .ok_or_else(|| unsupported("select builder", self.span()))?;
+        if receiver_ids.is_empty() && after_values.is_empty() {
+            return Err(unsupported("empty select", self.span()));
+        }
+        let channels = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            receiver_ids
+                .iter()
+                .map(|index| {
+                    runtime
+                        .channels
+                        .get(*index)
+                        .map(|channel| channel.channel.clone())
+                })
+                .collect::<Option<Vec<_>>>()
+        }
+        .ok_or_else(|| unsupported("select receiver", self.span()))?;
+        let recvs = channels
+            .iter()
+            .map(|channel| channel.select_inner())
+            .collect();
+        let timers = after_values
+            .into_iter()
+            .map(|(ms, value)| (ms.max(0) as u64, Some(value)))
+            .collect();
+        let value = crate::scheduler::jet_scheduler_select_values(recvs, timers);
+        self.task_wait_cancel_check()?;
+        Ok(value)
     }
 
     /// D-VERDICT-1323-1: request cancellation for one task without consuming
@@ -2143,6 +2390,8 @@ fn run_program_with_structs_on_stack(
         runtime_execution: true,
         prefer_tir_calls: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,
@@ -2216,6 +2465,8 @@ pub fn run_named_func(
         runtime_execution: true,
         prefer_tir_calls: program.canonical_calls.contains(name),
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,
@@ -2389,6 +2640,8 @@ fn eval_expr_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.initial_impure_depth;
     let repl_mode = req.repl_mode;
+    let repl_grants = req.repl_grants.to_vec();
+    let repl_authorizer = req.repl_authorizer.take();
     let source_span = req.expr.span();
     let mut sink_target = req.sink.take();
     let mutated_out = req.mutated.take();
@@ -2409,6 +2662,8 @@ fn eval_expr_hook(
         runtime_execution: false,
         prefer_tir_calls: false,
         repl_mode,
+        repl_grants,
+        repl_authorizer,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,
@@ -2503,6 +2758,8 @@ fn eval_block_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.impure_depth;
     let repl_mode = req.repl_mode;
+    let repl_grants = req.repl_grants.to_vec();
+    let repl_authorizer = req.repl_authorizer.take();
     let source_span = req
         .stmts
         .first()
@@ -2526,6 +2783,8 @@ fn eval_block_hook(
         runtime_execution: false,
         prefer_tir_calls: false,
         repl_mode,
+        repl_grants,
+        repl_authorizer,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,

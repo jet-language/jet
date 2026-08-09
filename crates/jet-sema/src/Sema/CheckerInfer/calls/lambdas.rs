@@ -547,6 +547,15 @@ use std::collections::HashSet;
                     Type::Int
                 });
                 lam.meta.loop_result_type = Some(result_ty.clone());
+                if lam.meta.requires_exhaustion_route && !lam.meta.exhaustion_route_attached {
+                    self.diags.push(Diagnostic::error(
+                        "E0078",
+                        "this finite value loop needs a written exhaustion route".to_string(),
+                        "the source can end without a matching break, so the expression must state what exhaustion means".to_string(),
+                        "add `?? fallback` after the closing `}`, or use the labeled loop form for `next` or `break`".to_string(),
+                        lam.meta.exhaustion_span.or(Some(lam.span)),
+                    ));
+                }
                 body_ret = Some(result_ty);
             }
 

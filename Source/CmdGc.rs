@@ -469,15 +469,21 @@ fn fail(error: TraceError, mode: OutputMode) -> ! {
         ErrorKind::Incomplete => "trace a smaller complete workload; reports never estimate dropped promotions",
         _ => "rerun the program with `--gc-trace` to replace the rejected trace",
     };
+    let diagnostic = jet::Diagnostics::Diagnostic::error(
+        "E2110",
+        "GC trace cannot be reported".to_string(),
+        format!("{}.", error.detail.trim_end_matches('.')),
+        format!("{fix}."),
+        None,
+    )
+    .at_moment(jet::Diagnostics::ReportMoment::Tool);
     if mode.json {
-        println!(
-            "{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2110\",\"severity\":\"error\",\"message\":\"GC trace cannot be reported\",\"why\":\"{}\",\"fix\":\"{}\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}",
-            json_escape(&error.detail), json_escape(fix)
-        );
+        print!("{}", jet::render_all_json("", "", &[diagnostic]));
     } else {
-        eprintln!("Error [E2110]: GC trace cannot be reported");
-        eprintln!(" Why: {}.", error.detail.trim_end_matches('.'));
-        eprintln!(" Fix: {fix}.");
+        eprint!(
+            "{}",
+            jet::render_all_colored("", "", &[diagnostic], mode.color_stderr())
+        );
     }
     exit(jet::ExitCodes::USER_ERROR)
 }
@@ -494,7 +500,7 @@ fn unix_ms() -> u64 {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[{\"source\":\"src/main.jet\",\"span_start\":4,\"span_end\":8,\"scope\":\"fn run\",\"policy_provenance\":\"pkg.jet:4\",\"reason\":\"cycle\",\"type_name\":\"Node\",\"allocations\":2,\"retained\":1,\"identities\":[{\"identity\":1,\"retained\":true},{\"identity\":2,\"retained\":false}]}]}";
+    const SAMPLE: &str = "{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[{\"source\":\"src/main.jet\",\"span_start\":4,\"span_end\":8,\"scope\":\"fn run\",\"policy_provenance\":\"package.jet:4\",\"reason\":\"cycle\",\"type_name\":\"Node\",\"allocations\":2,\"retained\":1,\"identities\":[{\"identity\":1,\"retained\":true},{\"identity\":2,\"retained\":false}]}]}";
 
     #[test]
     fn projections_derive_counts_from_identity_evidence() {

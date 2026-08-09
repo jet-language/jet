@@ -78,7 +78,7 @@ impl Source {
 ///
 /// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
 /// `…@github` source's kind can't be known during pure `evaluate_env`
-/// evaluation — it depends on whether the remote repo carries a `pkg.jet`,
+/// evaluation — it depends on whether the remote repo carries a `package.jet`,
 /// which only a realize-time probe (with the offline flag + source cache) can
 /// answer. `Provider::resolve_kind` turns `Infer` into a concrete `Nix`/`Core`
 /// when realization runs; it never reaches a provider.
@@ -93,7 +93,7 @@ pub enum ProviderKind {
     Cpan,
     Packagist,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
-    /// `pkg.jet` (U9). Only the typed `…@github` surface produces this.
+    /// `package.jet` (U9). Only the typed `…@github` surface produces this.
     Infer,
 }
 
@@ -535,7 +535,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 // ──────────────────────────────────────────────
 // `target@provider` source refs (D-JPK-REF1=A; amends U6).
 //
-// The typed authoring surface (env.jet/pkg.jet `sources:`/`packages:`) writes source
+// The typed authoring surface (env.jet/package.jet `sources:`/`packages:`) writes source
 // refs as `target@provider` — `owner/repo/rev@github`, `channel@nixpkgs`.
 // Local paths are bare (`./local`, `../local`, `/opt/local`).
 //

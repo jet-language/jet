@@ -73,9 +73,9 @@ Eleven ballots (D-FAIL-*) ask direction-level questions.
 Each stands alone. What does not change: `T ? E` and `?`/`??` spellings, the
 optional/fallible whitespace canon, trap-on-overflow for sized widths,
 validate-block accumulation, `#Transact` rollback, the no-exceptions wall,
-and cancellation's one unwind engine. Task failure at join stays in the
-concurrency slate's lane (its proposed D-CONC-FAIL1 row, not yet a minted
-ballot); this proposal supplies the value it rides on.
+and cancellation's one unwind engine. Task failure at join follows the
+ratified D-CONC-FAIL1=A one-rail law; this proposal supplies the value it rides
+on.
 
 ## Glossary
 
@@ -646,7 +646,7 @@ fn settle(batch: [Transfer]) ? Err {               // proposed: no arrow, no uni
 fn run() {
     result :: task settle(load_batch()?)           // concurrency slate spelling
     result.join()? "settling the day's batch"      // a panicked task arrives as a value
-}                                    // (the concurrency slate's proposed D-CONC-FAIL1 lane)
+}                                    // (the concurrency slate's ratified D-CONC-FAIL1=A law)
 ```
 
 ## What this unlocks
@@ -668,7 +668,7 @@ fn run() {
   `.err.out` examples on every tier, so runtime failure becomes a tested
   dimension instead of a silent gap.
 - **Concurrency and services.** The join boundary (the concurrency slate's
-  proposed D-CONC-FAIL1), restart rules, and supervision all ride one value
+  ratified D-CONC-FAIL1=A), restart rules, and supervision all ride one value
   shape. That slate deletes the string-typed `task.exception()`; this model
   supplies the typed value that replaces it.
 - **Critical software.** Contracts that erase under proof are the SPARK

@@ -103,6 +103,89 @@ impl OutputMode {
     }
 }
 
+/// Render one spanless driver failure through Jet's shared diagnostic frame.
+fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
+    match code {
+        "E1202" => (
+            "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run",
+            "run `jet fetch`, then run the command again",
+        ),
+        "E1235" => (
+            "the registry git operation failed because of network, authentication, or local-clone state",
+            "check registry network access and credentials, then run the command again",
+        ),
+        "E2101" => (
+            "Jet command groups accept only commands in their named area",
+            "run `jet help` or the command group's `help` route",
+        ),
+        "E2102" => (
+            "Jet ignores no flags silently, so a typo cannot quietly change a command",
+            "correct the named flag, or run `jet help` to see the flags",
+        ),
+        "E2104" => (
+            "Jet needs valid command input before it can run this command",
+            "correct the named argument or input, then run the command again",
+        ),
+        "E2105" => (
+            "Jet could not complete the named file, tool, or operating-system operation",
+            "correct the named problem, then run the command again",
+        ),
+        "E2941" => (
+            "jet prove accepts only its registered proof lenses",
+            "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`",
+        ),
+        _ => (
+            "Jet could not complete this command",
+            "correct the named problem, then run the command again",
+        ),
+    }
+}
+
+pub(crate) fn emit_cli_diagnostic(code: &str, what: String) {
+    let (why, fix) = cli_diagnostic_copy(code);
+    emit_cli_report(code, what, why.to_string(), fix.to_string(), false);
+}
+
+pub(crate) fn emit_cli_diagnostic_with_fix(code: &str, what: String, fix: String) {
+    let (why, _) = cli_diagnostic_copy(code);
+    emit_cli_report(code, what, why.to_string(), fix, false);
+}
+
+pub(crate) fn emit_cli_report(
+    code: &str,
+    what: String,
+    why: String,
+    fix: String,
+    json: bool,
+) {
+    let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None)
+        .at_moment(jet::Diagnostics::ReportMoment::Tool);
+    if json {
+        print!("{}", jet::render_all_json("", "", &[diagnostic]));
+    } else {
+        eprint!("{}", jet::render_all_colored("", "", &[diagnostic], false));
+    }
+}
+
+macro_rules! cli_error {
+    (@fix $code:expr, $what:expr, $fix:expr) => {
+        crate::emit_cli_diagnostic_with_fix($code, ($what).to_string(), ($fix).to_string())
+    };
+    (@full $code:expr, $what:expr, $why:expr, $fix:expr) => {
+        crate::emit_cli_report(
+            $code,
+            ($what).to_string(),
+            ($why).to_string(),
+            ($fix).to_string(),
+            false,
+        )
+    };
+    ($code:expr, $($arg:tt)*) => {
+        crate::emit_cli_diagnostic($code, format!($($arg)*))
+    };
+}
+pub(crate) use cli_error;
+
 /// Parse `--color=auto|always|never` from raw argv (last one wins).
 fn parse_color(raw: &[String]) -> ColorChoice {
     let mut choice = ColorChoice::Auto;
@@ -237,42 +320,44 @@ impl ProfileConfig {
         parts.join(";")
     }
 
-    pub(crate) fn apply_rustc(&self, cmd: &mut Command, ffi: bool) {
+    pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+        let mut args = Vec::new();
         if self.small {
-            cmd.arg("-C")
-                .arg("opt-level=z")
-                .arg("-C")
-                .arg("panic=abort")
-                .arg("-C")
-                .arg("strip=symbols");
+            args.extend(
+                ["-C", "opt-level=z", "-C", "panic=abort", "-C", "strip=symbols"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
             if !ffi {
-                cmd.arg("-C").arg("lto=fat");
+                args.extend(["-C".to_string(), "lto=fat".to_string()]);
             }
-            return;
+            return args;
         }
         match self.optimize {
             OptimizeLevel::None => {}
             OptimizeLevel::Basic => {
-                cmd.arg("-O");
+                args.push("-O".to_string());
             }
             OptimizeLevel::Full => {
-                cmd.arg("-C").arg("opt-level=3");
+                args.extend(["-C".to_string(), "opt-level=3".to_string()]);
             }
         }
         if self.debug_info {
-            cmd.arg("-C").arg("debuginfo=2");
+            args.extend(["-C".to_string(), "debuginfo=2".to_string()]);
         } else if !matches!(self.optimize, OptimizeLevel::None) {
-            cmd.arg("-C").arg("strip=symbols");
+            args.extend(["-C".to_string(), "strip=symbols".to_string()]);
         }
         if self.panic_abort {
-            cmd.arg("-C").arg("panic=abort");
+            args.extend(["-C".to_string(), "panic=abort".to_string()]);
         }
         if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
-            cmd.arg("-C").arg("lto=thin");
+            args.extend(["-C".to_string(), "lto=thin".to_string()]);
         }
         for feat in &self.features {
-            cmd.arg("--cfg").arg(format!("feature=\"{feat}\""));
+            args.push("--cfg".to_string());
+            args.push(format!("feature=\"{feat}\""));
         }
+        args
     }
 
     pub(crate) fn apply_env(&self, cmd: &mut Command) {
@@ -676,13 +761,13 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         let group = group_spec.name;
         let verb = first;
         let replacement = format!("jet {group} {}", raw.join(" "));
-        if raw.iter().any(|arg| arg == "--json") {
-            println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{verb}` moved under `jet {group}`\",\"why\":\"infrequent commands live in a named area so daily Jet commands stay easy to scan\",\"fix\":\"run `{}`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&replacement));
-            exit(ExitCodes::USAGE);
-        }
-        eprintln!("Error [E2101]: `{verb}` moved under `jet {group}`.");
-        eprintln!(" Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.");
-        eprintln!(" Fix: run `{replacement}`.");
+        emit_cli_report(
+            "E2101",
+            format!("`{verb}` moved under `jet {group}`"),
+            "infrequent commands live in a named area so daily Jet commands stay easy to scan".to_string(),
+            format!("run `{replacement}`"),
+            raw.iter().any(|arg| arg == "--json"),
+        );
         exit(ExitCodes::USAGE);
     }
     let Some(group) = raw.first().cloned() else { return };
@@ -707,13 +792,13 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     }
     let Some(sub) = raw.get(1).cloned() else { return };
     if exhaustive && jet::CLI::nested_command(&group, &sub).is_none() {
-        if raw.iter().any(|arg| arg == "--json") {
-            println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet {} command\",\"why\":\"jet {} accepts only commands in its named area\",\"fix\":\"run `jet {} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&sub), esc(&group), esc(&group), esc(&group));
-        } else {
-            eprintln!("Error [E2101]: `{sub}` isn't a jet {group} command.");
-            eprintln!(" Why: jet {group} accepts only commands in its named area.");
-            eprintln!(" Fix: run `jet {group} help`.");
-        }
+        emit_cli_report(
+            "E2101",
+            format!("`{sub}` isn't a jet {group} command"),
+            format!("jet {group} accepts only commands in its named area"),
+            format!("run `jet {group} help`"),
+            raw.iter().any(|arg| arg == "--json"),
+        );
         exit(ExitCodes::USAGE);
     }
     if let Some((_, action)) = jet::CLI::nested_command(&group, &sub) {
@@ -815,16 +900,13 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
 /// doesn't apply) — `verb` renamed outright to `replacement`, a full `jet …`
 /// command line the caller has already composed for this exact invocation.
 fn teach_retired(verb: &str, replacement: &str, why: &str, json: bool) -> ! {
-    if json {
-        println!(
-            "{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet command\",\"why\":\"{}\",\"fix\":\"run `{}`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}",
-            esc(verb), esc(why), esc(replacement)
-        );
-    } else {
-        eprintln!("Error [E2101]: `{verb}` isn't a jet command.");
-        eprintln!(" Why: {why}.");
-        eprintln!(" Fix: run `{replacement}`.");
-    }
+    emit_cli_report(
+        "E2101",
+        format!("`{verb}` isn't a jet command"),
+        why.to_string(),
+        format!("run `{replacement}`"),
+        json,
+    );
     exit(ExitCodes::USAGE);
 }
 
@@ -1028,11 +1110,7 @@ fn main() {
         .and_then(jet::Driver::target_machine_by_name);
     if let Some(name) = requested_target.as_deref() {
         if selected_machine.is_none() && name.starts_with("board.") {
-            eprintln!("error: unknown target machine `{name}`");
-            eprintln!(
-                " fix: use one of {}, or a rustc target triple",
-                jet::Driver::TARGET_MACHINE_NAMES.join(", ")
-            );
+            crate::cli_error!(@full "E3302", format!("target `{name}` is not available"), "the name is neither a declared target machine nor a recognized target triple", format!("use one of {}, or a rustc target triple", jet::Driver::TARGET_MACHINE_NAMES.join(", ")));
             exit(ExitCodes::USAGE);
         }
     }
@@ -1055,8 +1133,7 @@ fn main() {
         .find_map(|a| a.strip_prefix("--port=").map(str::to_string))
         .map(|s| {
             s.parse::<u16>().unwrap_or_else(|_| {
-                eprintln!("error: `--port={}` isn't a valid port number", s);
-                eprintln!(" fix: use a number from 1 to 65535, e.g. `--port=3000`");
+                crate::cli_error!(@fix "E2104", format!("`--port={}` isn't a valid port number", s), "use a number from 1 to 65535, e.g. `--port=3000`");
                 exit(ExitCodes::USAGE);
             })
         });
@@ -1181,7 +1258,7 @@ fn main() {
             _ => {}
         }
         if let Err(e) = jet::LSP::run_stdio() {
-            eprintln!("error: language server failed: {}", e);
+            crate::cli_error!("E2105", "language server failed: {}", e);
             exit(ExitCodes::USER_ERROR);
         }
         return;
@@ -1203,8 +1280,7 @@ fn main() {
     };
     if let Some(output) = output_name.as_deref() {
         if cmd != "run" || output.is_empty() {
-            eprintln!("error: `--output` needs a runnable Output address with `jet run`");
-            eprintln!(" fix: write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT);
+            crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address with `jet run`", format!("write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT));
             exit(ExitCodes::USAGE);
         }
     }
@@ -1269,7 +1345,7 @@ fn main() {
                 .args(fwd.iter().map(|s| s.as_str()))
                 .status()
                 .unwrap_or_else(|e| {
-                    eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
+                    crate::cli_error!("E2105", "couldn't run `{}`: {}", bin.display(), e);
                     exit(ExitCodes::USER_ERROR);
                 });
             exit(status.code().unwrap_or(ExitCodes::OK));
@@ -1332,8 +1408,7 @@ fn main() {
                 .get(1)
                 .and_then(|value| value.parse::<u32>().ok())
                 .unwrap_or_else(|| {
-                    eprintln!("error: jet inspect live needs a process id");
-                    eprintln!(" fix: run jet inspect live <pid>");
+                    crate::cli_error!(@fix "E2104", "jet inspect live needs a process id", "run jet inspect live <pid>");
                     exit(ExitCodes::USAGE);
                 });
             let once = raw.iter().any(|arg| arg == "--once")
@@ -1341,8 +1416,7 @@ fn main() {
                 || !std::io::stdout().is_terminal();
             loop {
                 let snapshot = jet::DevServer::LiveInspect::read(pid).unwrap_or_else(|message| {
-                    eprintln!("error: {message}");
-                    eprintln!(" fix: start the program with --observe, or attach to a jet dev process");
+                    crate::cli_error!(@fix "E2105", message, "start the program with --observe, or attach to a jet dev process");
                     exit(ExitCodes::USER_ERROR);
                 });
                 if mode.json {
@@ -1509,7 +1583,7 @@ fn main() {
         "toolchain" => run_toolchain(),
         // U11 (D-JPK-SCRIPTDEP1=A): `jet init <script.jet>` lifts that
         // script's inline `use pkg#version;` deps into the freshly written
-        // `pkg.jet`; bare `jet init` is unchanged.
+        // `package.jet`; bare `jet init` is unchanged.
         "init" => run_init(args.get(1).map(|s| s.as_str()), &raw, mode),
         "split" => run_split(&args, &raw, mode),
         "fold" => run_fold(&args, &raw, mode),
@@ -1544,13 +1618,13 @@ fn main() {
                     json,
                 ),
                 Some(other) => {
-                    if json {
-                        println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet gc command\",\"why\":\"jet gc currently exposes only the automatic-promotion report\",\"fix\":\"run `jet gc report`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(other));
-                    } else {
-                        eprintln!("Error [E2101]: `{other}` isn't a jet gc command.");
-                        eprintln!(" Why: jet gc currently exposes only the automatic-promotion report.");
-                        eprintln!(" Fix: run `jet gc report`.");
-                    }
+                    emit_cli_report(
+                        "E2101",
+                        format!("`{other}` isn't a jet gc command"),
+                        "jet gc currently exposes only the automatic-promotion report".to_string(),
+                        "run `jet gc report`".to_string(),
+                        json,
+                    );
                     exit(ExitCodes::USAGE);
                 }
             }
@@ -1578,14 +1652,11 @@ fn main() {
                     run_key_backup(dest, registry);
                 }
                 Some(other) => {
-                    eprintln!(
-                        "error: unknown `jet registry key` subcommand `{}` — did you mean `jet registry key backup`?",
-                        other
-                    );
+                    crate::cli_error!("E2101", "unknown `jet registry key` subcommand `{}` — did you mean `jet registry key backup`?", other);
                     exit(ExitCodes::USER_ERROR);
                 }
                 None => {
-                    eprintln!("error: `jet registry key` needs a subcommand — try `jet registry key backup`.");
+                    crate::cli_error!("E2104", "`jet registry key` needs a subcommand — try `jet registry key backup`.");
                     exit(ExitCodes::USER_ERROR);
                 }
             }
@@ -1877,11 +1948,7 @@ fn main() {
             let file = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
-                    eprintln!(
-                        "error: `jet dev` needs a file to watch: {} dev <file.{}>",
-                        jet::Syntax::BINARY_NAME,
-                        jet::Syntax::FILE_EXT
-                    );
+                    crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
                     exit(ExitCodes::USAGE);
                 }
             };
@@ -1975,11 +2042,7 @@ fn main() {
                     match resolve_bare_entry("debug", &cwd, member_flag) {
                         Some(entry) => entry.to_string_lossy().into_owned(),
                         None => {
-                            eprintln!(
-                                "error: `jet debug` needs a file to debug: {} debug <file.{}>",
-                                jet::Syntax::BINARY_NAME,
-                                jet::Syntax::FILE_EXT
-                            );
+                            crate::cli_error!("E2104", "`jet debug` needs a file to debug: {} debug <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
                             exit(ExitCodes::USAGE);
                         }
                     }
@@ -2058,8 +2121,7 @@ fn main() {
                     ));
                 }
                 _ => {
-                    eprintln!("error: unknown hangar subcommand `{}`", sub);
-                    eprintln!(" fix: run `jet hangar help` to see every hangar command");
+                    crate::cli_error!(@fix "E2101", format!("unknown hangar subcommand `{}`", sub), "run `jet hangar help` to see every hangar command");
                     exit(ExitCodes::USAGE);
                 }
             }
@@ -2087,11 +2149,7 @@ fn main() {
             let file = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
-                    eprintln!(
-                        "error: `jet eval` needs a file: {} eval --pure <file.{}>",
-                        jet::Syntax::BINARY_NAME,
-                        jet::Syntax::FILE_EXT
-                    );
+                    crate::cli_error!("E2104", "`jet eval` needs a file: {} eval --pure <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
                     exit(ExitCodes::USAGE);
                 }
             };
@@ -2217,8 +2275,7 @@ fn main() {
                 match s.parse::<u64>() {
                     Ok(n) => Some(n),
                     Err(_) => {
-                        eprintln!("error: `--shuffle={}` isn't a number", s);
-                        eprintln!(" fix: use `--shuffle=<seed>` (e.g. `--shuffle=42`), or bare `--shuffle` for a random seed");
+                        crate::cli_error!(@fix "E2104", format!("`--shuffle={}` isn't a number", s), "use `--shuffle=<seed>` (e.g. `--shuffle=42`), or bare `--shuffle` for a random seed");
                         exit(ExitCodes::USAGE);
                     }
                 }
@@ -2372,11 +2429,7 @@ fn main() {
             if cmd == "run" {
                 if let Some(task) = task_name.as_deref() {
                     if task.is_empty() {
-                        eprintln!("error: `--task` needs a task name");
-                        eprintln!(
-                            " fix: write `jet run --task <name> <file.{}>`",
-                            jet::Syntax::FILE_EXT
-                        );
+                        crate::cli_error!(@fix "E2104", "`--task` needs a task name", format!("write `jet run --task <name> <file.{}>`", jet::Syntax::FILE_EXT));
                         exit(ExitCodes::USAGE);
                     }
                     run_task_entry(&resolved, task, &program_args, mode);
@@ -2553,14 +2606,11 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
         // a manifest but no entry, fall through so the file-not-found path
         // names the missing `run.jet`.
         if jet::Loader::manifest_path(path).is_none() {
-            eprintln!(
-                "error: no `{entry}` entry in `{dir}`",
+            crate::cli_error!(
+                "E2105",
+                "no `{entry}` entry in `{dir}`",
                 entry = jet::Syntax::DEFAULT_ENTRY_FILE,
                 dir = raw,
-            );
-            eprintln!(
-                " fix: add `{}` to that directory, or point at a `.jet` file directly",
-                jet::Syntax::DEFAULT_ENTRY_FILE
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -2585,8 +2635,7 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         Ok(Some(entry)) => return entry,
         Ok(None) => {}
         Err(error) => {
-            eprintln!("error: {error}");
-            eprintln!(" fix: repair the typed Package output or point at a `.jet` file directly");
+            crate::cli_error!(@fix "E2105", error, "repair the typed Package output or point at a `.jet` file directly");
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -2655,7 +2704,7 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// A `workspace.jet` (D-JPK-WORKSPACE2) is checked at `cwd` directly first —
 /// `jetpack::WorkspaceFile::load` never walks upward, matching every
 /// other workspace-aware call site — because a monorepo workspace root often
-/// carries no `pkg.jet` of its own (payloads live entirely in member
+/// carries no `package.jet` of its own (Package facts live entirely in member
 /// directories). Only when there's no workspace, or it has zero/one runnable
 /// member, does resolution fall back to the ordinary `find_manifest_root` +
 /// `find_project_entry` single-package convention (unchanged from before
@@ -2723,11 +2772,10 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                 Some((_, entry)) => Some(entry.clone()),
                 None => {
                     let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
-                    eprintln!("error: no workspace member named `{want}`");
                     if cmd == "tasks" {
-                        eprintln!(" fix: list tasks for one of: {}", names.join(", "));
+                        crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("list tasks for one of: {}", names.join(", ")));
                     } else {
-                        eprintln!(" fix: pick one of: {}", names.join(", "));
+                        crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("pick one of: {}", names.join(", ")));
                     }
                     exit(ExitCodes::USAGE);
                 }
@@ -2738,26 +2786,10 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             n if n >= 2 => {
                 let names: Vec<&str> = runnable.iter().map(|(n, _)| n.as_str()).collect();
                 if cmd == "tasks" {
-                    eprintln!(
-                        "error: `jet tasks` is ambiguous — this workspace has {} members with entry files",
-                        names.len()
-                    );
-                    eprintln!(
-                        " why: tasks are listed for one member at a time: {}",
-                        names.join(", ")
-                    );
-                    eprintln!(" fix: pick one with `jet tasks -p <member>`");
+                    crate::cli_error!(@full "E2104", format!("`jet tasks` is ambiguous — this workspace has {} members with entry files", names.len()), format!("tasks are listed for one member at a time: {}", names.join(", ")), "pick one with `jet tasks -p <member>`");
                     exit(ExitCodes::USAGE);
                 }
-                eprintln!(
-                    "error: `jet {cmd}` is ambiguous — {} workspace members can run",
-                    names.len()
-                );
-                eprintln!(
-                    " why: this workspace declares multiple runnable members: {}",
-                    names.join(", ")
-                );
-                eprintln!(" fix: pick one with `jet {cmd} -p <member>`, or run its file directly");
+                crate::cli_error!(@full "E2104", format!("`jet {cmd}` is ambiguous — {} workspace members can run", names.len()), format!("this workspace declares multiple runnable members: {}", names.join(", ")), format!("pick one with `jet {cmd} -p <member>`, or run its file directly"));
                 exit(ExitCodes::USAGE);
             }
             _ => {} // no runnable member — fall through to the single-project convention
@@ -2773,12 +2805,7 @@ fn missing_bare_entry(cmd: &str, cwd: &Path) -> ! {
         eprint!("{}", msg);
         exit(ExitCodes::USAGE);
     }
-    eprintln!("error: no file given and no `package.jet` found in this directory or above");
-    eprintln!(
-        " fix: run `jet {} <file.{}>` or cd into a project",
-        cmd,
-        jet::Syntax::FILE_EXT
-    );
+    crate::cli_error!(@fix "E2104", "no file given and no `package.jet` found in this directory or above", format!("run `jet {} <file.{}>` or cd into a project", cmd, jet::Syntax::FILE_EXT));
     exit(ExitCodes::USAGE);
 }
 
@@ -2875,11 +2902,7 @@ fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
                 .env(jet::Syntax::TOOLCHAIN_EXEC_MARKER_ENV, &version)
                 .status()
                 .unwrap_or_else(|e| {
-                    eprintln!(
-                        "error: couldn't exec the pinned toolchain `{}`: {}",
-                        binary.display(),
-                        e
-                    );
+                    crate::cli_error!("E2105", "couldn't exec the pinned toolchain `{}`: {}", binary.display(), e);
                     exit(ExitCodes::USER_ERROR);
                 });
             exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
@@ -2913,7 +2936,7 @@ fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
         Some("env") => jetpack::Transition::SplitTarget::Environment,
         Some("package") => {
             let Some(name) = args.get(2) else {
-                eprintln!("error: jet split package needs a Package name");
+                crate::cli_error!("E2104", "jet split package needs a Package name");
                 exit(ExitCodes::USAGE);
             };
             jetpack::Transition::SplitTarget::Package {
@@ -2922,7 +2945,7 @@ fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
         }
         Some("hosts") => {
             let Some(name) = args.get(2) else {
-                eprintln!("error: jet split hosts needs a host name");
+                crate::cli_error!("E2104", "jet split hosts needs a host name");
                 exit(ExitCodes::USAGE);
             };
             jetpack::Transition::SplitTarget::Hosts {
@@ -2930,12 +2953,11 @@ fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
             }
         }
         Some(other) => {
-            eprintln!("error: unknown split target {other}");
-            eprintln!(" fix: use jet split env, jet split package <name>, or jet split hosts <name>");
+            crate::cli_error!(@fix "E2101", format!("unknown split target {other}"), "use jet split env, jet split package <name>, or jet split hosts <name>");
             exit(ExitCodes::USAGE);
         }
         None => {
-            eprintln!("error: jet split needs a target");
+            crate::cli_error!("E2104", "jet split needs a target");
             exit(ExitCodes::USAGE);
         }
     };
@@ -2949,8 +2971,7 @@ fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
 
 fn run_fold(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
     let Some(path) = args.get(1) else {
-        eprintln!("error: jet fold needs a generated transition path");
-        eprintln!(" fix: use jet fold package/env.jet or jet fold packages/name/package.jet");
+        crate::cli_error!(@fix "E2104", "jet fold needs a generated transition path", "use jet fold package/env.jet or jet fold packages/name/package.jet");
         exit(ExitCodes::USAGE);
     };
     let check_only = raw.iter().any(|arg| arg == "--check");
@@ -3064,7 +3085,7 @@ fn run_init(
         match jetpack::Transition::restore_role_files(&cwd, check_only) {
             Ok(result) => print_transition_result(&result, check_only, mode),
             Err(error) => {
-                eprintln!("error: {error}");
+                crate::cli_error!("E2105", "{error}");
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -3077,7 +3098,7 @@ fn run_init(
             match jetpack::Transition::init(&cwd, true) {
                 Ok(result) => print_transition_result(&result, true, mode),
                 Err(error) => {
-                    eprintln!("error: {error}");
+                    crate::cli_error!("E2105", "{error}");
                     exit(ExitCodes::USER_ERROR);
                 }
             }
@@ -3096,7 +3117,7 @@ fn run_init(
             match jetpack::Transition::init(&cwd, false) {
             Ok(result) => print_transition_result(&result, false, mode),
             Err(error) => {
-                eprintln!("error: {error}");
+                crate::cli_error!("E2105", "{error}");
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -3172,7 +3193,7 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
 /// stale — the same "locks by file-content hash" contract `jet run` uses).
 fn run_lock(script: Option<&str>, mode: OutputMode) {
     let Some(raw_arg) = script else {
-        eprintln!("error: `jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`");
+        crate::cli_error!("E2104", "`jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`");
         exit(ExitCodes::USER_ERROR);
     };
     let file = resolve_source_path(raw_arg);
@@ -3180,17 +3201,14 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
     let script_dir = script_path.parent().unwrap_or(Path::new("."));
 
     if jet::Loader::find_manifest_root(script_dir).is_some() {
-        eprintln!(
-            "error: `{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
-            jet::Syntax::PAYLOAD_FILE
-        );
+        crate::cli_error!("E1202", "`{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies", jet::Syntax::PACKAGE_FILE);
         exit(ExitCodes::USER_ERROR);
     }
 
     let src = match fs::read_to_string(&file) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: couldn't read `{file}`: {e}");
+            crate::cli_error!("E2105", "couldn't read `{file}`: {e}");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -3242,7 +3260,7 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
             exit(ExitCodes::OK);
         }
         Err(e) => {
-            eprintln!("error: couldn't write the lock sidecar: {e}");
+            crate::cli_error!("E2105", "couldn't write the lock sidecar: {e}");
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -3279,9 +3297,10 @@ pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> 
 }
 
 /// Find the manifest root from `cwd`, or exit. D-JPK-FILENAME2=B (A2): when
-/// there's no `pkg.jet` but a retired filename (`pack.jet`/`payload.jet`/
-/// `jet.toml`) sits where it belongs, teaches E1226 instead of the generic
-/// "no pkg.jet found" — `fallback_hint` is that generic message's body for
+/// there's no `package.jet` but a retired filename (`pkg.jet`/`pack.jet`/
+/// `payload.jet`/`jet.toml`) sits where it belongs, teaches E1226 instead of
+/// the generic "no package.jet found" — `fallback_hint` is that generic
+/// message's body for
 /// commands that genuinely have no manifest at all.
 pub(crate) fn require_manifest_root(cwd: &Path, fallback_hint: &str) -> PathBuf {
     jet::Loader::find_manifest_root(cwd).unwrap_or_else(|| {

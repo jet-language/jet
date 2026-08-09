@@ -483,11 +483,11 @@ const TRUTH_ROWS: &[RegistryRow] = &[
     ),
     truth_row(
         "AotCoreCalls",
-        "crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs",
+        "crates/jet-foundation/src/Syntax/core_calls.rs",
         &["AOT emit of every plain core.* call"],
         Guard {
-            test: "no_bespoke_arm_repeats_a_table_row",
-            file: "crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs",
+            test: "aot_projection_is_complete_both_directions",
+            file: "tests/core_call_table.rs",
             proof: GuardProof::CountsSites,
         },
         "D-ONCE-LAW1",

@@ -545,7 +545,8 @@
         super::jet_scheduler_current_task_trace()
     }
 
-    /// D-CONCSELECT1=A: fluent select builder accumulated at compile time, executed at `.wait()`.
+    /// D-SELECT-GENERIC1=A: fluent select builder for any one `Receiver<T>`
+    /// element type, accumulated at compile time and executed at `.wait()`.
     pub struct JetSelectBuilder<T: Send + 'static> {
         recvs: Vec<JetReceiver<T>>,
         after_values: Vec<(i64, T)>,
@@ -582,24 +583,17 @@
         }
     }
 
-    /// D-CONCSELECT1=A: multiplex channel/timer arms registered by `g.select()`.
+    /// D-SELECT-GENERIC1=A: multiplex any one `Receiver<T>` element type.
     pub fn jet_select_wait<T: Send + 'static>(
         recvs: &[&JetReceiver<T>],
         after_values: Vec<(i64, T)>,
     ) -> T {
         let inners: Vec<_> = recvs.iter().map(|c| c.inner.select_inner()).collect();
-        let timers: Vec<u64> = after_values.iter().map(|(ms, _)| (*ms).max(0) as u64).collect();
-        match super::jet_scheduler_select(inners, timers) {
-            super::JetSelectOutcome::Recv { value, .. } => value,
-            super::JetSelectOutcome::After { arm } => after_values
-                .into_iter()
-                .nth(arm)
-                .map(|(_, value)| value)
-                .unwrap_or_else(|| super::jet_panic("<core.tasks>", 0, "select timer arm missing value")),
-            super::JetSelectOutcome::Closed => {
-                super::jet_panic("<core.tasks>", 0, "select closed");
-            }
-        }
+        let timers = after_values
+            .into_iter()
+            .map(|(ms, value)| (ms.max(0) as u64, Some(value)))
+            .collect();
+        super::jet_scheduler_select_values(inners, timers)
     }
 
     /// D-TUPLE-DESTRUCT1: `tasks.channel<T>()` — mirrors Rust's `mpsc::channel()`:

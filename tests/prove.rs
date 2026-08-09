@@ -14,7 +14,7 @@ fn workspace(name: &str) -> PathBuf {
 fn budget_workspace(name: &str) -> PathBuf {
     let root = workspace(name);
     fs::create_dir_all(root.join("src")).unwrap();
-    fs::write(root.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::write(root.join("src/main.jet"), r#"module perf.package {
     budgets: [Budget.{
         name: "public-api",

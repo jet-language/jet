@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex};
 
 mod common;
 use common::{
-    fixture_filter, fixture_matches, have_rustc, panic_message, test_worker_count, unified_diff,
-    FfiBridgeLock,
+    add_generated_rust, fixture_filter, fixture_matches, have_rustc, panic_message,
+    test_worker_count, unified_diff, FfiBridgeLock,
 };
 
 #[derive(Clone)]
@@ -354,13 +354,15 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let dir = std::env::temp_dir();
     let rs = dir.join(format!("jet_golden_{}_{}.rs", std::process::id(), flat_stem));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
-    fs::write(&rs, &rust_code).unwrap();
     let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd
-        .args(["--edition", "2021"])
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin);
+    add_generated_rust(
+        &mut rustc_cmd,
+        &rs,
+        &rust_code,
+        ffi_link.is_some(),
+        &[],
+    );
+    rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &ffi_link {
         rustc_cmd
             .arg("--extern")
@@ -643,14 +645,24 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
             "devloop_task_runner",
             task
         ));
-        fs::write(&rs, &compiled.rust).unwrap();
-        let out = Command::new("rustc")
-            .args(["--edition", "2021"])
-            .arg(&rs)
-            .arg("-o")
-            .arg(&bin)
-            .output()
-            .unwrap();
+        let mut rustc = Command::new("rustc");
+        add_generated_rust(
+            &mut rustc,
+            &rs,
+            &compiled.rust,
+            compiled.ffi.is_some(),
+            &[],
+        );
+        rustc.arg("-o").arg(&bin);
+        if let Some(link) = &compiled.ffi {
+            rustc
+                .arg("--extern")
+                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+                rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+            }
+        }
+        let out = rustc.output().unwrap();
         assert!(
             out.status.success(),
             "I2 violated: rustc rejected task_runner --task={task}:\n{}",
@@ -841,6 +853,11 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         &s,
         "// JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_scoped",
         "// JET_VETTED_UNSAFE_END: jet_taskgroup_scoped",
+    );
+    s = strip_region(
+        &s,
+        "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter",
+        "// JET_VETTED_UNSAFE_END: ffi_reporter",
     );
     s = strip_regions(
         &s,

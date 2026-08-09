@@ -60,10 +60,27 @@ pub enum Severity {
     Lint,
 }
 
-/// The current `--json` diagnostic schema version. Bumped only on a
-/// breaking change to the shape below (D-DX1: stable + versioned). Consumers
-/// (LSP, fix engine) gate on this field.
-pub const JSON_SCHEMA_VERSION: u32 = 1;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportMoment {
+    Compile,
+    Run,
+    Test,
+    Tool,
+}
+
+impl ReportMoment {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Compile => "compile",
+            Self::Run => "run",
+            Self::Test => "test",
+            Self::Tool => "tool",
+        }
+    }
+}
+
+/// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
+pub const REPORT_SCHEMA: &str = "jet.report/v1";
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
 pub const MAX_SOURCE_NESTING: usize = 256;
@@ -133,6 +150,7 @@ pub enum StructuredDiagnostic {
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
+    pub moment: ReportMoment,
     pub severity: Severity,
     pub code: String,
     pub what: String,
@@ -188,6 +206,7 @@ impl Diagnostic {
         span: Option<Span>,
     ) -> Self {
         let mut d = Diagnostic {
+            moment: ReportMoment::Compile,
             severity: Severity::Error,
             code: code.into(),
             what,
@@ -200,6 +219,16 @@ impl Diagnostic {
         };
         d.attach_teaching_edit();
         d
+    }
+
+    pub fn e0956_unsupported(what: &str, span: Span) -> Self {
+        Self::error(
+            "E0956",
+            format!("{what} can't run at compile time yet"),
+            "the canonical TIR evaluator doesn't cover this construct yet".to_string(),
+            "use a simpler form, or run via `jet build` / `jet run`".to_string(),
+            Some(span),
+        )
     }
 
     pub fn source_nesting_exceeded(depth: usize, span: Span) -> Self {
@@ -223,6 +252,7 @@ impl Diagnostic {
         span: Option<Span>,
     ) -> Self {
         Diagnostic {
+            moment: ReportMoment::Compile,
             severity: Severity::Lint,
             code: code.into(),
             what,
@@ -237,6 +267,11 @@ impl Diagnostic {
 
     pub fn with_detail(mut self, detail: String) -> Self {
         self.detail = Some(detail);
+        self
+    }
+
+    pub fn at_moment(mut self, moment: ReportMoment) -> Self {
+        self.moment = moment;
         self
     }
 
@@ -375,42 +410,46 @@ impl Diagnostic {
         out
     }
 
-    /// Render this diagnostic as one JSON object in the stable `--json` schema
-    /// (D-DX1). Hand-rolled (invariant I6: no serde). The shape is:
+    /// Render this diagnostic as one `jet.report/v1` JSON object.
+    /// Hand-rolled (invariant I6: no serde). The shape is:
     ///
     /// ```json
     /// {
-    ///   "schema_version": 1,
-    ///   "code": "E0102", "severity": "error",
-    ///   "message": "…", "why": "…", "fix": "…",
+    ///   "schema": "jet.report/v1", "moment": "compile",
+    ///   "severity": "error", "code": "E0102", "what": "…",
+    ///   "why": "…", "fix": "…",
     ///   "detail": "…" | null,
     ///   "file": "a.jet", "line": 2, "col": 5,
     ///   "span": { "start": 12, "end": 17 } | null,
-    ///   "edit": { "span": {…}, "new_text": "…" } | null
+    ///   "fix_edits": [{ "file": "a.jet", "span": {…}, "new_text": "…" }],
+    ///   "cause": []
     /// }
     /// ```
     ///
-    /// `edit` is the machine-applicable fix the LSP / fix engine consumes.
+    /// `fix_edits` holds the machine-applicable fix the LSP / fix engine consumes.
     pub fn to_json(&self, file: &str, src: &str) -> String {
-        if let Some(json) = self.structured_json(file, src) {
-            return json;
-        }
+        let report_file = machine_report_path(file);
         let mut o = String::from("{");
-        o.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
-        o.push_str(&format!(",\"code\":{}", json_str(&self.code)));
+        o.push_str(&format!("\"schema\":{}", json_str(REPORT_SCHEMA)));
+        o.push_str(&format!(",\"moment\":{}", json_str(self.moment.as_str())));
         let sev = match self.severity {
             Severity::Error => "error",
             Severity::Lint => "warning",
         };
         o.push_str(&format!(",\"severity\":{}", json_str(sev)));
-        o.push_str(&format!(",\"message\":{}", json_str(&self.what)));
+        o.push_str(&format!(",\"code\":{}", json_str(&self.code)));
+        o.push_str(&format!(",\"what\":{}", json_str(&self.what)));
         o.push_str(&format!(",\"why\":{}", json_str(&self.why)));
         o.push_str(&format!(",\"fix\":{}", json_str(&self.fix)));
         match &self.detail {
             Some(d) => o.push_str(&format!(",\"detail\":{}", json_str(d))),
             None => o.push_str(",\"detail\":null"),
         }
-        o.push_str(&format!(",\"file\":{}", json_str(file)));
+        if report_file.is_empty() {
+            o.push_str(",\"file\":null");
+        } else {
+            o.push_str(&format!(",\"file\":{}", json_str(&report_file)));
+        }
         match self.span {
             Some(span) => {
                 let (line, col) = line_col(src, span.start);
@@ -424,91 +463,56 @@ impl Diagnostic {
                 o.push_str(",\"line\":null,\"col\":null,\"span\":null");
             }
         }
+        o.push_str(",\"fix_edits\":[");
         match &self.edit {
             Some(e) => {
                 o.push_str(&format!(
-                    ",\"edit\":{{\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{}}}",
+                    "{{\"file\":{},\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{}}}",
+                    json_str(&report_file),
                     e.span.start,
                     e.span.end,
                     json_str(&e.new_text)
                 ));
             }
-            None => o.push_str(",\"edit\":null"),
+            None => {}
         }
-        o.push('}');
-        o
-    }
-
-    /// Decision-owned protocol object for diagnostics with a closed machine
-    /// projection. Generic diagnostics keep the D-DX1 schema above.
-    pub fn structured_json(&self, file: &str, src: &str) -> Option<String> {
-        let StructuredDiagnostic::CryptoMisuse {
+        o.push_str("],\"cause\":[]");
+        if let Some(StructuredDiagnostic::CryptoMisuse {
             reason,
             operation,
             expected,
             actual,
-        } = self.structured.as_ref()?;
-        let span = self.span?;
-        let (line, col) = line_col(src, span.start);
-        let file = project_relative_diagnostic_path(file);
-        let mut json = format!(
-            concat!(
-                "{{\"schema\":\"jet.diagnostic/v1\",",
-                "\"code\":\"E2702\",\"class\":\"user\",",
-                "\"severity\":\"error\",\"phase\":\"sema\",",
-                "\"what\":{},\"why\":{},\"fix\":{},",
-                "\"reason\":{},\"operation\":{}"
-            ),
-            json_str(&self.what),
-            json_str(&self.why),
-            json_str(&self.fix),
-            json_str(reason.as_str()),
-            json_str(operation),
-        );
-        if let Some(expected) = expected {
-            json.push_str(&format!(",\"expected\":{}", json_str(expected)));
+        }) = &self.structured
+        {
+            o.push_str(&format!(",\"reason\":{}", json_str(reason.as_str())));
+            o.push_str(&format!(",\"operation\":{}", json_str(operation)));
+            if let Some(expected) = expected {
+                o.push_str(&format!(",\"expected\":{}", json_str(expected)));
+            }
+            if let Some(actual) = actual {
+                o.push_str(&format!(",\"actual\":{actual}"));
+            }
         }
-        if let Some(actual) = actual {
-            json.push_str(&format!(",\"actual\":{actual}"));
-        }
-        json.push_str(&format!(
-            concat!(
-                ",\"primarySpan\":{{\"file\":{},\"start\":{},\"end\":{},\"line\":{},\"col\":{}}},",
-                "\"relatedSpans\":[]}}"
-            ),
-            json_str(&file),
-            span.start,
-            span.end,
-            line,
-            col,
-        ));
-        Some(json)
+        o.push('}');
+        o
     }
 }
 
-fn project_relative_diagnostic_path(file: &str) -> String {
+fn machine_report_path(file: &str) -> String {
     let path = std::path::Path::new(file);
-    if !path.is_absolute() {
-        return file.replace('\\', "/");
+    if file.is_empty() || !path.is_absolute() {
+        return file.to_string();
     }
-    let mut directory = path.parent();
-    while let Some(root) = directory {
+    for root in path.ancestors().skip(1) {
         if root.join(".git").exists() {
             if let Ok(relative) = path.strip_prefix(root) {
-                return relative.to_string_lossy().replace('\\', "/");
+                return relative.display().to_string();
             }
         }
-        directory = root.parent();
     }
-    if let Ok(current) = std::env::current_dir() {
-        if let Ok(relative) = path.strip_prefix(current) {
-            return relative.to_string_lossy().replace('\\', "/");
-        }
-    }
-    path.file_name().map_or_else(
-        || "<source>".to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    )
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).
@@ -532,44 +536,13 @@ pub fn json_str(s: &str) -> String {
     out
 }
 
-/// Render a batch of diagnostics as a single JSON document in the `--json`
-/// schema: `{ "schema_version": 1, "diagnostics": [ … ] }`.
+/// Render reports as JSON Lines. An empty batch emits no bytes.
 pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
-    let structured_count = diags
-        .iter()
-        .filter(|diagnostic| diagnostic.structured.is_some())
-        .count();
-    if structured_count == diags.len() && structured_count != 0 {
-        let mut out = String::new();
-        for diagnostic in diags {
-            out.push_str(&diagnostic.structured_json(file, src).unwrap());
-            out.push('\n');
-        }
-        return out;
-    }
-    if structured_count != 0 {
-        let generic = diags
-            .iter()
-            .filter(|diagnostic| diagnostic.structured.is_none())
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut out = render_all_json(file, src, &generic);
-        for diagnostic in diags.iter().filter(|diagnostic| diagnostic.structured.is_some()) {
-            out.push_str(&diagnostic.structured_json(file, src).unwrap());
-            out.push('\n');
-        }
-        return out;
-    }
-    let mut out = String::from("{");
-    out.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
-    out.push_str(",\"diagnostics\":[");
-    for (i, d) in diags.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
+    let mut out = String::new();
+    for d in diags {
         out.push_str(&d.to_json(file, src));
+        out.push('\n');
     }
-    out.push_str("]}\n");
     out
 }
 
@@ -992,15 +965,15 @@ mod crypto_diagnostic_contract_tests {
         assert_eq!(
             json,
             concat!(
-                "{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\",",
-                "\"class\":\"user\",\"severity\":\"error\",\"phase\":\"sema\",",
+                "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\",",
+                "\"severity\":\"error\",\"code\":\"E2702\",",
                 "\"what\":\"crypto API misuse\",",
                 "\"why\":\"HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160\",",
                 "\"fix\":\"pass an output length from 0 through 8160 bytes\",",
+                "\"detail\":null,\"file\":\"secret-name.jet\",\"line\":1,\"col\":5,",
+                "\"span\":{\"start\":4,\"end\":8},\"fix_edits\":[],\"cause\":[],",
                 "\"reason\":\"output_length\",\"operation\":\"hkdf_sha256\",",
-                "\"expected\":\"0..8160\",\"actual\":8161,",
-                "\"primarySpan\":{\"file\":\"secret-name.jet\",\"start\":4,\"end\":8,\"line\":1,\"col\":5},",
-                "\"relatedSpans\":[]}\n"
+                "\"expected\":\"0..8160\",\"actual\":8161}\n"
             )
         );
         for forbidden in ["password", "plaintext", "ciphertext", "backend", "rustc", "dependency"] {
@@ -1009,7 +982,7 @@ mod crypto_diagnostic_contract_tests {
     }
 
     #[test]
-    fn ordinary_diagnostics_keep_the_stable_batch_schema() {
+    fn ordinary_diagnostics_use_report_json_lines() {
         let diagnostic = Diagnostic::error(
             "E0001",
             "bad token".into(),
@@ -1017,8 +990,11 @@ mod crypto_diagnostic_contract_tests {
             "remove it".into(),
             None,
         );
-        assert!(render_all_json("x.jet", "", &[diagnostic])
-            .starts_with("{\"schema_version\":1,\"diagnostics\":["));
+        let json = render_all_json("x.jet", "", &[diagnostic]);
+        assert!(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""));
+        assert_eq!(json.lines().count(), 1);
+        assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
+        assert_eq!(render_all_json("x.jet", "", &[]), "");
     }
 
     #[test]
@@ -1053,12 +1029,12 @@ mod crypto_diagnostic_contract_tests {
         };
         let json = render_all_json("x.jet", "x", &[diagnostic(), diagnostic()]);
         assert_eq!(json.lines().count(), 2);
-        assert_eq!(json.matches("\"schema\":\"jet.diagnostic/v1\"").count(), 2);
+        assert_eq!(json.matches("\"schema\":\"jet.report/v1\"").count(), 2);
         assert_eq!(json.matches("\"reason\":\"invalid_length\"").count(), 2);
     }
 
     #[test]
-    fn mixed_batches_preserve_the_generic_envelope_and_crypto_object() {
+    fn mixed_batches_preserve_order_and_one_schema() {
         let generic = Diagnostic::error(
             "E0001",
             "bad token".into(),
@@ -1078,8 +1054,8 @@ mod crypto_diagnostic_contract_tests {
         let json = render_all_json("x.jet", "x", &[crypto, generic]);
         let lines = json.lines().collect::<Vec<_>>();
         assert_eq!(lines.len(), 2, "{json}");
-        assert!(lines[0].starts_with("{\"schema_version\":1,\"diagnostics\":["));
-        assert!(lines[0].contains("\"code\":\"E0001\""));
-        assert!(lines[1].starts_with("{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\""));
+        assert!(lines.iter().all(|line| crate::JSON::parse_json(line).is_ok()));
+        assert!(lines[0].contains("\"schema\":\"jet.report/v1\"") && lines[0].contains("\"code\":\"E2702\""));
+        assert!(lines[1].contains("\"schema\":\"jet.report/v1\"") && lines[1].contains("\"code\":\"E0001\""));
     }
 }

@@ -167,7 +167,8 @@ fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> Bui
             let defined = load_pkg_profiles(source_file)
                 .map(|profiles| profiles.into_iter().map(|p| p.name).collect::<Vec<_>>())
                 .unwrap_or_default();
-            let diag = jet::Manifest::e1219(name, &defined);
+            let diag = jet::Manifest::e1219(name, &defined)
+                .at_moment(jet::Diagnostics::ReportMoment::Tool);
             if mode.json {
                 eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
             } else {
@@ -219,7 +220,7 @@ pub(crate) fn run_compile_cmd(
 ) {
     // D-BUILDPROFILE1: profile selection. Precedence: --freestanding > --small >
     // --release/--profile=<name> > default. Named profiles are resolved against
-    // pkg.jet's `build {}` block; unknown names emit E1219 and exit.
+    // package.jet's `build {}` block; unknown names emit E1219 and exit.
     let profile = if freestanding {
         BuildProfile::Freestanding
     } else if small {
@@ -233,11 +234,7 @@ pub(crate) fn run_compile_cmd(
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
-            eprintln!(
-                " fix: check the spelling, or run {} from the folder that contains it",
-                jet::Syntax::BINARY_NAME
-            );
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -270,7 +267,7 @@ pub(crate) fn run_compile_cmd(
             report_problems(mode, file, &src, &lints);
         }
         if mode.json && lints.is_empty() {
-            println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
+            print!("{}", jet::render_all_json(file, &src, &[]));
         } else if !mode.json && lints.is_empty() && !mode.quiet {
             println!("ok: `{}` has no problems", file);
         }
@@ -418,7 +415,7 @@ pub(crate) fn run_compile_cmd(
     // cache. A hit means this program was type-checked, codegen'd, compiled and
     // run once before under this toolchain + profile + manifest — replaying its
     // binary replays a validated result, it never bypasses a check (I2/I3). The
-    // toolchain-version + `pkg.jet` salts guarantee a compiler or policy change
+    // toolchain-version + `package.jet` salts guarantee a compiler or policy change
     // invalidates the entry, so effect-budget enforcement can't be masked.
     // `jet build` deliberately stays on the full path below so its effect +
     // capability summaries always print; it still skips rustc via `native_key`.
@@ -434,7 +431,7 @@ pub(crate) fn run_compile_cmd(
                     run_cmd.arg(arg.as_str());
                 }
                 let status = run_cmd.status().unwrap_or_else(|e| {
-                    eprintln!("error: couldn't run the built program: {}", e);
+                    crate::cli_error!("E2105", "couldn't run the built program: {}", e);
                     exit(ExitCodes::USER_ERROR);
                 });
                 exit(status.code().unwrap_or(ExitCodes::OK));
@@ -447,7 +444,7 @@ pub(crate) fn run_compile_cmd(
     // D-LINTPOLICY1=A (the override law): visible lints from this compile,
     // captured here (out of the `match` arm's scope) so the `policy.lints`
     // deny-path enforcement below can see them alongside the already-loaded
-    // `pkg.jet` manifest.
+    // `package.jet` manifest.
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
 
@@ -561,7 +558,7 @@ pub(crate) fn run_compile_cmd(
     }
 
     // D-EFFBUDGET1: zero-config, always-on effect summary on every build/run,
-    // plus opt-in whole-graph enforcement when `pkg.jet` declares `effects:`.
+    // plus opt-in whole-graph enforcement when `package.jet` declares `effects:`.
     // The front-end compile above already succeeded; this reruns the
     // check-only pass to pull the whole-program effect fixpoint
     // (`Sema::solve`) that ordinary compilation doesn't need to return.
@@ -724,17 +721,13 @@ pub(crate) fn run_compile_cmd(
                 run_cmd.arg(arg.as_str());
             }
             let status = run_cmd.status().unwrap_or_else(|e| {
-                eprintln!("error: couldn't run the built program: {}", e);
+                crate::cli_error!("E2105", "couldn't run the built program: {}", e);
                 exit(ExitCodes::USER_ERROR);
             });
             exit(status.code().unwrap_or(ExitCodes::OK));
         }
         other => {
-            eprintln!(
-                "error: `{}` isn't a {} command",
-                other,
-                jet::Syntax::BINARY_NAME
-            );
+            crate::cli_error!("E2101", "`{}` isn't a {} command", other, jet::Syntax::BINARY_NAME);
             eprint!("{}", usage());
             exit(ExitCodes::USAGE);
         }
@@ -759,11 +752,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
-            eprintln!(
-                " fix: check the spelling, or run {} from the folder that contains it",
-                jet::Syntax::BINARY_NAME
-            );
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -820,7 +809,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
         .env("JET_BIN", &jet_bin)
         .status()
         .unwrap_or_else(|e| {
-            eprintln!("error: couldn't run the built program: {}", e);
+            crate::cli_error!("E2105", "couldn't run the built program: {}", e);
             exit(ExitCodes::USER_ERROR);
         });
     exit(status.code().unwrap_or(ExitCodes::OK));
@@ -833,7 +822,7 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
     let _src = match fs::read_to_string(file) {
         Ok(source) => source,
         Err(_) => {
-            eprintln!("error: can't find the file `{file}`");
+            crate::cli_error!("E2105", "can't find the file `{file}`");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -841,7 +830,7 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| file.to_string());
     let jet_bin = std::env::current_exe().unwrap_or_else(|_| {
-        eprintln!("error: couldn't locate the running Jet executable");
+        crate::cli_error!("E2105", "couldn't locate the running Jet executable");
         exit(ExitCodes::USER_ERROR);
     });
     let mut command = Command::new(jet_bin);
@@ -852,7 +841,7 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
         command.env("JET_WEBAPP_PORT", port.to_string());
     }
     let status = command.status().unwrap_or_else(|error| {
-        eprintln!("error: couldn't run the web app: {error}");
+        crate::cli_error!("E2105", "couldn't run the web app: {error}");
         exit(ExitCodes::USER_ERROR);
     });
     exit(status.code().unwrap_or(ExitCodes::OK));
@@ -872,11 +861,7 @@ pub(crate) fn run_task_entry(
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
-            eprintln!(
-                " fix: check the spelling, or run {} from the folder that contains it",
-                jet::Syntax::BINARY_NAME
-            );
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -960,7 +945,7 @@ pub(crate) fn run_task_entry(
         run_cmd.arg(arg.as_str());
     }
     let status = run_cmd.status().unwrap_or_else(|e| {
-        eprintln!("error: couldn't run the built program: {}", e);
+        crate::cli_error!("E2105", "couldn't run the built program: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
     exit(status.code().unwrap_or(ExitCodes::OK));
@@ -1037,7 +1022,7 @@ fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::
 
 pub(crate) fn run_tasks(file: &str, mode: OutputMode) {
     let src = fs::read_to_string(file).unwrap_or_else(|_| {
-        eprintln!("error: can't find the file `{file}`");
+        crate::cli_error!("E2105", "can't find the file `{file}`");
         exit(ExitCodes::USER_ERROR);
     });
     let tasks = list_task_names(&src).unwrap_or_else(|diags| {
@@ -1129,8 +1114,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
-            eprintln!(" fix: check the spelling");
+            crate::cli_error!("E2105", "can't find the file `{}`", file);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -1173,7 +1157,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
         return;
     }
     fs::write(file, &fixed).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", file, e);
+        crate::cli_error!("E2105", "couldn't write {}: {}", file, e);
         exit(ExitCodes::USER_ERROR);
     });
     if n == 0 {
@@ -1381,29 +1365,28 @@ fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
 
 pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
-        eprintln!("error: project name must be a simple folder name");
-        eprintln!(" fix: try: {} new my_app", jet::Syntax::BINARY_NAME);
+        crate::cli_error!(@fix "E2104", "project name must be a simple folder name", format!("try: {} new my_app", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
     let dir = Path::new(name);
     if dir.exists() {
-        eprintln!("error: `{}` already exists", name);
+        crate::cli_error!("E2104", "`{}` already exists", name);
         exit(ExitCodes::USER_ERROR);
     }
     // Create: <name>/package.jet, <name>/run.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
-        eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
+        crate::cli_error!("E2105", "couldn't create `{}`/.jet: {}", name, e);
         exit(ExitCodes::USER_ERROR);
     });
     let manifest_text = jet::Manifest::new_template(name, annotated);
     fs::write(dir.join(jet::Syntax::PACKAGE_FILE), manifest_text).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::Syntax::PACKAGE_FILE, e);
+        crate::cli_error!("E2105", "couldn't write {}: {}", jet::Syntax::PACKAGE_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
     let run_src = "fn run() {\n    print(\"hello, world\");\n}\n";
     fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::Syntax::DEFAULT_ENTRY_FILE, e);
+        crate::cli_error!("E2105", "couldn't write {}: {}", jet::Syntax::DEFAULT_ENTRY_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
     fs::write(
@@ -1411,7 +1394,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         "build/\n.jet-build/\n.jet/lock\n.jet/cache/\n",
     )
     .unwrap_or_else(|e| {
-        eprintln!("error: couldn't write .gitignore: {}", e);
+        crate::cli_error!("E2105", "couldn't write .gitignore: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
     // #1659 criterion 3: `--quiet` suppresses this confirmation; the project
@@ -1459,7 +1442,7 @@ pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
 pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
-        eprintln!("error: can't find `{}`", path);
+        crate::cli_error!("E2105", "can't find `{}`", path);
         exit(ExitCodes::USER_ERROR);
     }
     if p.is_dir() {
@@ -1468,7 +1451,7 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
         collect_test_files_recursive(p, ext, &mut files);
         files.sort();
         if files.is_empty() {
-            eprintln!("error: no .{} files in `{}` (searched subdirectories too)", ext, path);
+            crate::cli_error!("E2104", "no .{} files in `{}` (searched subdirectories too)", ext, path);
             exit(ExitCodes::USER_ERROR);
         }
         let mut any_fail = false;
@@ -1518,7 +1501,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: couldn't read `{}`: {}", shown, e);
+            crate::cli_error!("E2105", "couldn't read `{}`: {}", shown, e);
             return false;
         }
     };
@@ -1603,7 +1586,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
             if let Some(co) = &cov_out {
                 let _ = fs::remove_file(co);
             }
-            eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
+            crate::cli_error!("E2105", "couldn't run tests in `{}`: {}", shown, e);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -1651,7 +1634,7 @@ fn run_doctests(
             std::process::id()
         ));
         if fs::write(&tmp, &program).is_err() {
-            eprintln!("error: couldn't stage doctest from `{}`", shown);
+            crate::cli_error!("E2105", "couldn't stage doctest from `{}`", shown);
             all_ok = false;
             write_doctest_proof_record(&label, shown, block.fence_line, false, "producer_start_failed");
             continue;
@@ -1691,7 +1674,7 @@ fn run_doctests(
         let out = match Command::new(&bin).output() {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("error: couldn't run {}: {}", label, e);
+                crate::cli_error!("E2105", "couldn't run {}: {}", label, e);
                 all_ok = false;
                 write_doctest_proof_record(&label, shown, block.fence_line, false, "producer_start_failed");
                 let _ = fs::remove_file(&tmp);
@@ -1738,7 +1721,7 @@ fn run_doctests(
     }
     if did_rewrite {
         if let Err(e) = fs::write(path, &rewritten) {
-            eprintln!("error: couldn't update doctest snapshots in `{}`: {}", shown, e);
+            crate::cli_error!("E2105", "couldn't update doctest snapshots in `{}`: {}", shown, e);
             return false;
         }
     }
@@ -1889,7 +1872,7 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS
-/// and the retired payload manifest. Canonical Package and Config files use
+/// and the canonical or retired package manifest. Canonical Package and Config files use
 /// the typed package formatter in the preflight path below.
 /// Entries are sorted deterministically.
 fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -1904,6 +1887,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 walk_jet_files(&path, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
+            && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PACKAGE_FILE)
             && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PAYLOAD_FILE)
         {
             out.push(path);
@@ -1911,7 +1895,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Discover the project/workspace root via `pkg.jet` and collect all `.jet`
+/// Discover the project/workspace root via `package.jet` and collect all `.jet`
 /// files under it. Falls back to cwd when no manifest is found above.
 fn discover_project_files() -> Vec<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1952,9 +1936,7 @@ fn collect_changed_files() -> Vec<PathBuf> {
         .map(|s| s.success())
         .unwrap_or(false);
     if !is_git {
-        eprintln!("error: `--changed` requires a git repository");
-        eprintln!(" why: `jet fmt --changed` uses git to find modified .jet files");
-        eprintln!(" fix: run from inside a git repository, or format specific files with `jet fmt <path>`");
+        crate::cli_error!(@full "E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`");
         exit(ExitCodes::USAGE);
     }
 
@@ -2030,7 +2012,7 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
     use std::io::Read;
     let mut src = String::new();
     if std::io::stdin().read_to_string(&mut src).is_err() {
-        eprintln!("error: failed to read from stdin");
+        crate::cli_error!("E2105", "failed to read from stdin");
         exit(ExitCodes::USAGE);
     }
     let label = stdin_path.unwrap_or("<stdin>");
@@ -2192,7 +2174,7 @@ pub(crate) fn run_fmt(
                         json_escape(io_err)
                     );
                 } else {
-                    eprintln!("error: {}", io_err);
+                    crate::cli_error!("E2105", "{}", io_err);
                 }
             }
             if !r.parse_diags.is_empty() {
@@ -2271,7 +2253,7 @@ pub(crate) fn run_fmt(
     // Format mode: write all changed files (preflight passed, so all are valid).
     for r in results.iter().filter(|r| r.changed) {
         if let Err(e) = fs::write(&r.path, &r.formatted) {
-            eprintln!("error: couldn't write `{}`: {}", r.path.display(), e);
+            crate::cli_error!("E2105", "couldn't write `{}`: {}", r.path.display(), e);
             exit(ExitCodes::USAGE);
         }
     }
@@ -2352,7 +2334,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
+            crate::cli_error!("E2105", "can't find the file `{}`", file);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -2363,7 +2345,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
             exit(ExitCodes::USER_ERROR);
         }
         Err(jet::FuzzCompileError::Target(msg)) => {
-            eprintln!("error: {}", msg);
+            crate::cli_error!("E2105", "{}", msg);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -2410,7 +2392,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
         Ok(status) => status,
         Err(e) => {
             let _ = fs::remove_file(&bin);
-            eprintln!("error: couldn't run the fuzz harness for `{}`: {}", file, e);
+            crate::cli_error!("E2105", "couldn't run the fuzz harness for `{}`: {}", file, e);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -2447,6 +2429,7 @@ fn append_cache_field(bytes: &mut Vec<u8>, value: &str) {
 fn native_cache_salt(
     toolchain: &str,
     dependency_fingerprint: &str,
+    runtime_fingerprint: &str,
     corelib_fingerprint: &str,
     mode: &str,
     target: &str,
@@ -2455,10 +2438,11 @@ fn native_cache_salt(
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"jet-native-cache-salt-v4");
+    bytes.extend_from_slice(b"jet-native-cache-salt-v5");
     for value in [
         toolchain,
         dependency_fingerprint,
+        runtime_fingerprint,
         corelib_fingerprint,
         mode,
         target,
@@ -2581,7 +2565,7 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 ///
 /// `mode_tag` keeps binaries built from the same AST under different pipelines in
 /// separate key spaces (a `jet test` harness binary can never be served for a
-/// `jet run`). The toolchain version and `pkg.jet` fingerprint ride the salt.
+/// `jet run`). The toolchain version and `package.jet` fingerprint ride the salt.
 fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
     native_cache_key_with_toolchain(file, profile_tag, mode_tag, native_toolchain_identity())
 }
@@ -2619,11 +2603,13 @@ fn native_cache_key_with_toolchain(
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();
     let dependency_interfaces = dependency_interface_fingerprint(&bundle);
+    let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint();
     let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(&bundle.used_core);
     let manifest = manifest_fingerprint(file)?;
     let salt = native_cache_salt(
         toolchain_identity,
         &format!("{manifest}:{dependency_interfaces}"),
+        &runtime_fingerprint,
         &corelib_fingerprint,
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
@@ -2701,11 +2687,7 @@ pub(crate) fn run_dev_web(
 ) {
     let path = Path::new(file);
     if !path.exists() {
-        eprintln!("error: can't find the file `{}`", file);
-        eprintln!(
-            " fix: check the spelling, or run {} from the folder that contains it",
-            jet::Syntax::BINARY_NAME
-        );
+        crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
 
@@ -2794,7 +2776,7 @@ fn rebuild_dev_web(
     }
     if let Err(error) = jet_devserver::WebHost::stage_and_swap(&staging, Path::new("build")) {
         let message = format!("couldn't finalize web build: {error}");
-        eprintln!("error: {message}");
+        crate::cli_error!("E2105", "{message}");
         host.mark_error("ICE".to_string(), message, is_rebuild);
         return false;
     }
@@ -3208,13 +3190,13 @@ pub(crate) fn build(
     };
 
     fs::create_dir_all("build").unwrap_or_else(|e| {
-        eprintln!("error: couldn't create the build/ folder: {}", e);
+        crate::cli_error!("E2105", "couldn't create the build/ folder: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
     let rs_path = PathBuf::from("build").join(format!("{}.rs", stem(file)));
     step(format!("emit Rust  -> {}", rs_path.display()));
     fs::write(&rs_path, rust_code).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", rs_path.display(), e);
+        crate::cli_error!("E2105", "couldn't write {}: {}", rs_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
 
@@ -3342,18 +3324,83 @@ pub(crate) fn build(
         bin.display()
     ));
     let mut cmd = Command::new("rustc");
-    cmd.arg("--edition").arg("2021");
+    let mut rustc_flags = Vec::new();
     // E2-M15: cross-compilation target triple.
     if let Some(triple) = cross_target {
-        cmd.arg("--target").arg(triple);
+        rustc_flags.push("--target".to_string());
+        rustc_flags.push(triple.to_string());
     }
     let ffi_present = ffi.is_some();
     let config = profile.config();
-    config.apply_env(&mut cmd);
     if matches!(profile, BuildProfile::Release) {
-        cmd.arg("--cfg").arg("jet_release");
+        rustc_flags.push("--cfg".to_string());
+        rustc_flags.push("jet_release".to_string());
     }
-    config.apply_rustc(&mut cmd, ffi_present);
+    rustc_flags.extend(config.rustc_args(ffi_present));
+    let cache_flags = rustc_flags.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+    let cache_env = config
+        .env
+        .iter()
+        .map(|(name, value)| {
+            (
+                std::ffi::OsString::from(name),
+                std::ffi::OsString::from(value),
+            )
+        })
+        .collect::<Vec<_>>();
+    // Rust FFI glue can implement runtime traits for foreign types. Keep that
+    // source in one crate until the bridge owns those impls; Rust's orphan rule
+    // correctly rejects moving both the trait and type behind separate externs.
+    let prepared_runtime = if ffi_present {
+        if verbose {
+            step("runtime cache bypassed (Rust FFI glue)".to_string());
+        }
+        jet::RuntimeCache::PreparedRuntime::inline(rust_code)
+    } else {
+        match jet::RuntimeCache::prepare(
+            std::ffi::OsStr::new("rustc"),
+            rust_code,
+            &cache_flags,
+            &cache_env,
+        ) {
+            Ok(prepared) => {
+                if verbose {
+                    step(format!(
+                        "runtime   -> {}",
+                        if prepared.cache_hit() { "cache hit" } else { "cache store" }
+                    ));
+                }
+                prepared
+            }
+            Err(jet::RuntimeCache::Error::Cache(error)) => {
+                if verbose {
+                    step(format!("runtime cache bypassed ({error})"));
+                }
+                jet::RuntimeCache::PreparedRuntime::inline(rust_code)
+            }
+            Err(jet::RuntimeCache::Error::Tool(_)) => {
+                eprintln!("error: couldn't find `rustc` on this machine");
+                eprintln!(
+                    " why: v1 of this language uses Rust as its backend (docs/spec/architecture.md)"
+                );
+                eprintln!(" fix: install Rust from https://rustup.rs, then try again");
+                exit(ExitCodes::USER_ERROR);
+            }
+            Err(jet::RuntimeCache::Error::Rejected(error)) => {
+                eprintln!(
+                    "{}",
+                    jet::Diagnostics::render_ice_report(
+                        "rustc rejected the generated cached runtime",
+                        &error,
+                        true,
+                    )
+                );
+                exit(ExitCodes::ICE);
+            }
+        }
+    };
+    cmd.arg("--edition").arg("2021").args(&rustc_flags);
+    config.apply_env(&mut cmd);
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two
     // concurrent `jet` processes compiling different source that happens to
@@ -3378,13 +3425,13 @@ pub(crate) fn build(
     // compile; `store_cached` reads from this private path.
     let work = PathBuf::from("build").join(format!(".work.{}.{}", bin_name, std::process::id()));
     if let Err(e) = fs::create_dir_all(&work) {
-        eprintln!("error: couldn't create the build work dir: {}", e);
+        crate::cli_error!("E2105", "couldn't create the build work dir: {}", e);
         exit(ExitCodes::USER_ERROR);
     }
     let tmp_bin = work.join(&bin_name);
     let tmp_rs = work.join(format!("{}.rs", stem(file)));
-    if let Err(e) = fs::write(&tmp_rs, rust_code) {
-        eprintln!("error: couldn't write {}: {}", tmp_rs.display(), e);
+    if let Err(e) = fs::write(&tmp_rs, prepared_runtime.rust()) {
+        crate::cli_error!("E2105", "couldn't write {}: {}", tmp_rs.display(), e);
         exit(ExitCodes::USER_ERROR);
     }
     // Pin the crate name to the file stem — the name rustc used to infer from
@@ -3392,6 +3439,7 @@ pub(crate) fn build(
     // into codegen.
     cmd.arg("--crate-name").arg(rustc_crate_name(file));
     cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
+    prepared_runtime.add_rustc_args(&mut cmd);
     if let Some(link) = ffi {
         cmd.arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
@@ -3408,11 +3456,7 @@ pub(crate) fn build(
     let out = match cmd.output() {
         Ok(o) => o,
         Err(_) => {
-            eprintln!("error: couldn't find `rustc` on this machine");
-            eprintln!(
-                " why: v1 of this language uses Rust as its backend (docs/spec/architecture.md)"
-            );
-            eprintln!(" fix: install Rust from https://rustup.rs, then try again");
+            crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -3462,7 +3506,7 @@ pub(crate) fn build(
     if let Some(key) = cache_key {
         if let Err(error) = jet::BuildCache::store_cached(&key, &tmp_bin) {
             let _ = fs::remove_dir_all(&work);
-            eprintln!("error: couldn't store build cache artifact: {error}");
+            crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
             exit(ExitCodes::USER_ERROR);
         }
         step("cache store -> saved binary for next time".to_string());
@@ -3474,7 +3518,7 @@ pub(crate) fn build(
     if fs::rename(&tmp_bin, &bin).is_err() {
         if let Err(e) = fs::copy(&tmp_bin, &bin) {
             let _ = fs::remove_file(&tmp_bin);
-            eprintln!("error: couldn't finish writing {}: {}", bin.display(), e);
+            crate::cli_error!("E2105", "couldn't finish writing {}: {}", bin.display(), e);
             exit(ExitCodes::USER_ERROR);
         }
         let _ = fs::remove_file(&tmp_bin);
@@ -3501,7 +3545,7 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
+            crate::cli_error!("E2105", "can't find the file `{}`", file);
             return ExitCodes::USER_ERROR;
         }
     };
@@ -3627,14 +3671,18 @@ mod missing_c_lib_tests {
     #[test]
     fn generic_instance_cache_salt_tracks_every_downstream_input() {
         let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
-        let base = native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &instances);
-        assert_ne!(base, native_cache_salt("tool-b", "deps-a", "core-a", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-b", "core-a", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-b", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "test", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "macos-aarch64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &["instance-c".into()]));
-        assert_eq!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
+        let salt = |tool, deps, runtime, core, mode, target, instances: &[String]| {
+            native_cache_salt(tool, deps, runtime, core, mode, target, instances)
+        };
+        let base = salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &instances);
+        assert_ne!(base, salt("tool-b", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-b", "runtime-a", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-b", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-b", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "test", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "macos-aarch64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &["instance-c".into()]));
+        assert_eq!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
     }
 
     #[test]
@@ -3642,10 +3690,10 @@ mod missing_c_lib_tests {
         let project = ScratchProject::new();
         let main = "use defs.box\nmodule defs\n\nmodule selected = box<Int, 3>\nfn run() { print(selected.value()) }\n";
         let dependency = "pub module box<T, n: Int> { pub fn value() => Int { return n } }\n";
-        let manifest_v1 = "payload: { name: \"cache-proof\", version: \"1.0.0\" }\n";
+        let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
         project.write("main.jet", main);
         project.write("defs.jet", dependency);
-        project.write("pkg.jet", manifest_v1);
+        project.write("package.jet", manifest_v1);
 
         let base = native_cache_key(&project.main(), "default", "run").expect("base cache key");
         let toolchain_a = native_cache_key_with_toolchain(&project.main(), "default", "run", "compiler-build-a/rustc-a/linker-a/backend-a").expect("toolchain A cache key");
@@ -3677,13 +3725,13 @@ mod missing_c_lib_tests {
 
         project.write("main.jet", main);
         project.write(
-            "pkg.jet",
-            "payload: { name: \"cache-proof\", version: \"2.0.0\" }\n",
+            "package.jet",
+            "name: \"cache-proof\"\nversion: \"2.0.0\"\n",
         );
         let package = native_cache_key(&project.main(), "default", "run").expect("package cache key");
         assert_ne!(base, package, "package manifest edit must invalidate native cache");
 
-        project.write("pkg.jet", manifest_v1);
+        project.write("package.jet", manifest_v1);
         let profile = native_cache_key(&project.main(), "small", "run").expect("profile cache key");
         assert_ne!(base, profile, "build-profile edit must invalidate native cache");
     }

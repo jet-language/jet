@@ -1644,24 +1644,12 @@ fn json_str(value: &str) -> String {
 }
 
 pub(crate) fn emit_diag(code: &str, what: &str, why: &str, fix: &str, json_mode: bool) {
-    if json_mode {
-        println!(
-            "{{\"schema_version\":1,\"code\":{},\"severity\":\"error\",\"message\":{},\"why\":{},\"fix\":{},\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}",
-            json_str(code),
-            json_str(what),
-            json_str(why),
-            json_str(fix)
-        );
-    } else {
-        eprintln!("Error [{code}]: {what}");
-        eprintln!(" Why: {why}");
-        eprintln!(" Fix: {fix}");
-    }
+    crate::emit_cli_report(code, what.to_string(), why.to_string(), fix.to_string(), json_mode);
 }
 
 #[allow(dead_code)]
 pub(crate) fn fail_usage(message: &str) -> ! {
-    eprintln!("error: {message}");
+    crate::cli_error!("E2104", "{message}");
     exit(ExitCodes::USAGE);
 }
 

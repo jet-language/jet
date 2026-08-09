@@ -383,6 +383,14 @@ An ordinary loop returns one final value only through break payloads. Every
 payload exit must unify. A yielding loop's bare or targeted `break` returns
 the accumulated List, and its `next` omits the current item. Payload breaks
 are rejected in yielding loops because their result is already `[T]`.
+**D-CHOOSE-FIND1=A**: a finite source loop in value position uses a braced
+body with `break value` exits and must be followed by a written exhaustion
+route: `loop item, source { if found(item) { break item } } ?? fallback`.
+The route is part of the expression. `?? next` and `?? break` immediately
+after that closing brace are rejected; use the labeled loop form when the
+exhaustion path must steer another loop. An explicit target,
+`?? next(name)` or `?? break(name)`, remains a named route to an enclosing
+loop.
 `next` enters the target's continuation edge: explicit state runs its
 afterthought then retests; source advances; condition retests; infinite restarts.
 `next()`, `.next()`, and `fn next` remain ordinary uses. After `??`, bare `next`
@@ -1558,8 +1566,8 @@ The concrete terminal view uses the ratified existing route:
 **D-PACKAGE-POLICY-SCOPE1=A — package `policy:` holds a typed field value**
 *(ratified 2026-07-16, card #657)*: the package-echelon `policy:` field
 settled by D-POLICY-WORD1 holds a typed `.{ ... }` value whose governance
-keys are ordinary fields, written like every other Package role field
-(`identity:`, `sources:`, D-SHAPE5a) — not the `#Policy(...)` marker
+keys are ordinary fields, written like every other Package role field, with
+bare top-level `name:`/`version:` identity — not the `#Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
 `#Policy(...)` marker uses, so `no_alloc: true` in `policy:` and
 `#Policy(no_alloc)` on a block/function/module are the same key in two
@@ -1572,9 +1580,9 @@ which extracts a shared `policy:` value into a named `Config` when needed;
 `policy:` itself does not compose a `use:` list of named profiles.
 
 ```jet
-# package.jet — policy: reads like every other typed Package field
-identity: .{ name: "meter", version: "1.0.0" }
-sources:  .{ roots: ["Source"] }
+# package.jet — policy: reads beside bare Package identity
+name:     "meter"
+version:  "1.0.0"
 policy:   .{
     no_alloc: true
     zero_rc: true
@@ -1755,12 +1763,13 @@ predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
 owned `String`. Local use remains codegen-invisible; crossing a return or field
 boundary uses D-MEM-VIEWRET1's named, provenance-carrying `View<str>` contract.
 `split` later joined the lazy `Iter` model under D-ITERTOOLS1=A (was eager
-`Vec<String>` through S5). **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
-lock-guarded shared handle — `Shared.new(x)` constructs (bare type-name call,
-`T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read- or
-write-locked view, the lock scoped to the call only; cloning is always a
-cheap handle clone (never a deep copy), so it crosses a `tasks.spawn` boundary
-with no `take`. (`Shared<T>`'s *type* predates this stage as inert signature
+`Vec<String>` through S5). **S6 shipped (2026-07-04), amended by
+D-CONC-SHARE1=A**: `Shared<T>` (D-SHARED-API1=A) is a lock-guarded shared
+value — `shared expr` constructs the cell; plain field reads and writes take
+one statement step; several steps commit under `#Transact`; expert guards and
+`Condition` remain. Cloning is always a cheap handle clone (never a deep copy),
+so it crosses a task boundary with no `take`. (`Shared<T>`'s *type* predates
+this stage as inert signature
 plumbing over a plain `Arc<T>` — never actually constructible, see
 `tests/ownership.rs`'s pre-existing param-signature tests; S6 gives it a real
 constructor and upgrades the representation to `Arc<RwLock<T>>`.) `Pool<T>`/
@@ -1852,28 +1861,109 @@ There is no general deferred statement or block: `defer action()` and
 ordinary close-call resolution proves that `close(^resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
 
-**S53 — Concurrency** *(deferred core; combinators live)*: tasks/channels
-deferred past v1.0 (planned: `tasks.spawn(closure) => Task<T>`, `t.join()`,
-`tasks.channel<T>()`; no shared mutable state). Already ratified around it:
-**D-CONCCOMB1** structured combinators `g.all` / `g.race` / `g.any`
-(race cancels losers; all fails fast; any takes first Ok, D-RACEWIN1);
-**D-DETACH1** `task.detach()` consumes the handle, detached capture of a
-borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
-`async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
-*(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
-`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
-`.sender()` method. Destructure with the existing S74 tuple form:
-`(tx, rx) := tasks.channel<T>()`; a second sender is `~tx`. A
-`Receiver<T>` is what `g.select().recv(rx)` takes.
+### Concurrency — ratified law
 
-**D-STM1=A — atomic memory transactions** *(ratified by owner
-2026-07-12, card #506)*: `#Transact` gains the `Shared<T>` plane — reads
-and writes to Shared handles inside the block form one atomic commit,
-retried on conflict; either every handle's change lands or none does.
-No new marker (I8); E0746 keeps rejecting irreversible effects inside.
-The single-task local-rollback behavior (D-TXN1–4) is unchanged.
-Expert floor: `Shared.edit_all` canonical-order multi-lock stays
-available for code that wants locking, not retry, semantics.
+**D-CONC-UNIT1=A — one substrate for state, duty, and reach** *(ratified
+2026-08-06, card #1505)*: task lifecycles are typestate rows; the join duty
+uses the same single-use obligation as every other single-use value; and the
+five separate crossing checks become one registered fact plane. Every
+concurrency error uses one vocabulary. The facts erase before codegen, so this
+decision changes no user-facing surface and amends no prior semantics.
+
+**D-CONC-JOIN1=A — dropping a bound task handle is an error** *(ratified
+2026-08-06, card #1505)*: a bound `Task<T>` must be joined, used through its
+result, or detached. Dropping it without discharge is a compile error, not a
+warning or an implicit join. The rule extends D-LIN1 to task handles and the
+task-list forms from D-VERDICT-1323-1, and amends L1101. Unbound spawns still
+join at scope end under D-CONC-SPAWN1.
+
+**D-CONC-GROUP1=A — group borrows work in any parameter position** *(ratified
+2026-08-06, card #1505)*: a group may be a direct parameter of a free function
+or method. A group may not be stored, returned, captured, or placed in a field.
+The storage ban and E1110 rationale remain. This amends
+D-TASKGROUP-PARAM1=A only at its parameter-position boundary.
+
+**D-CONC-OUTCOME1=A — typed outcome and status** *(ratified 2026-08-06,
+card #1505; retired by D-CONC-FAIL1=A)*: the ballot first ratified consuming
+`outcome()` with `TaskOutcome` and borrowing `status()` with `TaskStatus`,
+covering `Finished`, `Panicked`, `Cancelled`, and `DeadlineBlown`; `status()`
+covered running, paused, and cancel-requested states. The later
+D-CONC-FAIL1=A ruling retires that separate surface. `TaskOutcome`,
+`TaskStatus`, `trace()`, and `exception()` do not ship. It amends
+D-COROUTINE1's handle surface; D-CONC-FAIL1=A is the later retirement ruling.
+
+**D-CONC-CROSS1=A — one crossing plane and one error family** *(ratified
+2026-08-06, card #1505)*: sendability is a registered fact about a type. One
+prover handles task captures, parallel adapters, kernels, cells, and fixed
+backings. Each rejection names what cannot cross, the boundary, and the fix.
+E1111 and the kernel wording join the E1101/E1102 family. The semantics
+ratified by D-PARCAPTURE1 and the kernel decisions stay unchanged; this
+decision amends their prover and diagnostic implementation only.
+
+**D-CONC-STM1=A — one-run, ordered transaction commit** *(ratified
+2026-08-06, card #1505; amends D-STM1)*: a transaction body runs exactly once.
+Participants acquire write locks in stable order, buffered changes apply, and
+locks release. Contention waits instead of retrying. Log lines and other body
+effects do not run twice. Irreversible-effect checks remain unchanged.
+
+**D-CONC-SCHED1=A — typed schedule data and one job word** *(ratified
+2026-08-06, card #1505)*: the value behind the unchanged schedule marker is
+typed `Duration` or wall-clock time on the D-TYPE2-TIME1 rail. `jet dev`,
+services, and jetos timers read that value. A job is a task the runtime starts.
+The service plane uses supervisor tasks, groups, and restart data. This amends
+the value grammar of D-SCHEDULE1=A, aligns D-TAG-SURFACE1 and D-TASK-META1,
+and does not change schedule placement rules.
+
+**D-CONC-STREAM1=A — a stream is a task** *(ratified 2026-08-06, card #1505;
+amends D-STREAMYIELD1)*: dropping a stream iterator cancels its producer. The
+producer unwinds at its next wait point and runs its cleanups. `yield` is a
+wait point and drop-close is cancellation. The generator delegates to
+D-CANCELMODEL1=C and subsumes the separate generator-lifecycle work; it has no
+separate shutdown law.
+
+**D-CONC-CHAN1=A — builtin channels and arm-table draining** *(ratified
+2026-08-06, card #1505; its wait spelling is amended by D-CONC-CHAN2=D)*:
+`channel<T>()` is builtin and needs no import. `loop value, receiver` drains
+until close. `Receiver<T>` and `Sender<T>` are nameable in signatures. The
+wait works on plain endpoints in any task. The fluent builder, dead `Channel`
+entry, and silently dropped `.read` arm are deleted. `after` takes a duration
+on the D-TYPE2-TIME1 rail. This amends D-CONCSELECT1=A and narrows
+D-TASKRUNTIME1's module surface; cancellation remains D-CANCELMODEL1=C.
+
+**D-CONC-SHARE1=A — shared values use plain access** *(ratified 2026-08-06,
+card #1505; amends D-SHARED-API1 and D-TXN2)*: `shared expr` builds the cell;
+field reads and writes use ordinary access; each statement is one atomic step;
+and several steps commit under `#Transact`. The `read` and `edit` closure
+forms are deleted. Expert guards and `Condition` remain. Lock order and
+crossing safety stay checked. It amends D-SHARED-API1=A, D-TXN2, and uses the
+ordered commit law of D-CONC-STM1=A.
+
+**D-CONC-SPAWN1=D — one nested task keyword family** *(ratified 2026-08-06,
+card #1505)*: the surface is `task f()`, `task.all { … }`, `task.race { … }`,
+`task.any { … }`, and `task.group g(limit: n) { … }`. Only `task` is reserved;
+`all`, `race`, `any`, and `group` remain free identifiers. Scope-end joins,
+fail-fast, cancel-losers, and first-`Ok` laws stay. It respells the surfaces of
+D-TASKSCOPE1, D-NURSERY1, D-CONCCOMB1, and D-TASKGROUP-PARAM1 without changing
+their lifetime laws. This is the final spelling for the spawn surface.
+
+**D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
+2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
+`join()` returns `T ? TaskFailure`. `TaskFailure` is a normal enum with
+`.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` returns
+its tuple on the same rail. A joined child panic becomes `.Panicked(reason)`;
+it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
+`TaskStatus` are deleted. It amends D-COROUTINE1 and retires
+D-CONC-OUTCOME1=A; conversion uses D-FAIL-CONV1.
+
+**D-CONC-CHAN2=D — the readiness wait rides subjectless `if`** *(ratified
+2026-08-07, card #1505; amends D-IFGUARD1, D-CONCSELECT1, and the wait
+spelling in D-CONC-CHAN1)*: a subjectless `if` table whose every arm head is a
+binding/source pair is one atomic readiness wait. `after` takes a Time delta;
+an optional `else` arm makes the wait non-blocking; mixed readiness and Bool
+heads are a registered diagnostic; a closed source stops matching. Expression
+form follows the `if` value-table law. `select` stays a free identifier
+everywhere. It amends D-IFGUARD1, D-CONCSELECT1, and D-CONC-CHAN1's spelling;
+`after` uses D-TYPE2-TIME1=A and cancellation follows D-CANCELMODEL1=C.
 
 **D-CANCELMODEL1 = C** *(ratified 2026-07-11, card #126)*: cancellation is
 preemptive at wait points. A cancelled task (race loser, fail-fast sibling,
@@ -2026,20 +2116,19 @@ tier-1); not inside one JIT module. *(rides JIT hot-reload runtime)*
 
 **D-EFFBUDGET1 — Package effect budget**: every build prints a one-line
 effect summary and records per-dependency provenance in the lock.
-`effects: { allow: […], deny: […] }` in `pkg.jet` enforces the whole graph
+`effects: { allow: […], deny: […] }` in `package.jet` enforces the whole graph
 (E1220 names the dependency); `grants: { "dep": [Effect] }` per-dep escape;
 malformed block E1221.
 
-**D-STREAMYIELD1 — Generators**: `fn f() => Stream<T>` uses `yield expr` to
-hand a value to the consumer and suspend until the next pull; falling off
-the end (or a bare `return;`) ends the stream; `return value;` is E0806.
-Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
-async/await coloring. The emitted program uses the scheduler-backed Prelude
-receiver and an owned pull iterator: `yield` blocks the producer until the
-consumer pulls, and dropping the iterator on `break` closes the receiver. A
-failed producer send returns through the active lexical cleanups, so no
-statement after the last accepted pull runs. This is one pull/cancellation
-law for AOT, JIT, and the interpreter; it does not require coroutine syntax.
+**D-STREAMYIELD1 — Generators** *(amended by D-CONC-STREAM1=A)*:
+`fn f() => Stream<T>` uses `yield expr` to hand a value to the consumer and
+suspend until the next pull; falling off the end (or a bare `return;`) ends the
+stream; `return value;` is E0806. Consumers are ordinary `loop x; f() { }`
+loops — one keyword, one type, no async/await coloring. The producer is a task:
+`yield` is a wait point, dropping the iterator is cancellation, and the
+producer unwinds at its next wait point with normal cleanup. This is the task
+cancellation law on AOT, JIT, and the interpreter; it does not require
+coroutine syntax.
 
 ### Comptime & metaprogramming
 
@@ -2095,11 +2184,14 @@ and `T.$fields` are one closed spelling, each projecting the matching
 `TypeInfo` member. The mark after `.` is not a general user-member escape:
 any other marked member reports E0302 and names the three facts.
 
-**D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**: only a curated whitelist of
-pure Core functions evaluates at comptime; the sole I/O escapes are
-`embed_file(path) => String` and `embed_bytes(path) => [U8]` (string-literal
-path, no escaping the project root). **D-STRPARSE1**: comptime evaluation may
-pass through `Result`/`Option` for pure parse paths.
+**D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**, amended by
+**D-META-EFFECT1**: comptime and runtime read the same Core effect fact. An
+empty effect set is Tier 0 and may evaluate without a gate. Recorded,
+hash-checked inputs such as `embed_file(path) => String`,
+`embed_bytes(path) => [U8]`, `find(glob)`, and pinned `fetch` are Tier 1; they
+enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
+`#Impure("reason")` plus `--allow-impure` gate for this ruling. **D-STRPARSE1**:
+comptime evaluation may pass through `Result`/`Option` for pure parse paths.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
@@ -2389,7 +2481,7 @@ in Jet code matches the C header and the library's documentation. Ordinary
 Jet modules stay fully enforced; the exemption boundary is a module kind sema
 already tracks, so no new syntax exists.
 
-Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
+Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `package.jet`
 `deps:` → pkg-config fallback → E3201. C deps are link deps, never packages.
 `jet inspect bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
 binds scalars and `char*`↔String; `#define` constants only. Old
@@ -2528,7 +2620,7 @@ the D-FFI-PY1 precedent):**
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
 tier (`use "xxhash.h" as xx` — bind on first compile), project tier
-(`use py.h5instrument as h5`, dep pinned in `pkg.jet` as
+(`use py.h5instrument as h5`, dep pinned in `package.jet` as
 `<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
 overlay wins). `jet inspect bind <lang>` is a per-language binder emitting
 inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
@@ -3115,14 +3207,13 @@ index, not a substitute for that law.
 - **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers collection
   adapters. Collections expose beginner-friendly methods returning lazy views;
   materialization is explicit via `collect`, `to_list`, or reducers.
-- **D-TASKRUNTIME1=A**: task groups remain the structured lifetime boundary.
-  Channels, timers, deadlines, cancellation, and select produce typed event
-  values; scheduler budgets, tracing, and deterministic tests are expert hooks.
-  Implemented Epoch 3 surface: `tasks.channel<T>()`, bounded
-  `tasks.channel<T>(capacity: N)`, `tasks.after(ms: N)`,
-  `tasks.after(ms: N, value: fallback)`, `tasks.interval(ms: N)`, and
-  `g.select().recv(rx).after(ms: N, value: fallback).wait()` over one return
-  type. Bounded channel pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
+- **D-TASKRUNTIME1=A** *(amended by D-CONC-SPAWN1=D,
+  D-CONC-CHAN1=A, and D-CONC-CHAN2=D)*: structured task scopes remain the
+  lifetime boundary. The current surface is the nested `task` family,
+  builtin `channel<T>()`, `loop value, receiver`, and a subjectless `if`
+  readiness table on plain endpoints. Timers, deadlines, cancellation, and
+  readiness waits use typed values and the shared scheduler laws. Bounded
+  channel pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
 - **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
   typed rows, lazy query plans, joins, windows, missing values, and plotting.
   Eager helpers and lazy plans share the same operations. Current shipped floor:
@@ -3464,7 +3555,7 @@ generated JS loader; DOM work goes through a tiny first-party `JetDom` shim
 (no vdom); hybrid: view emits JS, compute may compile to WASM. `#Target(…)`
 takes `Web`/`Browser`/`Wasm`/`JS` and `OS.Linux`/`OS.MacOS`/`OS.Windows`
 (mixing web+OS on one item rejected). Default target: CLI `--target` >
-`pkg.jet` `target:` > file marker. `#HTML("path.html")` names a companion
+`package.jet` `target:` > file marker. `#HTML("path.html")` names a companion
 page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `OS.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
@@ -3553,7 +3644,8 @@ the same typed value:
 
 ```jet
 greeter: Package :: .{
-    identity: .{ name: "greeter", version: "1.0.0" }
+    name: "greeter"
+    version: "1.0.0"
     sources: .{ roots: ["Source"] }
 }
 ```
@@ -3562,13 +3654,14 @@ The exact view may pin those same role types without changing meaning:
 
 ```jet
 greeter: Package :: .{
-    identity: Package.Identity.{ name: "greeter", version: "1.0.0" }
+    name: "greeter"
+    version: "1.0.0"
     sources: Package.Sources.{ roots: ["Source"] }
 }
 ```
 
-There is no package-only `identity { ... }` block and no untyped, dotless
-`identity: { ... }` record. This decision reuses ordinary `.{ ... }` and
+There is no package-only identity wrapper and no untyped, dotless identity
+record. This decision reuses ordinary `.{ ... }` and
 `Type.{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
 production, formatter form, editor grammar, snapshot, or executable example.
 
@@ -3734,9 +3827,9 @@ parser or runtime behavior, diagnostic, grammar, snapshot, or executable
 example.
 
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
-is **`pkg.jet`** (`payload: { name, version }` identity + `packages:` +
-`deps:` + `targets:` + `effects:`); dev shell is **`env.jet`**; monorepo
-index is **`module workspace` in `workspace.jet`** (`members:` may run
+is **`package.jet`** (bare `name:`/`version:` identity + `packages:` +
+`deps:` + `targets:` + `effects:`); other `.jet` files contribute Configs;
+`module workspace` is discovered by declaration (`members:` may run
 comptime — inline lists, `find("./dir")`, or an expression referencing a
 sibling `comptime`/`fn`; D-WORKSPACE1/2 — the root `jetpack.toml` index is
 retired). A member is addressed three ways (D-MONOREF1=A, implemented):
@@ -3766,10 +3859,10 @@ composition, receipts, or lifecycle behavior. It adds no token, `Syntax.rs`
 entry, parser or runtime behavior, grammar rule, diagnostic, snapshot, or
 executable example by itself.
 
-**U10 — payload → packages → modules**: a payload (one `pkg.jet`) lists its
+**U10 — Package → packages → modules**: a Package (one `package.jet`) lists its
 packages in `packages: { name: … }`; a package **is** a top-level `module` —
 its module name is its identity, its file is discovered by walking the tree
-(exactly-one-match required). `env.jet` is never a package index.
+(exactly-one-match required). No other filename is a Package root.
 
 **U7 — Zero-ceremony single files**: `jet run file.jet` never needs a
 manifest, `.jet/`, or any ecosystem file — forever.
@@ -3802,13 +3895,14 @@ deps: {
 the pinned toolchain into the hangar (prebuilt objects via D-JPK-CACHE1,
 offline thereafter per D-JPK-OFFLINE1, GC per D-JPK-GC1, no Nix required per
 D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
-(D-JPK-DISPATCH1). Frozen-forward identity block: the top-level identity fields
-and migration-era `payload:` wrapper stay parseable by every future jet, so an
-old jet can always read enough of any manifest to fetch the right toolchain. `jet self toolchain`
+(D-JPK-DISPATCH1). Frozen-forward identity block: the bare top-level identity
+fields stay parseable by every future jet, so an old jet can always read enough
+of any manifest to fetch the right toolchain. The retired `payload:` wrapper is
+an ordinary E1206 unknown-field error. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is `name: target@provider`, or a bare
-local path. Core vs nix is inferred by probing the target for `pkg.jet`
+local path. Core vs nix is inferred by probing the target for `package.jet`
 (cheap manifest-only probe; `…@nixpkgs` is never probed). No `via:` marker.
 
 **D-TGT1–4 — Targets**: packages declare `targets:` (no `kind:`); shipped:
@@ -3829,7 +3923,7 @@ machinery survives, re-grounded as unconditional pub-fn semver diffing
 (E1218/E2601) — same intent (breaking-change detection at publish), no
 capability-tier freeze.
 
-**Publishing & supply chain**: `jet registry publish` (version from `pkg.jet`;
+**Publishing & supply chain**: `jet registry publish` (version from `package.jet`;
 refuses dirty tree/failing tests, `--allow-dirty`; errors E1219+)
 (D-PUBLISH1A). Published versions permanent; `jet registry yank --undo` hides from new
 resolution only (D-VERSION1). Ranges `textkit#^1.2` freeze in `.jet/lock`
@@ -3865,7 +3959,7 @@ D-BUILDTOOLCHAIN1, D-BUILDPROBE1, D-BUILDCACHE1, D-BUILDREMOTE1,
 D-BUILDSCHED1, D-BUILDQUERY1, D-BUILDLEGACY1, D-BUILDPLUGIN1,
 D-FRONTENDAPI1, D-DSLBLOCK1, D-METAMUTATE1)*: compile-time build entry is
 `fn build(b: BuildContext)`, living in the unit's own definition file (beside
-`fn run` / in `pkg.jet` / in `workspace.jet`); `jet build` runs it when
+`fn run` / in `package.jet` / in a discovered Config); `jet build` runs it when
 defined, else the batteries pipeline. Build code is tiered: Tier 1
 pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
 permission + provenance; deps never get Tier 2 implicitly. Generated source
@@ -4085,7 +4179,7 @@ implementation.
   Older `jetpack config trust` remains a storage-management compatibility path;
   the product concept is `jet trust`.
 - **D-JPK-GRANTSCHEMA1 (=A, ratified 2026-07-06, #229)**: reviewed source
-  policy lives under `policy.trust` in `pkg.jet`, e.g.
+  policy lives under `policy.trust` in `package.jet`, e.g.
   `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
   Trust policy feeds the same grant graph used by prompts, CLI, locks, and
   audit.
@@ -4196,12 +4290,12 @@ sha256:)`, `.exec(tool:, args:)`, `.install(src:, dest:)`, and
 invalid paths, cycles, and partial outputs remain errors; the recipe does not
 add ambient authority or a second build mechanism.
 
-**U1 — manifest history**: superseded — see D-JPK-FILES above (`pkg.jet`).
+**U1 — manifest history**: superseded — see D-ECO-FILEROOT1 above (`package.jet`).
 
 ### Jetpack Images
 
 **D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates)**: active `image.*`
-syntax is OCI-only: `from: packages.<name>` (a package this project's `pkg.jet`
+syntax is OCI-only: `from: packages.<name>` (a package this project's `package.jet`
 declares `executable`) + optional `kind: .Oci`, `expose: [Int]`, `env_vars:
 [KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar),
 `files: [String]`, and `base: oci("<ref>")`. A local `file://` OCI layout is
@@ -5384,7 +5478,8 @@ Control flow).
 **S29 — dotless struct literal**: superseded by D-DOTCTOR2 `T.{ }` (E0320).
 **S35 — `or` fallback**: superseded by `??` (S71).
 **S43 — `test` blocks**: superseded by `#Test("name")` (see Testing).
-**S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
+**S53 — concurrency**: superseded as a deferral. Concurrency is live ratified
+law; see the D-CONC entries above. Implementation remains on its own cards.
 **S81 — `?continue`**: superseded by `expr ?? next` (D-LOOP-CONTROLWORD1=B).
 **D-MARKER-FAMILY1 / D-MARKERMOVE1/2/3 — two-plane `@`/`#` sigil law**:
 superseded by D-VERDICT-732-1; every marker is back on `#`, `@` is reserved
@@ -5556,8 +5651,8 @@ destructure. `<:` and `:>` are longest-match digraphs; `:>`
 suppresses line termination and neither digraph ends a statement. The formatter
 retains one authored fence and wraps wide explicit fences one name per line.
 `tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
-returns their results in list order; taskgroup combinators remain the structured
-ownership surface. Card #1239.
+returns their results in list order; the nested `task` combinators retain the
+structured ownership surface under D-CONC-SPAWN1=D. Card #1239.
 
 **2026-07-30 — D-VERDICT-1320-1 (amends D-EACH1)**: the fence respells as
 symmetric `$[ a, b ]$`. `$[` and `]$` are longest-match digraphs (`$[` before
@@ -5721,6 +5816,186 @@ because the comptime evaluator folds a divisor it can see and stops the build.
 The example is about sibling cancellation, so it says so directly. Spelling is unchanged
 (`OP_SLASH`). Flagship: `examples/features/math/int_div.jet`. Card #1433.
 
+**2026-08-06 — D-TYPE2-FOUND1 = A — Adopt the carrier plus knowledge foundation**
+*(card #1497, implementation card #1546)*. Every compile-time fact joins one
+substrate with one registry. Ranges, units, lengths, states, and obligations
+share registration, checking, and reflection. Type equality becomes transitive
+again. Shipped programs keep their exact behavior; this changes how the
+compiler holds what it already knows.
+
+Type carries a knowledge vector. Identity is carrier plus identity-bearing facts,
+declared per plane. Obligations compare by subsumption, which restores transitive
+equality. All knowledge erases before the typed IR, so codegen and every
+execution tier are untouched.
+
+Amends: none.
+
+**2026-08-06 — D-TYPE2-NUM1 = A — The number tower: one grid, and BigInt folds into Int**
+*(card #1497, implementation card #1550)*. Every number type becomes one cell
+of the grid. A sized width like U8 becomes Int plus a proven range and a one-byte
+layout; its spelling and behavior do not change. BigInt retires, because the
+arbitrary-precision Int already holds every value it held. The four errors that
+police mixing Int with BigInt retire with it.
+
+Axis one is the value world: whole, ratio, real, complex. Axis two is the
+knowledge grade: exact unbounded, exact bounded, approximate, measured. The
+ratified widening law, value-set containment, becomes the theorem that a subset
+needs no conversion. One interval prover replaces the width table, the range-type
+checks, and the fixed-list index proof.
+
+Amends: D-INTBIG1. E0130–E0133 retire with BigInt.
+
+The existing `BigInt` Syntax and editor-highlight rows remain as migration
+anchors until #1550 removes the implementation; retirement snapshots are owed
+to #1550.
+
+**2026-08-06 — D-TYPE2-REFINE1 = A — One spelling for value-range rules**
+*(card #1497, implementation card #1548)*. `distinct Int(1..6)` becomes the
+one spelling. The `#Invariant` marker retires, and the index prover reads range
+facts directly. The same range facts describe the sized widths, so U8 and Die
+fail with the same error shape.
+
+The range becomes an interval fact on the plane registry. The prover for
+fixed-list indexing consumes interval facts instead of parsed strings. The marker
+row retires under law zero with a replacement note.
+
+The `#Invariant` row remains only as a migration anchor until implementation
+card #1548 removes its parser and sema references. Its removal and any UI or
+formatter snapshot updates are owed to #1548.
+
+Amends: D-RANGETYPE1, D-REFINE1, and D-VERDICT-1455-1. Replacement: use
+`distinct Int(lo..hi)` for a named range and `Int(lo..hi)` inline.
+
+**2026-08-06 — D-TYPE2-TIME1 = A — Time joins the unit plane**
+*(card #1497, implementation card #1552)*. Duration becomes the delta quantity
+of a canonical Time unit family, stored as a 64-bit nanosecond count per the
+ratified resolution decision. Instant becomes the matching point quantity.
+Every 500ms resolves through the one unit plane, in user code, timeouts, and
+schedules alike. Both hidden suffix tables are deleted.
+
+The Time family is the one unit family with a fixed integer carrier, per the
+ratified nanosecond decision. Point and delta reuse the affine machinery
+temperatures already use. Timeout and schedule sites accept the Time delta type
+instead of reading raw suffix tables.
+
+The `Instant` Syntax row is registered now for I7 and editor-grammar coverage;
+its parser/sema behavior and UI or formatter snapshots are owed to #1552.
+
+Amends: D-TIMERES1 and D-QUANTITY-POINT1. Replacement: resolve Duration and
+Instant through the canonical Time quantity family.
+
+**2026-08-06 — D-TYPE2-MEASURE1 = A — One home for compile-time numbers in types**
+*(card #1497, implementation card #1553)*. Lengths, shapes, lanes, and exponents
+become measures: compile-time numbers attached to types through the plane
+registry. Each use declares its combination rules. Joining two lists adds
+lengths. Matrix multiply matches inner sides and composes outer sides.
+Multiplying quantities adds exponents. Surfaces do not change; the encodings
+underneath become one.
+
+Measures are declared literals or module value parameters, never computed by user
+code, so the ratified wall that compile-time evaluation cannot create types
+stands. Symbolic lengths from generic modules resolve at specialization exactly
+as today, without the placeholder-zero sentinel.
+
+Amends: D-COMPUTE-TYPE1's stored encoding; its semantics stay unchanged.
+
+**2026-08-06 — D-TYPE2-EXACT1 = A — The conservation law for precision**
+*(card #1497, implementation card #1554)*. The law enters the spec: knowledge
+grows silently, is lost only at a spelled step, and erases at runtime. The two
+existing spellings stay, because each names its own operation well. Approx marks
+accepting a representation's precision; rounded conversions name a mode because
+rounding direction matters there.
+
+The law binds every future surface: any operation that discards range, exactness,
+unit, state, or classification must require a spelled step, checked in sema.
+Existing spellings are grandfathered as the law's two instances.
+
+Amends: none.
+
+**2026-08-06 — D-TYPE2-UNCERT1 = A — Uncertainty as a knowledge grade**
+*(card #1497, implementation card #1555)*. Measurement becomes the measured
+grade of numeric knowledge. Arithmetic and the math functions propagate
+uncertainty by the standard first-order rules. Exact values are
+zero-uncertainty, so mixing works without ceremony. Nothing changes for any
+program until a measurement enters it, and printing shows the value with its
+uncertainty.
+
+Propagation uses first-order linear approximation with uncorrelated inputs,
+stated plainly in the docs. Correlated errors are out of scope and documented as
+such. Measured unit scales produce measured conversion results, connecting the
+two existing homes of uncertainty. A companion literal spelling, value ±
+uncertainty, is proposed in the surface section of the proposal; the plain
+measurement call is the canonical form either way. The spelling is not ratified.
+
+Amends: D-UNCERTAIN1.
+
+**2026-08-06 — D-TYPE2-PLANE1 = A — The plane law: registered, nameable, reflectable, readable**
+*(card #1497, implementation card #1547)*. Every fact plane lives in one
+registry. A plane exists exactly when registered, its facts are nameable,
+reflection reports them as typed values, and the compiler's planes ship as
+readable prelude source. Reflection gains dimensions, and marker arguments
+become typed records on fields, methods, and variants, matching the type level.
+
+This extends the marker registration law to dimensions, measures, exactness, and
+classifications. Reflection's remaining string fallbacks are removed. Drift
+guards walk every registered plane end to end, the same pattern the marker
+rebuild uses.
+
+Amends: D-VERDICT-1455-1.
+
+**2026-08-06 — D-TYPE2-DEFAULT1 = A — Precise by default: the exact numeric world**
+*(card #1497, implementation card #1551)*. Decimal literals are exact Decimal
+values. Division of exact values lands in exact rational territory: a result with
+a finite decimal prints as a decimal, otherwise it prints as a fraction and
+stays exact. Functions that truly leave the rationals, like square root and sine,
+answer approximate and say so. Experts opt into Float or F32 at the declaration,
+and hot code gets today's machine arithmetic unchanged.
+
+This amends three ratified rules by name. D-INTDIV1: division still maps whole to
+rational, but the landing default is exact instead of Float. D-EXPSEM1 and
+D-EXPNEG1: a written negative exponent gets the same exact landing. D-NUMTYPE1:
+its Fraction-is-opt-in-by-name clause relaxes, because plain division can now
+answer an exact ratio. Exact values use machine-word fast paths with spill, the
+bigint Int playbook. Sized widths and Float keep every ratified behavior once
+named, mixing with an approximate operand answers approximate under the one
+widening law, and narrowing still requires approx.
+
+Amends: D-INTDIV1, D-EXPSEM1, D-EXPNEG1, and D-NUMTYPE1.
+
+**2026-08-06 — D-TYPE2-SPELL1 = A — Inline refinements in type position**
+*(card #1497, implementation card #1549)*. `Int(0..100)` is legal in any type
+position: parameters, returns, fields, bindings. Literals check at compile time;
+unproven values convert fallibly, exactly as U8 works today. Naming stays
+available through distinct when identity matters. Two inline types with the same
+base and range are the same type.
+
+The inline form is structural: identity is carrier plus interval fact. distinct
+stays the nominal wrapper. The same checking already ratified for range types
+applies unchanged, including the literal-only bounds rule from D-RANGE-VALUE1;
+only the requirement to pre-declare a name is removed.
+
+`Int(0..100)` is registered now, but is not parseable in every type position
+until #1549. Its UI and formatter snapshots are owed to #1549.
+
+Amends: D-RANGE-VALUE1.
+
+**2026-08-06 — D-TYPE2-IMAG1 = A — Imaginary literals ride the unit-literal path**
+*(card #1497, implementation card #1556)*. A numeric literal with the suffix i
+is an imaginary number. Real plus imaginary reads exactly like the textbook:
+0.5 + 0.8i. The lexer path is the shipped unit-literal path, so no new grammar
+exists, and the identifier i alone remains an ordinary variable name.
+
+The suffix resolves through the same table-free literal machinery as unit suffixes,
+minting the imaginary component of the ratified Complex type. Only the suffix form
+is special: bare i is untouched, and shadowing risks are the same as any unit
+suffix in scope.
+
+The `Complex` and `i` Syntax rows are registered now; imaginary semantics and
+their UI or formatter snapshots are owed to #1556. No standalone `i` keyword row
+is added because it remains an ordinary identifier.
+
+Amends: none.
+
 **D-VERDICT-1455-1 — Mandatory registration (law zero)** *(ratified
 2026-08-05, card #1455)*: a marker exists if and only if it is a row in
 `Policy::APPLIED_RULES`. No marker may be parsed, checked, formatted,
@@ -5814,6 +6089,15 @@ an owner call. Card #1526.
 D-META-FORM1=A** *(card #1538, proposal
 `docs/proposals/metaprogramming-one-compile-time-program.md`)*. Four registries
 were proposed in one week for one job. This ruling makes them one.
+
+**2026-08-06 — D-META-EFFECT1=A** *(card #1543, same proposal)*. One effect
+model applies at both stages. Tier 0 is an empty effect set; Tier 1 is recorded
+and hashed in `.jet/lock`; Tier 2 requires `#Impure("reason")` and
+`--allow-impure` in this change. The curated pure-Core eligibility list retires:
+the shared foundation effect fact decides eligibility, and the shared
+`PurityStage` walk gives both stages one E3401 family (`E0951` redirects to
+E3401). `D-ONCE-GATE1` remains a later policy question; it does not retire
+`--allow-impure` here.
 
 **D-META-REG1 = A — one table, four uses.** A marker rule, a knowledge plane, a
 right, and a build fact are rows of the same table, separated only by what they
@@ -5978,6 +6262,15 @@ law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
 **2026-08-07 — D-NAME-FILES1 = C** *(card #1625, proposal `docs/proposals/names-one-tree.md`)*. Manual named imports stay: every cross-file name keeps an explicit import line, and no invisible auto-import of project files ships. Owner's words: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot. The rest of the D-NAME slate stays open on the card.
+
+**2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
+D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
+`loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,
+grant: .{ ... })?` is the load form, and `mod.on_tick(dt)` is the typed member
+call form. The grant maps declared effects to normalized path sets and is
+checked before mapping. Native export produces static and shared libraries,
+the C header, and generated bindings for named languages. No new lexer token,
+keyword, or Jet-to-Jet ABI promise enters the surface.
 
 ## The say-it-once slate (D-ONCE-*, ratified 2026-08-07, card #1656)
 

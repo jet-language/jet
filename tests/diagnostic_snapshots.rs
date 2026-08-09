@@ -2,8 +2,10 @@
 //! (tests/ui/*.jet + .stderr) and ownership lints (tests/ui_lint/*.jet +
 //! .warn), both driven by the same `UPDATE_EXPECT` snapshot harness.
 //!
-//! Each tests/ui/NAME.jet has a sibling NAME.stderr holding the exact
-//! rendered output; each tests/ui_lint/NAME.jet has a sibling NAME.warn.
+//! Each flat tests/ui/NAME.jet has a sibling NAME.stderr holding the exact
+//! rendered output. A directory fixture uses `main.jet` + `stderr`, or
+//! `workspace.jet` + tests/ui/NAME.stderr. Each tests/ui_lint/NAME.jet has a
+//! sibling NAME.warn.
 //! To update after an INTENTIONAL wording change:
 //!
 //!     JET_UI_FILTER=tests/ui/NAME.jet UPDATE_EXPECT=tests/ui/NAME.jet \
@@ -111,6 +113,16 @@ fn ui_snapshots() {
                     ext
                 );
                 entries.push((main, rel));
+            } else {
+                let workspace = path.join(jet::Syntax::WORKSPACE_FILE);
+                if workspace.is_file() {
+                    let rel = format!(
+                        "tests/ui/{}/{}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        jet::Syntax::WORKSPACE_FILE
+                    );
+                    entries.push((workspace, rel));
+                }
             }
         }
     }
@@ -177,12 +189,20 @@ fn ui_snapshots() {
         }
 
         let file_arg = path.to_string_lossy();
+        let render_path = if path.file_name().and_then(|name| name.to_str())
+            == Some(jet::Syntax::WORKSPACE_FILE)
+        {
+            jet::Syntax::WORKSPACE_FILE.to_string()
+        } else {
+            shown_path.clone()
+        };
         // E2-M15: files marked with `// @freestanding` are compiled with
         // the freestanding profile (E3301 checks enabled).
         let freestanding = src.lines().any(|l| l.trim() == "// @freestanding");
-        // I4: files marked with `// @all_diags` run `check_with_path` and include
-        // ALL diagnostics (errors + lints) so lint codes can have UI snapshots.
-        let all_diags = src.lines().any(|l| l.trim() == "// @all_diags");
+        // I4: `// @all_diags` and workspace fixtures run `check_with_path`.
+        let all_diags = src.lines().any(|l| l.trim() == "// @all_diags")
+            || path.file_name().and_then(|name| name.to_str())
+                == Some(jet::Syntax::WORKSPACE_FILE);
         // D-CTEFFECT1: files marked `// @allow_impure` compile with the
         // allow-impure flag so E3411/E3412 snapshots can exercise the gate.
         let allow_impure = src.lines().any(|l| l.trim() == "// @allow_impure");
@@ -353,7 +373,7 @@ fn ui_snapshots() {
             if diags.is_empty() {
                 "(no errors)\n".to_string()
             } else {
-                jet::render_diagnostics(&shown_path, &src, &diags)
+                jet::render_diagnostics(&render_path, &src, &diags)
             }
         } else if freestanding {
             match jet::compile_freestanding(&file_arg) {
@@ -387,6 +407,21 @@ fn ui_snapshots() {
 
         let expect_path = if path.file_name().unwrap() == "main.jet" {
             path.parent().unwrap().join("stderr")
+        } else if path.file_name().and_then(|name| name.to_str())
+            == Some(jet::Syntax::WORKSPACE_FILE)
+        {
+            path.parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(format!(
+                    "{}.stderr",
+                    path.parent()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                ))
         } else {
             path.with_extension("stderr")
         };
@@ -497,6 +532,12 @@ fn normalize_volatile_ui_snapshot(shown_path: &str, actual: String) -> String {
     // provenance, for one) renders an absolute path; make it repo-relative.
     let root = format!("{}/", env!("CARGO_MANIFEST_DIR"));
     let actual = actual.replace(&root, "");
+    // Workspace evaluator tests use `/tmp` as their stable base directory.
+    let actual = if let Some(fixture_root) = shown_path.strip_suffix("/workspace.jet") {
+        actual.replace(fixture_root, "/tmp")
+    } else {
+        actual
+    };
     let actual = actual
         .lines()
         .filter(|line| !line.contains("Blocking waiting for file lock on package cache"))

@@ -568,7 +568,7 @@ pub(crate) fn collect_core_expr(
             }
         }
         Expr::Call(c) => {
-            // D-PRELUDE1 = B: bare `input(...)` is prelude-ambient; mark core.io so
+            // D-NAME-ALIAS1=A: bare `input(...)` is prelude-ambient; mark core.io so
             // CORELIB_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
             if c.name == Syntax::BUILTIN_INPUT {
                 note_core_usage(used, spans, "core.io::input", Some(c.name_span));

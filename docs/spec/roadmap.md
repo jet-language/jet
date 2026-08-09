@@ -47,7 +47,7 @@ live open-decision queue.
 
 **E2-M2 — Release policy, editions, epoch contract** verified 2026-06-16. Ratified
 compatibility/release policy ([`release-policy.md`](release-policy.md));
-`edition:` marker in `pkg.jet`; enriched `jet --version` banner; E2001
+`edition:` marker in `package.jet`; enriched `jet --version` banner; E2001
 reachable, E2002/L2001 registered (honestly empty pre-1.0 deprecation registry).
 
 **E2-M3 — Developer command UX** verified 2026-06-16. Stable exit-code table,
@@ -120,7 +120,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **M9** — generics and traits; **M9.5** — comptime evaluation and `@embed`.
 - **M10** — Core library: `core.files`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.encoding.json`. Frozen API in `docs/reference/core-library.md`.
 - **M11** — tasks and channels (Epoch-2 concurrency work; shipped as part of the v1 arc).
-- **M12** — package manager: `pkg.jet`, `.jet/lock`, content-addressed store (D-PM1…8). M12.1 verified; M12.2 (registry/semver) is Epoch 1 tail.
+- **M12** — package manager: `package.jet`, `.jet/lock`, content-addressed store (D-PM1…8). M12.1 verified; M12.2 (registry/semver) is Epoch 1 tail.
 - **M13** — LSP: incremental front end, go-to-definition, diagnostics, hover.
 - **M14** — v1.0 GA: showcase programs, diagnostics polish, binary size budgets.
 
@@ -131,7 +131,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 18 milestones, production-platform arc, GA verified 2026-06-18.
 
 - **E2-M1** — tasks and channels without data races; ownership proves sendability.
-- **E2-M2** — release policy, editions/epochs, `edition:` in `pkg.jet`, deprecation policy.
+- **E2-M2** — release policy, editions/epochs, `edition:` in `package.jet`, deprecation policy.
 - **E2-M3** — developer CLI polish: TTY color, `jet explain`, `jet self doctor`, fix engine, man pages, completions.
 - **E2-M4** — `jet dev`: watch server, interpreter-backed dev loop, <200ms latency budget.
 - **E2-M5** — tier-2 references: `view`/`ref` hardening, zero-copy patterns.
