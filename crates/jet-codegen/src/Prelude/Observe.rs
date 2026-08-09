@@ -76,7 +76,7 @@ static JET_PROBE_ARENA_BYTES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 thread_local! {
-    static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
+    pub static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
 }
 
 fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> {

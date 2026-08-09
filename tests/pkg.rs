@@ -82,7 +82,7 @@ fn shape6_registry_routes_and_retired_bare_snapshots() {
     assert!(!key.status.success());
     assert_eq!(
         String::from_utf8(key.stderr).unwrap(),
-        "error: `jet registry key` needs a subcommand — try `jet registry key backup`.\n"
+        "Error [E2104]: `jet registry key` needs a subcommand — try `jet registry key backup`.\n Why: Jet needs valid command input before it can run this command\n Fix: correct the named argument or input, then run the command again\n"
     );
 
     for verb in ["publish", "keygen", "key", "yank"] {

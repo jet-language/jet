@@ -116,7 +116,7 @@ impl JetParaRuntimeFailure {
 }
 
 thread_local! {
-    static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn jet_para_call<R, F>(index: usize, f: F) -> Result<R, JetParaFailure>
@@ -367,7 +367,7 @@ impl JetShow for JetReservoirSampler {
 }
 
 thread_local! {
-    static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
