@@ -63,9 +63,9 @@ pub const KW_PRIV: &str = "priv";
 /// public-by-default for following top-level items (D-VISDEFAULT1=C).
 pub const MARKER_PUB_FILE: &str = "PubFile";
 
-/// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables ambient
-/// prelude auto-imports (`print` / `input`). Expert escape hatch only — no
-/// library may inject into the no-prefix surface.
+/// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables the
+/// readable Core prelude. Expert escape hatch only — no library may inject into
+/// the no-prefix surface.
 pub const MARKER_NO_PRELUDE: &str = "NoPrelude";
 
 /// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
@@ -170,24 +170,13 @@ pub const STMT_SEP: &str = ";";
 pub const INTERP_OPEN: &str = "{";
 pub const INTERP_CLOSE: &str = "}";
 
-/// S9 (ratified): the built-in print function (adds a newline).
+/// S9 (ratified): the prelude-declared print function (adds a newline).
 pub const BUILTIN_PRINT: &str = "print";
 
-/// D-PRELUDE1 option B (ratified): `input` is ambient (no `use core.io` required).
-/// Both `print` and `input` form the interactive I/O subset. All other core.io
-/// members stay qualified behind `use core.io`.
+/// D-NAME-ALIAS1=A: `input` is prelude-declared (no `use core.io` required).
+/// `print` and `input` remain the interactive I/O subset. Other `core.io`
+/// members are opened through the readable prelude's explicit aliases.
 pub const BUILTIN_INPUT: &str = "input";
-
-/// D-PRELUDE-LAW1=A: complete closed no-prefix registry. The first group is
-/// always ambient; the second exists only under its ratified comptime gates.
-/// User declarations shadow these names and libraries cannot inject new ones.
-pub const PRELUDE_ALWAYS_IDENTS: &[&str] =
-    &["print", "input", "panic", "require"];
-pub const PRELUDE_COMPTIME_IDENTS: &[&str] =
-    &["embed_file", "embed_bytes", "find", "fetch"];
-pub const PRELUDE_IDENTS: &[&str] = &[
-    "print", "input", "panic", "require", "embed_file", "embed_bytes", "find", "fetch",
-];
 
 /// S11 (ratified): built-in type names (M1).
 pub const TYPE_INT: &str = "Int";

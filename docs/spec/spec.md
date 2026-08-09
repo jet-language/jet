@@ -240,25 +240,28 @@ keep code readable from top to bottom. See
   `hi..lo` is **E0316**. Arm heads accept range literals only. A
   `distinct Int(0..10)` constraint also stays literal-only because a runtime
   Range cannot determine a type declaration (D-RANGE-VALUE1=A).
-- **Ambient surface (D-PRELUDE-LAW1=A):** this registry is closed. Always
-  ambient: `print`, `input`, `panic`, `require`. Comptime-gated ambient:
-  `embed_file`, `embed_bytes`, `find`, `fetch`. A user declaration shadows an
-  ambient name in its scope; libraries cannot inject names; any addition or
-  removal needs an owner ballot. `eprint`, `args`, and `read_all_input` stay
-  qualified behind `use core.io`.
-  **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of those ambient names —
-  call `io.print` / `io.input` after `use core.io as io`, or remove the marker.
-  Its existing opt-out scope is the interactive I/O pair `print`/`input`.
+- **Ambient surface (D-NAME-ALIAS1=A, D-CORE-PRELUDE1/2):** one readable
+  `core/prelude.jet` module declares the closed no-prefix surface. Functions
+  are `print`, `input`, `panic`, `require`, `assert`, and `assert_eq`.
+  `pub use` aliases add `eprint`, `Clock`, `Instant`, `Date`, `Duration`,
+  `Path`, `read_file`, `write_file`, and `file_exists`. The comptime-gated
+  names `embed_file`, `embed_bytes`, `find`, and `fetch` stay gated at their
+  existing declarations. `random` stays qualified as `core.math.random`.
+  User declarations replace a prelude alias and produce the ratified shadow
+  lint; libraries cannot inject names; additions and removals need an owner
+  ballot. Core meaning stays in Prelude/CoreLib (I9).
+  **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of every readable prelude
+  name. Use a qualified Core call, or remove the marker.
 - **Tool artifact extensions (D-ARTIFACT-EXT1=A):** the closed family is
   `.jetmap` (source maps), `.jetnb` (notebooks), `.jetproof` (proof evidence),
   `.jettrace` (performance traces), `.jetreplay` (game input replays), and
   `.jetproof-replay` (proof replays). Consumers reject a different family
   member by artifact kind; retired suffixes have no compatibility aliases.
-- `print(x)` is built in (S9); takes one or more printable arguments
+- `print(x)` is prelude-declared (S9); takes one or more printable arguments
   (E0103, E0112) and writes each on its own line with a trailing newline
   (D-VERDICT-1321-1). `io.print`/`io.eprint` accept the same variadic
   form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
-- `input()` / `input(prompt)` is prelude (D-PRELUDE1); reads a line from
+- `input()` / `input(prompt)` is prelude (D-NAME-ALIAS1); reads a line from
   stdin, strips the trailing newline, and returns `String ? IOError`.
   Use `??` to unwrap or handle the error.
 - Functions: multi-argument calls, checked arity (E0104) and argument

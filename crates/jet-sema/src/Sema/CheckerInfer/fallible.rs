@@ -619,6 +619,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
+        self.normalize_prelude_expr(expr);
         match expr {
             Expr::Call(call) => match self.check_call(call, false) {
                 Some(Some(t)) => Some(t),

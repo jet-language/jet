@@ -15,6 +15,7 @@ use crate::Sema::Diagnostics::{
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
 use crate::Syntax;
+use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
         /// Check a call. Returns:
@@ -149,7 +150,7 @@ impl<'a> Checker<'a> {
             if call.name == Syntax::BUILTIN_APPROX && !self.funcs.contains_key(&call.name) {
                 return self.check_numeric_approx(call).map(Some);
             }
-            // D-EFF1: an ambient builtin (`print`/`input`) contributes the `IO`
+            // D-EFF1: an ambient prelude builtin (`print`/`input`) contributes the `IO`
             // effect, unless a user function of the same name shadows it (in which
             // case the edge to that user function is recorded below).
             if !self.funcs.contains_key(&call.name) {
@@ -275,8 +276,41 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
+
+            // D-NAME-ALIAS1=A / D-PRELUDEX1=A: every readable prelude name
+            // follows the one file-level opt-out. print and input retain their
+            // detailed diagnostics below.
+            if self.no_prelude
+                && call.name != Syntax::BUILTIN_PRINT
+                && call.name != Syntax::BUILTIN_INPUT
+                && !self.funcs.contains_key(&call.name)
+                && self.lookup(&call.name).is_none()
+                && CorePrelude::entry(&call.name).is_some()
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0429",
+                    format!(
+                        "{} is not ambient here — this file opted out with #{}",
+                        call.name,
+                        Syntax::MARKER_NO_PRELUDE
+                    ),
+                    format!(
+                        "#{} closes the readable Core prelude for this file",
+                        Syntax::MARKER_NO_PRELUDE
+                    ),
+                    "write the qualified Core call, or remove #NoPrelude".to_string(),
+                    Some(call.name_span),
+                ));
+                for arg in call.args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(None);
+            }
     
-            if call.name == Syntax::BUILTIN_PRINT {
+            if call.name == Syntax::BUILTIN_PRINT
+                && self.funcs.get(Syntax::BUILTIN_PRINT).is_none()
+                && self.lookup(Syntax::BUILTIN_PRINT).is_none()
+            {
                 if self.no_prelude {
                     self.diags.push(Diagnostic::error(
                         "E0429",
@@ -289,7 +323,7 @@ impl<'a> Checker<'a> {
                             "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
                             Syntax::MARKER_NO_PRELUDE,
                             Syntax::BUILTIN_PRINT,
-                            Syntax::BUILTIN_INPUT
+                            Syntax::BUILTIN_INPUT,
                         ),
                         format!(
                             "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
@@ -371,10 +405,10 @@ impl<'a> Checker<'a> {
                 return Some(None);
             }
     
-            // D-PRELUDE1 = B: `input` is ambient — no `use core.io` needed.
+            // D-NAME-ALIAS1=A: `input` is prelude-declared — no `use core.io` needed.
             // Resolves to the same semantics as `io.input`: optional String prompt,
             // returns Result(String, IOError). Shadowed by any user-defined `input`.
-            // D-PRELUDEX1=A: `#NoPrelude` turns the ambient off.
+            // D-PRELUDEX1=A: `#NoPrelude` turns the readable prelude off.
             if call.name == Syntax::BUILTIN_INPUT
                 && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
                 && self.lookup(Syntax::BUILTIN_INPUT).is_none()
@@ -391,7 +425,7 @@ impl<'a> Checker<'a> {
                             "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
                             Syntax::MARKER_NO_PRELUDE,
                             Syntax::BUILTIN_PRINT,
-                            Syntax::BUILTIN_INPUT
+                            Syntax::BUILTIN_INPUT,
                         ),
                         format!(
                             "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
@@ -419,7 +453,10 @@ impl<'a> Checker<'a> {
                 return Some(Some(result_ty(Type::String, io_error_ty())));
             }
     
-            if call.name == Syntax::BUILTIN_PANIC {
+            if call.name == Syntax::BUILTIN_PANIC
+                && self.funcs.get(Syntax::BUILTIN_PANIC).is_none()
+                && self.lookup(Syntax::BUILTIN_PANIC).is_none()
+            {
                 // D-METADEPTH2: retain panic reachability in the checked call
                 // graph consumed by ProgramInfo; this sentinel is not an effect.
                 self.fx_edges.insert("__jet_panic__".to_string());
@@ -427,7 +464,10 @@ impl<'a> Checker<'a> {
                 return Some(None);
             }
     
-            if call.name == Syntax::BUILTIN_REQUIRE {
+            if call.name == Syntax::BUILTIN_REQUIRE
+                && self.funcs.get(Syntax::BUILTIN_REQUIRE).is_none()
+                && self.lookup(Syntax::BUILTIN_REQUIRE).is_none()
+            {
                 self.check_require_call(call);
                 return Some(None);
             }
@@ -437,7 +477,11 @@ impl<'a> Checker<'a> {
                 return Some(None);
             }
     
-            if call.name == Syntax::BUILTIN_FIND && self.in_comptime {
+            if call.name == Syntax::BUILTIN_FIND
+                && self.in_comptime
+                && self.funcs.get(Syntax::BUILTIN_FIND).is_none()
+                && self.lookup(Syntax::BUILTIN_FIND).is_none()
+            {
                 if call.args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0103",
@@ -741,10 +785,10 @@ impl<'a> Checker<'a> {
                     call.name
                 );
                 let mut best: Option<(&str, usize)> = None;
-                let prelude_cands: &[&str] = if self.no_prelude {
-                    &[]
+                let prelude_cands: Vec<&str> = if self.no_prelude {
+                    Vec::new()
                 } else {
-                    Syntax::PRELUDE_IDENTS
+                    CorePrelude::names().collect()
                 };
                 for cand in self
                     .funcs

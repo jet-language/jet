@@ -13,6 +13,8 @@ use crate::AST::{
     AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
     TypedLitBody, UnOp, noelse_terminated,
 };
+use jet_foundation::Prelude as CorePrelude;
+use jet_foundation::Prelude::Target;
 use std::collections::HashSet;
 
 fn field_path(expr: &Expr) -> Option<String> {
@@ -372,7 +374,60 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    pub(crate) fn normalize_prelude_expr(&mut self, e: &mut Expr) {
+        let (name, span) = match &*e {
+            Expr::Call(call) => (call.name.clone(), call.name_span),
+            _ => return,
+        };
+        if self.no_prelude
+            || self.funcs.contains_key(&name)
+            || self.lookup(&name).is_some()
+        {
+            return;
+        }
+        let Some(entry) = CorePrelude::entry(&name) else {
+            return;
+        };
+        match entry.target {
+            Target::Core { module, item } => {
+                let Some(alias) = crate::Sema::Prelude::core_alias_for(self.core_imports, module)
+                else {
+                    return;
+                };
+                let old = std::mem::replace(e, Expr::Absent(span));
+                let Expr::Call(call) = old else {
+                    unreachable!("prelude normalization only replaces calls");
+                };
+                *e = Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(alias.to_string(), call.name_span)),
+                    method: item.to_string(),
+                    method_span: call.name_span,
+                    owner_type_args: Vec::new(),
+                    type_args: call.type_args,
+                    args: call.args,
+                    recv_type: None,
+                    resolved_ret: call.resolved_ret,
+                    checked_widen: false,
+                };
+            }
+            // The existing assertion kernel is shared by AOT, JIT, and the
+            // interpreter. These readable names only select that kernel.
+            Target::Builtin if name == "assert" => {
+                if let Expr::Call(call) = e {
+                    call.name = Syntax::BUILTIN_REQUIRE.to_string();
+                }
+            }
+            Target::Builtin if name == "assert_eq" => {
+                if let Expr::Call(call) = e {
+                    call.name = Syntax::BUILTIN_REQUIRE_EQ.to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn normalize_contextual_expr(&mut self, e: &mut Expr) {
+        self.normalize_prelude_expr(e);
         // D-SHAPE3b: contextual Optional/Result spellings share one generic
         // literal path before sema lowers them to the existing dedicated nodes.
         // A user function still wins for bare `Ok`/`Err` calls.
