@@ -1,4 +1,5 @@
-//! Jetpack ref classifier: `name['#'selector]['@'source]` (D-JPK-REF1=A).
+//! Jetpack ref classifier: `name['#'selector]['@'source]` or
+//! `source.package` (D-JPK-REF1=A, D-MONOREF1=A).
 //!
 //! A ref reads like an address: the package first, then its source. `#` pins a
 //! version or channel. Bare `./`, `../`, and `/` paths need no provider word.
@@ -381,7 +382,8 @@ fn provider_first(provider: &str, target: &str, raw: &str) -> RefError {
 }
 
 /// Classify a `name['#'selector]['@'source]` ref against built-in sources.
-/// This is the strict path for direct CLI refs.
+/// This is the strict path for direct CLI refs. A declared monorepo source also
+/// accepts D-MONOREF1's `source.package` form.
 pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
     classify_in(raw, &SourceTable::empty())
 }
@@ -432,13 +434,23 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
         });
     }
 
+    if let Some((source, package)) = raw.split_once('.') {
+        if !source.is_empty() && !package.is_empty() && table.upstream(source).is_some() {
+            return Ok(RefSpec {
+                source: Source::Named(source.to_string()),
+                package: package.to_string(),
+                raw: raw.to_string(),
+            });
+        }
+    }
+
     Err(RefError::MissingSeparator(raw.to_string()))
 }
 
 /// Classify a ref with workspace-member awareness (Slice B, D-MONOREF1=A).
 ///
 /// Resolution order, first match wins:
-///   1. source form `package@source` — via `classify_in`
+///   1. source forms `package@source` and `source.package` — via `classify_in`
 ///   2. local form  `./package` — via `classify_in`
 ///   3. path form   `infra/logging` — exact relative-path match in the index
 ///   4. bare form   `logging` — exact member-name match in the index
