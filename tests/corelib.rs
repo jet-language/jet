@@ -1595,10 +1595,10 @@ fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutco
     let bin = dir.join("counted");
     let generated = renamed.replacen("#![allow(warnings)]", "", 1);
     assert_ne!(generated, renamed, "generated crate attribute changed");
-    fs::write(&rs, format!("#![allow(warnings)]\n{allocator}\n{generated}")).unwrap();
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .output().unwrap();
+    let rust = format!("#![allow(warnings)]\n{allocator}\n{generated}");
+    let mut command = Command::new("rustc");
+    common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(rustc.status.success(), "rustc rejected counted JSON program:\n{}", String::from_utf8_lossy(&rustc.stderr));
     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
     assert!(run.status.success(), "counted JSON program failed:\n{}", String::from_utf8_lossy(&run.stderr));
@@ -3203,10 +3203,10 @@ fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROp
     let bin = dir.join("counted");
     let generated = renamed.replacen("#![allow(warnings)]", "", 1);
     assert_ne!(generated, renamed, "generated crate attribute changed");
-    fs::write(&rs, format!("#![allow(warnings)]\n{allocator}\n{generated}")).unwrap();
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .output().unwrap();
+    let rust = format!("#![allow(warnings)]\n{allocator}\n{generated}");
+    let mut command = Command::new("rustc");
+    common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(rustc.status.success(), "rustc rejected counted CBOR program:\n{}", String::from_utf8_lossy(&rustc.stderr));
     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
     assert!(run.status.success(), "counted CBOR program failed:\n{}", String::from_utf8_lossy(&run.stderr));
@@ -3371,14 +3371,9 @@ fn run() {
     });
     let rust = dir.join("args_parse_or_exit.rs");
     let bin = dir.join("args_parse_or_exit");
-    fs::write(&rust, out.rust).unwrap();
-    let built = Command::new("rustc")
-        .args(["--edition", "2021"])
-        .arg(&rust)
-        .arg("-o")
-        .arg(&bin)
-        .output()
-        .unwrap();
+    let mut command = Command::new("rustc");
+    common::add_generated_rust(&mut command, &rust, &out.rust, out.ffi.is_some(), &[]);
+    let built = command.arg("-o").arg(&bin).output().unwrap();
     assert!(
         built.status.success(),
         "rustc rejected generated code:\n{}",
@@ -3530,17 +3525,9 @@ fn run() {
     let out = compile_temp("os_interrupt_runtime.jet", src);
     let rs = dir.join("main.rs");
     let bin = dir.join("interrupt-runtime");
-    fs::write(&rs, out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let mut command = Command::new("rustc");
+    common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(rustc.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&rustc.stderr));
 
     let mut child = Command::new(&bin)
@@ -3599,11 +3586,9 @@ fn run() {
     );
     let rs = dir.join("main.rs");
     let bin = dir.join("interrupt-deadline");
-    fs::write(&rs, out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .output()
-        .unwrap();
+    let mut command = Command::new("rustc");
+    common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let rustc = command.arg("-o").arg(&bin).output().unwrap();
     assert!(
         rustc.status.success(),
         "rustc failed:\n{}",
@@ -3696,15 +3681,9 @@ fn build_and_run(
     });
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
     let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd.args([
-        "--edition",
-        "2021",
-        rs.to_str().unwrap(),
-        "-o",
-        bin.to_str().unwrap(),
-    ]);
+    common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
+    rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &out.ffi {
         rustc_cmd
             .arg("--extern")
@@ -3774,17 +3753,9 @@ fn build_and_run_multi(
     });
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let mut rustc_cmd = Command::new("rustc");
+    common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let rustc = rustc_cmd.arg("-o").arg(&bin).output().unwrap();
     assert!(
         rustc.status.success(),
         "rustc rejected generated multi-file code:\n{}",
@@ -5632,10 +5603,15 @@ fn main() {
 "#);
     let rs = dir.join("runtime_laws.rs");
     let bin = dir.join("runtime_laws");
-    fs::write(&rs, rust).unwrap();
     let mut rustc = Command::new("rustc");
-    rustc.args(["--edition", "2021", "--cfg", "test"])
-        .arg(&rs).arg("-o").arg(&bin);
+    common::add_generated_rust(
+        &mut rustc,
+        &rs,
+        &rust,
+        compiled.ffi.is_some(),
+        &["--cfg", "test"],
+    );
+    rustc.arg("-o").arg(&bin);
     if let Some(link) = compiled.ffi {
         rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
@@ -12161,9 +12137,15 @@ fn run() {
     let compiled = jet::compile_with_path(src, shown.to_str().unwrap()).unwrap();
     let rs = dir.join("clock.rs");
     let bin = dir.join("clock");
-    fs::write(&rs, compiled.rust).unwrap();
     let mut rustc = Command::new("rustc");
-    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin);
+    common::add_generated_rust(
+        &mut rustc,
+        &rs,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        &[],
+    );
+    rustc.arg("-o").arg(&bin);
     if let Some(link) = compiled.ffi {
         rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) { rustc.arg("-L").arg(format!("dependency={}", deps_dir.display())); }
