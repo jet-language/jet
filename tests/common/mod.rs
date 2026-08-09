@@ -24,7 +24,8 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
 /// this so a missing rustc is a loud failure — never a quiet self-skip that
 /// silently drops I2 (rustc-must-accept) coverage.
 pub fn have_rustc() -> bool {
-    let present = Command::new("rustc").arg("--version").output().is_ok();
+    static PRESENT: OnceLock<bool> = OnceLock::new();
+    let present = *PRESENT.get_or_init(|| Command::new("rustc").arg("--version").output().is_ok());
     if !present && std::env::var("JET_REQUIRE_RUSTC").as_deref() == Ok("1") {
         panic!(
             "JET_REQUIRE_RUSTC=1 but rustc not found on PATH — refusing to \
@@ -33,6 +34,43 @@ pub fn have_rustc() -> bool {
         );
     }
     present
+}
+
+/// Write generated Rust and add the one canonical cached-runtime dependency to
+/// a raw rustc command. The caller still compiles and links the user program.
+pub fn add_generated_rust(
+    command: &mut Command,
+    path: &Path,
+    generated: &str,
+    has_rust_ffi: bool,
+    rustc_flags: &[&str],
+) {
+    let flags = rustc_flags
+        .iter()
+        .map(|flag| std::ffi::OsString::from(*flag))
+        .collect::<Vec<_>>();
+    // A raw Rust `--test` invocation asks rustc to synthesize a harness from
+    // every embedded `#[cfg(test)]` module. Keep that uncommon inspection mode
+    // inline; it is not the Jet test-harness build path.
+    let rust_test_harness = rustc_flags.contains(&"--test");
+    let prepared = if has_rust_ffi || rust_test_harness {
+        jet::RuntimeCache::PreparedRuntime::inline(generated)
+    } else {
+        match jet::RuntimeCache::prepare(std::ffi::OsStr::new("rustc"), generated, &flags, &[]) {
+            Ok(prepared) => prepared,
+            Err(jet::RuntimeCache::Error::Cache(_)) => {
+                jet::RuntimeCache::PreparedRuntime::inline(generated)
+            }
+            Err(error) => panic!("cached runtime build failed: {error}"),
+        }
+    };
+    fs::write(path, prepared.rust()).unwrap();
+    command
+        .arg("--edition")
+        .arg("2021")
+        .args(rustc_flags.iter().copied())
+        .arg(path);
+    prepared.add_rustc_args(command);
 }
 
 /// A throwaway directory under the system temp dir, removed on drop.
@@ -483,15 +521,9 @@ fn build_and_run_with_cwd(
     });
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
     let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd.args([
-        "--edition",
-        "2021",
-        rs.to_str().unwrap(),
-        "-o",
-        bin.to_str().unwrap(),
-    ]);
+    add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
+    rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &out.ffi {
         rustc_cmd
             .arg("--extern")

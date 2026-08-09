@@ -2447,6 +2447,7 @@ fn append_cache_field(bytes: &mut Vec<u8>, value: &str) {
 fn native_cache_salt(
     toolchain: &str,
     dependency_fingerprint: &str,
+    runtime_fingerprint: &str,
     corelib_fingerprint: &str,
     mode: &str,
     target: &str,
@@ -2455,10 +2456,11 @@ fn native_cache_salt(
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"jet-native-cache-salt-v4");
+    bytes.extend_from_slice(b"jet-native-cache-salt-v5");
     for value in [
         toolchain,
         dependency_fingerprint,
+        runtime_fingerprint,
         corelib_fingerprint,
         mode,
         target,
@@ -2619,11 +2621,13 @@ fn native_cache_key_with_toolchain(
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();
     let dependency_interfaces = dependency_interface_fingerprint(&bundle);
+    let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint();
     let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(&bundle.used_core);
     let manifest = manifest_fingerprint(file)?;
     let salt = native_cache_salt(
         toolchain_identity,
         &format!("{manifest}:{dependency_interfaces}"),
+        &runtime_fingerprint,
         &corelib_fingerprint,
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
@@ -3342,18 +3346,83 @@ pub(crate) fn build(
         bin.display()
     ));
     let mut cmd = Command::new("rustc");
-    cmd.arg("--edition").arg("2021");
+    let mut rustc_flags = Vec::new();
     // E2-M15: cross-compilation target triple.
     if let Some(triple) = cross_target {
-        cmd.arg("--target").arg(triple);
+        rustc_flags.push("--target".to_string());
+        rustc_flags.push(triple.to_string());
     }
     let ffi_present = ffi.is_some();
     let config = profile.config();
-    config.apply_env(&mut cmd);
     if matches!(profile, BuildProfile::Release) {
-        cmd.arg("--cfg").arg("jet_release");
+        rustc_flags.push("--cfg".to_string());
+        rustc_flags.push("jet_release".to_string());
     }
-    config.apply_rustc(&mut cmd, ffi_present);
+    rustc_flags.extend(config.rustc_args(ffi_present));
+    let cache_flags = rustc_flags.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+    let cache_env = config
+        .env
+        .iter()
+        .map(|(name, value)| {
+            (
+                std::ffi::OsString::from(name),
+                std::ffi::OsString::from(value),
+            )
+        })
+        .collect::<Vec<_>>();
+    // Rust FFI glue can implement runtime traits for foreign types. Keep that
+    // source in one crate until the bridge owns those impls; Rust's orphan rule
+    // correctly rejects moving both the trait and type behind separate externs.
+    let prepared_runtime = if ffi_present {
+        if verbose {
+            step("runtime cache bypassed (Rust FFI glue)".to_string());
+        }
+        jet::RuntimeCache::PreparedRuntime::inline(rust_code)
+    } else {
+        match jet::RuntimeCache::prepare(
+            std::ffi::OsStr::new("rustc"),
+            rust_code,
+            &cache_flags,
+            &cache_env,
+        ) {
+            Ok(prepared) => {
+                if verbose {
+                    step(format!(
+                        "runtime   -> {}",
+                        if prepared.cache_hit() { "cache hit" } else { "cache store" }
+                    ));
+                }
+                prepared
+            }
+            Err(jet::RuntimeCache::Error::Cache(error)) => {
+                if verbose {
+                    step(format!("runtime cache bypassed ({error})"));
+                }
+                jet::RuntimeCache::PreparedRuntime::inline(rust_code)
+            }
+            Err(jet::RuntimeCache::Error::Tool(_)) => {
+                eprintln!("error: couldn't find `rustc` on this machine");
+                eprintln!(
+                    " why: v1 of this language uses Rust as its backend (docs/spec/architecture.md)"
+                );
+                eprintln!(" fix: install Rust from https://rustup.rs, then try again");
+                exit(ExitCodes::USER_ERROR);
+            }
+            Err(jet::RuntimeCache::Error::Rejected(error)) => {
+                eprintln!(
+                    "{}",
+                    jet::Diagnostics::render_ice_report(
+                        "rustc rejected the generated cached runtime",
+                        &error,
+                        true,
+                    )
+                );
+                exit(ExitCodes::ICE);
+            }
+        }
+    };
+    cmd.arg("--edition").arg("2021").args(&rustc_flags);
+    config.apply_env(&mut cmd);
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two
     // concurrent `jet` processes compiling different source that happens to
@@ -3383,7 +3452,7 @@ pub(crate) fn build(
     }
     let tmp_bin = work.join(&bin_name);
     let tmp_rs = work.join(format!("{}.rs", stem(file)));
-    if let Err(e) = fs::write(&tmp_rs, rust_code) {
+    if let Err(e) = fs::write(&tmp_rs, prepared_runtime.rust()) {
         eprintln!("error: couldn't write {}: {}", tmp_rs.display(), e);
         exit(ExitCodes::USER_ERROR);
     }
@@ -3392,6 +3461,7 @@ pub(crate) fn build(
     // into codegen.
     cmd.arg("--crate-name").arg(rustc_crate_name(file));
     cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
+    prepared_runtime.add_rustc_args(&mut cmd);
     if let Some(link) = ffi {
         cmd.arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
@@ -3627,14 +3697,18 @@ mod missing_c_lib_tests {
     #[test]
     fn generic_instance_cache_salt_tracks_every_downstream_input() {
         let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
-        let base = native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &instances);
-        assert_ne!(base, native_cache_salt("tool-b", "deps-a", "core-a", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-b", "core-a", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-b", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "test", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "macos-aarch64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &["instance-c".into()]));
-        assert_eq!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
+        let salt = |tool, deps, runtime, core, mode, target, instances: &[String]| {
+            native_cache_salt(tool, deps, runtime, core, mode, target, instances)
+        };
+        let base = salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &instances);
+        assert_ne!(base, salt("tool-b", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-b", "runtime-a", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-b", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-b", "run", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "test", "linux-x86_64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "macos-aarch64", &instances));
+        assert_ne!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &["instance-c".into()]));
+        assert_eq!(base, salt("tool-a", "deps-a", "runtime-a", "core-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
     }
 
     #[test]

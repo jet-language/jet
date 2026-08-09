@@ -97,6 +97,7 @@ pub use jet_repl as REPL;
 pub use jet_repl::{SemanticSymbols, Term};
 pub mod BuildCache;
 pub mod RunCache;
+pub mod RuntimeCache;
 pub mod BudgetProviders;
 pub mod BudgetStore;
 pub use jet_driver::BudgetView;

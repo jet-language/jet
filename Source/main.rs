@@ -237,42 +237,44 @@ impl ProfileConfig {
         parts.join(";")
     }
 
-    pub(crate) fn apply_rustc(&self, cmd: &mut Command, ffi: bool) {
+    pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+        let mut args = Vec::new();
         if self.small {
-            cmd.arg("-C")
-                .arg("opt-level=z")
-                .arg("-C")
-                .arg("panic=abort")
-                .arg("-C")
-                .arg("strip=symbols");
+            args.extend(
+                ["-C", "opt-level=z", "-C", "panic=abort", "-C", "strip=symbols"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
             if !ffi {
-                cmd.arg("-C").arg("lto=fat");
+                args.extend(["-C".to_string(), "lto=fat".to_string()]);
             }
-            return;
+            return args;
         }
         match self.optimize {
             OptimizeLevel::None => {}
             OptimizeLevel::Basic => {
-                cmd.arg("-O");
+                args.push("-O".to_string());
             }
             OptimizeLevel::Full => {
-                cmd.arg("-C").arg("opt-level=3");
+                args.extend(["-C".to_string(), "opt-level=3".to_string()]);
             }
         }
         if self.debug_info {
-            cmd.arg("-C").arg("debuginfo=2");
+            args.extend(["-C".to_string(), "debuginfo=2".to_string()]);
         } else if !matches!(self.optimize, OptimizeLevel::None) {
-            cmd.arg("-C").arg("strip=symbols");
+            args.extend(["-C".to_string(), "strip=symbols".to_string()]);
         }
         if self.panic_abort {
-            cmd.arg("-C").arg("panic=abort");
+            args.extend(["-C".to_string(), "panic=abort".to_string()]);
         }
         if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
-            cmd.arg("-C").arg("lto=thin");
+            args.extend(["-C".to_string(), "lto=thin".to_string()]);
         }
         for feat in &self.features {
-            cmd.arg("--cfg").arg(format!("feature=\"{feat}\""));
+            args.push("--cfg".to_string());
+            args.push(format!("feature=\"{feat}\""));
         }
+        args
     }
 
     pub(crate) fn apply_env(&self, cmd: &mut Command) {
