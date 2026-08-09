@@ -120,6 +120,15 @@ impl<V: user_Encode> user_Encode for std::collections::BTreeMap<String, V> {
         )
     }
 }
+impl<V: user_Encode> user_Encode for JetMap<String, V> {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Object(
+            self.iter()
+                .map(|(k, v)| (k.clone(), v.jet_encode()))
+                .collect(),
+        )
+    }
+}
 // D-ENC-CBOR-SURFACE1: DataTree itself is Codable. Whole-value codec
 // composition must not fall through to rustc after front-end acceptance.
 impl user_Encode for jet_std::DataTree {
@@ -306,6 +315,12 @@ impl<V: user_Decode> user_Decode for std::collections::BTreeMap<String, V> {
                 jet_std::datatree_kind(other)
             ))),
         }
+    }
+}
+impl<V: user_Decode> user_Decode for JetMap<String, V> {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        <std::collections::BTreeMap<String, V> as user_Decode>::jet_decode(t)
+            .map(|map| map.into_iter().collect())
     }
 }
 

@@ -258,7 +258,8 @@ fn jet_std_xml_parse_bytes(bytes: &Vec<u8>, options: jet_std::XMLParseOptions) -
 
 fn jet_std_xml_render(d: &jet_std::DataTree) -> String {
     jet_xml_from_data_tree(d)
-        .and_then(|value| crate::jet_xml_kernel::render_document(&value))
+        .ok()
+        .and_then(|value| crate::jet_xml_kernel::render_document(&value).ok())
         .unwrap_or_default()
 }
 

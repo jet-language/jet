@@ -360,14 +360,14 @@ $b64url_n :: (base64.decode_url("aGk") ?? panic("b64url")).len()
 $b32_n :: (base32.decode("MZXQ====") ?? panic("b32")).len()
 
 fn run() {
-    print("{json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
-    print("{jsonl_n}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
-    print("{csv_n}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
-    print("{xml_text}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
-    print("{cbor_round}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
-    print("{b64_n}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
-    print("{b64url_n}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
-    print("{b32_n}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
+    print("{$json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
+    print("{$jsonl_n}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
+    print("{$csv_n}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
+    print("{$xml_text}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
+    print("{$cbor_round}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
+    print("{$b64_n}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
+    print("{$b64url_n}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
+    print("{$b32_n}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
 }
 "#;
 
@@ -427,7 +427,7 @@ fn gap() => String {
 }
 
 fn run() {
-    print("{root}|{packet}")
+    print("{$root}|{$packet}")
     print(gap())
 }
 "#;
