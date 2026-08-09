@@ -4464,6 +4464,22 @@ fn tir_js_abi_int_expr(
     }
 }
 
+fn tir_js_err_field(
+    expr: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
+    use TIR::TExprKind as E;
+    match &expr.kind {
+        // JS Err values are the web boundary shape, not the internal tagged
+        // Option carrier. Marshal present values directly and use null for an
+        // absent optional code/cause.
+        E::Present(inner) => tir_js_expr(inner, funcs, file_prefix),
+        E::Absent => Ok("null".to_string()),
+        _ => tir_js_expr(expr, funcs, file_prefix),
+    }
+}
+
 fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
@@ -4521,6 +4537,21 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
         E::Field { recv, field, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field)),
+        E::StructLit { fields, .. }
+            if matches!(&expr.ty, Type::Named(name) if name == Syntax::TYPE_ERR) =>
+        {
+            let value = |wanted: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _, _)| field == wanted)
+                    .map(|(_, value, _)| value)
+                    .ok_or(())
+            };
+            let message = tir_js_err_field(value("message")?, funcs, file_prefix)?;
+            let code = tir_js_err_field(value("code")?, funcs, file_prefix)?;
+            let cause = tir_js_err_field(value("cause")?, funcs, file_prefix)?;
+            format!("({{ message: {message}, code: {code}, cause: {cause} }})")
+        }
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::EnumLit {
             variant, payload, ..

@@ -718,16 +718,16 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             .map(|(param, arg)| (param.name.clone(), arg.clone()))
             .collect();
         for item in items {
-            let (method, trait_name) = match item {
+            let (method, trait_name, generated_serde) = match item {
                 Item::Struct(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
-                        Some(method) => (method, None),
+                        Some(method) => (method, None, false),
                         None => continue,
                     }
                 }
                 Item::Enum(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
-                        Some(method) => (method, None),
+                        Some(method) => (method, None, false),
                         None => continue,
                     }
                 }
@@ -737,11 +737,11 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                         continue;
                     };
                     match &imp.trait_name {
-                        None => (method, None),
+                        None => (method, None, false),
                         Some(t)
                             if t == crate::Generics::ENCODE || t == crate::Generics::DECODE =>
                         {
-                            (method, Some(t.as_str()))
+                            (method, Some(t.as_str()), imp.is_generated_serde)
                         }
                         Some(_) => continue,
                     }
@@ -749,7 +749,20 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 _ => continue,
             };
             let mut subst = owner_subst.clone();
-            if !method_type_args.is_empty() {
+            // Built-in serde expansion keeps the owner's type parameters on the
+            // generated method so the source remains an ordinary Jet impl. A
+            // concrete owner such as `Wrap<Int>` binds those parameters; they
+            // are not independent method arguments to discard.
+            let owner_binds_method_params = generated_serde
+                && method
+                .type_params
+                .iter()
+                .all(|param| owner_subst.contains_key(&param.name));
+            if owner_binds_method_params {
+                if !method_type_args.is_empty() {
+                    continue;
+                }
+            } else if !method_type_args.is_empty() {
                 if method_type_args.len() != method.type_params.len() {
                     continue;
                 }

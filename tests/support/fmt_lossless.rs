@@ -4,15 +4,10 @@ use std::path::PathBuf;
 use jet::Lexer::{StrTokPart, TokKind, Token};
 
 const UI_PARSE_INVALID: &[&str] = &[
-    "tests/ui/E0927_allow_marker_legal.jet",
-    "tests/ui/E0927_retired_marker.jet",
     "tests/ui/E0927_retired_pure_callable.jet",
     "tests/ui/E0927_retired_pure_trait_oneline.jet",
     "tests/ui/E0927_retired_pure_trait_twoline.jet",
-    "tests/ui/E0927_unknown_marker_contract.jet",
-    "tests/ui/E0927_unknown_marker_directive.jet",
     "tests/ui/E0927_unknown_marker_function.jet",
-    "tests/ui/E0927_unknown_marker_typo.jet",
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/auto_derive_invalid_sign.jet",
@@ -50,7 +45,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/empty_map_colon_retired.jet",
     "tests/ui/enum_group_payload.jet",
     "tests/ui/enum_multi_positional_payload.jet",
-    "tests/ui/enum_pattern_needs_dot.jet",
     "tests/ui/enum_pattern_needs_dot_or.jet",
     "tests/ui/enum_pattern_needs_dot_payload.jet",
     "tests/ui/external_method_retired_separator.jet",
@@ -143,6 +137,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/result_old_syntax.jet",
     "tests/ui/retired_bare_sanitizer.jet",
     "tests/ui/retired_cli_marker.jet",
+    "tests/ui/retired_error_type.jet",
     "tests/ui/retired_void_result.jet",
     "tests/ui/return_arrow_split.jet",
     "tests/ui/root_param_shape.jet",

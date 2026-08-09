@@ -8,6 +8,8 @@
 //! language. The fact guard checks both law columns against the one registry.
 //! The source scan rejects second Rust copies.
 
+use std::collections::BTreeSet;
+
 use jet::AST::{Item, MarkerDecl};
 use jet_foundation::Facts;
 use jet_foundation::Policy::{self, RuleSite};
@@ -130,17 +132,30 @@ fn every_fact_row_carries_its_law_columns() {
         .map(str::trim)
         .filter(|line| line.starts_with("fact "))
         .collect();
-    let expected = written.len();
     let declarations = Registry::fact_declarations();
-    assert_eq!(declarations.len(), expected, "every fact declaration is read");
+    assert_eq!(declarations.len(), written.len(), "every fact declaration is read");
 
+    let declaration_names: BTreeSet<_> = declarations.iter().map(|declaration| declaration.name).collect();
     let rows: Vec<_> = Registry::rows()
         .iter()
-        .filter(|row| row.kind() == Registry::RowKind::Fact)
+        .filter(|row| declaration_names.contains(row.name))
         .collect();
-    assert_eq!(rows.len(), expected, "every fact declaration serves one row");
+    let row_names: BTreeSet<_> = rows.iter().map(|row| row.name).collect();
+    assert_eq!(
+        row_names, declaration_names,
+        "parsed fact declarations and registry rows must have the same names"
+    );
+    assert_eq!(rows.len(), declarations.len(), "every fact declaration serves one row");
 
-    for ((source, declaration), row) in written.iter().zip(declarations).zip(rows) {
+    for declaration in declarations {
+        let source = written
+            .iter()
+            .find(|source| source.starts_with(&format!("fact {}(", declaration.name)))
+            .unwrap_or_else(|| panic!("fact `{}` is not written", declaration.name));
+        let row = rows
+            .iter()
+            .find(|row| row.name == declaration.name)
+            .unwrap_or_else(|| panic!("fact `{}` has no registry row", declaration.name));
         assert!(source.starts_with(&format!("fact {}(", declaration.name)));
         for column in ["$holds:", "$safe:", "$gates:"] {
             assert!(source.contains(column), "`{}` must write `{column}`", declaration.name);

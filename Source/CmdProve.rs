@@ -214,6 +214,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
     }
     let mut replay_authority = if let Some(path) = replay {
+        // Refuse statically unrecorded authority before touching the artifact.
+        // The artifact cannot turn an IO or unsupported Time operation into a
+        // replayable one, and the refusal must remain the typed E3623 report.
+        if let Err(status) = preflight_replay_target(&target, json) {
+            exit(status);
+        }
         match crate::ProveReplay::prepare_replay(&identity, &path) {
             Ok(authority) => {
                 let mut authority = authority;
@@ -221,9 +227,6 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                 // inspecting the executable target. A malformed or stale
                 // artifact is a typed replay refusal (exit 1), never a child
                 // build/producer failure or ICE.
-                if let Err(status) = preflight_replay_target(&target, json) {
-                    exit(status);
-                }
                 let time_sites = capture_sites_for_target(&target)
                     .into_iter()
                     .filter(|site| supported_time_capture_site(site))
