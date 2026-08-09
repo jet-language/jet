@@ -13,6 +13,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
+mod encoding_base_rt {
+    include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
+}
+
 /// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
     #[derive(Clone, Debug, PartialEq)]
@@ -395,82 +399,24 @@ fn result_err_decode(path: &str, reason: &str) -> i64 {
     result_err_fields(errors)
 }
 
-// ── encode (mirrors EncodingCodecs.rs jet_std_hex/b64/base32_encode) ─────────
-
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    encoding_base_rt::jet_std_hex_encode(&bytes.to_vec())
 }
 
-const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 fn b64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(B64_CHARS[(n >> 18) as usize] as char);
-        out.push(B64_CHARS[((n >> 12) & 0x3f) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            B64_CHARS[((n >> 6) & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            B64_CHARS[(n & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
+    encoding_base_rt::jet_std_b64_encode(&bytes.to_vec())
 }
 
 fn b64url_encode(bytes: &[u8]) -> String {
-    b64_encode(bytes)
-        .trim_end_matches('=')
-        .replace('+', "-")
-        .replace('/', "_")
+    encoding_base_rt::jet_std_b64url_encode(&bytes.to_vec())
 }
 
-const BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
 fn base32_encode(bytes: &[u8]) -> String {
-    let mut out = String::new();
-    let mut buffer: u32 = 0;
-    let mut bits = 0u8;
-    for &b in bytes {
-        buffer = (buffer << 8) | b as u32;
-        bits += 8;
-        while bits >= 5 {
-            let idx = ((buffer >> (bits - 5)) & 31) as usize;
-            out.push(BASE32_CHARS[idx] as char);
-            bits -= 5;
-        }
-    }
-    if bits > 0 {
-        let idx = ((buffer << (5 - bits)) & 31) as usize;
-        out.push(BASE32_CHARS[idx] as char);
-    }
-    while out.len() % 8 != 0 {
-        out.push('=');
-    }
-    out
+    encoding_base_rt::jet_std_base32_encode(&bytes.to_vec())
 }
 
 fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
-    let s = text.trim();
-    if s.len() % 2 != 0 {
-        return Err(format!("hex string has odd length ({})", s.len()));
-    }
-    let mut out = Vec::with_capacity(s.len() / 2);
-    for i in (0..s.len()).step_by(2) {
-        match u8::from_str_radix(&s[i..i + 2], 16) {
-            Ok(b) => out.push(b),
-            Err(_) => return Err(format!("invalid hex at offset {}: {:?}", i, &s[i..i + 2])),
-        }
-    }
-    Ok(out)
+    encoding_base_rt::jet_std_hex_decode(&text.to_string())
 }
 
 extern "C" fn jet_jit_hex_encode(bytes: i64) -> i64 {
@@ -2490,4 +2436,3 @@ extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
         Err(msg) => result_err_msg(msg),
     }
 }
-

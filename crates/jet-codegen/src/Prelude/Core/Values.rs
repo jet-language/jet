@@ -444,27 +444,37 @@ enum JetLoadable<T: Clone, E: Clone> {
     Failed(E),
 }
 impl<T: Clone, E: Clone> JetLoadable<T, E> {
+    fn loadable_tag(&self) -> u8 {
+        match self {
+            JetLoadable::Idle => JET_LOADABLE_IDLE,
+            JetLoadable::Loading => JET_LOADABLE_LOADING,
+            JetLoadable::Loaded(_) => JET_LOADABLE_LOADED,
+            JetLoadable::Failed(_) => JET_LOADABLE_FAILED,
+        }
+    }
     fn is_idle(&self) -> bool {
-        matches!(self, JetLoadable::Idle)
+        jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_IDLE)
     }
     fn is_loading(&self) -> bool {
-        matches!(self, JetLoadable::Loading)
+        jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_LOADING)
     }
     fn is_loaded(&self) -> bool {
-        matches!(self, JetLoadable::Loaded(_))
+        jet_loadable_has_value(self.loadable_tag())
     }
     fn is_failed(&self) -> bool {
-        matches!(self, JetLoadable::Failed(_))
+        jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_FAILED)
     }
     fn loaded(&self) -> JetOutcome<T, JetAbsent> {
-        if let JetLoadable::Loaded(v) = self {
+        if jet_loadable_has_value(self.loadable_tag()) {
+            let JetLoadable::Loaded(v) = self else { unreachable!() };
             Ok(v.clone())
         } else {
             Err(JetAbsent)
         }
     }
     fn or_else(&self, default: T) -> T {
-        if let JetLoadable::Loaded(v) = self {
+        if jet_loadable_has_value(self.loadable_tag()) {
+            let JetLoadable::Loaded(v) = self else { unreachable!() };
             v.clone()
         } else {
             default

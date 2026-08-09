@@ -4,6 +4,10 @@
 
 use super::Concurrency;
 
+mod seeded_random_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
+}
+
 // ── ambient PRNG (Process.rs jet_rng_next / jet_std_random_*) ────────────────
 
 thread_local! {
@@ -162,32 +166,19 @@ pub(crate) struct RngState {
 }
 
 fn det_next(r: &mut RngState) -> u64 {
-    r.state = r.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = r.state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
+    seeded_random_kernel::jet_seeded_rng_next(&mut r.state)
 }
 
 fn rng_float(r: &mut RngState) -> f64 {
-    (det_next(r) >> 11) as f64 / (1u64 << 53) as f64
+    seeded_random_kernel::jet_seeded_rng_float(&mut r.state)
 }
 
 fn rng_float_open(r: &mut RngState) -> f64 {
-    let x = rng_float(r);
-    if x <= 0.0 {
-        f64::MIN_POSITIVE
-    } else {
-        x
-    }
+    seeded_random_kernel::jet_seeded_rng_float_open(&mut r.state)
 }
 
 fn rng_int(r: &mut RngState, lo: i64, hi: i64) -> i64 {
-    if hi <= lo {
-        return lo;
-    }
-    let span = (hi - lo + 1) as u64;
-    lo + (det_next(r) % span) as i64
+    seeded_random_kernel::jet_seeded_rng_int(&mut r.state, lo, hi)
 }
 
 fn with_rng<T: Default>(handle: i64, f: impl FnOnce(&mut RngState) -> T) -> T {
@@ -215,29 +206,21 @@ extern "C" fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
 
 extern "C" fn jet_jit_rng_float_range(handle: i64, low: f64, high: f64) -> f64 {
     with_rng(handle, |r| {
-        if !(high > low) {
-            return low;
-        }
-        low + (high - low) * rng_float(r)
+        seeded_random_kernel::jet_seeded_rng_float_range(&mut r.state, low, high)
     })
 }
 
 extern "C" fn jet_jit_rng_bool_p(handle: i64, p: f64) -> i8 {
     with_rng(handle, |r| {
-        let ok = if p <= 0.0 || p.is_nan() {
-            false
-        } else if p >= 1.0 {
-            true
-        } else {
-            rng_float(r) < p
-        };
-        i8::from(ok)
+        i8::from(seeded_random_kernel::jet_seeded_rng_bool_p(&mut r.state, p))
     })
 }
 
 extern "C" fn jet_jit_rng_bool(handle: i64) -> i8 {
     // Match AOT `jet_rng_bool` / comptime seeded rng: LSB of SplitMix64 next.
-    with_rng(handle, |r| i8::from((det_next(r) & 1) == 1))
+    with_rng(handle, |r| {
+        i8::from(seeded_random_kernel::jet_seeded_rng_bool(&mut r.state))
+    })
 }
 
 extern "C" fn jet_jit_rng_pick(handle: i64, items: i64) -> i64 {
@@ -444,7 +427,6 @@ host_fns! {
     rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
     rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
 }
-
 
 
 

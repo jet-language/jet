@@ -1313,7 +1313,7 @@ fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result
 }
 
 fn jet_net_ip_addr(text: &String) -> Result<JetIpAddr, JetNetError> {
-    text.parse::<std::net::IpAddr>()
+    jet_net_pure_parse_ip(text)
         .map(|inner| JetIpAddr { inner })
         .map_err(|e| JetNetError::InvalidInput(jet_net_detail("parse IP address", Some(text.clone()), None, format!("invalid IP address `{}`: {}", text, e), None)))
 }
@@ -1323,7 +1323,7 @@ fn jet_net_ip_to_string(ip: &JetIpAddr) -> String {
 }
 
 fn jet_net_ip_is_ipv4(ip: &JetIpAddr) -> bool {
-    ip.inner.is_ipv4()
+    jet_net_pure_ip_is_ipv4(&ip.inner)
 }
 
 fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNetError> {
@@ -1331,33 +1331,36 @@ fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNet
         return Err(JetNetError::InvalidInput(jet_net_detail("resolve socket address", Some(host.clone()), None, format!("invalid port `{}`: expected 0..65535", port), None)));
     }
     let text = format!("{}:{}", host, port);
-    text.parse::<std::net::SocketAddr>()
-        .or_else(|_| {
+    let resolved = match jet_net_pure_parse_socket_addr(&text) {
+        Ok(address) => Ok(address),
+        Err(_) => {
             use std::net::ToSocketAddrs;
             text.to_socket_addrs()?
                 .next()
                 .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address"))
-        })
+        }
+    };
+    resolved
         .map(|inner| JetSocketAddr { inner })
         .map_err(|e| jet_net_io_error("resolve socket address", Some(text), e))
 }
 
 fn jet_net_socket_addr_parse(text: &String) -> Result<JetSocketAddr, JetNetError> {
-    text.parse::<std::net::SocketAddr>()
+    jet_net_pure_parse_socket_addr(text)
         .map(|inner| JetSocketAddr { inner })
         .map_err(|e| JetNetError::InvalidInput(jet_net_detail("parse socket address", Some(text.clone()), None, format!("invalid socket address `{}`: {}", text, e), None)))
 }
 
 fn jet_net_socket_host(addr: &JetSocketAddr) -> String {
-    addr.inner.ip().to_string()
+    jet_net_pure_socket_host(&addr.inner)
 }
 
 fn jet_net_socket_port(addr: &JetSocketAddr) -> i64 {
-    addr.inner.port() as i64
+    jet_net_pure_socket_port(&addr.inner)
 }
 
 fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String {
-    addr.inner.to_string()
+    jet_net_pure_socket_to_string(&addr.inner)
 }
 
 fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTCPListener, JetNetError> {
@@ -3026,4 +3029,3 @@ fn jet_net_tcp_reply(mut stream: JetTCPStream, status: &String, body: &String) -
     stream.inner.shutdown(std::net::Shutdown::Write)
         .map_err(|e| jet_net_io_error("tcp reply close", None, e))
 }
-

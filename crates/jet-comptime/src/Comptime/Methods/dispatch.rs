@@ -30,25 +30,22 @@ use super::core_calls::{
 };
 use super::repl_process::apply_repl_authorized_core_call;
 
+mod seeded_random_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
+}
+
 // Keep this seeded SplitMix64 stream byte-for-byte with the AOT `jet_rng_*`
 // helpers. `core.random`'s ambient interpreter RNG is intentionally separate.
 fn seeded_rng_next(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut value = *state;
-    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    value ^ (value >> 31)
+    seeded_random_kernel::jet_seeded_rng_next(state)
 }
 
 fn seeded_rng_int(state: &mut u64, low: i64, high: i64) -> i64 {
-    if high <= low {
-        return low;
-    }
-    low + (seeded_rng_next(state) % ((high - low + 1) as u64)) as i64
+    seeded_random_kernel::jet_seeded_rng_int(state, low, high)
 }
 
 fn seeded_rng_float(state: &mut u64) -> f64 {
-    (seeded_rng_next(state) >> 11) as f64 / (1u64 << 53) as f64
+    seeded_random_kernel::jet_seeded_rng_float(state)
 }
 
 fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
@@ -168,43 +165,43 @@ pub fn apply_seeded_rng_method(
         "float_range" => {
             let low = float(0)?;
             let high = float(1)?;
-            Ok(CtValue::Float(CtFloat::f64(if high > low { low + (high - low) * seeded_rng_float(state) } else { low })))
+            Ok(CtValue::Float(CtFloat::f64(
+                seeded_random_kernel::jet_seeded_rng_float_range(state, low, high),
+            )))
         }
-        "bool" if args.is_empty() => Ok(CtValue::Bool((seeded_rng_next(state) & 1) == 1)),
+        "bool" if args.is_empty() => Ok(CtValue::Bool(
+            seeded_random_kernel::jet_seeded_rng_bool(state),
+        )),
         "bool" => {
             let p = float(0)?;
-            Ok(CtValue::Bool(if p <= 0.0 || p.is_nan() {
-                false
-            } else if p >= 1.0 {
-                true
-            } else {
-                seeded_rng_float(state) < p
-            }))
+            Ok(CtValue::Bool(
+                seeded_random_kernel::jet_seeded_rng_bool_p(state, p),
+            ))
         }
         "normal" => {
             let mean = float(0)?;
             let stddev = float(1)?;
-            let first = seeded_rng_float(state).max(f64::MIN_POSITIVE);
-            let second = seeded_rng_float(state);
-            let normal = (-2.0 * first.ln()).sqrt()
-                * (std::f64::consts::TAU * second).cos();
-            Ok(CtValue::Float(CtFloat::f64(mean + normal * stddev.max(0.0))))
+            Ok(CtValue::Float(CtFloat::f64(
+                seeded_random_kernel::jet_seeded_rng_normal(state, mean, stddev),
+            )))
         }
         "exponential" => {
             let lambda = float(0)?;
-            Ok(CtValue::Float(CtFloat::f64(if lambda <= 0.0 || lambda.is_nan() { 0.0 } else { -seeded_rng_float(state).max(f64::MIN_POSITIVE).ln() / lambda })))
+            Ok(CtValue::Float(CtFloat::f64(
+                seeded_random_kernel::jet_seeded_rng_exponential(state, lambda),
+            )))
         }
         "bytes" => {
-            let count = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            let count = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(CtValue::Bytes(
-                (0..count).map(|_| seeded_rng_next(state) as u8).collect(),
+                seeded_random_kernel::jet_seeded_rng_bytes(state, count),
             ))
         }
         "split" => Ok(CtValue::Struct {
             type_name: crate::Syntax::RNG_TYPE.to_string(),
             fields: vec![(
                 "state".to_string(),
-                CtValue::Int(seeded_rng_next(state) as i64),
+                CtValue::Int(seeded_random_kernel::jet_seeded_rng_split(state) as i64),
             )],
         }),
         "pick" => {

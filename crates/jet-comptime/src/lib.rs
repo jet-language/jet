@@ -7,4 +7,9 @@
 pub use jet_foundation::{
     BuildEffect, Collections, Diagnostics, Generics, Numeric, Syntax, Traits, AST, SHA256,
 };
+
+pub(crate) trait JetShow {
+    fn jet_show(&self) -> String;
+}
+
 pub mod Comptime;

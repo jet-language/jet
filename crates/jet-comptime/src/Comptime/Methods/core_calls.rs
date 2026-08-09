@@ -24,6 +24,45 @@ mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
+mod encoding_base_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
+}
+
+mod fmt_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Fmt.rs");
+}
+
+mod path_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Path.rs");
+}
+
+mod seeded_random_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
+}
+
+mod net_pure_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/NetPure.rs");
+}
+
+mod loadable_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Loadable.rs");
+}
+
+fn loadable_variant(state: &str) -> &'static str {
+    let tag = match state {
+        "idle" => loadable_kernel::JET_LOADABLE_IDLE,
+        "loading" => loadable_kernel::JET_LOADABLE_LOADING,
+        "loaded" => loadable_kernel::JET_LOADABLE_LOADED,
+        _ => loadable_kernel::JET_LOADABLE_FAILED,
+    };
+    match tag {
+        loadable_kernel::JET_LOADABLE_IDLE => "Idle",
+        loadable_kernel::JET_LOADABLE_LOADING => "Loading",
+        loadable_kernel::JET_LOADABLE_LOADED => "Loaded",
+        _ => "Failed",
+    }
+}
+
 mod mime_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
 }
@@ -606,79 +645,20 @@ pub fn apply_data_line_call(
     }
 }
 
-const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
-
 fn hex_encode(bytes: Vec<u8>) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX_DIGITS[(b >> 4) as usize] as char);
-        out.push(HEX_DIGITS[(b & 0xf) as usize] as char);
-    }
-    out
+    encoding_base_kernel::jet_std_hex_encode(&bytes)
 }
 
-fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
-        return None;
-    }
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = Vec::with_capacity(chars.len() / 2);
-    for pair in chars.chunks(2) {
-        let hi = pair[0].to_digit(16)?;
-        let lo = pair[1].to_digit(16)?;
-        out.push(((hi << 4) | lo) as u8);
-    }
-    Some(out)
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    encoding_base_kernel::jet_std_hex_decode(&s.to_string())
 }
-
-const BASE64_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn base64_encode(bytes: Vec<u8>) -> String {
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = chunk.get(1).copied();
-        let b2 = chunk.get(2).copied();
-        out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char);
-        out.push(BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char);
-        out.push(match b1 {
-            Some(b1) => {
-                BASE64_ALPHABET[(((b1 & 0x0f) << 2) | (b2.unwrap_or(0) >> 6)) as usize] as char
-            }
-            None => '=',
-        });
-        out.push(match b2 {
-            Some(b2) => BASE64_ALPHABET[(b2 & 0x3f) as usize] as char,
-            None => '=',
-        });
-    }
-    out
+    encoding_base_kernel::jet_std_b64_encode(&bytes)
 }
 
-const BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
 fn base32_encode(bytes: &[u8]) -> String {
-    let mut out = String::new();
-    let mut buffer: u32 = 0;
-    let mut bits = 0u8;
-    for &b in bytes {
-        buffer = (buffer << 8) | b as u32;
-        bits += 8;
-        while bits >= 5 {
-            let idx = ((buffer >> (bits - 5)) & 31) as usize;
-            out.push(BASE32_CHARS[idx] as char);
-            bits -= 5;
-        }
-    }
-    if bits > 0 {
-        let idx = ((buffer << (5 - bits)) & 31) as usize;
-        out.push(BASE32_CHARS[idx] as char);
-    }
-    while out.len() % 8 != 0 {
-        out.push('=');
-    }
-    out
+    encoding_base_kernel::jet_std_base32_encode(&bytes.to_vec())
 }
 
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
@@ -864,114 +844,6 @@ pub(super) fn shuffle_ct_list(state: &mut u64, xs: &mut [CtValue]) {
     }
 }
 
-// ── core.fmt: pure text formatting, mirrors AOT's `jet_fmt_*` (DataFmt.rs)
-// byte-for-byte (comma grouping, byte-size units, duration parts, ordinal
-// suffix, pad fill) so a comptime call prints identically to the same call
-// at AOT runtime (R12 parity). ────────────────────────────────────────────
-
-fn comma_int_ct(value: i64) -> String {
-    let raw = value.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, ch) in raw.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    let mut text: String = out.chars().rev().collect();
-    if value < 0 {
-        text.insert(0, '-');
-    }
-    text
-}
-
-fn comma_decimal_ct(raw: String) -> String {
-    let (sign, rest) = raw.strip_prefix('-').map_or(("", raw.as_str()), |s| ("-", s));
-    let mut split = rest.splitn(2, '.');
-    let whole = split.next().unwrap_or("0");
-    let frac = split.next();
-    let whole_value = whole.parse::<i64>().unwrap_or(0);
-    let whole_text = comma_int_ct(whole_value);
-    match frac {
-        Some(frac) => format!("{}{}.{}", sign, whole_text, frac),
-        None => format!("{}{}", sign, whole_text),
-    }
-}
-
-fn fmt_decimal_ct(value: f64, precision: i64) -> String {
-    let precision = precision.clamp(0, 9) as usize;
-    comma_decimal_ct(format!("{:.*}", precision, value))
-}
-
-fn fmt_bytes_ct(value: i64) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let mut size = (value as f64).abs();
-    let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
-    let mut unit = 0usize;
-    while size >= 1000.0 && unit + 1 < units.len() {
-        size /= 1000.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{}{} {}", sign, size as i64, units[unit])
-    } else if size >= 10.0 {
-        format!("{}{} {}", sign, size.round() as i64, units[unit])
-    } else {
-        let shown = format!("{:.1}", size);
-        format!("{}{} {}", sign, shown.trim_end_matches(".0"), units[unit])
-    }
-}
-
-fn fmt_duration_ct(ms: i64) -> String {
-    let sign = if ms < 0 { "-" } else { "" };
-    let mut rest = ms.abs();
-    if rest < 1000 {
-        return format!("{}{}ms", sign, rest);
-    }
-    let days = rest / 86_400_000;
-    rest %= 86_400_000;
-    let hours = rest / 3_600_000;
-    rest %= 3_600_000;
-    let minutes = rest / 60_000;
-    rest %= 60_000;
-    let seconds = rest / 1000;
-    let mut parts = Vec::new();
-    if days > 0 {
-        parts.push(format!("{}d", days));
-    }
-    if hours > 0 {
-        parts.push(format!("{}h", hours));
-    }
-    if minutes > 0 {
-        parts.push(format!("{}m", minutes));
-    }
-    if seconds > 0 || parts.is_empty() {
-        parts.push(format!("{}s", seconds));
-    }
-    format!(
-        "{}{}",
-        sign,
-        parts.into_iter().take(3).collect::<Vec<_>>().join(" ")
-    )
-}
-
-fn pad_need_ct(text: &str, width: i64) -> usize {
-    let width = width.max(0) as usize;
-    width.saturating_sub(text.chars().count())
-}
-
-fn pad_fill_ct(fill: &str, len: usize) -> String {
-    if len == 0 {
-        return String::new();
-    }
-    let fill = if fill.is_empty() { " " } else { fill };
-    let mut out = String::new();
-    while out.chars().count() < len {
-        out.push_str(fill);
-    }
-    out.chars().take(len).collect()
-}
-
 thread_local! {
     static JET_AMBIENT_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173);
 }
@@ -1108,12 +980,12 @@ pub fn apply_core_call(
         // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.
         ("core.reactive.loadable", state @ ("idle" | "loading")) => Ok(CtValue::Enum {
             type_name: "Loadable".to_string(),
-            variant: if state == "idle" { "Idle" } else { "Loading" }.to_string(),
+            variant: loadable_variant(state).to_string(),
             args: Vec::new(),
         }),
         ("core.reactive.loadable", state @ ("loaded" | "failed")) => Ok(CtValue::Enum {
             type_name: "Loadable".to_string(),
-            variant: if state == "loaded" { "Loaded" } else { "Failed" }.to_string(),
+            variant: loadable_variant(state).to_string(),
             args: vec![(None, one(0)?.clone())],
         }),
         // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
@@ -1241,30 +1113,14 @@ pub fn apply_core_call(
                 _ => return Err(unsupported("this operation on a value that is not a whole number", span)),
             };
             match method {
-                "isqrt" => {
-                    if value < 0 {
-                        return Ok(CtValue::absent(Type::Int));
-                    }
-                    let mut root = (value as f64).sqrt() as i64;
-                    while root > 0 && root.saturating_mul(root) > value { root -= 1; }
-                    while (root + 1).saturating_mul(root + 1) <= value { root += 1; }
-                    Ok(CtValue::Present(Box::new(CtValue::Int(root))))
-                }
-                "factorial" => {
-                    if value < 0 {
-                        return Ok(CtValue::absent(Type::Int));
-                    }
-                    let mut total: i64 = 1;
-                    let mut step: i64 = 2;
-                    while step <= value {
-                        total = match total.checked_mul(step) {
-                            Some(next) => next,
-                            None => return Ok(CtValue::absent(Type::Int)),
-                        };
-                        step += 1;
-                    }
-                    Ok(CtValue::Present(Box::new(CtValue::Int(total))))
-                }
+                "isqrt" => Ok(match math_lib_pure::jet_std_math_isqrt(value) {
+                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
+                    None => CtValue::absent(Type::Int),
+                }),
+                "factorial" => Ok(match math_lib_pure::jet_std_math_factorial(value) {
+                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
+                    None => CtValue::absent(Type::Int),
+                }),
                 "checked_abs" => Ok(match value.checked_abs() {
                     Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
                     None => CtValue::absent(Type::Int),
@@ -1330,31 +1186,21 @@ pub fn apply_core_call(
                 CtValue::Int(v) => *v,
                 _ => return Err(unsupported("leading_ones needs a whole number", span)),
             };
-            Ok(CtValue::Int((value as u64).leading_ones() as i64))
+            Ok(CtValue::Int(math_lib_pure::jet_std_math_leading_ones(value)))
         }
         ("core.math", "trailing_ones") => {
             let value = match one(0)? {
                 CtValue::Int(v) => *v,
                 _ => return Err(unsupported("trailing_ones needs a whole number", span)),
             };
-            Ok(CtValue::Int((value as u64).trailing_ones() as i64))
+            Ok(CtValue::Int(math_lib_pure::jet_std_math_trailing_ones(value)))
         }
         ("core.math", "digits") => {
             let value = match one(0)? {
                 CtValue::Int(v) => *v,
                 _ => return Err(unsupported("digits needs a whole number", span)),
             };
-            Ok(CtValue::Int(if value == 0 {
-                1
-            } else {
-                let mut n = value.unsigned_abs();
-                let mut count = 0i64;
-                while n > 0 {
-                    count += 1;
-                    n /= 10;
-                }
-                count
-            }))
+            Ok(CtValue::Int(math_lib_pure::jet_std_math_digits(value)))
         }
         ("core.math", "binomial") => {
             let n = match one(0)? {
@@ -1416,9 +1262,9 @@ pub fn apply_core_call(
             ))))
         }
         ("core.math", "erfc") => {
-            Ok(CtValue::Float(CtFloat::f64(
-                1.0 - math_lib_pure::jet_std_math_erf(as_ct_float(one(0)?, span)?.as_f64()),
-            )))
+            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_erfc(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
         }
         ("core.math", "gamma") => {
             Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_gamma(
@@ -1426,12 +1272,9 @@ pub fn apply_core_call(
             ))))
         }
         ("core.math", "lgamma") => {
-            let g = math_lib_pure::jet_std_math_gamma(as_ct_float(one(0)?, span)?.as_f64());
-            Ok(CtValue::Float(CtFloat::f64(if g.is_nan() || g <= 0.0 {
-                f64::NAN
-            } else {
-                g.ln()
-            })))
+            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_lgamma(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
         }
         ("core.math", "sin_cos") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
@@ -1583,30 +1426,15 @@ pub fn apply_core_call(
             }))
         }
         ("core.math", "gcd") => {
-            let mut a = as_int(one(0)?, span)?.abs();
-            let mut b = as_int(one(1)?, span)?.abs();
-            while b != 0 {
-                let r = a % b;
-                a = b;
-                b = r;
-            }
-            Ok(CtValue::Int(a))
+            Ok(CtValue::Int(math_lib_pure::jet_std_math_gcd(
+                as_int(one(0)?, span)?,
+                as_int(one(1)?, span)?,
+            )))
         }
         ("core.math", "lcm") => {
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
-            Ok(CtValue::Int(if a == 0 || b == 0 {
-                0
-            } else {
-                let mut x = a.abs();
-                let mut y = b.abs();
-                while y != 0 {
-                    let r = x % y;
-                    x = y;
-                    y = r;
-                }
-                (a / x).saturating_mul(b).abs()
-            }))
+            Ok(CtValue::Int(math_lib_pure::jet_std_math_lcm(a, b)))
         }
         // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
@@ -1767,11 +1595,9 @@ pub fn apply_core_call(
         ("core.path", "join") => {
             let a = as_string(one(0)?, span)?;
             let b = as_string(one(1)?, span)?;
-            let joined = std::path::Path::new(a)
-                .join(b)
-                .to_string_lossy()
-                .into_owned();
-            Ok(CtValue::Str(joined))
+            Ok(CtValue::Str(path_kernel::jet_std_path_join(
+                a, b,
+            )))
         }
         // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
@@ -1789,31 +1615,15 @@ pub fn apply_core_call(
         }
         ("core.path", "parent") => {
             let p = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(
-                std::path::Path::new(p)
-                    .parent()
-                    .map(|x| x.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-            ))
+            Ok(CtValue::Str(path_kernel::jet_std_path_parent(p)))
         }
         ("core.path", "extension") => {
             let p = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(
-                std::path::Path::new(p)
-                    .extension()
-                    .map(|x| x.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-            ))
+            Ok(CtValue::Str(path_kernel::jet_std_path_extension(p)))
         }
         ("core.path", "normalize") => {
             let p = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(
-                std::path::Path::new(p)
-                    .components()
-                    .collect::<std::path::PathBuf>()
-                    .to_string_lossy()
-                    .into_owned(),
-            ))
+            Ok(CtValue::Str(path_kernel::jet_std_path_normalize(p)))
         }
         // --- core.encoding.json ---
         ("core.encoding.json", "parse") => {
@@ -2194,13 +2004,13 @@ pub fn apply_core_call(
                 random_sample_ct(st, xs, k)
             })))
         }
-        // --- core.fmt (pure text formatting; mirrors AOT's `jet_fmt_*`, DataFmt.rs) ---
+        // --- core.fmt: CtValue adapters over the shared Prelude kernel ---
         ("core.fmt", "number") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.number expects an Int", span)),
             };
-            Ok(CtValue::Str(comma_int_ct(n)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_number(n)))
         }
         ("core.fmt", "decimal") => {
             let value = as_float(one(0)?, span)?;
@@ -2208,7 +2018,7 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.decimal precision must be Int", span)),
             };
-            Ok(CtValue::Str(fmt_decimal_ct(value, precision)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_decimal(value, precision)))
         }
         ("core.fmt", "percent") => {
             let value = as_float(one(0)?, span)?;
@@ -2216,42 +2026,28 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.percent precision must be Int", span)),
             };
-            Ok(CtValue::Str(format!(
-                "{}%",
-                fmt_decimal_ct(value * 100.0, precision)
-            )))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_percent(value, precision)))
         }
         ("core.fmt", "bytes") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.bytes expects an Int", span)),
             };
-            Ok(CtValue::Str(fmt_bytes_ct(n)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_bytes(n)))
         }
         ("core.fmt", "duration") => {
             let ms = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.duration expects an Int (ms)", span)),
             };
-            Ok(CtValue::Str(fmt_duration_ct(ms)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_duration(ms)))
         }
         ("core.fmt", "ordinal") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.ordinal expects an Int", span)),
             };
-            let abs = n.abs();
-            let suffix = if (11..=13).contains(&(abs % 100)) {
-                "th"
-            } else {
-                match abs % 10 {
-                    1 => "st",
-                    2 => "nd",
-                    3 => "rd",
-                    _ => "th",
-                }
-            };
-            Ok(CtValue::Str(format!("{}{}", comma_int_ct(n), suffix)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_ordinal(n)))
         }
         ("core.fmt", "plural") => {
             let count = match one(0)? {
@@ -2260,8 +2056,9 @@ pub fn apply_core_call(
             };
             let singular = as_string(one(1)?, span)?;
             let plural = as_string(one(2)?, span)?;
-            let word = if count.abs() == 1 { singular } else { plural };
-            Ok(CtValue::Str(format!("{} {}", comma_int_ct(count), word)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_plural(
+                count, singular, plural,
+            )))
         }
         ("core.fmt", "pad_left") => {
             let text = as_string(one(0)?, span)?;
@@ -2270,8 +2067,9 @@ pub fn apply_core_call(
                 _ => return Err(unsupported("fmt.pad_left width must be Int", span)),
             };
             let fill = as_string(one(2)?, span)?;
-            let need = pad_need_ct(text, width);
-            Ok(CtValue::Str(format!("{}{}", pad_fill_ct(fill, need), text)))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_left(
+                text, width, fill,
+            )))
         }
         ("core.fmt", "pad_right") => {
             let text = as_string(one(0)?, span)?;
@@ -2280,8 +2078,9 @@ pub fn apply_core_call(
                 _ => return Err(unsupported("fmt.pad_right width must be Int", span)),
             };
             let fill = as_string(one(2)?, span)?;
-            let need = pad_need_ct(text, width);
-            Ok(CtValue::Str(format!("{}{}", text, pad_fill_ct(fill, need))))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_right(
+                text, width, fill,
+            )))
         }
         ("core.fmt", "pad_center") => {
             let text = as_string(one(0)?, span)?;
@@ -2290,14 +2089,8 @@ pub fn apply_core_call(
                 _ => return Err(unsupported("fmt.pad_center width must be Int", span)),
             };
             let fill = as_string(one(2)?, span)?;
-            let need = pad_need_ct(text, width);
-            let left = need / 2;
-            let right = need - left;
-            Ok(CtValue::Str(format!(
-                "{}{}{}",
-                pad_fill_ct(fill, left),
-                text,
-                pad_fill_ct(fill, right)
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_center(
+                text, width, fill,
             )))
         }
         // --- D-ANY-JAI1: core.reflect (the runtime reflection floor, pure).
@@ -2319,8 +2112,8 @@ pub fn apply_core_call(
         ("core.encoding.hex", "decode") => {
             let s = as_string(one(0)?, span)?;
             Ok(match hex_decode(s) {
-                Some(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                None => CtValue::failed(Box::new(CtValue::Str(format!("`{}` isn't valid hex", s)))),
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
         ("core.encoding.base64", "encode") => {
@@ -2348,10 +2141,7 @@ pub fn apply_core_call(
         ("core.encoding.base64", "encode_url") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(
-                base64_encode(bytes)
-                    .trim_end_matches('=')
-                    .replace('+', "-")
-                    .replace('/', "_"),
+                encoding_base_kernel::jet_std_b64url_encode(&bytes),
             ))
         }
         ("core.encoding.base64", "decode_url") => {
@@ -2397,7 +2187,7 @@ pub fn apply_core_call(
         // `UrlLite.rs`) ---
         ("core.url", "parse") => {
             let s = as_string(one(0)?, span)?;
-            Ok(match super::super::UrlLite::UrlParts::parse(s) {
+            Ok(match super::super::UrlLite::parse(s) {
                 Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
                 Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
             })
@@ -2409,7 +2199,7 @@ pub fn apply_core_call(
             let query = as_string_rows(one(3)?, span)?;
             let fragment = as_string(one(4)?, span)?.to_string();
             Ok(
-                match super::super::UrlLite::UrlParts::from_parts(&scheme, &host, &path, &query, &fragment)
+                match super::super::UrlLite::from_parts(&scheme, &host, &path, &query, &fragment)
                 {
                     Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
                     Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
@@ -2418,7 +2208,7 @@ pub fn apply_core_call(
         }
         ("core.url", "file") => {
             let path = as_string(one(0)?, span)?;
-            Ok(url_parts_to_ct(&super::super::UrlLite::UrlParts::file(path)))
+            Ok(url_parts_to_ct(&super::super::UrlLite::file(path)))
         }
         ("core.url", "data") => {
             // `mime` arg is a `CtValue::Struct { type_name: "Mime", .. }`
@@ -2461,9 +2251,7 @@ pub fn apply_core_call(
                 }
                 _ => return Err(unsupported("core.url.data: first argument must be a Mime", span)),
             };
-            Ok(url_parts_to_ct(&super::super::UrlLite::UrlParts::data(
-                &rendered, text,
-            )))
+            Ok(url_parts_to_ct(&super::super::UrlLite::data(&rendered, text)))
         }
         ("core.url", "query") => {
             let rows = as_string_rows(one(0)?, span)?;
@@ -2677,24 +2465,32 @@ pub fn apply_core_call(
         ("core.data", "line_text" | "line_svg") => apply_data_line_call(method, args, span),
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
         ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
-            as_string(one(0)?, span)?.chars().count() as i64,
+            super::super::TextLite::unicode_scalar_count(as_string(one(0)?, span)?),
         )),
         ("core.text.unicode", "byte_count") => {
-            Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64))
+            Ok(CtValue::Int(super::super::TextLite::unicode_byte_count(
+                as_string(one(0)?, span)?,
+            )))
         }
         ("core.text.unicode", "is_ascii") => {
-            Ok(CtValue::Bool(as_string(one(0)?, span)?.is_ascii()))
+            Ok(CtValue::Bool(super::super::TextLite::unicode_is_ascii(
+                as_string(one(0)?, span)?,
+            )))
         }
         ("core.text.unicode", "lower") => {
-            Ok(CtValue::Str(super::super::TextLite::lower(as_string(one(0)?, span)?)))
+            Ok(CtValue::Str(super::super::TextLite::unicode_lower(
+                as_string(one(0)?, span)?,
+            )))
         }
         ("core.text.unicode", "upper") => {
-            Ok(CtValue::Str(super::super::TextLite::upper(as_string(one(0)?, span)?)))
+            Ok(CtValue::Str(super::super::TextLite::unicode_upper(
+                as_string(one(0)?, span)?,
+            )))
         }
         ("core.text.unicode", "scalars") => Ok(CtValue::List(
-            as_string(one(0)?, span)?
-                .chars()
-                .map(|c| CtValue::Str(c.to_string()))
+            super::super::TextLite::unicode_scalars(as_string(one(0)?, span)?)
+                .into_iter()
+                .map(CtValue::Str)
                 .collect(),
         )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when

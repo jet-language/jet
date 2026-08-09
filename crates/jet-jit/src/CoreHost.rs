@@ -8,6 +8,10 @@ use super::Concurrency;
 use std::cell::{Cell, RefCell};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
+mod path_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/Path.rs");
+}
+
 // ── core.os (mirrors jet_std_os_* in FSIoEnvOsTesting.rs) ────────────────────
 
 extern "C" fn jet_jit_os_name() -> i64 {
@@ -1274,59 +1278,27 @@ extern "C" fn jet_jit_fs_create_dir(path: i64) -> i64 {
 extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
     let b = clone_string(base);
     let p = clone_string(part);
-    let joined = std::path::Path::new(&b)
-        .join(p)
-        .to_string_lossy()
-        .to_string();
+    let joined = path_kernel::jet_std_path_join(&b, &p);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(joined))
 }
 
 /// String-form `core.path.parent` / `.extension` / `.normalize` (D-IO1 helpers).
 extern "C" fn jet_jit_path_parent_str(path: i64) -> i64 {
     let s = clone_string(path);
-    let out = std::path::Path::new(&s)
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let out = path_kernel::jet_std_path_parent(&s);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
 extern "C" fn jet_jit_path_extension_str(path: i64) -> i64 {
     let s = clone_string(path);
-    let out = std::path::Path::new(&s)
-        .extension()
-        .map(|e| e.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let out = path_kernel::jet_std_path_extension(&s);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
 extern "C" fn jet_jit_path_normalize_str(path: i64) -> i64 {
     let s = clone_string(path);
-    let source = std::path::Path::new(&s);
-    let rooted = source.has_root();
-    let mut normalized = std::path::PathBuf::new();
-    let mut normal_depth = 0usize;
-    for component in source.components() {
-        match component {
-            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            std::path::Component::RootDir => normalized.push(component.as_os_str()),
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir if normal_depth > 0 => {
-                normalized.pop();
-                normal_depth -= 1;
-            }
-            std::path::Component::ParentDir if !rooted => normalized.push(".."),
-            std::path::Component::ParentDir => {}
-            std::path::Component::Normal(part) => {
-                normalized.push(part);
-                normal_depth += 1;
-            }
-        }
-    }
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .alloc_string(normalized.to_string_lossy().into_owned())
-    })
+    let out = path_kernel::jet_std_path_normalize(&s);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
 extern "C" fn jet_jit_path_write_atomic(rec: i64, bytes: i64) -> i64 {
@@ -1342,38 +1314,25 @@ extern "C" fn jet_jit_path_from(path: i64) -> i64 {
 extern "C" fn jet_jit_path_join_handle(rec: i64, part: i64) -> i64 {
     let base = path_string_from_record(rec);
     let p = clone_string(part);
-    path_record(
-        std::path::Path::new(&base)
-            .join(p)
-            .to_string_lossy()
-            .to_string(),
-    )
+    path_record(path_kernel::jet_std_path_join(&base, &p))
 }
 
 extern "C" fn jet_jit_path_parent(rec: i64) -> i64 {
     let s = path_string_from_record(rec);
-    match std::path::Path::new(&s).parent() {
+    match path_kernel::jet_std_path_parent_opt(&s) {
         None => 0,
-        Some(par) => path_record(par.to_string_lossy().to_string()).wrapping_add(1),
+        Some(parent) => path_record(parent).wrapping_add(1),
     }
 }
 
 extern "C" fn jet_jit_path_extension(rec: i64) -> i64 {
     let s = path_string_from_record(rec);
-    option_string_bits(
-        std::path::Path::new(&s)
-            .extension()
-            .map(|e| e.to_string_lossy().to_string()),
-    )
+    option_string_bits(path_kernel::jet_std_path_extension_opt(&s))
 }
 
 extern "C" fn jet_jit_path_stem(rec: i64) -> i64 {
     let s = path_string_from_record(rec);
-    option_string_bits(
-        std::path::Path::new(&s)
-            .file_stem()
-            .map(|e| e.to_string_lossy().to_string()),
-    )
+    option_string_bits(path_kernel::jet_std_path_stem_opt(&s))
 }
 
 extern "C" fn jet_jit_path_to_string(rec: i64) -> i64 {
@@ -2415,8 +2374,6 @@ host_fns! {
     io_input: "jet_jit_io_input" => jet_jit_io_input: sig_i8_i64_i64;
     process_exit: "jet_jit_process_exit" => jet_jit_process_exit: sig_void_i64;
 }
-
-
 
 
 
