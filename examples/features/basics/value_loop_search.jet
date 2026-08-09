@@ -1,0 +1,25 @@
+// D-CHOOSE-FIND1=A: a search loop states what exhaustion means.
+fn labeled_route() => Int {
+    attempt := 0
+    outer :: loop {
+        attempt += 1
+        found :: loop value, [1] {
+            if attempt > 1 { break value }
+        } ?? next(outer)
+        break 7
+    }
+    outer
+}
+
+fn run() {
+    values :: [Int].{1, 2, 3, 4}
+    first :: loop value, values {
+        if value > 2 { break value }
+    } ?? -1
+    miss :: loop value, values {
+        if value > 9 { break value }
+    } ?? -1
+    print(first)
+    print(miss)
+    print(labeled_route())
+}

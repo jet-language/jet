@@ -5,7 +5,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{Call, Expr, OrFallback, TryConvert, Type};
+use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
 
 impl<'a> Checker<'a> {
     pub(crate) fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
@@ -263,6 +263,189 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-CHOOSE-FIND1=A: a finite value loop is not a fallible expression.
+    /// Attach its written exhaustion route to the compiler-private result-loop
+    /// carrier, then erase the surface `??` before ordinary lowering. Every
+    /// execution tier therefore consumes the same result-loop AST.
+    pub(crate) fn infer_value_loop_fallback(&mut self, expr: &mut Expr) -> Option<Type> {
+        let span = expr.span();
+        let Expr::OrFallback {
+            value, fallback, ..
+        } = std::mem::replace(expr, Expr::Absent(span))
+        else {
+            unreachable!("value-loop fallback dispatch only accepts OrFallback")
+        };
+        let mut value = value;
+        mark_value_loop_route_attached(&mut value);
+        let value_ty = match self.infer(&mut value) {
+            Some(ty) => ty,
+            None => {
+                *expr = *value;
+                return None;
+            }
+        };
+        self.reject_borrowed_param_subplace(
+            value.as_ref(),
+            Some(&value_ty),
+            "supply an owned exhaustion-route payload",
+        );
+        let Some(label) = value_loop_route_label(&mut value) else {
+            *expr = *value;
+            return Some(value_ty);
+        };
+
+        match fallback {
+            OrFallback::Value(mut fallback_expr) => {
+                let fallback_span = fallback_expr.span();
+                let saved = self.expected_type.clone();
+                self.expected_type = Some(value_ty.clone());
+                let fallback_ty = self.infer(&mut fallback_expr);
+                self.expected_type = saved;
+                if let Some(fallback_ty) = fallback_ty {
+                    if fallback_ty != value_ty {
+                        self.diags.push(Diagnostic::error(
+                            "E0405",
+                            format!(
+                                "the fallback is {}, but the loop value is {}",
+                                fallback_ty.show(),
+                                value_ty.show()
+                            ),
+                            format!(
+                                "both sides of `{}` must be the same type",
+                                Syntax::OP_FALLBACK
+                            ),
+                            type_fix_hint(&value_ty, &fallback_ty),
+                            Some(fallback_span),
+                        ));
+                    }
+                }
+                attach_value_loop_route(
+                    &mut value,
+                    Stmt::BreakLabelValue(
+                        label,
+                        span,
+                        *fallback_expr,
+                        fallback_span,
+                    ),
+                );
+            }
+            OrFallback::Return(mut ret_expr, ret_span) => {
+                let ret = self.ret.clone();
+                match (&ret, ret_expr.as_mut()) {
+                    (Some(ret_ty), Some(e)) => {
+                        let saved = self.expected_type.clone();
+                        self.expected_type = Some(ret_ty.clone());
+                        let expr_ty = self.infer(e);
+                        self.expected_type = saved;
+                        if let Some(expr_ty) = expr_ty {
+                            self.check_type_assignable(ret_ty, &expr_ty, e.span());
+                        }
+                    }
+                    (Some(ret_ty), None) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0405",
+                            format!("`{} return` here needs a value", Syntax::OP_FALLBACK),
+                            format!(
+                                "a bare `return` needs a value here because the function returns {}",
+                                ret_ty.show()
+                            ),
+                            format!(
+                                "give a fallback value: `{} return <value>`",
+                                Syntax::OP_FALLBACK
+                            ),
+                            Some(ret_span),
+                        ));
+                    }
+                    (None, Some(e)) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0405",
+                            format!("`{} return` can't return a value here", Syntax::OP_FALLBACK),
+                            "this function returns nothing, so `return` can't carry a value"
+                                .to_string(),
+                            "drop the value, or add `=> Type` to the function".to_string(),
+                            Some(e.span()),
+                        ));
+                    }
+                    (None, None) => {}
+                }
+                attach_value_loop_route(
+                    &mut value,
+                    Stmt::Return(ret_expr.map(|e| *e), span),
+                );
+            }
+            OrFallback::Panic { name_span, args } => {
+                let mut call = Call {
+                    name: Syntax::BUILTIN_PANIC.to_string(),
+                    name_span,
+                    type_args: Vec::new(),
+                    args,
+                    resolved_ret: None,
+                    range_checked: false,
+                    widen_approx: false,
+                };
+                self.check_panic_call(&mut call);
+                attach_value_loop_route(&mut value, Stmt::Expr(Expr::Call(call)));
+            }
+            route @ (OrFallback::Break(_) | OrFallback::Continue(_)) => {
+                let (route, route_span) = match &route {
+                    OrFallback::Break(span) => ("break".to_string(), *span),
+                    OrFallback::Continue(span) => ("next".to_string(), *span),
+                    OrFallback::Value(_) | OrFallback::Return(..) | OrFallback::Panic { .. }
+                    | OrFallback::BreakLabel(..)
+                    | OrFallback::ContinueLabel(..) => {
+                        unreachable!("matched immediate loop-control fallback")
+                    }
+                };
+                mark_value_loop_route_unattached(&mut value);
+                self.diags.push(Diagnostic::error(
+                    "E0078",
+                    format!(
+                        "this finite value loop cannot use `{} {}` after its closing brace",
+                        Syntax::OP_FALLBACK,
+                        route
+                    ),
+                    "the route would control the loop that just closed; use a labeled loop to name the target".to_string(),
+                    "write a labeled search such as `found :: loop { ... break(found, value) }`".to_string(),
+                    Some(route_span),
+                ));
+            }
+            OrFallback::BreakLabel(name, route_span) => {
+                if self.loop_depth == 0 {
+                    mark_value_loop_route_unattached(&mut value);
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_BREAK, route_span));
+                } else if !self.loop_labels.iter().any(|label| label == &name) {
+                    mark_value_loop_route_unattached(&mut value);
+                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
+                        &name,
+                        &self.loop_labels,
+                        route_span,
+                    ));
+                } else {
+                    attach_value_loop_route(&mut value, Stmt::BreakLabel(name, route_span));
+                }
+            }
+            OrFallback::ContinueLabel(name, route_span) => {
+                if self.loop_depth == 0 {
+                    mark_value_loop_route_unattached(&mut value);
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_NEXT, route_span));
+                } else if !self.loop_labels.iter().any(|label| label == &name) {
+                    mark_value_loop_route_unattached(&mut value);
+                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
+                        &name,
+                        &self.loop_labels,
+                        route_span,
+                    ));
+                } else {
+                    attach_value_loop_route(&mut value, Stmt::ContinueLabel(name, route_span));
+                }
+            }
+        }
+        *expr = *value;
+        Some(value_ty)
+    }
+
     pub(crate) fn infer_or_fallback(
         &mut self,
         value: &mut Box<Expr>,
@@ -445,4 +628,86 @@ impl<'a> Checker<'a> {
             _ => self.infer(expr),
         }
     }
+}
+
+pub(crate) fn value_loop_requires_route(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::CallValue { callee, args, .. }
+            if args.is_empty()
+                && matches!(
+                    callee.as_ref(),
+                    Expr::Lambda(lam)
+                        if lam.meta.result_loop
+                            && lam.meta.requires_exhaustion_route
+                            && !lam.meta.exhaustion_route_attached
+                )
+    )
+}
+
+fn mark_value_loop_route_attached(expr: &mut Expr) {
+    let Expr::CallValue { callee, args, .. } = expr else {
+        return;
+    };
+    if !args.is_empty() {
+        return;
+    }
+    if let Expr::Lambda(lam) = callee.as_mut() {
+        lam.meta.exhaustion_route_attached = true;
+    }
+}
+
+fn mark_value_loop_route_unattached(expr: &mut Expr) {
+    let Expr::CallValue { callee, args, .. } = expr else {
+        return;
+    };
+    if !args.is_empty() {
+        return;
+    }
+    if let Expr::Lambda(lam) = callee.as_mut() {
+        lam.meta.exhaustion_route_attached = false;
+    }
+}
+
+fn value_loop_route_label(expr: &mut Expr) -> Option<String> {
+    let Expr::CallValue { callee, args, .. } = expr else {
+        return None;
+    };
+    if !args.is_empty() {
+        return None;
+    }
+    let Expr::Lambda(lam) = callee.as_mut() else {
+        return None;
+    };
+    let LambdaBody::Block(stmts) = &mut lam.body else {
+        return None;
+    };
+    let Some(Stmt::Loop {
+        label: Some((label, _)),
+        ..
+    }) = stmts.first()
+    else {
+        return None;
+    };
+    Some(label.clone())
+}
+
+fn attach_value_loop_route(expr: &mut Expr, route: Stmt) -> bool {
+    let Expr::CallValue { callee, args, .. } = expr else {
+        return false;
+    };
+    if !args.is_empty() {
+        return false;
+    }
+    let Expr::Lambda(lam) = callee.as_mut() else {
+        return false;
+    };
+    let LambdaBody::Block(stmts) = &mut lam.body else {
+        return false;
+    };
+    let Some(Stmt::Loop { body, .. }) = stmts.first_mut() else {
+        return false;
+    };
+    body.push(route);
+    true
 }
