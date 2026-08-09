@@ -940,7 +940,7 @@ mod tests {
         let mut visited = 0;
         assert_eq!(
             Type::for_each_composite_pair(&expected, &wrong_arity, &mut |_, _| visited += 1),
-            Err(CompositeTypePairError::ShapeMismatch)
+            Err(crate::AST::CompositeTypePairError::ShapeMismatch)
         );
         assert_eq!(visited, 0);
     }

@@ -2,7 +2,6 @@ use crate::AST::{AccessConvention, Expr, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::type_fix_hint;
-use crate::Syntax;
 
 fn is_inline_compute_transform(checker: &Checker<'_>, expr: &Expr) -> bool {
     match expr {

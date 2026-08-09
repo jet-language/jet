@@ -1085,7 +1085,7 @@ impl<'a> Parser<'a> {
             let mut fields = Vec::new();
             let mut methods = Vec::new();
             let mut trait_impls = Vec::new();
-            let mut derives = Vec::new();
+            let derives = Vec::new();
             let mut validate_block = Vec::new();
             let mut validate_span = None;
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {

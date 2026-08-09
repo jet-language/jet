@@ -21,7 +21,7 @@ impl<'a> Parser<'a> {
             let mut groups = Vec::new();
             let mut methods = Vec::new();
             let mut trait_impls = Vec::new();
-            let mut derives = Vec::new();
+            let derives = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();

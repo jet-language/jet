@@ -4,7 +4,7 @@ use crate::AST::{
     ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Item, Marker, RustConstKind,
     StrPart, StructDef, TraitImplBlock, Type, VariantPayload,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
 /// getter call `(self).user_field()` for a computed field (it's not a struct

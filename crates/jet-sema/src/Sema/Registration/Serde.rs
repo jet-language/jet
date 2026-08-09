@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     let mut generated_items = Vec::new();
     for item in items.iter_mut() {
         if let Item::Enum(e) = item {
@@ -362,7 +362,7 @@ fn expand_builtin_enum_serde(
     }
 }
 
-pub(super) fn parse_generated_fragment(
+pub(crate) fn parse_generated_fragment(
     source: &str,
     what: String,
     fix: String,

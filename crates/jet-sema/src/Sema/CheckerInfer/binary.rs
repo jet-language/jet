@@ -1444,7 +1444,7 @@ impl<'a> Checker<'a> {
                     {
                         self.diags.push(Diagnostic::error(
                             "E0361",
-                            format!("`compare` calls itself through {}", operator_label(op)),
+                            format!("`compare` calls itself through {}", operator_label(*op)),
                             "the operator symbol dispatches back to this same hook, so evaluation would recurse forever".to_string(),
                             "compare the value's fields or call a different named helper inside the hook".to_string(),
                             Some(span),
