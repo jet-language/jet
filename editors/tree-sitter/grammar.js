@@ -520,6 +520,7 @@ module.exports = grammar({
         "Char",
         "()",
         "Error",
+        "Err",
         "I8",
         "I16",
         "I32",

@@ -296,7 +296,6 @@ fn run() {
     assert!(web.wasm_rust.contains("jet_err_message"));
 
     let js_src = r#"
-#Target(Web)
 #Target(JS)
 fn run() {
     error :: Err("bad", code: "E_BAD", cause: Err("root"))

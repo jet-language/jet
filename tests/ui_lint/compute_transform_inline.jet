@@ -1,0 +1,13 @@
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) => Tensor {
+    return compute.mul(w, x) ?? panic("loss")
+}
+
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    (dw, dx) :: compute.gradient(loss)(w, x)
+    print("grad:{compute.to_list(dw)}")
+    print("grad_x:{compute.to_list(dx)}")
+}

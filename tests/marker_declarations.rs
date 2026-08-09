@@ -130,14 +130,15 @@ fn every_fact_row_carries_its_law_columns() {
         .map(str::trim)
         .filter(|line| line.starts_with("fact "))
         .collect();
+    let expected = written.len();
     let declarations = Registry::fact_declarations();
-    assert_eq!(written.len(), declarations.len(), "every fact declaration is read");
+    assert_eq!(declarations.len(), expected, "every fact declaration is read");
 
     let rows: Vec<_> = Registry::rows()
         .iter()
-        .filter(|row| row.rule.is_none() && row.kind() != Registry::RowKind::Truth)
+        .filter(|row| row.kind() == Registry::RowKind::Fact)
         .collect();
-    assert_eq!(rows.len(), declarations.len(), "every fact declaration serves one row");
+    assert_eq!(rows.len(), expected, "every fact declaration serves one row");
 
     for ((source, declaration), row) in written.iter().zip(declarations).zip(rows) {
         assert!(source.starts_with(&format!("fact {}(", declaration.name)));

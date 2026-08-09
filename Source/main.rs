@@ -763,9 +763,9 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         let replacement = format!("jet {group} {}", raw.join(" "));
         emit_cli_report(
             "E2101",
-            format!("`{verb}` moved under `jet {group}`"),
-            "infrequent commands live in a named area so daily Jet commands stay easy to scan".to_string(),
-            format!("run `{replacement}`"),
+            format!("`{verb}` moved under `jet {group}`."),
+            "infrequent commands live in a named area so daily Jet commands stay easy to scan.".to_string(),
+            format!("run `{replacement}`."),
             raw.iter().any(|arg| arg == "--json"),
         );
         exit(ExitCodes::USAGE);
@@ -794,9 +794,9 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     if exhaustive && jet::CLI::nested_command(&group, &sub).is_none() {
         emit_cli_report(
             "E2101",
-            format!("`{sub}` isn't a jet {group} command"),
-            format!("jet {group} accepts only commands in its named area"),
-            format!("run `jet {group} help`"),
+            format!("`{sub}` isn't a jet {group} command."),
+            format!("jet {group} accepts only commands in its named area."),
+            format!("run `jet {group} help`."),
             raw.iter().any(|arg| arg == "--json"),
         );
         exit(ExitCodes::USAGE);
