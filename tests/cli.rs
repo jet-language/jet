@@ -5093,6 +5093,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
             .output()
             .unwrap()
     };
+    let mut golden = String::new();
 
     // 1. Bare `jet run` at the workspace root: both members resolve via
     //    D-ILE1 (`<package>.jet`, since neither has `run.jet`/`src/run.jet`), so the
@@ -5125,11 +5126,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
         "-p hello should run: stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("hello from the monorepo"),
-        "stdout: {}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    golden.push_str(&String::from_utf8(out.stdout).unwrap());
 
     // 3. `-p ranker` likewise.
     let out = run(&root, &["-p", "ranker"]);
@@ -5139,10 +5136,13 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
         "-p ranker should run: stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("ranker: #1 monorepo demo"),
-        "stdout: {}",
-        String::from_utf8_lossy(&out.stdout)
+    golden.push_str(&String::from_utf8(out.stdout).unwrap());
+    // Package workspaces use this dedicated golden path because they are not
+    // single-entry files in `tests/golden.rs`'s example scan.
+    assert_eq!(
+        golden,
+        include_str!("../examples/features/expected/packages/monorepo.out"),
+        "monorepo output differs from its golden artifact"
     );
 
     // 4. `cd packages/hello && jet run` (bare, single-package convention):
