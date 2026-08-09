@@ -171,7 +171,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/unit_family_derived_requires_base.jet",
     "tests/ui/unit_family_duplicate_metadata.jet",
     "tests/ui/unit_family_float_metadata.jet",
-    "tests/ui/unit_family_metadata_without_base.jet",
     "tests/ui/unit_family_missing_base.jet",
     "tests/ui/unit_family_unknown_header_field.jet",
     "tests/ui/unit_family_unknown_metadata.jet",
