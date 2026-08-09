@@ -3385,17 +3385,6 @@ pub(crate) fn build(
                 eprintln!(" fix: install Rust from https://rustup.rs, then try again");
                 exit(ExitCodes::USER_ERROR);
             }
-            Err(jet::RuntimeCache::Error::Rejected(error)) => {
-                eprintln!(
-                    "{}",
-                    jet::Diagnostics::render_ice_report(
-                        "rustc rejected the generated cached runtime",
-                        &error,
-                        true,
-                    )
-                );
-                exit(ExitCodes::ICE);
-            }
         }
     };
     cmd.arg("--edition").arg("2021").args(&rustc_flags);
