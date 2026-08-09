@@ -104,7 +104,7 @@ fn inspect_unsafe_loader_failures_use_standard_diagnostics() {
     assert_eq!(missing_json.status.code(), Some(1));
     let stdout = String::from_utf8(missing_json.stdout).unwrap();
     let stderr = String::from_utf8(missing_json.stderr).unwrap();
-    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "{stdout}");
+    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
     assert!(stdout.contains("\"code\":\"E0603\""), "{stdout}");
     assert!(parse_json(&stdout).is_ok(), "loader diagnostic JSON must parse: {stdout}");
     assert!(stderr.is_empty(), "JSON loader diagnostics should keep stderr quiet: {stderr}");
@@ -136,7 +136,7 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     assert_eq!(json.status.code(), Some(1), "{}", String::from_utf8_lossy(&json.stderr));
     let stdout = String::from_utf8(json.stdout).unwrap();
     let stderr = String::from_utf8(json.stderr).unwrap();
-    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "{stdout}");
+    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
     assert!(stdout.contains("\"code\":\"E3107\"") && stdout.contains("helper.jet") && stdout.contains("\"line\":4,\"col\":16"), "{stdout}");
     assert!(parse_json(&stdout).is_ok(), "inspection diagnostic JSON must parse: {stdout}");
     assert!(stderr.is_empty(), "JSON inspection diagnostics should keep stderr quiet: {stderr}");
@@ -4712,15 +4712,15 @@ fn expand_json_compile_error_uses_machine_diagnostics() {
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "JSON diagnostics must be one document on stdout: {stdout}");
+    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "JSON diagnostic must use jet.report/v1: {stdout}");
     assert!(stdout.contains("\"code\":\"E0102\""), "missing registered diagnostic: {stdout}");
-    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON must parse as one document: {stdout}");
+    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON line must parse: {stdout}");
     assert!(!stdout.contains("Error ["), "human diagnostic leaked into JSON: {stdout}");
     assert!(stderr.is_empty(), "JSON mode should keep stderr quiet: {stderr}");
 }
 
 #[test]
-fn expand_json_unknown_lens_is_versioned_usage_error() {
+fn expand_json_unknown_lens_uses_machine_diagnostic() {
     let p = expand_fixture();
     let out = Command::new(jet())
         .args(["inspect", "expand", "--facts", "bogus", "--json"])
@@ -4730,9 +4730,9 @@ fn expand_json_unknown_lens_is_versioned_usage_error() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("{\"schema_version\":1,\"error\""), "{stdout}");
-    assert!(stdout.contains("\"kind\":\"usage\""), "{stdout}");
-    assert!(!stdout.contains("E2101"), "usage error must not borrow unknown-command code: {stdout}");
+    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
+    assert!(stdout.contains("\"code\":\"E2941\""), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON line must parse: {stdout}");
     assert!(out.stderr.is_empty());
 }
 
@@ -5527,6 +5527,69 @@ fn perf_and_structural_merge_never_raw_exit() {
                 line_no + 1
             );
         }
+    }
+}
+
+#[test]
+fn uncoded_errors() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("Source");
+    for entry in fs::read_dir(&root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|value| value.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).unwrap();
+        let compact = source.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+        let mut rest = compact.as_str();
+        while let Some(at) = rest.find("eprintln!(") {
+            let after_macro = &rest[at + "eprintln!(".len()..];
+            let after_raw = after_macro.strip_prefix('r').unwrap_or(after_macro);
+            let after_hashes = after_raw.trim_start_matches('#');
+            assert!(
+                !after_hashes.starts_with("\"error:")
+                    && !after_hashes.starts_with("\"Error:"),
+                "{} contains a bare eprintln error; use the shared Diagnostic renderer with a registered code",
+                path.display()
+            );
+            rest = after_macro;
+        }
+    }
+}
+
+#[test]
+fn generic_cli_diagnostics_match_registered_snapshots() {
+    let cases = [
+        (
+            "E2104",
+            "`jet inspect example` needs an entry file",
+            include_str!("fixtures/cli-diagnostics/E2104.stderr"),
+        ),
+        (
+            "E2105",
+            "couldn't read `package.jet`: permission denied",
+            include_str!("fixtures/cli-diagnostics/E2105.stderr"),
+        ),
+    ];
+    for (code, what, expected) in cases {
+        let (why, fix) = if code == "E2104" {
+            (
+                "Jet needs valid command input before it can run this command",
+                "correct the named argument or input, then run the command again",
+            )
+        } else {
+            (
+                "Jet could not complete the named file, tool, or operating-system operation",
+                "correct the named problem, then run the command again",
+            )
+        };
+        let diagnostic = jet::Diagnostics::Diagnostic::error(
+            code,
+            what.to_string(),
+            why.to_string(),
+            fix.to_string(),
+            None,
+        );
+        assert_eq!(diagnostic.render_colored("", "", false), expected);
     }
 }
 

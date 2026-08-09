@@ -140,7 +140,7 @@ pub fn dispatch(engine: &str, verb: &str, argv: &[String]) -> i32 {
     match engine_command(&bin).args(argv).status() {
         Ok(status) => status.code().unwrap_or(ExitCodes::USER_ERROR),
         Err(e) => {
-            eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
+            crate::cli_error!("E2105", "couldn't run `{}`: {}", bin.display(), e);
             ExitCodes::USER_ERROR
         }
     }
@@ -162,7 +162,7 @@ pub fn capture(
         .current_dir(cwd)
         .output()
         .map_err(|e| {
-            eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
+            crate::cli_error!("E2105", "couldn't run `{}`: {}", bin.display(), e);
             ExitCodes::USER_ERROR
         })
 }

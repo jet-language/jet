@@ -91,6 +91,25 @@ fn push_prelude(out: &mut String) {
     }
 }
 
+fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
+    let Some(link) = link else {
+        out.push_str("fn jet_ffi_install_reporter() {}\n\n");
+        return;
+    };
+    out.push_str(&format!(
+        concat!(
+            "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter\n",
+            "extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {{\n",
+            "    let message = if message.is_null() {{ \"panic: a foreign function panicked\".into() }} else {{ String::from_utf8_lossy(unsafe {{ std::slice::from_raw_parts(message, len) }}).into_owned() }};\n",
+            "    eprintln!(\"{{message}}\");\n",
+            "}}\n",
+            "// JET_VETTED_UNSAFE_END: ffi_reporter\n",
+            "fn jet_ffi_install_reporter() {{ {}::jet_ffi_set_reporter(jet_ffi_reporter); }}\n\n"
+        ),
+        link.crate_name,
+    ));
+}
+
 fn emit_command_metadata(
     bundle: &ProgramBundle,
     active_os: Syntax::OSTarget,
@@ -1864,6 +1883,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
         }
     }
     out.push_str("#![allow(warnings)]\n\n");
+    push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -1978,6 +1998,23 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aot_ffi_host_installs_bridge_reporter() {
+        let link = FfiLink {
+            crate_name: "jet_ffi_fixture".into(),
+            rlib_path: "fixture.rlib".into(),
+            cdylib_path: "fixture.so".into(),
+            target_deps_dir: "deps".into(),
+            host_deps_dir: "deps".into(),
+            helper_bin_path: None,
+            secrets_helper_bin_path: None,
+        };
+        let mut source = String::new();
+        push_ffi_reporter(&mut source, Some(&link));
+        assert!(source.contains("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)"));
+        assert!(source.contains("panic: a foreign function panicked"));
+    }
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
@@ -2434,6 +2471,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -2885,6 +2923,7 @@ pub fn emit_bundle_dbg(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
+    push_ffi_reporter(&mut out, link);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -3065,6 +3104,7 @@ pub fn emit_bundle_tests_cov(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
+    push_ffi_reporter(&mut out, link);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -3273,6 +3313,7 @@ pub fn emit_bundle_fuzz(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
+    push_ffi_reporter(&mut out, link);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -3535,6 +3576,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
+    push_ffi_reporter(&mut out, link);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);

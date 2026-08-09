@@ -842,6 +842,11 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_scoped",
         "// JET_VETTED_UNSAFE_END: jet_taskgroup_scoped",
     );
+    s = strip_region(
+        &s,
+        "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter",
+        "// JET_VETTED_UNSAFE_END: ffi_reporter",
+    );
     s = strip_regions(
         &s,
         "// jet:shared-guard-internal-begin",

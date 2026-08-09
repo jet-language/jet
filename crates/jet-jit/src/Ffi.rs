@@ -25,6 +25,17 @@ unsafe extern "C" {
 #[cfg(unix)]
 const RTLD_NOW: c_int = 2;
 
+extern "C" fn jit_ffi_reporter(message: *const u8, len: usize) {
+    let message = if message.is_null() {
+        "panic: a foreign function panicked".into()
+    } else {
+        // JET_VETTED_UNSAFE_BEGIN: ffi_reporter
+        String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(message, len) }).into_owned()
+        // JET_VETTED_UNSAFE_END: ffi_reporter
+    };
+    eprintln!("{message}");
+}
+
 #[derive(Clone, Copy)]
 enum ParamAbi {
     Int,
@@ -146,6 +157,22 @@ fn load_cdylib(
                 .into_owned();
             return Err(format!("jit ffi: dlopen {}: {err}", path.display()));
         }
+        let setter_name = CString::new("jet_ffi_set_reporter").unwrap();
+        let setter_ptr = unsafe { dlsym(handle, setter_name.as_ptr()) };
+        if setter_ptr.is_null() {
+            unsafe { dlclose(handle); }
+            return Err(format!(
+                "jit ffi: missing symbol `jet_ffi_set_reporter` in {}",
+                path.display()
+            ));
+        }
+        let set_reporter = unsafe {
+            std::mem::transmute::<
+                *mut c_void,
+                unsafe extern "C" fn(extern "C" fn(*const u8, usize)),
+            >(setter_ptr)
+        };
+        unsafe { set_reporter(jit_ffi_reporter) };
         let free_name = CString::new("jet_ffi_cabi_free").unwrap();
         let free_ptr = unsafe { dlsym(handle, free_name.as_ptr()) };
         let free_fn = if free_ptr.is_null() {
@@ -354,4 +381,16 @@ host_fns! {
         sig.returns.push(AbiParam::new(types::I64));
     }
     call: "jet_jit_extern_call" => jet_jit_extern_call: sig;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reporter_is_installed_after_rtld_now_load() {
+        let source = include_str!("Ffi.rs");
+        let load = source.find("dlopen(c_path.as_ptr(), RTLD_NOW)").unwrap();
+        let reporter = source.find("CString::new(\"jet_ffi_set_reporter\")").unwrap();
+        let install = source.find("set_reporter(jit_ffi_reporter)").unwrap();
+        assert!(load < reporter && reporter < install);
+    }
 }

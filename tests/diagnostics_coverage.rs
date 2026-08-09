@@ -229,16 +229,17 @@ fn snapshot_codes() -> BTreeSet<String> {
         }
     }
 
-    // tests/fixtures/jetpack-diagnostics/*.stderr: exact CLI stderr fixtures
-    // for jetpack/jetos command diagnostics that do not originate from .jet UI
-    // source files.
-    let jetpack = root.join("tests/fixtures/jetpack-diagnostics");
-    if let Ok(entries) = fs::read_dir(&jetpack) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("stderr") {
-                for code in extract_snapshot_codes(&read(&p)) {
-                    out.insert(code);
+    // Exact CLI stderr fixtures for command diagnostics that do not originate
+    // from .jet UI source files.
+    for fixture_dir in ["jetpack-diagnostics", "cli-diagnostics"] {
+        let fixtures = root.join("tests/fixtures").join(fixture_dir);
+        if let Ok(entries) = fs::read_dir(&fixtures) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|x| x.to_str()) == Some("stderr") {
+                    for code in extract_snapshot_codes(&read(&p)) {
+                        out.insert(code);
+                    }
                 }
             }
         }

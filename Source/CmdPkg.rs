@@ -21,8 +21,7 @@ pub(crate) fn run_add(raw_args: &[String]) {
     let dep_name = match non_flag.get(1) {
         Some(n) => n.as_str(),
         None => {
-            eprintln!("error: `jet add` needs a dependency name");
-            eprintln!(" fix: try `jet add mylib --path ../mylib`");
+            crate::cli_error!(@fix "E2104", "`jet add` needs a dependency name", "try `jet add mylib --path ../mylib`");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -45,10 +44,7 @@ pub(crate) fn run_add(raw_args: &[String]) {
         } else if let Some(r) = rev_val {
             jet::Manifest::GitSelector::Rev(r.to_string())
         } else {
-            eprintln!(
-                "error: git dependency `{}` needs one of: --tag, --branch, --rev",
-                dep_name
-            );
+            crate::cli_error!("E2104", "git dependency `{}` needs one of: --tag, --branch, --rev", dep_name);
             exit(ExitCodes::USER_ERROR);
         };
         jet::Manifest::DepSpec::Git {
@@ -56,23 +52,19 @@ pub(crate) fn run_add(raw_args: &[String]) {
             selector,
         }
     } else {
-        eprintln!("error: `jet add {}` needs --path or --git", dep_name);
-        eprintln!(
-            " fix: try `jet add {} --path ../{}` or `jet add {} --git <url> --tag <tag>`",
-            dep_name, dep_name, dep_name
-        );
+        crate::cli_error!(@fix "E2104", format!("`jet add {}` needs --path or --git", dep_name), format!("try `jet add {} --path ../{}` or `jet add {} --git <url> --tag <tag>`", dep_name, dep_name, dep_name));
         exit(ExitCodes::USER_ERROR);
     };
 
     // Load the manifest, add the dep, write back.
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let updated = jet::Manifest::add_dependency(&raw, dep_name, &spec);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't write {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     println!("added `{}` to {}", dep_name, pack_path.display());
@@ -87,12 +79,12 @@ pub(crate) fn run_remove(dep_name: &str) {
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let updated = jet::Manifest::remove_dependency(&raw, dep_name);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't write {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     println!("removed `{}` from {}", dep_name, pack_path.display());
@@ -116,7 +108,7 @@ pub(crate) fn run_update(dep: Option<&str>) {
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -202,8 +194,7 @@ pub(crate) fn run_hangar_rollback(gen_str: &str) {
     let gen_number = match gen_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            eprintln!("error: `jet hangar rollback` needs a generation number");
-            eprintln!(" fix: run `jet hangar generations` to see available generations");
+            crate::cli_error!(@fix "E2104", "`jet hangar rollback` needs a generation number", "run `jet hangar generations` to see available generations");
             exit(ExitCodes::USAGE);
         }
     };
@@ -216,8 +207,7 @@ pub(crate) fn run_hangar_rollback(gen_str: &str) {
             println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
         }
         Err(e) => {
-            eprintln!("error: {}", e);
-            eprintln!(" fix: run `jet hangar generations` to see available generations");
+            crate::cli_error!(@fix "E2105", e.to_string(), "run `jet hangar generations` to see available generations");
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -226,7 +216,7 @@ pub(crate) fn run_hangar_rollback(gen_str: &str) {
 fn do_fetch(root: &Path, locked: bool) {
     let pack_path = jet::Loader::manifest_path(root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
