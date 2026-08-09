@@ -98,6 +98,33 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: KW_DEFER,
         class: HighlightClass::KeywordControl,
     },
+    // D-CONC-SPAWN1=D: only `task` is reserved; qualified selectors remain
+    // spellings of the same surface without reserving bare `all`/`race`/etc.
+    HighlightToken {
+        text: KW_CONC_TASK,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_ALL,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_ANY,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_GROUP,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: TASK_RACE,
+        class: HighlightClass::KeywordControl,
+    },
+    // D-CONC-CHAN2=D: readiness timeout arm.
+    HighlightToken {
+        text: READINESS_AFTER,
+        class: HighlightClass::KeywordControl,
+    },
     // Declarations and contextual structure.
     HighlightToken {
         text: KW_FN,
@@ -205,10 +232,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
-        text: KW_TASKGROUP,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
         text: CTX_BLOCK,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -278,6 +301,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordOther,
     },
     HighlightToken {
+        text: KW_SHARED,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
         text: BUILTIN_PRINT,
         class: HighlightClass::Builtin,
     },
@@ -287,6 +314,14 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: VALIDATE_CHECK_FN,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: BUILTIN_CHANNEL,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: TASK_JOIN,
         class: HighlightClass::Builtin,
     },
     // Literals.
@@ -304,6 +339,18 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: LIT_VALUE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: TASK_FAILURE_CANCELLED,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: TASK_FAILURE_DEADLINE_BLOWN,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: TASK_FAILURE_PANICKED,
         class: HighlightClass::Literal,
     },
     // Built-in types.
@@ -349,6 +396,26 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: TYPE_CONDITION,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_TASK,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_GROUP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_RECEIVER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SENDER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_TASK_FAILURE,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -401,14 +468,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: TYPE_ITER,
-        class: HighlightClass::TypeBuiltin,
-    },
-    HighlightToken {
-        text: TYPE_TASKGROUP,
-        class: HighlightClass::TypeBuiltin,
-    },
-    HighlightToken {
-        text: TYPE_SELECT_BUILDER,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -1068,13 +1127,16 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
     }
 }
 use super::{
-    MARKER_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
+    MARKER_PREFIX, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
+    KW_CONC_TASK, KW_SHARED, READINESS_AFTER, TASK_ALL, TASK_ANY, TASK_GROUP, TASK_JOIN, TASK_RACE,
+    TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
+    TYPE_GROUP, TYPE_RECEIVER, TYPE_SENDER, TYPE_TASK, TYPE_TASK_FAILURE,
     KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
     KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,
     KW_MARKER, KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB,
     KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF,
-    KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TASKGROUP, KW_TEST, KW_TODO,
+    KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST, KW_TODO,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
     KW_VIA, VALIDATE_CHECK_FN,
     LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,
@@ -1091,10 +1153,10 @@ use super::{
     TYPE_EFFECT, TYPE_ERROR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE, TYPE_EVENT_TRACE,
     TYPE_F32, TYPE_F64, TYPE_FIXED_SIZE_SEP, TYPE_FLOAT, TYPE_HASH_MAP, TYPE_HOOK, TYPE_I16,
     TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INT, TYPE_IO_ERROR, TYPE_JSON, TYPE_JSON_ERROR, TYPE_KEY,
-    TYPE_LRU, TYPE_MEASUREMENT, TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_SELECT_BUILDER, TYPE_SET,
+    TYPE_LRU, TYPE_MEASUREMENT, TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_SET,
     TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_WEAK, TYPE_CONDITION, TYPE_SIGNAL, TYPE_SORTED_SET,
     TYPE_STREAM, TYPE_ITER, TYPE_STRING, TYPE_SUBSCRIPTION,
-    TYPE_TASKGROUP, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UTF8_ERROR, TYPE_UNIT,
+    TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UTF8_ERROR, TYPE_UNIT,
     TYPE_WATCH_EVENT, TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
 };
 use crate::JSON::json_escape;

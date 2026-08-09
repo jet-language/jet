@@ -1101,6 +1101,48 @@ fn assert_fmt_stable(src: &str, label: &str) {
 }
 
 #[test]
+fn fmt_concurrency_spellings_that_parse_today() {
+    // D-CONC-JOIN1=A / D-CONC-CHAN1=A / D-CONC-FAIL1=A: these spellings
+    // already use parser shapes owned by existing generic/type/call/loop
+    // grammar. Future task/shared/select forms stay on their implementation
+    // cards and do not get parser stubs here.
+    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) => TaskFailure {
+    joined :: handle.join()
+    cancelled :: .Cancelled
+    deadline :: .DeadlineBlown
+    loop value, rx {
+        tx.send(value)
+    }
+    return .Panicked("boom")
+}
+
+fn open() {
+    pair :: channel<Int>(capacity: 8)
+}
+"#;
+    let once = jet::format_source(src).expect("parseable concurrency spellings should format");
+    for spelling in [
+        "Task<Int>",
+        "Group",
+        "Receiver<Int>",
+        "Sender<Int>",
+        "TaskFailure",
+        "handle.join()",
+        ".Cancelled",
+        ".DeadlineBlown",
+        "loop value, rx",
+        ".Panicked(\"boom\")",
+        "channel<Int>(capacity: 8)",
+    ] {
+        assert!(once.contains(spelling), "fmt dropped {spelling:?}:\n{once}");
+    }
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("concurrency spellings should re-format")
+    );
+}
+
+#[test]
 fn fmt_shield_block_stability() {
     let src = "fn run() {\n    #Shield {\n        print(\"committed\")\n    }\n}\n";
     assert_fmt_stable(src, "#Shield block");

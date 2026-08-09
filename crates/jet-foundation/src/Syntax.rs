@@ -163,6 +163,55 @@
 // D-MARKER-NAME-HYGIENE1=A: `#Discriminant("field")` owns serde internal
 // discriminants and `#Job fn` owns scheduled entry functions. `#Tag` and
 // `#Task` are retired spellings.
+
+// Concurrency surface — thirteen ratified D-CONC-* outcomes on card #1505.
+// Rows for forms that implementation cards will make parseable belong here
+// now; parser and sema support land on those cards.
+// D-CONC-UNIT1=A and D-CONC-CROSS1=A change compiler facts only. D-CONC-STM1=A
+// keeps #Transact, D-CONC-SCHED1=A keeps Job/Every/Duration, and
+// D-CONC-STREAM1=A keeps yield/Stream. D-CONC-OUTCOME1=A is retired by
+// D-CONC-FAIL1=A; TaskOutcome, TaskStatus, trace, and exception have no rows.
+/// D-CONC-SPAWN1=D: the one reserved word for structured task spawning.
+pub const KW_CONC_TASK: &str = "task";
+/// D-CONC-SPAWN1=D: qualified fan-out selector.
+pub const TASK_ALL: &str = "task.all";
+/// D-CONC-SPAWN1=D: qualified fan-out selector.
+pub const TASK_RACE: &str = "task.race";
+/// D-CONC-SPAWN1=D: qualified fan-out selector.
+pub const TASK_ANY: &str = "task.any";
+/// D-CONC-SPAWN1=D: qualified fan-out selector.
+pub const TASK_GROUP: &str = "task.group";
+
+/// D-CONC-JOIN1=A / D-CONC-SPAWN1=D: the nameable child-handle type.
+pub const TYPE_TASK: &str = "Task";
+/// D-CONC-GROUP1=A / D-CONC-SPAWN1=D: the scoped group-borrow type.
+pub const TYPE_GROUP: &str = "Group";
+
+/// D-CONC-CHAN1=A: builtin channel constructor.
+pub const BUILTIN_CHANNEL: &str = "channel";
+/// D-CONC-CHAN1=A: receiver endpoint type is nameable in signatures.
+pub const TYPE_RECEIVER: &str = "Receiver";
+/// D-CONC-CHAN1=A: sender endpoint type is nameable in signatures.
+pub const TYPE_SENDER: &str = "Sender";
+/// D-CONC-CHAN1=A / D-CONC-CHAN2=D: loop source form for channel draining.
+pub const LOOP_CHANNEL_DRAIN: &str = "loop value, receiver";
+/// D-CONC-CHAN2=D: contextual timeout arm in a readiness table.
+pub const READINESS_AFTER: &str = "after";
+
+/// D-CONC-SHARE1=A: prefix for construction of a shared cell.
+pub const KW_SHARED: &str = "shared";
+
+/// D-CONC-JOIN1=A / D-CONC-FAIL1=A: consuming task result operation.
+pub const TASK_JOIN: &str = "join";
+/// D-CONC-FAIL1=A: one error type for joined task failures.
+pub const TYPE_TASK_FAILURE: &str = "TaskFailure";
+/// D-CONC-FAIL1=A: cancellation failure variant.
+pub const TASK_FAILURE_CANCELLED: &str = "Cancelled";
+/// D-CONC-FAIL1=A: deadline failure variant.
+pub const TASK_FAILURE_DEADLINE_BLOWN: &str = "DeadlineBlown";
+/// D-CONC-FAIL1=A: panic failure variant.
+pub const TASK_FAILURE_PANICKED: &str = "Panicked";
+
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
