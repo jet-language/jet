@@ -159,9 +159,8 @@ pub type EffectSet = BTreeSet<String>;
 /// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring
 /// keys are normalized through the foundation resolver before matching.
 pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
-    let normalized_module =
-        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    let module = normalized_module.as_str();
+    // #1691 retired the jet.* internal module keys: callers always pass the
+    // canonical `core.*` name, so no normalization step remains.
     // D-DET1: the deterministic capability constructors carry NO ambient effect —
     // `Clock.new(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
     // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
