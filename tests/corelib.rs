@@ -10115,7 +10115,7 @@ fn run() {
 fn nested_pattern_subjects_clone_read_self_and_keep_take_self_by_value() {
     fn method_body<'a>(rust: &'a str, name: &str) -> &'a str {
         let tail = rust
-            .split_once(&format!("fn user_{name}"))
+            .split_once(&format!("fn {}", jet::AST::mangle(name)))
             .map(|(_, tail)| tail)
             .unwrap_or_else(|| panic!("missing generated method `{name}`"));
         let next_method = tail.find("\n    fn user_");

@@ -40,14 +40,17 @@ pub(super) fn project_checked(
     let mut inline_spans = Vec::new();
     let mut anchors = Vec::new();
     let mut node_refs = Vec::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         collect_item_graphs(
             path,
             src,
             &index,
+            &facts.name_ledger,
+            module_idx,
             &module.display,
             &module.source,
             &module.items,
+            None,
             &mut graph_json,
             &mut inline_spans,
             &mut anchors,
@@ -80,9 +83,12 @@ fn collect_item_graphs(
     entry_path: &Path,
     entry_src: &str,
     index: &SemIndex,
+    ledger: &jet_foundation::Names::NameLedger,
+    module_idx: usize,
     module_display: &str,
     module_src: &str,
     items: &[Item],
+    owner: Option<&str>,
     out: &mut Vec<String>,
     inline_spans: &mut Vec<InlineExpr>,
     anchors: &mut Vec<GraphEditAnchor>,
@@ -92,6 +98,14 @@ fn collect_item_graphs(
         match item {
             Item::Func(f) => {
                 let graph = project_func(index, module_display, module_src, f);
+                let ledger_name = owner
+                    .map(|owner| jet_foundation::Names::member_name(owner, &f.name))
+                    .unwrap_or_else(|| f.name.clone());
+                let visibility = super::graph_json::ledger_function_visibility(
+                    ledger,
+                    module_idx,
+                    &ledger_name,
+                );
                 inline_spans.extend(graph.inline_exprs.iter().map(|i| InlineExpr {
                     id: i.id.clone(),
                     span: i.span,
@@ -102,11 +116,16 @@ fn collect_item_graphs(
                     fallible: function_is_fallible(f),
                 });
                 collect_node_refs(&graph, node_refs);
-                out.push(graph_to_json(&graph, f, module_src));
+                out.push(graph_to_json(&graph, f, module_src, visibility));
             }
             Item::Struct(s) => {
                 for method in &s.methods {
                     let graph = project_func(index, module_display, module_src, method);
+                    let visibility = super::graph_json::ledger_function_visibility(
+                        ledger,
+                        module_idx,
+                        &format!("{}.{}", s.name, method.name),
+                    );
                     inline_spans.extend(graph.inline_exprs.iter().map(|i| InlineExpr {
                         id: i.id.clone(),
                         span: i.span,
@@ -117,12 +136,17 @@ fn collect_item_graphs(
                         fallible: function_is_fallible(method),
                     });
                     collect_node_refs(&graph, node_refs);
-                    out.push(graph_to_json(&graph, method, module_src));
+                    out.push(graph_to_json(&graph, method, module_src, visibility));
                 }
             }
             Item::Impl(i) => {
                 for method in &i.methods {
                     let graph = project_func(index, module_display, module_src, method);
+                    let visibility = super::graph_json::ledger_function_visibility(
+                        ledger,
+                        module_idx,
+                        &format!("{}.{}", i.type_name, method.name),
+                    );
                     inline_spans.extend(graph.inline_exprs.iter().map(|e| InlineExpr {
                         id: e.id.clone(),
                         span: e.span,
@@ -133,7 +157,7 @@ fn collect_item_graphs(
                         fallible: function_is_fallible(method),
                     });
                     collect_node_refs(&graph, node_refs);
-                    out.push(graph_to_json(&graph, method, module_src));
+                    out.push(graph_to_json(&graph, method, module_src, visibility));
                 }
             }
             Item::CodeModule(m) => {
@@ -142,9 +166,12 @@ fn collect_item_graphs(
                         entry_path,
                         entry_src,
                         index,
+                        ledger,
+                        module_idx,
                         module_display,
                         module_src,
                         body,
+                        Some(&m.name),
                         out,
                         inline_spans,
                         anchors,

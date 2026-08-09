@@ -311,7 +311,7 @@ impl<'a> Checker<'a> {
                             .collect();
                         let safe = match registry.types.get(leaf) {
                             Some(crate::Sema::TypeDef::Struct { fields, .. }) => fields.iter().all(
-                                |(_, _, field_ty, _)| {
+                                |(_, _, field_ty)| {
                                     let actual = trait_reg.instantiate_type(field_ty, &subst);
                                     transferable(checker, &actual, Some(owner), seen)
                                 },

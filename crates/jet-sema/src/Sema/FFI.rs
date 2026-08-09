@@ -162,7 +162,7 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
             *is_c_layout
                 && fields
                     .iter()
-                    .all(|(_, _, ty, _)| is_c_abi_type(ty, registry))
+                    .all(|(_, _, ty)| is_c_abi_type(ty, registry))
         }
         // No ratified C-safe enum representation exists yet (tag placement,
         // discriminant width, payload union layout are all undecided — see
@@ -400,7 +400,7 @@ pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
     }
     match registry.types.get(name) {
         Some(TypeDef::Struct { fields, .. }) => {
-            fields.iter().all(|(_, _, ty, _)| is_ffi_type(ty, registry))
+                    fields.iter().all(|(_, _, ty)| is_ffi_type(ty, registry))
         }
         Some(TypeDef::Enum { variants, .. }) => {
             variants.values().all(|(_, payload)| match payload {

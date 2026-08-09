@@ -199,8 +199,8 @@ impl<'a> Checker<'a> {
             self.registry
                 .struct_fields(owner_name)?
                 .iter()
-                .find(|(name, _, _, _)| name == field)
-                .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+                .find(|(name, _, _)| name == field)
+                .map(|(_, _, ty)| substitute_type(ty, &subst))
         }
 
         fn compound_expr_type(&self, expr: &Expr) -> Option<Type> {

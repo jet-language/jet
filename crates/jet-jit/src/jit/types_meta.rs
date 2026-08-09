@@ -5,6 +5,7 @@ use jet_codegen::Codegen::TIR::{
     JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TNumericOp,
 };
 use jet_foundation::AST::{Item, ProgramBundle, Type};
+use jet_foundation::Names::{mangle, mangle_path};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -459,7 +460,7 @@ impl<'a> JitMeta<'a> {
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
         }
-        let key = format!("user_{enum_name}::user_{variant}");
+        let key = format!("{}::{}", mangle_path(enum_name), mangle_path(variant));
         self.enum_variant_payload_types
             .get(&key)
             .map(|types| types.as_slice())
@@ -515,7 +516,7 @@ impl<'a> JitMeta<'a> {
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
         if let Some(fields) = self.struct_fields.get(type_name) {
-            let mangled = format!("user_{field}");
+            let mangled = mangle(field);
             if let Some(i) = fields.iter().position(|f| {
                 f == field || f == &mangled || f.strip_prefix("user_") == Some(field)
             }) {
@@ -741,7 +742,7 @@ impl<'a> JitMeta<'a> {
             };
         }
         let variants = self.enum_variants.get(enum_name)?;
-        let mangled = format!("user_{variant}");
+        let mangled = mangle(variant);
         variants
             .iter()
             .position(|v| v == variant || v == &mangled || v.strip_prefix("user_") == Some(variant))

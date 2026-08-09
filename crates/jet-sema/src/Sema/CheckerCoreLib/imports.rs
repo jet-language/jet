@@ -17,12 +17,13 @@ impl<'a> Checker<'a> {
             type_args: &[Type],
             args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
+            let member_prefix = jet_foundation::Names::member_name(alias, "");
             let Some(sig) = self.funcs.get(mangled).cloned() else {
                 self.diags.push(Diagnostic::error(
                     "E0608",
                     format!(
                         "`{}` is not defined in module `{}`",
-                        &mangled[alias.len() + 2..],
+                        mangled.strip_prefix(&member_prefix).unwrap_or(mangled),
                         alias
                     ),
                     "check the module body for the function you're calling".to_string(),
@@ -38,15 +39,13 @@ impl<'a> Checker<'a> {
             self.record_edge(mangled.to_string(), span);
             if let Some(identity) = self.code_module_identities.get(alias).cloned() {
                 self.record_semantic_reference(alias_span, identity.clone());
-                let method = mangled.strip_prefix(&format!("{alias}__")).unwrap_or(mangled);
+                let method = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
                 self.record_semantic_reference(span, format!("fn:{identity}::{method}"));
             }
             // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
             // its `pub` items — a bare private item escapes its module otherwise.
-            if !self.func_pub.get(mangled).copied().unwrap_or(false)
-                && !self.func_pkg_pub.get(mangled).copied().unwrap_or(false)
-            {
-                let item = &mangled[alias.len() + 2..];
+            if !self.name_ledger.exported(self.module_idx, mangled) {
+                let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
                 self.diags.push(Diagnostic::error(
                     "E0609",
                     format!("`{}` is private in module `{}`", item, alias),
@@ -59,7 +58,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            let item = &mangled[alias.len() + 2..];
+            let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
             if Syntax::classify_identifier(item) == Syntax::IdentifierClass::SoftPublic {
                 self.diags.push(soft_public_use(item, span));
             }
@@ -68,7 +67,7 @@ impl<'a> Checker<'a> {
                     "E0104",
                     format!(
                         "`{}` expects {} argument{}, got {}",
-                        &mangled[alias.len() + 2..],
+                        mangled.strip_prefix(&member_prefix).unwrap_or(mangled),
                         sig.params.len(),
                         if sig.params.len() == 1 { "" } else { "s" },
                         args.len()
@@ -76,7 +75,7 @@ impl<'a> Checker<'a> {
                     "every argument must match a parameter".to_string(),
                     format!(
                         "check the definition of `{}` in module `{}`",
-                        &mangled[alias.len() + 2..],
+                        mangled.strip_prefix(&member_prefix).unwrap_or(mangled),
                         alias
                     ),
                     Some(span),
@@ -204,7 +203,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(crate::Sema::e3403(
                             &format!(
                                 "an unproven Clock passed to pure `{}`",
-                                &mangled[alias.len() + 2..]
+                                mangled.strip_prefix(&member_prefix).unwrap_or(mangled)
                             ),
                             Some(arg_span),
                         ));
@@ -267,9 +266,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if target.funcs.contains_key(name) {
-                let is_pub = target.func_pub.get(name).copied().unwrap_or(false)
-                    || (self.same_package_scope(mod_idx)
-                        && target.func_pkg_pub.get(name).copied().unwrap_or(false));
+                let is_pub = self.name_ledger.visible(self.module_idx, mod_idx, name);
                 if !is_pub && mod_idx != self.module_idx {
                     self.diags.push(private_item(name, span));
                     for a in args.iter_mut() {

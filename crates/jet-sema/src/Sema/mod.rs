@@ -13,7 +13,6 @@ use crate::AST::{
     AccessConvention, Expr, ExternFn, Func, QuantityKind, Stmt, Type, VariantPayload,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
 
 mod Casing;
 
@@ -61,7 +60,6 @@ impl UninitState {
 #[derive(Debug, Clone)]
 pub(crate) struct MethodSig {
     name_span: Span,
-    is_pub: bool,
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
     /// D-GENERIC-CALL1=A: method-owned type parameters, distinct from the
@@ -92,7 +90,7 @@ pub(crate) struct MethodSig {
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
-        fields: Vec<(String, Span, Type, bool)>,
+        fields: Vec<(String, Span, Type)>,
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
         /// Values of this type must be consumed exactly once (E0140/E0141) and
@@ -276,7 +274,7 @@ impl TypeRegistry {
         self.unit_facts.get(name)
     }
 
-    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool)]> {
+    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type)]> {
         match self.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => Some(fields.as_slice()),
             _ => None,
@@ -483,7 +481,6 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
     }
     MethodSig {
         name_span: f.name_span,
-        is_pub: f.is_pub,
         params: f
             .params
             .iter()
@@ -1203,21 +1200,7 @@ pub(crate) struct ModuleState {
     /// True only for the explicitly selected package/workspace build entry.
     /// Ordinary `fn build` names do not grant compiler-host capabilities.
     allow_compiler_api: bool,
-    func_spans: HashMap<String, Span>,
-    const_spans: HashMap<String, Span>,
-    import_spans: HashMap<String, Span>,
-    /// D-PUBPKG1=A: modules under the same project package/workspace root may
-    /// see `pub(package)` items. Dependency/hangar modules get their own root.
-    package_scope: PathBuf,
     funcs: HashMap<String, FuncSig>,
-    func_pub: HashMap<String, bool>,
-    func_pkg_pub: HashMap<String, bool>,
-    type_pub: HashMap<String, bool>,
-    type_pkg_pub: HashMap<String, bool>,
-    method_pub: HashMap<(String, String), bool>,
-    method_pkg_pub: HashMap<(String, String), bool>,
-    field_pub: HashMap<(String, String), bool>,
-    field_pkg_pub: HashMap<(String, String), bool>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
@@ -1263,16 +1246,11 @@ pub(crate) struct Checker<'a> {
     unqualified: &'a HashMap<String, String>,
     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
     unqualified_file: &'a HashMap<String, (String, usize)>,
-    /// D-MOD2: pub flags for this module's functions, including inline-module
-    /// items mangled as `M__item`. Used to reject `M.private()` from outside.
-    func_pub: &'a HashMap<String, bool>,
-    /// D-PUBPKG1=A: package-scoped function visibility flags.
-    func_pkg_pub: &'a HashMap<String, bool>,
     module_path: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     current_function_span: Span,
-    reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
+    name_ledger: &'a mut jet_foundation::Names::NameLedger,
     diags: Vec<Diagnostic>,
     /// D-FACT-FLOW1: the one store of per-binding facts — declarations, flow
     /// narrowing, moves, uninitialised places and open borrow windows. Every
@@ -1983,7 +1961,7 @@ pub use Bundle::{
     specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,
 };
-pub use Effects::{DefinitionAnchorFact, EffectSummary, SemIndexEffectFacts};
+pub use Effects::{EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{
     check_memory_facts, project_memory_fact, MemoryCall, MemoryEvent, MemoryEventKind, MemoryFact,
     MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary,

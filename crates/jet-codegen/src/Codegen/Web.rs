@@ -1514,10 +1514,16 @@ fn bundle_module_index_for_alias(bundle: &ProgramBundle, alias: &str) -> Option<
         .find_map(|import| {
             (import.import_alias() == alias)
                 .then(|| {
+                    if bundle
+                        .name_ledger
+                        .effective_alias(bundle.entry, alias)
+                        .is_none()
+                    {
+                        return None;
+                    }
                     bundle
-                        .import_targets
-                        .get(&(bundle.entry, import.span))
-                        .copied()
+                        .name_ledger
+                        .import_target(bundle.entry, import.span)
                 })
                 .flatten()
         })

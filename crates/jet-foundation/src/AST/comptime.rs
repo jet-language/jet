@@ -1,4 +1,5 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
+use crate::Names::{mangle, mangle_path, user_type_rust};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -734,7 +735,7 @@ impl CtValue {
             // each arg in Rust `{:?}` form — matching that exactly here keeps
             // `jet dev` byte-identical to the compiled binary (I2).
             CtValue::Enum { variant, args, .. } => {
-                let mangled = format!("user_{}", variant.replace('.', "__"));
+                let mangled = mangle_path(variant);
                 if args.is_empty() {
                     mangled
                 } else if args.iter().all(|(label, _)| label.is_some()) {
@@ -788,7 +789,7 @@ impl CtValue {
             CtValue::Failed(CtReport::Told(v)) => format!("Err({})", v.debug_rust()),
             CtValue::Struct { type_name, fields } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
-                let mangled = format!("user_{}", ty.replace('.', "__"));
+                let mangled = user_type_rust(ty);
                 if fields.is_empty() {
                     mangled
                 } else {
@@ -814,7 +815,7 @@ impl CtValue {
                 _ => variant.clone(),
             },
             CtValue::Enum { variant, args, .. } => {
-                let mangled = format!("user_{}", variant.replace('.', "__"));
+                let mangled = mangle_path(variant);
                 if args.is_empty() {
                     mangled
                 } else if args.iter().all(|(label, _)| label.is_some()) {
@@ -1088,7 +1089,7 @@ impl CtValue {
                     .iter()
                     .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
                     .collect();
-                format!("user_{} {{ {} }}", type_name, parts.join(", "))
+                format!("{} {{ {} }}", user_type_rust(type_name), parts.join(", "))
             }
             CtValue::Enum {
                 type_name,
@@ -1125,7 +1126,7 @@ impl CtValue {
                 } else {
                     ct_mangle(variant)
                 };
-                let prefix = format!("user_{}::{}", type_name, variant);
+                let prefix = format!("{}::{}", user_type_rust(type_name), variant);
                 if args.is_empty() {
                     prefix
                 } else if args.iter().all(|(label, _)| label.is_none()) {
@@ -1157,7 +1158,7 @@ impl CtValue {
 }
 
 fn ct_mangle(name: &str) -> String {
-    format!("user_{}", name)
+    mangle(name)
 }
 
 #[cfg(test)]

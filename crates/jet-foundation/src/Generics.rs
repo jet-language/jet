@@ -83,7 +83,7 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
 
 /// User trait → Rust trait name.
 pub fn user_trait_rust(name: &str) -> String {
-    format!("user_{name}")
+    crate::Names::mangle(name)
 }
 
 /// Substitute type parameters in `ty` using `subst`.

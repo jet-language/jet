@@ -30,6 +30,7 @@ pub mod RegexSyntax;
 pub mod Registry;
 pub mod SHA256;
 pub mod MatchScan;
+pub mod Names;
 pub mod StreamCursor;
 pub mod StructuralDebug;
 pub mod Syntax;

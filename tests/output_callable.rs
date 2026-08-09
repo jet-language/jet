@@ -164,7 +164,7 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
         "effect row should be copied from sema"
     );
     assert_eq!(output.authority.as_str(), "safe-jet");
-    assert!(facts.reference_anchors.values().any(|anchor| {
+    assert!(facts.name_ledger.references().values().any(|anchor| {
         anchor.module_path == output.source_path && anchor.def_span == output.definition
     }));
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);

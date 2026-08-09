@@ -6,6 +6,7 @@ use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
     TPlace, TStrPart,
 };
+use crate::Codegen::mangle;
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{apply_core_call, apply_impure_core_call, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -3860,7 +3861,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut names = vec![method.name.clone()];
                 if method.mangled {
-                    names.push(format!("user_{}", method.name));
+                    names.push(mangle(&method.name));
                 }
                 if let Type::Named(type_name) = &recv.ty {
                     names.push(format!("{type_name}::{}", method.name));
@@ -5217,7 +5218,7 @@ impl<'a> EvalCtx<'a> {
                         ];
                         if owner_type.is_none() {
                             candidates.push(method.name.clone());
-                            candidates.push(format!("user_{}", method.name));
+                            candidates.push(mangle(&method.name));
                         }
                         for name in candidates {
                             if let Some(func) = self.funcs.get(&name).copied() {

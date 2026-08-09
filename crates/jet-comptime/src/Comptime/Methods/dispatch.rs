@@ -22,6 +22,7 @@ use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use crate::AST::CtValue;
+use jet_foundation::Names::{mangle, user_type_rust};
 use super::core_calls::{
     apply_core_call, apply_data_line_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
     eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
@@ -1226,10 +1227,10 @@ impl<'a> Interp<'a> {
                                 .find(|(name, _)| name == &field.name)
                                 .map(|(_, value)| value.debug_rust())
                                 .unwrap_or_else(|| CtValue::Unit.debug_rust());
-                            format!("user_{}: {}", field.name, rendered)
+                            format!("{}: {}", mangle(&field.name), rendered)
                         })
                         .collect();
-                    return format!("user_{type_name} {{ {} }}", parts.join(", "));
+                    return format!("{} {{ {} }}", user_type_rust(type_name), parts.join(", "));
                 }
                 let parts: Vec<String> = def
                     .fields

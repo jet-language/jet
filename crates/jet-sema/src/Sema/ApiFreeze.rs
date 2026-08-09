@@ -392,7 +392,7 @@ fn frozen_name(code_module: Option<&str>, name: &str) -> String {
 }
 
 /// Build a pre-v3 compatibility snapshot from AST items without solved effect
-/// facts. Current publish metadata must use [`snapshot_from_items_with_effects`].
+/// facts. Current publish metadata must use [`snapshot_from_items_with_ledger`].
 pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiSnapshot {
     snapshot_from_items_with_effects(items, package, version, None, None)
 }
@@ -405,6 +405,47 @@ pub fn snapshot_from_items_with_effects(
     solved: Option<&std::collections::HashMap<String, EffectSet>>,
     module_alias: Option<&str>,
 ) -> ApiSnapshot {
+    snapshot_from_items_with_context(
+        items,
+        package,
+        version,
+        solved,
+        module_alias,
+        0,
+        None,
+    )
+}
+
+/// Build current publish metadata from sema's one name ledger.
+pub fn snapshot_from_items_with_ledger(
+    items: &[Item],
+    package: &str,
+    version: &str,
+    solved: Option<&std::collections::HashMap<String, EffectSet>>,
+    module_alias: Option<&str>,
+    module_idx: usize,
+    ledger: &crate::AST::NameLedger,
+) -> ApiSnapshot {
+    snapshot_from_items_with_context(
+        items,
+        package,
+        version,
+        solved,
+        module_alias,
+        module_idx,
+        Some(ledger),
+    )
+}
+
+fn snapshot_from_items_with_context(
+    items: &[Item],
+    package: &str,
+    version: &str,
+    solved: Option<&std::collections::HashMap<String, EffectSet>>,
+    module_alias: Option<&str>,
+    module_idx: usize,
+    ledger: Option<&crate::AST::NameLedger>,
+) -> ApiSnapshot {
     let mut funcs = Vec::new();
     let mut dimensions = HashMap::new();
     collect_api_unit_dimensions(items, package, &mut dimensions);
@@ -414,6 +455,8 @@ pub fn snapshot_from_items_with_effects(
         module_alias,
         None,
         &dimensions,
+        module_idx,
+        ledger,
         &mut funcs,
     );
     funcs.sort();
@@ -624,36 +667,53 @@ fn collect_pub_fns(
     module_alias: Option<&str>,
     code_module: Option<&str>,
     dimensions: &ApiUnitDimensions,
+    module_idx: usize,
+    ledger: Option<&crate::AST::NameLedger>,
     out: &mut Vec<FrozenFn>,
 ) {
     let empty_effects = EffectSet::new();
     for item in items {
         match item {
             Item::Func(f)
-                if f.is_pub
-                    && !f.is_package_pub
-                    && crate::Syntax::classify_identifier(&f.name)
-                        == crate::Syntax::IdentifierClass::Ordinary => out.push(FrozenFn {
-                name: frozen_name(code_module, &f.name),
-                signature: qualify_api_signature(
-                    code_module,
-                    &canonical_fn_signature_with_effects(
-                        f,
-                        solved.map(|sets| {
-                            module_alias.and_then(|alias| {
-                                let name = code_module
-                                    .map(|module| format!("{module}__{}", f.name))
-                                    .unwrap_or_else(|| f.name.clone());
-                                sets.get(&format!("{alias}::{name}"))
-                            })
-                                .or_else(|| sets.get(&f.name))
-                                .unwrap_or(&empty_effects)
-                        }),
-                        dimensions,
+                if crate::Syntax::classify_identifier(&f.name)
+                    == crate::Syntax::IdentifierClass::Ordinary =>
+            {
+                let ledger_name = code_module
+                    .map(|module| jet_foundation::Names::member_name(module, &f.name))
+                    .unwrap_or_else(|| f.name.clone());
+                let is_public = ledger
+                    .map(|ledger| ledger.public(module_idx, &ledger_name))
+                    .unwrap_or(f.is_pub && !f.is_package_pub);
+                if !is_public {
+                    continue;
+                }
+                out.push(FrozenFn {
+                    name: frozen_name(code_module, &f.name),
+                    signature: qualify_api_signature(
+                        code_module,
+                        &canonical_fn_signature_with_effects(
+                            f,
+                            solved.map(|sets| {
+                                module_alias
+                                    .and_then(|alias| sets.get(&format!("{alias}::{ledger_name}")))
+                                    .or_else(|| sets.get(&f.name))
+                                    .unwrap_or(&empty_effects)
+                            }),
+                            dimensions,
+                        ),
                     ),
-                ),
-            }),
-            Item::Trait(trait_def) if trait_def.is_pub && !trait_def.is_package_pub => {
+                });
+            }
+            Item::Trait(trait_def) => {
+                let ledger_name = code_module
+                    .map(|module| jet_foundation::Names::member_name(module, &trait_def.name))
+                    .unwrap_or_else(|| trait_def.name.clone());
+                let is_public = ledger
+                    .map(|ledger| ledger.public(module_idx, &ledger_name))
+                    .unwrap_or(trait_def.is_pub && !trait_def.is_package_pub);
+                if !is_public {
+                    continue;
+                }
                 for method in &trait_def.methods {
                     if crate::Syntax::classify_identifier(&method.name)
                         == crate::Syntax::IdentifierClass::Ordinary
@@ -679,6 +739,8 @@ fn collect_pub_fns(
                         module_alias,
                         Some(&m.name),
                         dimensions,
+                        module_idx,
+                        ledger,
                         out,
                     );
                 }

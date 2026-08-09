@@ -398,8 +398,8 @@ impl<'a> Checker<'a> {
                 self.registry
                     .struct_fields(&name)?
                     .iter()
-                    .find(|(candidate, _, _, _)| candidate == field)
-                    .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+                    .find(|(candidate, _, _)| candidate == field)
+                    .map(|(_, _, ty)| substitute_type(ty, &subst))
             }
             _ => None,
         }

@@ -2287,7 +2287,7 @@ fn run_bundle(
         // Dev-tier only: surface reset / migration notes on stderr.
         eprintln!("{msg}");
     }
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Const(c) = item {
                 let value = if c.is_persist {
@@ -2306,12 +2306,19 @@ fn run_bundle(
                     globals.entry(c.name.clone()).or_insert_with(|| v.clone());
                     // ConstRef sometimes carries the Rust-mangled spelling.
                     globals
-                        .entry(format!("user_{}", c.name))
+                        .entry(crate::Codegen::mangle(&c.name))
                         .or_insert(v);
                 }
             }
         }
         for imp in &module.imports {
+            if bundle
+                .name_ledger
+                .effective_alias(module_idx, &imp.import_alias())
+                .is_none()
+            {
+                continue;
+            }
             if let Some(core_module) = imp.core_module_path() {
                 core_imports
                     .entry(imp.import_alias())

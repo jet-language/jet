@@ -203,7 +203,7 @@ fn dom_fn() {
         used_core: Default::default(),
         cffi: Default::default(),
         comptime_inputs: vec![],
-        import_targets: Default::default(),
+        name_ledger: jet::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: jet::Syntax::RuntimeLayer::Core,
         web_partitions: Default::default(),

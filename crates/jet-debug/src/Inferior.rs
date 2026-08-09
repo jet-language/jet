@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
+use jet_foundation::Names::mangle;
 
 /// Bogus command sent after every real one. lldb echoes then rejects it
 /// (`error: '<sentinel>' is not a valid command.`, to stderr, which we null —
@@ -413,13 +414,15 @@ impl Inferior {
     /// (`_jet_switch_subject`, destructure temps, …) that should never
     /// surface — `None` means "filter this one out", not "show it raw".
     pub(crate) fn rust_local_to_jet(name: &str) -> Option<String> {
-        name.strip_prefix("user_").map(|s| s.to_string())
+        name.strip_prefix("userct_")
+            .map(|s| format!("${s}"))
+            .or_else(|| name.strip_prefix("user_").map(str::to_string))
     }
 
     /// The reverse of [`Self::rust_local_to_jet`] — the mangled Rust name
     /// lldb needs for `frame variable <name>`.
     pub(crate) fn jet_local_to_rust(name: &str) -> String {
-        format!("user_{}", name)
+        mangle(name)
     }
 
     /// Clean a raw Rust function symbol (`prog::main::h4002…` or

@@ -792,7 +792,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("drop({})", emit_tir_expr(arg, cx))
         }
         TExprKind::Close(arg) => {
-            format!("user_Close::close({})", emit_tir_expr(arg, cx))
+            format!("{}::close({})", mangle("Close"), emit_tir_expr(arg, cx))
         }
         TExprKind::ResourceNew(arg) => {
             format!("JetResource::new({})", emit_tir_expr(arg, cx))
@@ -1001,7 +1001,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     _ => unreachable!("operator_line is only set for arithmetic hooks"),
                 };
                 return format!(
-                    "user_{trait_name}::__jet_{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
+                    "{}::__jet_{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
+                    crate::Generics::user_trait_rust(trait_name),
                     emit_tir_expr(recv, cx),
                     cx.file,
                 );
@@ -1843,7 +1844,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                         .map(|(_, ty)| ty.as_ref()),
                                     _ => None,
                                 };
-                                let raw = format!("({}).user_{field}", emit_tir_expr(tuple, cx));
+                                let raw = format!("({}).{}", emit_tir_expr(tuple, cx), mangle(field));
                                 source_ty.map_or_else(
                                     || format!("({raw}).clone()"),
                                     |source_ty| {
@@ -1896,7 +1897,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 let field = fields
                                     .get(index)
                                     .map_or_else(|| format!("column_{index}"), |name| name.clone());
-                                assignments.push(format!("user_{field}: {value}"));
+                                assignments.push(format!("{}: {value}", mangle(field)));
                             }
                             format!("{} {{ {} }}", tuple_struct, assignments.join(", "))
                         } else {
@@ -2794,8 +2795,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 // D-UNIONTYPE1=A: member error → anonymous union wrap.
                 TTryConvert::WidenUnion { enum_name, tag } => format!(
-                    "jet_trace_err({}.map_err(|e| user_{enum_name}::{tag}(e)), {}, {}, {})?",
-                    v, file, line, fn_name
+                    "jet_trace_err({}.map_err(|e| {}::{tag}(e)), {}, {}, {})?",
+                    v,
+                    user_type_rust(enum_name),
+                    file,
+                    line,
+                    fn_name
                 ),
                 // Error types match — bare propagate.
                 TTryConvert::None => {
@@ -4817,7 +4822,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.rust_type(target),
                     recv
                 ),
-                THandleOp::SerdeEncode => format!("user_Encode::jet_encode(&({}))", recv),
+                THandleOp::SerdeEncode => {
+                    format!("{}::jet_encode(&({}))", mangle("Encode"), recv)
+                }
                 // D-SERDE-ACCESS=B: same accessors on JSON/Data.
                 THandleOp::JSONField => format!("({}).field(&({}))", recv, a(0)),
                 THandleOp::JSONAt => format!("({}).at({})", recv, a(0)),
@@ -5211,7 +5218,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     )
                 }
                 TModuleCallForm::InlineMangled { mangled } => {
-                    format!("{}user_{}{}({})", cx.root_prefix, mangled, type_args, arg_str)
+                    format!("{}{}{}({})", cx.root_prefix, mangle(mangled), type_args, arg_str)
                 }
             }
         }

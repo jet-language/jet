@@ -57,7 +57,7 @@ pub(super) struct CachedFunctionBody {
     pub summaries: HashMap<String, EffectSummary>,
     pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
     pub address_taken: HashSet<String>,
-    pub anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    pub name_ledger: jet_foundation::Names::NameLedger,
     pub pending_diagnostics: Vec<PendingFunctionDiagnostic>,
 }
 
@@ -465,7 +465,7 @@ impl IncrementalSemaCache {
                             + format!("{:?}", entry.summaries).len()
                             + format!("{:?}", entry.comptime_inputs).len()
                             + format!("{:?}", entry.address_taken).len()
-                            + format!("{:?}", entry.anchors).len()
+                            + format!("{:?}", entry.name_ledger).len()
                             + format!("{:?}", entry.pending_diagnostics).len()
                     })
                     .sum::<usize>(),
@@ -671,6 +671,426 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
     out
 }
 
+fn declare_name(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module: usize,
+    name: impl Into<String>,
+    path: impl Into<String>,
+    kind: &str,
+    span: Span,
+    visibility: jet_foundation::Names::NameVisibility,
+) {
+    ledger.declare(
+        module,
+        name.into(),
+        path.into(),
+        kind.to_string(),
+        span,
+        visibility,
+    );
+}
+
+fn declare_method_names(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module: usize,
+    module_alias: &str,
+    owner: &str,
+    methods: &[Func],
+) {
+    for method in methods {
+        declare_name(
+            ledger,
+            module,
+            format!("{owner}.{}", method.name),
+            format!("{module_alias}.{owner}.{}", method.name),
+            "method",
+            method.name_span,
+            jet_foundation::Names::NameVisibility::from_flags(
+                method.is_pub,
+                method.is_package_pub,
+            ),
+        );
+    }
+}
+
+fn declare_item_names(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module: usize,
+    module_alias: &str,
+    item: &Item,
+) {
+    use jet_foundation::Names::NameVisibility;
+
+    match item {
+        Item::Func(function) => declare_name(
+            ledger,
+            module,
+            function.name.clone(),
+            format!("{module_alias}.{}", function.name),
+            "function",
+            function.name_span,
+            NameVisibility::from_flags(function.is_pub, function.is_package_pub),
+        ),
+        Item::Struct(definition) => {
+            declare_name(
+                ledger,
+                module,
+                definition.name.clone(),
+                format!("{module_alias}.{}", definition.name),
+                "type",
+                definition.name_span,
+                NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+            );
+            for field in &definition.fields {
+                declare_name(
+                    ledger,
+                    module,
+                    format!("{}.{}", definition.name, field.name),
+                    format!("{module_alias}.{}.{}", definition.name, field.name),
+                    "field",
+                    field.name_span,
+                    NameVisibility::from_flags(field.is_pub, field.is_package_pub),
+                );
+            }
+            declare_method_names(
+                ledger,
+                module,
+                module_alias,
+                &definition.name,
+                &definition.methods,
+            );
+            for implementation in &definition.trait_impls {
+                declare_method_names(
+                    ledger,
+                    module,
+                    module_alias,
+                    &definition.name,
+                    &implementation.methods,
+                );
+            }
+        }
+        Item::Enum(definition) => {
+            let visibility = NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
+            declare_name(
+                ledger,
+                module,
+                definition.name.clone(),
+                format!("{module_alias}.{}", definition.name),
+                "type",
+                definition.name_span,
+                visibility,
+            );
+            for variant in &definition.variants {
+                declare_name(
+                    ledger,
+                    module,
+                    format!("{}.{}", definition.name, variant.name),
+                    format!("{module_alias}.{}.{}", definition.name, variant.name),
+                    "variant",
+                    variant.name_span,
+                    visibility,
+                );
+            }
+            declare_method_names(
+                ledger,
+                module,
+                module_alias,
+                &definition.name,
+                &definition.methods,
+            );
+            for implementation in &definition.trait_impls {
+                declare_method_names(
+                    ledger,
+                    module,
+                    module_alias,
+                    &definition.name,
+                    &implementation.methods,
+                );
+            }
+        }
+        Item::Distinct(definition) => declare_name(
+            ledger,
+            module,
+            definition.name.clone(),
+            format!("{module_alias}.{}", definition.name),
+            "type",
+            definition.name_span,
+            NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+        ),
+        Item::TypeAlias(definition) => declare_name(
+            ledger,
+            module,
+            definition.name.clone(),
+            format!("{module_alias}.{}", definition.name),
+            "type",
+            definition.name_span,
+            NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+        ),
+        Item::UnitFamily(family) => {
+            for definition in family.distinct_defs() {
+                declare_name(
+                    ledger,
+                    module,
+                    definition.name.clone(),
+                    format!("{module_alias}.{}", definition.name),
+                    "type",
+                    definition.name_span,
+                    NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+                );
+            }
+        }
+        Item::Trait(definition) => {
+            let visibility = NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
+            declare_name(
+                ledger,
+                module,
+                definition.name.clone(),
+                format!("{module_alias}.{}", definition.name),
+                "trait",
+                definition.name_span,
+                visibility,
+            );
+            for method in &definition.methods {
+                declare_name(
+                    ledger,
+                    module,
+                    format!("{}.{}", definition.name, method.name),
+                    format!("{module_alias}.{}.{}", definition.name, method.name),
+                    "method",
+                    method.name_span,
+                    visibility,
+                );
+            }
+        }
+        Item::Tag(definition) => declare_name(
+            ledger,
+            module,
+            definition.name.clone(),
+            format!("{module_alias}.{}", definition.name),
+            "tag",
+            definition.name_span,
+            NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+        ),
+        Item::Impl(implementation) => {
+            declare_method_names(
+                ledger,
+                module,
+                module_alias,
+                &implementation.type_name,
+                &implementation.methods,
+            );
+            for (name, span, _) in &implementation.assoc_type_impls {
+                declare_name(
+                    ledger,
+                    module,
+                    format!("{}.{}", implementation.type_name, name),
+                    format!("{module_alias}.{}.{}", implementation.type_name, name),
+                    "associated_type",
+                    *span,
+                    NameVisibility::Private,
+                );
+            }
+        }
+        Item::Const(definition) => declare_name(
+            ledger,
+            module,
+            definition.name.clone(),
+            format!("{module_alias}.{}", definition.name),
+            "const",
+            definition.name_span,
+            NameVisibility::Private,
+        ),
+        Item::ExternRust(block) => {
+            for function in &block.functions {
+                declare_name(
+                    ledger,
+                    module,
+                    function.name.clone(),
+                    format!("{module_alias}.{}", function.name),
+                    "extern",
+                    function.name_span,
+                    NameVisibility::Private,
+                );
+            }
+        }
+        Item::CModule(module_def) => {
+            for function in &module_def.functions {
+                declare_name(
+                    ledger,
+                    module,
+                    function.name.clone(),
+                    format!("{module_alias}.{}", function.name),
+                    "extern",
+                    function.name_span,
+                    NameVisibility::Public,
+                );
+            }
+        }
+        Item::CodeModule(code_module) => {
+            let visibility = NameVisibility::from_flags(
+                code_module.is_pub,
+                code_module.is_package_pub,
+            );
+            declare_name(
+                ledger,
+                module,
+                code_module.name.clone(),
+                format!("{module_alias}.{}", code_module.name),
+                "module",
+                code_module.name_span,
+                visibility,
+            );
+            if let Some(body) = &code_module.body {
+                for nested in body {
+                    if let Item::Func(function) = nested {
+                        let semantic_name = jet_foundation::Names::member_name(
+                            &code_module.name,
+                            &function.name,
+                        );
+                        declare_name(
+                            ledger,
+                            module,
+                            semantic_name,
+                            format!("{module_alias}.{}.{}", code_module.name, function.name),
+                            "function",
+                            function.name_span,
+                            NameVisibility::from_flags(function.is_pub, function.is_package_pub),
+                        );
+                    }
+                }
+            }
+        }
+        Item::StateDecl(state) => {
+            let visibility = NameVisibility::from_flags(state.is_pub, state.is_package_pub);
+            declare_name(
+                ledger,
+                module,
+                state.type_name.clone(),
+                format!("{module_alias}.{}", state.type_name),
+                "state",
+                state.type_name_span,
+                visibility,
+            );
+            for (name, span) in &state.states {
+                declare_name(
+                    ledger,
+                    module,
+                    format!("{}.State.{name}", state.type_name),
+                    format!("{module_alias}.{}.State.{name}", state.type_name),
+                    "state",
+                    *span,
+                    visibility,
+                );
+            }
+        }
+        Item::ProtocolDecl(protocol) => {
+            let visibility = NameVisibility::from_flags(protocol.is_pub, protocol.is_package_pub);
+            declare_name(
+                ledger,
+                module,
+                protocol.name.clone(),
+                format!("{module_alias}.{}", protocol.name),
+                "protocol",
+                protocol.name_span,
+                visibility,
+            );
+        }
+        _ => {}
+    }
+}
+
+fn populate_name_ledger(
+    bundle: &ProgramBundle,
+    states: &[ModuleState],
+    ledger: &mut jet_foundation::Names::NameLedger,
+) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let package = package_scope_for(&module.path, &bundle.project_root)
+            .to_string_lossy()
+            .into_owned();
+        ledger.set_module(
+            module_idx,
+            module.alias.clone(),
+            module.display.clone(),
+            package,
+        );
+    }
+
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let state = &states[module_idx];
+        for item in &module.items {
+            declare_item_names(ledger, module_idx, &module.alias, item);
+        }
+        for import in &module.imports {
+            let import_alias = import.import_alias();
+            let alias_visibility = jet_foundation::Names::NameVisibility::from_flags(
+                import.is_pub,
+                import.is_package_pub,
+            );
+            let (import_target, target_module) = if let Some(target) =
+                ledger.import_target(module_idx, import.span)
+            {
+                (bundle.modules[target].alias.clone(), Some(target))
+            } else if let Some(core_path) = import.core_module_path() {
+                (core_path, None)
+            } else {
+                let target = match &import.kind {
+                    ImportKind::File(path, _) | ImportKind::Module(path, _) => path.clone(),
+                    ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
+                };
+                (target, None)
+            };
+            ledger.record_alias(
+                module_idx,
+                import_alias,
+                import_target,
+                target_module,
+                import.alias_span,
+                alias_visibility,
+            );
+
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &import.kind
+            else {
+                continue;
+            };
+            for (original, local_alias) in items {
+                let local = local_alias.as_deref().unwrap_or(original);
+                let target = if module_alias == "core" || module_alias == "jet" {
+                    Some((format!("core.{original}"), None))
+                } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
+                    Some((
+                        format!("{}.{}", bundle.modules[*target_module].alias, real),
+                        Some(*target_module),
+                    ))
+                } else if let Some(resolved) = state.unqualified.get(local) {
+                    Some((resolved.clone(), Some(module_idx)))
+                } else if let Some(target_module) = state.imports.get(module_alias) {
+                    Some((
+                        format!("{}.{}", bundle.modules[*target_module].alias, original),
+                        Some(*target_module),
+                    ))
+                } else {
+                    None
+                };
+                if let Some((target, target_module)) = target {
+                    ledger.record_alias(
+                        module_idx,
+                        local.to_string(),
+                        target,
+                        target_module,
+                        import.alias_span,
+                        alias_visibility,
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// D-MOD2: inside an inline `module math { … }`, a call to a sibling function
 /// `helper(x)` must lower to the mangled `math__helper`. This pre-pass rewrites
 
@@ -838,20 +1258,8 @@ fn check_bundle_opts_for_output_inner(
         .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
             module_alias: m.alias.clone(),
-            func_spans: HashMap::new(),
-            const_spans: HashMap::new(),
-            import_spans: HashMap::new(),
-            package_scope: package_scope_for(&m.path, &bundle.project_root),
             allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
             funcs: HashMap::new(),
-            func_pub: HashMap::new(),
-            func_pkg_pub: HashMap::new(),
-            type_pub: HashMap::new(),
-            type_pkg_pub: HashMap::new(),
-            method_pub: HashMap::new(),
-            method_pkg_pub: HashMap::new(),
-            field_pub: HashMap::new(),
-            field_pkg_pub: HashMap::new(),
             registry: builtin_type_registry(),
             consts: HashMap::new(),
             imports: HashMap::new(),
@@ -882,6 +1290,8 @@ fn check_bundle_opts_for_output_inner(
             reexports: HashMap::new(),
         })
         .collect();
+    let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
+    name_ledger.clear_sema_facts();
 
     // Generic-instance declarations have one AST/codegen owner, while every
     // consumer registry receives the same nominal metadata. This is not a
@@ -904,16 +1314,14 @@ fn check_bundle_opts_for_output_inner(
             match item {
                 Item::Struct(def) => {
                     register_struct(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub.insert(def.name.clone(), def.is_pub && !def.is_package_pub);
-                    st.type_pkg_pub.insert(def.name.clone(), def.is_package_pub);
                 }
                 Item::Enum(def) => {
                     register_enum(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub.insert(def.name.clone(), def.is_pub && !def.is_package_pub);
-                    st.type_pkg_pub.insert(def.name.clone(), def.is_package_pub);
                 }
                 _ => unreachable!(),
             }
+            let module_alias = bundle.modules[consumer].alias.clone();
+            declare_item_names(&mut name_ledger, consumer, &module_alias, item);
         }
     }
 
@@ -1037,21 +1445,7 @@ fn check_bundle_opts_for_output_inner(
             None
         };
         let st = &mut states[idx];
-        for import in &module.imports {
-            if !matches!(import.kind, crate::AST::ImportKind::Unqualified { .. }) {
-                st.import_spans.insert(import.import_alias(), import.alias_span);
-            }
-        }
         for item in &module.items {
-            match item {
-                Item::Func(f) => {
-                    st.func_spans.insert(f.name.clone(), f.name_span);
-                }
-                Item::Const(c) => {
-                    st.const_spans.insert(c.name.clone(), c.name_span);
-                }
-                _ => {}
-            }
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags),
                 Item::Struct(s) => {
@@ -1062,39 +1456,9 @@ fn check_bundle_opts_for_output_inner(
                         &st.funcs,
                         &st.consts,
                     );
-                    st.type_pub
-                        .insert(s.name.clone(), s.is_pub && !s.is_package_pub);
-                    st.type_pkg_pub.insert(s.name.clone(), s.is_package_pub);
-                    for fld in &s.fields {
-                        st.field_pub.insert(
-                            (s.name.clone(), fld.name.clone()),
-                            fld.is_pub && !fld.is_package_pub,
-                        );
-                        st.field_pkg_pub
-                            .insert((s.name.clone(), fld.name.clone()), fld.is_package_pub);
-                    }
-                    for m in &s.methods {
-                        st.method_pub.insert(
-                            (s.name.clone(), m.name.clone()),
-                            m.is_pub && !m.is_package_pub,
-                        );
-                        st.method_pkg_pub
-                            .insert((s.name.clone(), m.name.clone()), m.is_package_pub);
-                    }
                 }
                 Item::Enum(e) => {
                     register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub
-                        .insert(e.name.clone(), e.is_pub && !e.is_package_pub);
-                    st.type_pkg_pub.insert(e.name.clone(), e.is_package_pub);
-                    for m in &e.methods {
-                        st.method_pub.insert(
-                            (e.name.clone(), m.name.clone()),
-                            m.is_pub && !m.is_package_pub,
-                        );
-                        st.method_pkg_pub
-                            .insert((e.name.clone(), m.name.clone()), m.is_package_pub);
-                    }
                 }
                 Item::Impl(i) => {
                     if !i.type_name.contains('.') && !st.registry.contains(&i.type_name) {
@@ -1108,15 +1472,6 @@ fn check_bundle_opts_for_output_inner(
                             ),
                             Some(i.type_span),
                         ));
-                    } else if !i.type_name.contains('.') {
-                        for m in &i.methods {
-                            st.method_pub.insert(
-                                (i.type_name.clone(), m.name.clone()),
-                                m.is_pub && !m.is_package_pub,
-                            );
-                            st.method_pkg_pub
-                                .insert((i.type_name.clone(), m.name.clone()), m.is_package_pub);
-                        }
                     }
                 }
                 Item::Const(c) => {
@@ -1127,21 +1482,11 @@ fn check_bundle_opts_for_output_inner(
                 }
                 Item::Distinct(d) => {
                     register_distinct(d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub
-                        .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
-                    st.type_pkg_pub.insert(d.name.clone(), d.is_package_pub);
                 }
                 Item::TypeAlias(a) => {
                     register_type_alias(a, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub
-                        .insert(a.name.clone(), a.is_pub && !a.is_package_pub);
-                    st.type_pkg_pub.insert(a.name.clone(), a.is_package_pub);
                 }
-                Item::Tag(t) => {
-                    st.type_pub
-                        .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
-                    st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
-                }
+                Item::Tag(_) => {}
                 // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
@@ -1167,9 +1512,6 @@ fn check_bundle_opts_for_output_inner(
                                 st.registry.unit_facts.insert(d.name.clone(), fact);
                             }
                         }
-                        st.type_pub
-                            .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
-                        st.type_pkg_pub.insert(d.name.clone(), d.is_package_pub);
                     }
                 }
                 Item::Test(t) => {
@@ -1234,16 +1576,10 @@ fn check_bundle_opts_for_output_inner(
                                 &mut diags,
                                 true,
                             );
-                            // C FFI functions are callable across the `use c.<lib>`
-                            // alias — expose them like any pub item.
-                            st.func_pub.insert(ef.name.clone(), true);
                         }
                     }
                 }
                 Item::Trait(t) => {
-                    st.type_pub
-                        .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
-                    st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
                 }
                 Item::Module(_) => {}
                 Item::CodeModule(cm) => {
@@ -1259,17 +1595,13 @@ fn check_bundle_opts_for_output_inner(
                         );
                         for inner in body {
                             if let Item::Func(f) = inner {
-                                let mangled = format!("{}__{}", cm.name, f.name);
-                                st.func_spans.insert(mangled.clone(), f.name_span);
+                                let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
                                 st.funcs.insert(mangled.clone(), func_to_sig(f));
                                 if !f.type_params.is_empty() {
                                     st.trait_reg
                                         .fn_params
                                         .insert(mangled.clone(), f.type_params.clone());
                                 }
-                                st.func_pub.insert(mangled, f.is_pub && !f.is_package_pub);
-                                st.func_pkg_pub
-                                    .insert(format!("{}__{}", cm.name, f.name), f.is_package_pub);
                             }
                         }
                     }
@@ -1451,19 +1783,6 @@ fn check_bundle_opts_for_output_inner(
                                 &st.funcs,
                                 &st.consts,
                             );
-                            st.type_pub
-                                .insert(s.name.clone(), s.is_pub && !s.is_package_pub);
-                            st.type_pkg_pub.insert(s.name.clone(), s.is_package_pub);
-                            for field in &s.fields {
-                                st.field_pub.insert(
-                                    (s.name.clone(), field.name.clone()),
-                                    field.is_pub && !field.is_package_pub,
-                                );
-                                st.field_pkg_pub.insert(
-                                    (s.name.clone(), field.name.clone()),
-                                    field.is_package_pub,
-                                );
-                            }
                         }
                         Item::Enum(e) => {
                             register_enum(
@@ -1473,21 +1792,9 @@ fn check_bundle_opts_for_output_inner(
                                 &st.funcs,
                                 &st.consts,
                             );
-                            st.type_pub
-                                .insert(e.name.clone(), e.is_pub && !e.is_package_pub);
-                            st.type_pkg_pub.insert(e.name.clone(), e.is_package_pub);
                         }
-                        Item::Tag(t) => {
-                            st.type_pub
-                                .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
-                            st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
-                        }
-                        Item::Impl(i) => {
-                            for m in &i.methods {
-                                st.method_pub
-                                    .insert((i.type_name.clone(), m.name.clone()), m.is_pub);
-                            }
-                        }
+                        Item::Tag(_) => {}
+                        Item::Impl(_) => {}
                         _ => {}
                     }
                 }
@@ -1557,7 +1864,7 @@ fn check_bundle_opts_for_output_inner(
         // expert cycles use Shared.Weak and are admitted.
         check_strong_shared_cycles(&st.registry, &mut diags);
     }
-    let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle, &name_ledger);
     for (state, auto_derives) in states.iter_mut().zip(&bundle_auto_derives) {
         state.trait_reg.merge_auto_derives(auto_derives);
     }
@@ -1572,8 +1879,8 @@ fn check_bundle_opts_for_output_inner(
             if let Item::Impl(i) = item {
                 if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
                     if let Some(fields) = st.registry.struct_fields(&i.type_name) {
-                        if let Some((_, _, field_ty, _)) =
-                            fields.iter().find(|(n, _, _, _)| n == field_name)
+                        if let Some((_, _, field_ty)) =
+                            fields.iter().find(|(n, _, _)| n == field_name)
                         {
                             let field_type_name = field_ty.name();
                             if !st.trait_reg.implements_trait(&field_type_name, trait_name) {
@@ -1613,6 +1920,11 @@ fn check_bundle_opts_for_output_inner(
             }
         }
     }
+
+    // D-NAME-TREE1=A: registration is complete, so publish declarations and
+    // visibility before any import or body pass consults them. The later
+    // unqualified-import pass adds alias rows to this same ledger.
+    populate_name_ledger(bundle, &states, &mut name_ledger);
 
     // D-MOD3/4: Unqualified imports (`use alias.Item`) are processed in a
     // dedicated pass *after* file-module aliases land in `st.imports` below.
@@ -1716,7 +2028,7 @@ fn check_bundle_opts_for_output_inner(
                 }
                 continue;
             }
-            if let Some(target) = bundle.import_targets.get(&(idx, imp.span)).copied() {
+            if let Some(target) = name_ledger.import_target(idx, imp.span) {
                 st.imports.insert(alias, target);
             }
         }
@@ -1741,7 +2053,7 @@ fn check_bundle_opts_for_output_inner(
                 // Inline module: items are mangled as `{alias}__{item}`.
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let mangled = format!("{}__{}", canonical, orig);
+                    let mangled = jet_foundation::Names::member_name(canonical, orig);
                     if !st.funcs.contains_key(&mangled) {
                         diags.push(Diagnostic::error(
                             "E0611",
@@ -1750,8 +2062,7 @@ fn check_bundle_opts_for_output_inner(
                             "make sure the name is spelled correctly".to_string(),
                             Some(*module_alias_span),
                         ));
-                    } else if !st.func_pub.get(&mangled).copied().unwrap_or(false)
-                        && !st.func_pkg_pub.get(&mangled).copied().unwrap_or(false)
+                    } else if !name_ledger.exported(idx, &mangled)
                     {
                         diags.push(Diagnostic::error(
                             "E0609",
@@ -1821,18 +2132,7 @@ fn check_bundle_opts_for_output_inner(
                 let is_reexport = imp.is_pub;
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let same_pkg = states[target_idx].package_scope == states[idx].package_scope;
-                    let is_pub = states[target_idx]
-                        .func_pub
-                        .get(orig.as_str())
-                        .copied()
-                        .unwrap_or(false)
-                        || (same_pkg
-                            && states[target_idx]
-                                .func_pkg_pub
-                                .get(orig.as_str())
-                                .copied()
-                                .unwrap_or(false));
+                    let is_pub = name_ledger.visible(idx, target_idx, orig);
                     let exists = states[target_idx].funcs.contains_key(orig.as_str());
                     if !exists {
                         diags.push(Diagnostic::error(
@@ -1874,6 +2174,8 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
+    populate_name_ledger(bundle, &states, &mut name_ledger);
+
     for idx in 0..bundle.modules.len() {
         for item in &bundle.modules[idx].items {
             let Item::Impl(i) = item else { continue };
@@ -1896,19 +2198,20 @@ fn check_bundle_opts_for_output_inner(
                     ),
                     Some(i.type_span),
                 ));
-            } else {
-                for m in &i.methods {
-                    states[idx]
-                        .method_pub
-                        .insert((i.type_name.clone(), m.name.clone()), m.is_pub);
-                }
             }
         }
     }
 
     // D-SHAPE-OUTPUT-CALLABLE1: freeze every runnable Output to the ordinary
     // function it resolves to before entry selection or lowering can inspect it.
-    resolve_outputs(bundle, &states, mode, explicit_output, &mut diags);
+    resolve_outputs(
+        bundle,
+        &states,
+        &name_ledger,
+        mode,
+        explicit_output,
+        &mut diags,
+    );
 
     // Parity with the single-file path: `@static` and address-taken consts
     // must lower to Rust `static` in bundle mode too.
@@ -2102,7 +2405,6 @@ fn check_bundle_opts_for_output_inner(
     }
     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
-    let mut reference_anchors = HashMap::new();
     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
     let mut module_pending_diagnostics = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
@@ -2124,20 +2426,28 @@ fn check_bundle_opts_for_output_inner(
             &mut local_summaries,
             &mut embed_inputs,
             &mut global_addr_taken,
-            &mut reference_anchors,
+            &mut name_ledger,
             &mut local_pending_diagnostics,
             incremental.as_deref_mut(),
         );
         dedupe_unknown_names(&mut module_diags);
         diags.extend(module_diags);
         for pending in &mut local_pending_diagnostics {
-            pending.function_key = format!("{}::{}", module.alias, pending.function_key);
+            pending.function_key = name_ledger
+                .semantic_identity(idx, &pending.function_key)
+                .unwrap_or_else(|| format!("{}::{}", module.alias, pending.function_key));
         }
         module_pending_diagnostics.push(local_pending_diagnostics);
         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
-        module_effect_summaries.push((module.alias.clone(), local_summaries));
+        module_effect_summaries.push((
+            name_ledger
+                .module_alias(idx)
+                .unwrap_or(&module.alias)
+                .to_string(),
+            local_summaries,
+        ));
     }
     bundle.comptime_inputs = embed_inputs;
     // D-METHODMACRO1=A: E0918 (address-taken) needs every module's function
@@ -2210,18 +2520,25 @@ fn check_bundle_opts_for_output_inner(
         for item in &mut module.items {
             let Item::Const(value) = item else { continue };
             let Some(output) = &mut value.resolved_output else { continue };
-            let alias = &states[output.module].module_alias;
+            let alias = name_ledger
+                .module_alias(output.module)
+                .unwrap_or(&states[output.module].module_alias);
+            let identity = name_ledger
+                .semantic_identity(output.module, &output.semantic_name)
+                .unwrap_or_else(|| format!("{alias}::{}", output.semantic_name));
             output.effects = public_solved
-                .get(&format!("{alias}::{}", output.semantic_name))
+                .get(&identity)
                 .map(|effects| effects.iter().cloned().collect())
                 .unwrap_or_default();
-            reference_anchors.insert(
-                (display.clone(), output.reference.start, output.reference.end),
-                super::Effects::DefinitionAnchorFact {
+            name_ledger.record_reference(
+                display.clone(),
+                output.reference.start,
+                output.reference.end,
+                jet_foundation::Names::NameReference {
                     module_path: output.source_path.clone(),
                     kind: "function".to_string(),
                     def_span: output.definition,
-                    semantic_identity: Some(format!("{alias}::{}", output.semantic_name)),
+                    semantic_identity: Some(identity),
                 },
             );
         }
@@ -2232,7 +2549,15 @@ fn check_bundle_opts_for_output_inner(
     let module_aliases = bundle
         .modules
         .iter()
-        .map(|module| format!("{}::", module.alias))
+        .enumerate()
+        .map(|(module_idx, module)| {
+            format!(
+                "{}::",
+                name_ledger
+                    .module_alias(module_idx)
+                    .unwrap_or(&module.alias)
+            )
+        })
         .collect::<Vec<_>>();
     let validation_summaries = public_summaries
         .iter()
@@ -2243,7 +2568,12 @@ fn check_bundle_opts_for_output_inner(
     // remains error-free through the solved effect phases below.
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let phase_diagnostic_start = diags.len();
-        let prefix = format!("{}::", module.alias);
+        let prefix = format!(
+            "{}::",
+            name_ledger
+                .module_alias(module_index)
+                .unwrap_or(&module.alias)
+        );
         let local_solved = public_solved
             .iter()
             .filter_map(|(key, row)| key.strip_prefix(&prefix).map(|key| (key.to_string(), row.clone())))
@@ -2277,9 +2607,12 @@ fn check_bundle_opts_for_output_inner(
             &local_summaries,
             &mut diags,
         );
+        let module_alias = name_ledger
+            .module_alias(module_index)
+            .unwrap_or(&module.alias);
         super::Effects::check_inferred_purity(
             &module.items,
-            &module.alias,
+            module_alias,
             &validation_summaries,
             &public_solved,
             &public_reachability,
@@ -2288,7 +2621,7 @@ fn check_bundle_opts_for_output_inner(
         check_replayable_effects(&module.items, &local_solved, &mut diags);
         check_secret_grants(
             &module.items,
-            &module.alias,
+            module_alias,
             &public_reachability.nodes_with("secret", Effect::Secret.name()),
             &mut diags,
         );
@@ -2418,6 +2751,7 @@ fn check_bundle_opts_for_output_inner(
     bundle.ffi_callback_fns = ffi_callback_fns;
     diags.extend(super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
+    bundle.name_ledger = name_ledger.clone();
     (
         diags,
         super::Effects::SemIndexEffectFacts {
@@ -2426,7 +2760,7 @@ fn check_bundle_opts_for_output_inner(
             reachability: public_reachability,
             memory_declarations,
             memory_projections,
-            reference_anchors,
+            name_ledger: name_ledger.clone(),
             web_app: web_app_graph,
             fact_registry,
         },
@@ -2502,7 +2836,7 @@ mod structure_tests {
             ffi_callback_fns: HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
-            import_targets: HashMap::new(),
+            name_ledger: jet_foundation::Names::NameLedger::default(),
             layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core,
             web_partitions: HashMap::new(),
@@ -2574,7 +2908,7 @@ mod structure_tests {
         dependency.display = "deps/dep.jet".to_string();
         dependency.alias = "dep".to_string();
         bundle.modules.push(dependency);
-        bundle.import_targets.insert((0, import_span), 1);
+        bundle.name_ledger.record_import_target(0, import_span, 1);
 
         assert!(inject_units_prelude(&mut bundle).is_empty());
         assert!(resolve_unit_dimensions(&mut bundle).is_empty());

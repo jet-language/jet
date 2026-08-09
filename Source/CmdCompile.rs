@@ -2537,18 +2537,19 @@ fn native_toolchain_identity() -> &'static str {
 fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
     let mut interfaces = Vec::new();
     for (dependency, root) in &bundle.dep_roots {
-        for module in &bundle.modules {
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
             if !module.path.starts_with(root) { continue; }
             for item in &module.items {
-                let public = match item {
-                    jet::AST::Item::Func(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Struct(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Enum(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Trait(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Tag(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::CodeModule(def) => def.is_pub || def.is_package_pub,
-                    _ => false,
+                let name = match item {
+                    jet::AST::Item::Func(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Struct(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Enum(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Trait(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Tag(def) => Some(def.name.as_str()),
+                    jet::AST::Item::CodeModule(def) => Some(def.name.as_str()),
+                    _ => None,
                 };
+                let public = name.is_some_and(|name| bundle.name_ledger.exported(module_idx, name));
                 if public {
                     interfaces.push((dependency.clone(), module.display.clone(), jet::CanonicalAST::canonical_fragment(item)));
                 }

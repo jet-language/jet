@@ -1288,17 +1288,22 @@ fn looks_like_item(text: &str) -> bool {
         || t.starts_with("module ")
 }
 
-/// D-CTCORE1: parse one `use …;` source line and add any core module alias →
-/// path entries to `map`. Called after a `use` import is accepted into the
-/// session so `run_repl_step` can resolve whitelisted pure Core calls inline.
-fn update_core_imports(import_src: &str, map: &mut HashMap<String, String>) {
-    let (toks, _) = crate::Lexer::lex(import_src);
-    if let Ok(prog) = crate::Parser::parse(&toks) {
-        for imp in &prog.imports {
-            if let Some(module) = crate::Loader::core_module_path(imp) {
-                let alias = crate::Loader::import_alias(imp);
-                map.insert(alias, module);
-            }
+/// D-CTCORE1: project accepted Core aliases from sema's name ledger. The
+/// interpreter receives this adapter map, never a second raw-source resolver.
+pub(crate) fn update_core_imports_from_ledger(
+    bundle: &crate::AST::ProgramBundle,
+    map: &mut HashMap<String, String>,
+) {
+    map.clear();
+    let module_idx = bundle.entry;
+    let module = &bundle.modules[module_idx];
+    for import in &module.imports {
+        let alias = import.import_alias();
+        let Some(binding) = bundle.name_ledger.effective_alias(module_idx, &alias) else {
+            continue;
+        };
+        if binding.target == "core" || binding.target.starts_with("core.") {
+            map.insert(alias, binding.target.clone());
         }
     }
 }
@@ -1758,7 +1763,10 @@ fn restore_move_diagnostic(d: Diagnostic, moved_names: &HashSet<String>) -> Diag
 
 /// Build a complete synthetic Jet source from accumulated declarations +
 /// new item, then run sema. The successful rebuild retains this checked AST.
-fn type_check_item(session: &Session, new_item_src: &str) -> Vec<Diagnostic> {
+pub(crate) fn type_check_item(
+    session: &Session,
+    new_item_src: &str,
+) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
     let prog_src = format!(
         "{}{}{}\n{}\n",
         PRELOAD_SRC,
@@ -1766,7 +1774,7 @@ fn type_check_item(session: &Session, new_item_src: &str) -> Vec<Diagnostic> {
         session.accumulated_src(),
         new_item_src,
     );
-    checked_program(&prog_src).err().unwrap_or_default()
+    checked_program(&prog_src)
 }
 
 fn checked_top_level_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, Func> {
@@ -1856,7 +1864,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
         ffi_callback_fns: std::collections::HashSet::new(),
         cffi: crate::AST::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: std::collections::HashMap::new(),
+        name_ledger: crate::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: std::collections::HashMap::new(),
@@ -2258,24 +2266,27 @@ pub(crate) fn execute_line(
         }
 
         InputKind::Item(src) => {
-            let errors = type_check_item(session, &src);
-            if !errors.is_empty() {
-                if !quiet {
-                    render_diags(&step_src, trimmed, &errors, color);
+            let bundle = match type_check_item(session, &src) {
+                Ok(bundle) => bundle,
+                Err(errors) => {
+                    if !quiet {
+                        render_diags(&step_src, trimmed, &errors, color);
+                    }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
+                    return false;
                 }
-                session.record_turn(
-                    trimmed,
-                    ReplTurnStatus::Error,
-                    errors
-                        .iter()
-                        .map(|d| format!("{}: {}", d.code, d.what))
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                );
-                return false;
-            }
+            };
             session.item_srcs.push(src);
             rebuild_funcs(session);
+            update_core_imports_from_ledger(&bundle, &mut session.core_imports);
             qprintln!("{}", green("ok", color));
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             if !quiet {
@@ -2287,27 +2298,27 @@ pub(crate) fn execute_line(
             // Try it against the accumulated session so a bad import
             // (unknown core module, etc.) reports before being kept.
             session.import_srcs.push(src.clone());
-            let errors = type_check_item(session, "");
-            if !errors.is_empty() {
-                session.import_srcs.pop();
-                if !quiet {
-                    render_diags(&step_src, trimmed, &errors, color);
+            let bundle = match type_check_item(session, "") {
+                Ok(bundle) => bundle,
+                Err(errors) => {
+                    session.import_srcs.pop();
+                    if !quiet {
+                        render_diags(&step_src, trimmed, &errors, color);
+                    }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
+                    return false;
                 }
-                session.record_turn(
-                    trimmed,
-                    ReplTurnStatus::Error,
-                    errors
-                        .iter()
-                        .map(|d| format!("{}: {}", d.code, d.what))
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                );
-                return false;
-            }
+            };
             rebuild_funcs(session);
-            // D-CTCORE1: register any core alias → module path so the
-            // comptime interpreter can execute whitelisted pure Core calls.
-            update_core_imports(&src, &mut session.core_imports);
+            update_core_imports_from_ledger(&bundle, &mut session.core_imports);
             qprintln!("{}", green("ok", color));
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             if !quiet {
@@ -2999,24 +3010,27 @@ pub fn run_transcript_with_flags(
             }
 
             InputKind::Item(src) => {
-                let errors = type_check_item(&session, &src);
-                if !errors.is_empty() {
-                    for d in &errors {
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                let bundle = match type_check_item(&session, &src) {
+                    Ok(bundle) => bundle,
+                    Err(errors) => {
+                        for d in &errors {
+                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        }
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            errors
+                                .iter()
+                                .map(|d| format!("{}: {}", d.code, d.what))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        continue;
                     }
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    continue;
-                }
+                };
                 session.item_srcs.push(src);
                 rebuild_funcs(&mut session);
+                update_core_imports_from_ledger(&bundle, &mut session.core_imports);
                 out.push_str("ok\n");
                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
                 session.remember_success(trimmed);
@@ -3024,27 +3038,27 @@ pub fn run_transcript_with_flags(
 
             InputKind::Import(src) => {
                 session.import_srcs.push(src.clone());
-                let errors = type_check_item(&session, "");
-                if !errors.is_empty() {
-                    session.import_srcs.pop();
-                    for d in &errors {
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                let bundle = match type_check_item(&session, "") {
+                    Ok(bundle) => bundle,
+                    Err(errors) => {
+                        session.import_srcs.pop();
+                        for d in &errors {
+                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        }
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            errors
+                                .iter()
+                                .map(|d| format!("{}: {}", d.code, d.what))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        continue;
                     }
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    continue;
-                }
+                };
                 rebuild_funcs(&mut session);
-                // D-CTCORE1: register any core alias → module path so the
-                // comptime interpreter can execute whitelisted pure Core calls.
-                update_core_imports(&src, &mut session.core_imports);
+                update_core_imports_from_ledger(&bundle, &mut session.core_imports);
                 out.push_str("ok\n");
                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
                 session.remember_success(trimmed);

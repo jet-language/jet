@@ -1963,7 +1963,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                         let Some(body) = &module.body else {
                             continue;
                         };
-                        let prefix = format!("{}__", module.name);
+                        let prefix = crate::Names::member_name(&module.name, "");
                         if let Some(inner) = name.strip_prefix(&prefix) {
                             if let Some(shapes) = named(body, inner, args, seen) {
                                 return Some(shapes);

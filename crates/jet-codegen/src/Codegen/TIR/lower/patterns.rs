@@ -1,6 +1,7 @@
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle_variant;
+use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
@@ -623,7 +624,7 @@ pub(crate) fn variant_payload_types(
 pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
     // D-UNIONTYPE1=A: compiler-generated union enums use bare member-type tags.
     if type_name.starts_with("__JetUnion_") {
-        return format!("user_{type_name}::{variant}");
+        return format!("{}::{variant}", user_type_rust(type_name));
     }
     // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum; its Rust name is `JetKey`.
     // Variant names are not mangled (Char, Enter, …).
@@ -631,7 +632,7 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
         return format!("{}JetKey::{}", cx.root_prefix, variant);
     }
     if type_name == crate::Syntax::TYPE_REMOVE_BY
-        || type_name == format!("user_{}", crate::Syntax::TYPE_REMOVE_BY)
+        || type_name == user_type_rust(crate::Syntax::TYPE_REMOVE_BY)
     {
         let variant = variant.strip_prefix("user_").unwrap_or(variant);
         return format!("{}JetRemoveBy::{}", cx.root_prefix, variant);
@@ -710,8 +711,8 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
         return format!("{}JetServiceError::{}", cx.root_prefix, variant);
     }
     let type_prefix = match cx.foreign_types.get(type_name) {
-        Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
-        None => format!("user_{}", type_name),
+        Some(rust_mod) => format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(type_name)),
+        None => user_type_rust(type_name),
     };
     format!("{}::{}", type_prefix, mangle_variant(variant))
 }

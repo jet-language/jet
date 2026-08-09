@@ -2464,12 +2464,15 @@ pub fn program_semantic_facts(
 ) -> crate::Comptime::ProgramSemanticFacts {
     let mut effects = std::collections::HashMap::new();
     let reaches_panic = checked.reachability.nodes_with("panic", "panic");
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             let crate::AST::Item::Func(func) = item else {
                 continue;
             };
-            let qualified = format!("{}::{}", module.alias, func.name);
+            let qualified = checked
+                .name_ledger
+                .semantic_identity(module_idx, &func.name)
+                .unwrap_or_else(|| format!("{}::{}", module.alias, func.name));
             let values = checked
                 .solved
                 .get(&qualified)
@@ -2482,6 +2485,7 @@ pub fn program_semantic_facts(
         effects,
         reaches_panic,
         fact_registry: checked.fact_registry.clone(),
+        name_ledger: checked.name_ledger.clone(),
     }
 }
 
@@ -3174,7 +3178,7 @@ fn compile_src_with_options_and_policy(
         ffi_callback_fns: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: std::collections::HashMap::new(),
+        name_ledger: crate::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: std::collections::HashMap::new(),
@@ -3483,7 +3487,7 @@ pub fn check_eval_with_effect_facts(
         ffi_callback_fns: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: std::collections::HashMap::new(),
+        name_ledger: crate::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: std::collections::HashMap::new(),

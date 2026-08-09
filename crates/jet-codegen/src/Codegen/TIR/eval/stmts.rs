@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc};
 use crate::AST::Type;
+use crate::Codegen::mangle;
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{CtReport, CtValue};
@@ -1448,7 +1449,7 @@ impl<'a> EvalCtx<'a> {
                         .get(&key)
                         .cloned()
                         .or_else(|| {
-                            let mangled = format!("user_{key}");
+                            let mangled = mangle(key);
                             scope.get(&mangled).cloned()
                         })
                         .unwrap_or(CtValue::Unit);
@@ -1530,7 +1531,7 @@ impl<'a> EvalCtx<'a> {
                             if scope.contains_key(&place) {
                                 scope.insert(place, snap);
                             } else {
-                                let mangled = format!("user_{place}");
+                                let mangled = mangle(&place);
                                 if scope.contains_key(&mangled) {
                                     scope.insert(mangled, snap);
                                 }

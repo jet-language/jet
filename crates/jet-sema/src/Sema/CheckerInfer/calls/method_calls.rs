@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
         };
         let owner = self.struct_owner_module(name, None)?;
         let fields = self.struct_fields_of(owner, name)?;
-        if let Some((_, _, ty, _)) = fields.iter().find(|(known, ..)| known == field) {
+        if let Some((_, _, ty)) = fields.iter().find(|(known, ..)| known == field) {
             return Some(ty.clone());
         }
         self.diags.push(Diagnostic::error(
@@ -145,9 +145,7 @@ impl<'a> Checker<'a> {
             let Some(sig) = target.funcs.get(method) else {
                 continue;
             };
-            let visible = target.func_pub.get(method).copied().unwrap_or(false)
-                || (self.same_package_scope(module_idx)
-                    && target.func_pkg_pub.get(method).copied().unwrap_or(false));
+            let visible = self.name_ledger.visible(self.module_idx, module_idx, method);
             if !visible || !sig.root_param {
                 continue;
             }
@@ -984,7 +982,7 @@ impl<'a> Checker<'a> {
                 // D-MOD2: inline code module call — `math.double(x)` where `math` is an
                 // inline `module math { … }` in this file. Resolve via mangled name.
                 if let Some(canonical) = self.code_modules.get(alias.as_str()) {
-                    let mangled = format!("{}__{}", canonical, method);
+                    let mangled = jet_foundation::Names::member_name(canonical, method);
                     return self.infer_code_module_call(
                         alias,
                         &mangled,
@@ -4251,8 +4249,8 @@ impl<'a> Checker<'a> {
                 }
             };
             if let Some(fields) = self.registry.struct_fields(&type_name) {
-                if let Some((_, _, field_ty, _)) =
-                    fields.iter().find(|(fname, _, _, _)| fname == method)
+                if let Some((_, _, field_ty)) =
+                    fields.iter().find(|(fname, _, _)| fname == method)
                 {
                     if matches!(field_ty, Type::Fn { .. }) {
                         *recv_type_out = Some(type_name.clone());
@@ -4287,7 +4285,12 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
-            if owner_mod != self.module_idx && !msig.is_pub {
+            let method_name = format!("{type_name}.{method}");
+            if owner_mod != self.module_idx
+                && !self
+                    .name_ledger
+                    .visible(self.module_idx, owner_mod, &method_name)
+            {
                 self.diags.push(crate::Sema::Diagnostics::private_item(method, span));
             } else if owner_mod != self.module_idx
                 && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic {

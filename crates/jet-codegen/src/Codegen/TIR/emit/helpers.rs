@@ -2,6 +2,7 @@ use crate::AST::Type;
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
+use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
@@ -129,7 +130,7 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 let enum_name = crate::AST::union_enum_name(members);
                 let tag = crate::AST::union_member_tag(&a.value.ty);
                 // Bare member-type tags — matches `emit_anonymous_unions` / match arms.
-                s = format!("user_{enum_name}::{tag}({s})");
+                s = format!("{}::{tag}({s})", user_type_rust(&enum_name));
             }
             // Fn-typed coercion: wrap to match `cx.rust_type` (Rc / Arc / Box for FnMut).
             // Skip wrap when the value already emits Rc/Arc/Box::new (named fn / lambda).
