@@ -17,8 +17,8 @@ use super::handles::eval_handle;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
-    progress_no_color, progress_now, progress_source_has_exact_total, unsupported, EvalCallable,
-    EvalCtx, Flow,
+    progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
+    unsupported, EvalCallable, EvalCtx, Flow,
 };
 
 fn progress_parts(
@@ -3275,7 +3275,7 @@ impl<'a> EvalCtx<'a> {
                         &self.base_dir,
                         sink.as_deref_mut(),
                         &self.repl_grants,
-                        self.repl_authorizer.as_deref_mut(),
+                        reborrow_repl_authorizer(&mut self.repl_authorizer),
                     )
                     .map(|value| {
                         mark_unknown_progress_total(

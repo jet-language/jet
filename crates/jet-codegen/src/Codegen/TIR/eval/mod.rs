@@ -94,6 +94,15 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::e0956_unsupported(what, span)
 }
 
+pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
+    authorizer: &'short mut Option<&'long mut dyn Comptime::ReplAuthorizer>,
+) -> Option<&'short mut (dyn Comptime::ReplAuthorizer + 'short)> {
+    match authorizer {
+        Some(authorizer) => Some(&mut **authorizer),
+        None => None,
+    }
+}
+
 pub(super) fn progress_now() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2641,7 +2650,7 @@ fn eval_expr_hook(
     let impure_depth = req.initial_impure_depth;
     let repl_mode = req.repl_mode;
     let repl_grants = req.repl_grants.to_vec();
-    let repl_authorizer = req.repl_authorizer.take();
+    let repl_authorizer = reborrow_repl_authorizer(&mut req.repl_authorizer);
     let source_span = req.expr.span();
     let mut sink_target = req.sink.take();
     let mutated_out = req.mutated.take();
@@ -2759,7 +2768,7 @@ fn eval_block_hook(
     let impure_depth = req.impure_depth;
     let repl_mode = req.repl_mode;
     let repl_grants = req.repl_grants.to_vec();
-    let repl_authorizer = req.repl_authorizer.take();
+    let repl_authorizer = reborrow_repl_authorizer(&mut req.repl_authorizer);
     let source_span = req
         .stmts
         .first()

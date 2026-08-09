@@ -1242,7 +1242,7 @@ mod net_tls_close_tests {
         for _ in 0..2 {
             let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::Success);
             let mut config = smtp_config(address.port(), false);
-            config.dkim = Some(email::DkimConfig {
+            config.dkim = Ok(email::DkimConfig {
                 domain: "example.com".to_string(), selector: "login-2026".to_string(),
                 private_key: seed.to_vec(),
                 signed_headers: ["from", "to", "subject", "mime-version", "content-type",
@@ -1270,7 +1270,7 @@ mod net_tls_close_tests {
         use smtp_adapter::jet_email as email;
         SMTP_WIPES.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut config = smtp_config(465, false);
-        config.dkim = Some(email::DkimConfig {
+        config.dkim = Ok(email::DkimConfig {
             domain: "example.com".to_string(), selector: "login-2026".to_string(),
             private_key: vec![0x5a; 31], signed_headers: vec!["from".to_string()],
         });

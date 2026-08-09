@@ -859,6 +859,7 @@ fn mk() {
             args: Vec::new(),
             recv_type: Some("Bag".to_string()),
             resolved_ret: None,
+            checked_widen: false,
         };
         let mut locals = HashSet::new();
         locals.insert("b".to_string());
