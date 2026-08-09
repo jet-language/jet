@@ -627,7 +627,7 @@ impl<'a> Checker<'a> {
                         {
                             self.diags.push(Diagnostic::error(
                                 "E0361",
-                                format!("`{}` calls itself through `{}`", method, op.spell()),
+                                format!("`{}` calls itself through {}", method, operator_label(op)),
                                 concat!(
                                     "the operator symbol dispatches back to this same hook, ",
                                     "so evaluation would recurse forever"
@@ -840,7 +840,7 @@ impl<'a> Checker<'a> {
                         (BinOp::Add, Point, Point) | (BinOp::Sub, Delta, Point) => {
                             self.diags.push(Diagnostic::error(
                                 "E0127",
-                                format!("operator `{}` is not available between `{}` and `{}`", op.spell(), lname, rname),
+                                format!("{} is not available between `{}` and `{}`", operator_label(op), lname, rname),
                                 "affine points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
                                 "subtract two points for a delta, or add a matching Delta to a point".to_string(),
                                 Some(span),
@@ -984,7 +984,7 @@ impl<'a> Checker<'a> {
                     if !self.registry.distinct_is_numeric(distinct_name) {
                         self.diags.push(Diagnostic::error(
                             "E0127",
-                            format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
+                            format!("{} is not available on `{}`", operator_label(op), distinct_name),
                             format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
                             format!("add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
                             Some(span),
@@ -992,7 +992,7 @@ impl<'a> Checker<'a> {
                     } else {
                         self.diags.push(Diagnostic::error(
                             "E0127",
-                            format!("operator `{}` is not available between `{}` and `{}`", op.spell(), lt.name(), rt.name()),
+                            format!("{} is not available between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
                             format!("`#Numeric` distinct types only support arithmetic between the same type"),
                             format!("both sides must be `{}`", distinct_name),
                             Some(span),
@@ -1004,7 +1004,7 @@ impl<'a> Checker<'a> {
                 if !self.registry.distinct_is_numeric(distinct_name) {
                     self.diags.push(Diagnostic::error(
                         "E0127",
-                        format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
+                        format!("{} is not available on `{}`", operator_label(op), distinct_name),
                         format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
                         "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
                         Some(span),
@@ -1102,7 +1102,7 @@ impl<'a> Checker<'a> {
                 // teaching diagnostic (the closed family has fixed operators).
                 self.diags.push(Diagnostic::error(
                     "E2511",
-                    format!("operator `{}` isn't defined between `{}` and `{}`", op.spell(), lt.name(), rt.name()),
+                    format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
                     "the built-in math types support element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`".to_string(),
                     "check the operands are the same lane/vector type, or use a method like `.dot()`/`.matmul()`".to_string(),
                     Some(span),
@@ -1140,8 +1140,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0133",
                     format!(
-                        "operator `{}` isn't defined between `{}` and `{}`",
-                        op.spell(),
+                        "{} isn't defined between `{}` and `{}`",
+                        operator_label(op),
                         lt.name(),
                         rt.name()
                     ),
@@ -1164,8 +1164,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0109",
                         format!(
-                            "`{}` needs both sides to be the same number type, but this has {} and {}",
-                            op.spell(),
+                            "{} needs both sides to be the same number type, but this has {} and {}",
+                            operator_label(op),
                             lt.show(),
                             rt.show()
                         ),
@@ -1220,8 +1220,8 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0360",
                             format!(
-                                "no `{}` operator is defined for `{}`",
-                                op.spell(),
+                                "no {} operator is defined for `{}`",
+                                operator_label(op),
                                 type_name
                             ),
                             format!(
@@ -1267,8 +1267,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0109",
                         format!(
-                            "`{}` works on {} only, but this has {} and {}",
-                            op.spell(),
+                            "{} works on {} only, but this has {} and {}",
+                            operator_label(op),
                             Type::Int.show(),
                             lt.show(),
                             rt.show()
@@ -1290,8 +1290,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0109",
                         format!(
-                            "`{}` works on {} only, but this has {} and {}",
-                            op.spell(),
+                            "{} works on {} only, but this has {} and {}",
+                            operator_label(op),
                             Type::Int.show(),
                             lt.show(),
                             rt.show()
@@ -1313,7 +1313,7 @@ impl<'a> Checker<'a> {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
-                                format!("secret-bearing `{}` values cannot use `{}`", lt.name(), op.spell()),
+                                format!("secret-bearing `{}` values cannot use {}", lt.name(), operator_label(op)),
                                 "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison".to_string(),
                                 "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values".to_string(),
                                 Some(span),
@@ -1321,7 +1321,7 @@ impl<'a> Checker<'a> {
                         } else if let Some(field) = incomparable_field(&lt, self.registry) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
-                                format!("`{}` can't be compared with `{}` because field `{}` doesn't support `{}`", lt.name(), rt.name(), field, op.spell()),
+                                format!("`{}` can't be compared with `{}` because field `{}` doesn't support {}", lt.name(), rt.name(), field, operator_label(op)),
                                 "value equality needs every field to support the comparison".to_string(),
                                 "compare individual fields instead".to_string(),
                                 Some(span),
@@ -1329,7 +1329,7 @@ impl<'a> Checker<'a> {
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
-                                format!("`{}` doesn't support `{}`", lt.name(), op.spell()),
+                                format!("`{}` doesn't support {}", lt.name(), operator_label(op)),
                                 "value equality requires the Equatable trait".to_string(),
                                 "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields".to_string(),
                                 Some(span),
@@ -1341,7 +1341,7 @@ impl<'a> Checker<'a> {
                     if matches!(lt, Type::Float | Type::Float32) {
                         self.diags.push(Diagnostic::lint(
                             "L0502",
-                            format!("comparing floats with `{}` is unreliable", op.spell()),
+                            format!("comparing floats with {} is unreliable", operator_label(op)),
                             "floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal".to_string(),
                             "compare within a tolerance: `(a - b).abs() < 1e-9`".to_string(),
                             Some(span),
@@ -1379,7 +1379,7 @@ impl<'a> Checker<'a> {
         } else if lt == rt && *lt == Type::String {
             self.diags.push(Diagnostic::error(
                 "E0109",
-                format!("text isn't ordered with `{}`", op.spell()),
+                format!("text isn't ordered with {}", operator_label(op)),
                 "comparing text for order isn't supported yet".to_string(),
                 "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
                 Some(span),
@@ -1437,7 +1437,7 @@ impl<'a> Checker<'a> {
                     {
                         self.diags.push(Diagnostic::error(
                             "E0361",
-                            format!("`compare` calls itself through `{}`", op.spell()),
+                            format!("`compare` calls itself through {}", operator_label(op)),
                             "the operator symbol dispatches back to this same hook, so evaluation would recurse forever".to_string(),
                             "compare the value's fields or call a different named helper inside the hook".to_string(),
                             Some(span),
@@ -1483,8 +1483,8 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E0109",
             format!(
-                "`{}` can't compare or combine {} and {}",
-                op.spell(),
+                "{} can't compare or combine {} and {}",
+                operator_label(op),
                 lt.show(),
                 rt.show()
             ),
@@ -1543,8 +1543,8 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E0359",
             format!(
-                "`{}` can't combine {} with {}",
-                op.spell(),
+                "{} can't combine {} with {}",
+                operator_label(op),
                 left.display_name(),
                 right.display_name()
             ),
@@ -1557,7 +1557,7 @@ impl<'a> Checker<'a> {
     fn dimension_overflow(&mut self, op: BinOp, span: Span) {
         self.diags.push(Diagnostic::error(
             "E0359",
-            format!("`{}` makes the physical dimension too large", op.spell()),
+            format!("{} makes the physical dimension too large", operator_label(op)),
             "physical dimension exponents are checked compiler facts and cannot overflow"
                 .to_string(),
             "simplify the repeated physical multiplication or division".to_string(),

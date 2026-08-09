@@ -242,6 +242,18 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 /// D-CAP2/S4's `copy` verb).
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
+pub const WRITE_CAPABILITY_LABEL: &str = "the write-capability marker `&`";
+pub const MOVE_CAPABILITY_LABEL: &str = "the move-capability marker `^`";
+
+pub fn capability_label(sigil: &str) -> &'static str {
+    if sigil == SIGIL_WRITE {
+        WRITE_CAPABILITY_LABEL
+    } else if sigil == SIGIL_MOVE {
+        MOVE_CAPABILITY_LABEL
+    } else {
+        "the capability marker"
+    }
+}
 
 /// D-APILABEL1=A: the two parameter-zone separators. Written in a parameter
 /// list, not as operators: `/` closes the positional-only zone (a label is

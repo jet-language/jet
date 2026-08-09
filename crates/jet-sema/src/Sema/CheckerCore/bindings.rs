@@ -416,7 +416,7 @@ impl<'a> Checker<'a> {
                     {
                         self.diags.push(Diagnostic::error(
                             "E0120",
-                            format!("`{}` was not moved here, so it cannot be taken (`^`)", n),
+                            format!("`{}` was not moved here, so it cannot be taken with the move-capability marker `^`", n),
                             "this function has read access only and does not own the value"
                                 .to_string(),
                             format!(

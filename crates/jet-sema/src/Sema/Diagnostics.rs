@@ -6,6 +6,18 @@ pub(crate) use crate::Syntax::edit_distance;
 use crate::AST::{BinOp, Expr, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
+pub(crate) const WRITE_CAPABILITY_MARKER: &str = Syntax::WRITE_CAPABILITY_LABEL;
+pub(crate) const MOVE_CAPABILITY_MARKER: &str = Syntax::MOVE_CAPABILITY_LABEL;
+
+pub(crate) fn operator_label(op: BinOp) -> String {
+    match op {
+        BinOp::BitAnd => "the bitwise and operator `&`".to_string(),
+        BinOp::Pow => "the power operator `^`".to_string(),
+        BinOp::BitXor => "the bitwise xor operator `~|`".to_string(),
+        _ => format!("`{}`", op.spell()),
+    }
+}
+
 pub(crate) fn undeclared_value_tag(
     marker: &str,
     suggestion: Option<&str>,
@@ -34,7 +46,7 @@ pub(crate) fn compound_why(op: BinOp) -> String {
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::FloorDiv => {
             "`+ - * / /%` work on Int and Float".to_string()
         }
-        _ => format!("`{}` is a whole-number operation (Int only)", op.spell()),
+        _ => format!("{} is a whole-number operation (Int only)", operator_label(op)),
     }
 }
 
@@ -124,9 +136,9 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
             "`{}` is being changed in this call, so it can't be used again here",
             name
         ),
-        "while something is being changed, nobody else may be looking at it".to_string(),
+        "while something is being changed through the write-capability marker `&`, nobody else may be looking at it".to_string(),
         format!(
-            "pass `{}{}` only once, or copy first with `{}{}`",
+            "pass the write-capability marker `&` (`{}{}`) only once, or copy first with `{}{}`",
             Syntax::SIGIL_WRITE,
             name,
             Syntax::SIGIL_COPY,

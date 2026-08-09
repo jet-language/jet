@@ -716,10 +716,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         format!(
-                            "`{}` needs a plain named binding after it",
-                            Syntax::SIGIL_WRITE
+                            "{} needs a plain named binding after it",
+                            crate::Sema::Diagnostics::WRITE_CAPABILITY_MARKER
                         ),
-                        "write access (`&`) can only be granted to a named binding, not an expression".to_string(),
+                        "write access from the write-capability marker `&` can only be granted to a named binding, not an expression".to_string(),
                         self.non_name_write_argument_fix(&arg.expr),
                         Some(arg.span),
                     ));
@@ -743,18 +743,17 @@ impl<'a> Checker<'a> {
                                 self.diags.push(Diagnostic::error(
                                     "E0201",
                                     format!(
-                                        "`{}` needs `{}` here — this value can't be copied",
+                                        "`{}` needs {} here — this value can't be copied",
                                         method,
-                                        Syntax::SIGIL_MOVE
+                                        crate::Sema::Diagnostics::MOVE_CAPABILITY_MARKER
                                     ),
                                     format!(
-                                        "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                        "parameter {} takes ownership through the move-capability marker `^`; passing `{}` without that marker would have to copy it, but this type can't be copied",
                                         arg_idx + 1,
-                                        name,
-                                        Syntax::SIGIL_MOVE
+                                        name
                                     ),
                                     format!(
-                                        "write `{}{}` to move ownership to `{}`",
+                                        "write the move-capability marker `^` (`{}{}`) to move ownership to `{}`",
                                         Syntax::SIGIL_MOVE,
                                         name,
                                         method
@@ -776,15 +775,14 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0202",
                                 format!(
-                                    "parameter `{}` requires write access (`&`) at the call site",
-                                    name
+                                    "parameter `{}` requires the write-capability marker `&` at the call site",
+                                    name,
                                 ),
                                 format!(
-                                    "`{method}` needs to edit (`&`) this value; passing it without `{}` grants only read access",
-                                    Syntax::SIGIL_WRITE
+                                    "`{method}` needs to edit this value with the write-capability marker `&`; passing it without that marker grants only read access",
                                 ),
                                 format!(
-                                    "write `{}{}` when calling `{method}`",
+                                    "write the write-capability marker `&` (`{}{}`) when calling `{method}`",
                                     Syntax::SIGIL_WRITE,
                                     name
                                 ),
@@ -823,15 +821,12 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0203",
                             format!(
-                                "`{}` passed to a parameter that does not consume",
-                                Syntax::SIGIL_MOVE
+                                "a value was passed with the move-capability marker `^` to a parameter that does not consume"
                             ),
-                            "only move (`^`) parameters accept a moved value at the call site"
+                            "only parameters declared with the move-capability marker `^` accept a moved value at the call site"
                                 .to_string(),
                             format!(
-                                "remove `{}` or change the parameter to take ownership (`{}`)",
-                                Syntax::SIGIL_MOVE,
-                                Syntax::SIGIL_MOVE
+                                "remove the move-capability marker `^`, or declare the parameter with that marker to take ownership"
                             ),
                             Some(arg.span),
                         ));
@@ -2187,10 +2182,10 @@ impl<'a> Checker<'a> {
                     "E0120",
                     format!("`{name}` was not moved here, so its contents cannot be taken apart"),
                     format!(
-                        "`{name}` grants read-only access to `{ty}`, so its non-copyable parts cannot be taken apart"
+                        "`{name}` grants read-only access to `{ty}`, so its non-copyable parts cannot be taken apart with the move-capability marker `^`"
                     ),
                     format!(
-                        "change the parameter to `{name}: {}{ty}`, or inspect it without binding its contents",
+                        "change the parameter to `{name}: {}{ty}` with the move-capability marker `^`, or inspect it without binding its contents",
                         Syntax::SIGIL_MOVE
                     ),
                     Some(*name_span),

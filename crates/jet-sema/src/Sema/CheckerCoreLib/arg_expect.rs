@@ -179,10 +179,10 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E0203",
-                    format!("`{}` passed to a parameter that does not consume", Syntax::SIGIL_MOVE),
+                    "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
                     "standard library functions in M10 read their ordinary arguments unless documented otherwise"
                         .to_string(),
-                    format!("remove `{}` here", Syntax::SIGIL_MOVE),
+                    "remove the move-capability marker `^` here".to_string(),
                     Some(arg.span),
                 ));
             }

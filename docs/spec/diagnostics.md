@@ -13,6 +13,12 @@ Every diagnostic has four parts:
 - **why** — the rule behind the error, so the user learns the model.
 - **fix** — a concrete next step, copy-pasteable when possible.
 
+`&` and `^` each have two readings: `&` is the write-capability marker or the
+bitwise and operator, and `^` is the move-capability marker or the power
+operator. Bitwise xor is `~|`. When a diagnostic shows one of these signs, its
+what/why names the reading; the entries below refer to this rule instead of
+repeating the distinction.
+
 ## Diagnostic code grammar
 
 Jet uses one code grammar with two valid shapes:
@@ -103,7 +109,7 @@ renumbered, and no new `W` code may be allocated.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `defer` only schedules a consuming resource close ``. | Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked. | Write `defer close(^resource)`. |
+| `` `defer` only schedules a consuming resource close ``. | Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked. | Write `defer close(^resource)` with the move-capability marker `^`. |
 
 ## Error code registry
 
@@ -165,7 +171,7 @@ renumbered, and no new `W` code may be allocated.
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0056 | parse | *retired by D-S14-PAUSE* (was: `mut` capability keyword teaching) |
 | E0057 | parse | retired `take(...)` closure capture prefix; captures are implicit (D-ARROW-CONTROL1) |
-| E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → `&` sigil; `-> &T` returns no longer exist to point at) |
+| E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → the write-capability marker `&`; raw-reference return spelling `-> &T` no longer exists to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Scrub(Tag) fn` (D-TAG-SURFACE1) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
@@ -213,7 +219,7 @@ renumbered, and no new `W` code may be allocated.
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
-| E0120 | sema  | moving/returning a parameter without move (`^`) access |
+| E0120 | sema  | moving/returning a parameter without the move-capability marker `^` |
 | E0121 | sema  | value used after it was given away        |
 | E0122 | sema  | `run` returns something other than nothing or `() ?` in run mode |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
@@ -256,24 +262,24 @@ renumbered, and no new `W` code may be allocated.
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
 | L0152 | sema  | typestate: two paths meet and leave one value in different states, so it is untracked from there (D-STATE1, D-FACT-FLOW1, warning) |
-| E0201 | sema  | `take` (`^`) required; value can't be copied |
-| E0202 | sema  | `mut` (`&`) required at call site — write access not granted |
-| E0203 | sema  | `take` on a non-consuming parameter       |
+| E0201 | sema  | the move-capability marker `^` is required; value can't be copied |
+| E0202 | sema  | the write-capability marker `&` is required at call site — write access not granted |
+| E0203 | sema  | move-capability marker `^` used on a non-consuming parameter |
 | E0204 | sema  | same value used while `mut` is active in one call |
-| E0205 | sema  | `self.field = v` without write access (`&`) on the receiver (D-MUTSELF1) |
-| E0206 | sema  | *retired by D-MEM1/S3* (was: `view` return can't point at this value; `-> &T` returns no longer exist) |
-| E0207 | sema  | *retired by D-MEM1/S3* (was: a stored-reference `&T` field's owner ambiguous, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
+| E0205 | sema  | `self.field = v` without the write-capability marker `&` on the receiver (D-MUTSELF1) |
+| E0206 | sema  | *retired by D-MEM1/S3* (was: `view` return can't point at this value; raw-reference return spelling `-> &T` no longer exists) |
+| E0207 | sema  | *retired by D-MEM1/S3* (was: a stored raw-reference spelling `&T` field's owner ambiguous, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
-| E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
+| E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without the move-capability marker `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
 | E0211 | sema  | `~x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-SHAPE-COPY1=A, supersedes D-CAP2/D-MEM1/S4) |
 | E0212 | sema  | an owner is moved, replaced, or resized while a live view still points into its storage (D-MEM1 S9, card #649) |
-| E0213 | sema  | `&` window operand is not a place — a name plus maximal field/index/range projections (D-SHAPE-PLACE1=A) |
+| E0213 | sema  | the write-capability marker `&` is not on a place — a name plus maximal field/index/range projections (D-SHAPE-PLACE1=A) |
 | E0214 | sema  | teaching: retired `.view(a..b)` → bare range place `[a..b]` (D-SHAPE-PLACE1=A) |
 | E0215 | sema  | `SharedGuard.map` projection is not a stable stored field place (D-SHAREDGUARD1) |
 | E0216 | sema  | `SharedGuard.split` projections overlap or are not stable stored field places (D-SHAREDGUARD1) |
 | E0217 | sema  | a Cell guard is stored in an unsupported aggregate or captured by a lambda (D-LOCALCELL1=A) |
-| E0218 | sema  | `mem.pin` was given a value instead of a write window into a place (D-PIN1=A) |
+| E0218 | sema  | `mem.pin` was given a value instead of a write window made with the write-capability marker `&` (D-PIN1=A) |
 | E0219 | sema  | a pinned place is moved, replaced, or resized while a pin is still live (D-PIN1=A) |
 | E0220 | sema  | a place is read through its owner while an exclusive write window / pin into it is still live (card #1361, I2) |
 | E0221 | sema  | a struct field’s strong `Shared` edge can form a reference cycle (D-SHARED-CYCLE1=C) |
@@ -389,7 +395,7 @@ renumbered, and no new `W` code may be allocated.
 | E0424 | sema  | `Type.{ uninit }` used without `use core.mem` (D-UNINIT1, reworded) |
 | E0425 | sema  | *reserved — rustc unresolved-name code; never a Jet diagnostic (I2)* |
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type.{ uninit }` (D-UNINIT-SENTINEL2) |
-| E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
+| E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → raw-reference spelling `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0428 | parse | *retired by D-MARK-REPEAT1=A* (was: duplicate `#NoPrelude` marker in one file) |
 | E0429 | sema  | readable Core prelude name used under `#NoPrelude` (D-PRELUDEX1) |
 | E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
@@ -674,12 +680,12 @@ renumbered, and no new `W` code may be allocated.
 | E1130 | sema/parse | `#Kernel(.parallel)` has a duplicate marker or its body cannot satisfy the safe-kernel proof obligations (D-COMPUTE-KERNEL-SURFACE1=B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
-| E2301 | sema  | *retired for raw references by D-MEM1/S3* (`-> &T` returns remain absent; invalid named-view returns use E2305/E2307) |
-| E2302 | sema  | *retired for raw references by D-MEM1/S3* (`&T`/`#Ref` fields remain absent; named view fields follow D-MEM-VIEWRET1) |
+| E2301 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference return spelling `-> &T` remains absent; invalid named-view returns use E2305/E2307) |
+| E2302 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference field spelling `&T`/`#Ref` remains absent; named view fields follow D-MEM-VIEWRET1) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
 | E2304 | sema  | *retired for raw references by D-MEM1/S3* (named slice-view returns follow D-MEM-VIEWRET1 and use E2305 when invalid) |
 | E2305 | sema  | a `View<T>` would outlive its owner, or the compiler cannot infer, prove, and stabilize its public owner provenance (D-MEM-VIEWRET1) |
-| E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
+| E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a raw-reference `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
 | L2301 | sema  | *retired for raw references by D-MEM1/S3* (public named-view provenance is queryable and semver-pinned under D-MEM-VIEWRET1) |
 | E2307 | sema  | a string view would outlive its owning `String`, or the compiler cannot infer, prove, and stabilize its public owner provenance (D-MEM-VIEWRET1) |
 | E1201 | jet   | two versions of one package required (M12.1) |
@@ -1075,9 +1081,9 @@ named cell.
 | E2307 | A string view would outlive a possible owning `String`, has no stable public owner set, reaches an operation that needs an owned `String`, or an owned `String` is used where `View<str>` is required. | `View<str>` follows the same inferred owner-set rule as `View<T>` through calls, aggregates, callbacks, and trait contracts. Local and temporary owners die too soon; an owned-`String` use cannot preserve a zero-copy view; filling a `View<str>` slot needs `.trim()`/`.after()`/`.before()` (or a tracked string-view binding), not a plain owned place. | Keep every possible owner alive and use a proven `View<str>` boundary, bind a string window, return a `View` of the owning element, or materialize an owned `String` with `~view`. |
 | E0212 | An owner is moved, replaced, or resized while a live view still points into it. | The operation could move or destroy the storage that the view reads or edits; Jet rejects before lowering instead of relying on a backend borrow error. | Finish using the view before changing the owner, narrow the view's scope, or make an owned copy. |
 | E0213 | A read or write window starts from something that is not a place. | Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying. | Bind the call or temporary to a name first, then take the window from that name. |
-| E0214 | `.view(a..b)` uses the retired list-window spelling. | Place access has one rule: `value[a..b]` reads, `&value[a..b]` edits, and `~value[a..b]` copies. | Replace `value.view(a..b)` with `value[a..b]`. |
+| E0214 | `.view(a..b)` uses the retired list-window spelling. | Place access follows the sigil reading rule above. | Replace `value.view(a..b)` with `value[a..b]`. |
 | E0217 | A Cell guard is stored inside an unsupported value or captured by a lambda. | A Cell guard is a temporary loan handle. Storing it inside another value could keep the loan after its local scope ends. | Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections. |
-| E0218 | `mem.pin` needs a write window into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with write access instead of a copied value. | Write `mem.pin(&place)`. |
+| E0218 | `mem.pin` needs a write window made with the write-capability marker `&` into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with the write-capability marker; see the sigil reading rule above. | Write `mem.pin(&place)` with the write-capability marker `&`. |
 | E0219 | A pinned place is moved, replaced, or resized while a pin is still live. | The pin promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place. | Finish using the pin before changing the place, or narrow the pin's scope. |
 | E0220 | A place is read through its owner while an exclusive write window into it is still live. | An exclusive window (a pin or a mutable view) already gives write access to that storage; reading the owner beside it would be rejected after lowering. | Read or edit through the live window name instead of the owner. |
 | E0221 | A struct field’s strong `Shared` edge can form a reference cycle. | Strong `Shared` handles keep each other alive; a cycle through them never frees. | Use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong handle. |
@@ -1362,7 +1368,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3101 | `{op}` can only run inside an `#Unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `#Unsafe("why this is safe") { … }`. |
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
 | E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Unsafe("…") { … }`. |
-| E3104 | Retired allocator-specific use-after-free diagnostic. | Terminal release now uses ordinary consuming `close(^allocator)`. | Follow E0121 and acquire a new allocator after close. |
+| E3104 | Retired allocator-specific use-after-free diagnostic. | Terminal release now uses ordinary consuming `close(^allocator)` through the move-capability marker `^`. | Follow E0121 and acquire a new allocator after close. |
 | E3105 | Organization or package policy forbids unsafe code. | A lexical gate cannot widen the effective safety floor. | Remove the operation or have the policy owner change the outer policy. |
 | E3106 | This unsafe gate must choose a permitted obligation mode. | `.PerSite` requires `.Track`/`.Skip`, and `.Skip` has no ambient meaning outside `.PerSite`. | Add `obligations: .Track`, or use `.Skip` only under a package `.PerSite` policy. |
 | E3107 | `{operation}` is missing unsafe obligations: `{obligations}`. | Effective `.Obligations` policy requires a typed proof immediately after each low-level operation. | Add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset. |
@@ -1579,7 +1585,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
-| E0161 | `{what}` | Increment and decrement edit the binding or field in place (D-INCR1). | Declare with `:=` or mark the parameter `&` if the function should change it. |
+| E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-capability marker `&` if the function should change it. |
 | E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
 | E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |

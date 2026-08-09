@@ -3,8 +3,8 @@ Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned
     |
   7 |     t :: tasks.spawn(() => greet)
     |                      ^^^^^^^^^^^
- Why: this function can access the parameter, but it does not own the value
- Fix: make the parameter owned: `greet: ^fn()`
+ Why: this function can access the parameter, but it does not own the value; capture requires the move-capability marker `^`
+ Fix: make the parameter owned with the move-capability marker `^`: `greet: ^fn()`
 
 Error [E1102]: this task returns `fn()`, which isn't sendable
   --> tests/ui/task_detach_unsound.jet:7:22

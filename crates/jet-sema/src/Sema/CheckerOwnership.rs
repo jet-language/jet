@@ -2126,9 +2126,9 @@ impl<'a> Checker<'a> {
         let (code, why, fix) = if info.param_conv.is_some() {
             (
                 "E0205",
-                "an unmarked parameter gives read access only; a write window needs write access (`&`)".to_string(),
+                "an unmarked parameter gives read access only; a write window needs the write-capability marker `&`".to_string(),
                 format!(
-                    "change the parameter to `{}: {}{}`",
+                    "change the parameter to `{}: {}{}` with the write-capability marker `&`",
                     root,
                     Syntax::SIGIL_WRITE,
                     info.ty.name()
@@ -2209,7 +2209,7 @@ impl<'a> Checker<'a> {
                             Syntax::KW_SELF
                         ),
                         format!(
-                            "declare the enclosing method with `{}{}`",
+                            "declare the enclosing method with the write-capability marker `&`: `{}{}`",
                             Syntax::SIGIL_WRITE,
                             Syntax::KW_SELF
                         ),
@@ -2217,7 +2217,7 @@ impl<'a> Checker<'a> {
                 } else {
                     (
                         format!(
-                            "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
+                            "cannot write to `{}` — it does not have the write-capability marker `&`; required before calling `.{}()`",
                             root, method
                         ),
                         format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
@@ -2226,7 +2226,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0202",
                     what,
-                    "this method edits the value it's called on; write access (`&`) is required"
+                    "this method edits the value it's called on; the write-capability marker `&` is required"
                         .to_string(),
                     fix,
                     Some(span),
@@ -3970,7 +3970,7 @@ impl<'a> Checker<'a> {
             "E0205",
             "cannot edit through this read-only `SharedGuard` view".to_string(),
             "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access".to_string(),
-            "keep the edit at the acquisition site, or pass the guard to a `&guard: SharedGuard<T>` helper".to_string(),
+            "keep the edit at the acquisition site, or pass the guard to a helper with the write-capability marker `&`, such as `&guard: SharedGuard<T>`".to_string(),
             Some(span),
         ));
         true
@@ -4104,12 +4104,12 @@ impl<'a> Checker<'a> {
                 });
         if indexes_list {
             format!(
-                "change the helper to accept a list window, then pass a range write window such as `{}xs[a..b]`",
+                "change the helper to accept a list window, then pass a range write window with the write-capability marker `&`, such as `{}xs[a..b]`",
                 Syntax::SIGIL_WRITE,
             )
         } else {
             format!(
-                "bind the value first: `x {} ...` then pass `{}x`",
+                "bind the value first: `x {} ...` then pass `{}x` with the write-capability marker `&`",
                 Syntax::SIGIL_BIND_MUT,
                 Syntax::SIGIL_WRITE,
             )
@@ -4790,7 +4790,7 @@ impl<'a> Checker<'a> {
             .as_ref()
             .map(Type::show)
             .unwrap_or_else(|| "[Task<T>]".to_string());
-        let why = "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
+        let why = "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move-capability marker `^`"
             .to_string();
         // Infer may wrap an owning field/index read in `Copy`; report against
         // the underlying place so the fix names the projection, not a clone.
@@ -4813,7 +4813,7 @@ impl<'a> Checker<'a> {
                 });
                 let fix = if is_param && is_task_list {
                     format!(
-                        "take the list with `{name}: {}{list_ty}`, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`",
+                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`",
                         Syntax::SIGIL_MOVE
                     )
                 } else if is_task_list {
@@ -4863,7 +4863,7 @@ impl<'a> Checker<'a> {
                         ),
                         "this function has read access only and does not own the value".to_string(),
                         format!(
-                            "call it on a copy, or take ownership with `{}: {}{}`",
+                            "call it on a copy, or take ownership with the move-capability marker `^`: `{}: {}{}`",
                             name,
                             Syntax::SIGIL_MOVE,
                             info.ty.name()
@@ -4894,14 +4894,14 @@ impl<'a> Checker<'a> {
     ) -> Diagnostic {
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{}{name}` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
+                "`{name}` is used again after this call, so the move-capability marker `^` (`{}{name}`) would break that later use — write the copy marker `~` (`{}{name}`) to pass a copy, or reorder so this call is `{name}`'s last use and write the move-capability marker `^` (`{}{name}`)",
                 Syntax::SIGIL_MOVE,
                 Syntax::SIGIL_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write `{}{name}` to move it — this is `{name}`'s last use — or `{}{name}` to keep a copy",
+                "write the move-capability marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or the copy marker `~` (`{}{name}`) to keep a copy",
                 Syntax::SIGIL_MOVE,
                 Syntax::SIGIL_COPY,
             )
@@ -5025,17 +5025,15 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0201",
                             format!(
-                                "`{}` needs `{}` here — this value can't be copied",
+                                "`{}` needs the move-capability marker `^` here — this value can't be copied",
                                 call_name,
-                                Syntax::SIGIL_MOVE
                             ),
                             format!(
-                                "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                "parameter {} takes ownership through the move-capability marker `^`; passing `{}` without that marker would have to copy it, but this type can't be copied",
                                 idx + 1,
-                                name,
-                                Syntax::SIGIL_MOVE
+                                name
                             ),
-                            format!("write `{}{}` to move ownership to `{}`", Syntax::SIGIL_MOVE, name, call_name),
+                            format!("write the move-capability marker `^` (`{}{}`) to move ownership to `{}`", Syntax::SIGIL_MOVE, name, call_name),
                             Some(*span),
                         ));
                     }
@@ -5904,8 +5902,8 @@ pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
         format!("`{}` still owes `consume`", name),
         "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
         format!(
-            "consume it exactly once: move it to a `{}` parameter, or `return` it — or write `#{}(\"reason\") {{ consume({}) }}` to discard it deliberately",
-            Syntax::SIGIL_MOVE, Syntax::KW_UNSAFE, name
+            "consume it exactly once: move it to a parameter with the move-capability marker `^`, or `return` it — or write `#{}(\"reason\") {{ consume({}) }}` to discard it deliberately",
+            Syntax::KW_UNSAFE, name
         ),
         Some(span),
     )
@@ -5987,10 +5985,9 @@ pub(crate) fn e0142_aliased(name: &str, call: &str, span: Span) -> Diagnostic {
             call
         ),
         format!(
-            "move it with `{}{}` to give it away, or rework the call so it takes ownership (`{}`)",
+            "move it with the move-capability marker `^` (`{}{}`) to give it away, or rework the call so it takes ownership through that marker",
             Syntax::SIGIL_MOVE,
             name,
-            Syntax::SIGIL_MOVE
         ),
         Some(span),
     )

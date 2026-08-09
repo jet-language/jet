@@ -77,8 +77,8 @@ pub(crate) fn alloc_method_return(
         _ => {
             let (why, fix) = if method == "free" {
                 (
-                    "allocator terminal release uses the same nominal `Close` protocol as every resource".to_string(),
-                    "write `close(^allocator)`; use `allocator.reset()` only when reusing its backing storage".to_string(),
+                    "allocator terminal release uses the same nominal `Close` protocol as every resource; it consumes through the move-capability marker `^`".to_string(),
+                    "write `close(^allocator)` with the move-capability marker `^`; use `allocator.reset()` only when reusing its backing storage".to_string(),
                 )
             } else {
                 let methods = if type_name == "Fixed" {
