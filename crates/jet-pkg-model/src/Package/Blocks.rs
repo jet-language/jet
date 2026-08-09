@@ -658,7 +658,7 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
     for name in &names {
         if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
             return Err(PackageParseError::BadEffectsBlock(format!(
-                "`{name}` isn't a known effect (see docs/spec — the ten-effect D-EFF4 vocabulary)"
+                "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"
             )));
         }
     }
