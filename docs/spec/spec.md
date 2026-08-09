@@ -1057,7 +1057,7 @@ mode (structural check).
   only that region; the rest of the test still runs.
 
 **`jet new <name>`** creates `<name>/run.jet` with a zero-argument `fn run()`
-(hello world), plus `<name>/pkg.jet` and `<name>/.gitignore` (`build/`).
+(hello world), plus `<name>/package.jet` and `<name>/.gitignore` (`build/`).
 
 Example: `examples/features/tooling/tests.jet`; scope members in
 `examples/features/tooling/test_members.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
@@ -1126,7 +1126,7 @@ execution and link proof.
 **`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
 entry is a normal Jet signature plus **`= "rust::path"`** naming the target
 item. This source-level declaration is sufficient even inside a project with
-`pkg.jet`; users do not need the package manager just to call a foreign
+`package.jet`; users do not need the package manager just to call a foreign
 function. **`extern rust "std" { … }`** works for Rust standard-library items with
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
@@ -1174,7 +1174,7 @@ owned buffers, nullable strings, another encoding, or a library-specific free
 function stay raw and need an audited wrapper.
 
 Link key = last segment `<lib>`: a declared `<lib>: c@…` dep in the `deps:`
-block of `pkg.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallback;
+block of `package.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallback;
 `c@"path"` → local `-L`/`-I`/`-l`) → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
 `-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
@@ -1811,8 +1811,8 @@ root (the staged tree is searched exactly like the project tree or a path dep).
 No new keyword, no `..` import, no special call form — it is an ordinary module
 on the search path. An **`executable`** package goes on PATH, not `use`: naming
 one in `use` is **E0982**. A package's **`kind` is inferred when omitted**
-(D-ILE1): in a `pkg.jet` `packages:` block a bare `name` (no `: kind`), or a
-package with no `pkg.jet` at all, resolves to `executable` when its source stages
+(D-ILE1): in a `package.jet` `packages:` block a bare `name` (no `: kind`), or a
+package with no `package.jet` at all, resolves to `executable` when its source stages
 a `bin/` or declares a top-level `fn run`, otherwise `library`; an explicit
 `library`/`executable` always wins. Single-file `jet run`/`build file.jet` stays
 executable-requiring (R9; E0101 if it has no `run`). A `library` dependency the project declares but hasn't
@@ -2539,7 +2539,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `jet trust grant <grant> [--scope user|repo]` records a reviewed local grant;
   `jet trust revoke <grant>` removes it so the next risky action asks again.
   The store remains backward-compatible with U19 `hash:` and `pattern:` lines.
-  `pkg.jet` may carry reviewed source policy as
+  `package.jet` may carry reviewed source policy as
   `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
   Policy decisions are `allow`, `prompt`, or `deny`; unknown fields are a
   manifest error.
@@ -2549,7 +2549,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   outside this law). Every bypass is spelled at the site or on the command
   line, never in hidden config, and lands in the audit record (`jet inspect
   dossier`, effect-budget provenance, build facts). Walls are team policy
-  only: `pkg.jet`'s `policy: { lints: { deny: […] } }` joins `policy.trust`
+  only: `package.jet`'s `policy: { lints: { deny: […] } }` joins `policy.trust`
   under the one `policy:` namespace (D-JPK-POLICYSURFACE1) — `deny:` lists
   lint codes (e.g. `L0504`), and a lint that fires while its code is listed
   fails the build with E1293 instead of only warning. Absent entirely, every
@@ -3198,7 +3198,7 @@ session-only history.
 
 ## Editions & release policy (E2-M2)
 
-A project pins an **edition** with `edition: "2026"` in its `pkg.jet`
+A project pins an **edition** with `edition: "2026"` in its `package.jet`
 (D-REL3). An edition opts the project into a specific era of Jet syntax; the
 toolchain advertises the editions it supports in `jet --version` and rejects a
 future edition it can't provide (E2001). Single-file `jet run file.jet` carries
@@ -3265,21 +3265,20 @@ exact lock entry; an unlocked channel source is E1271, including under CI or
 ### Frozen-forward identity block
 
 The Package root's `name`, `version`, and `jet` fields form the project's
-**identity block**, read by a dedicated pre-parse (`Jetpack::JetPin::
-identity_preparse`) *before* the full manifest parse. Migration-era `pkg.jet`
-keeps the old `payload` wrapper until `jet init` folds it. The canonical grammar is
+**identity block**, read by the single `Package` parser before the rest of the
+manifest facts. Identity is bare top-level syntax. The canonical grammar is
 **contract-frozen** and must never be narrowed, so version dispatch can never be
 wedged by later manifest evolution (the Go `go.mod` contract):
 
 - The reader extracts top-level `name:`, `version:`, and `jet:` as simple
-  `key: value` entries, unquoted and trimmed. A migration-era `payload: { … }`
-  wrapper is read by the same frozen reader.
+  `key: value` entries, unquoted and trimmed. There is no `payload:` or
+  `identity:` wrapper.
 - Any other top-level key, any unknown nested block inside or outside the Package,
   and any surrounding syntax the running `jet` doesn't recognise is tolerated
   and skipped — it never blocks the identity read.
 
 Guarantee: **every past and future `jet` can read the identity block of any
-`package.jet` or migration-era `pkg.jet`.** New manifest features may only *add* fields/blocks the identity
+`package.jet`.** New manifest features may only *add* fields/blocks the identity
 reader ignores; the three identity fields keep this exact `key: value` shape.
 
 ## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
@@ -3713,7 +3712,7 @@ or sema internals, and no API can feed modified syntax back into compilation.
 
 ## Inline script dependencies — `use pkg#version` (D-JPK-SCRIPTDEP1=A)
 
-A bare `.jet` script — no `pkg.jet` — may open with an inline dependency
+A bare `.jet` script — no `package.jet` — may open with an inline dependency
 instead of a manifest:
 
 ```jet
@@ -3746,7 +3745,7 @@ rung 0 stays magic — but is L0203: nothing pins it until `jet store lock stats
 writes a `stats.jet.lock` sidecar (`script_hash` + each dep's resolved
 version and content hash, keyed by the script's own file-content hash so an
 edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
-written `pkg.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
+written `package.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
 (vision.md's ladder) without discarding what it already declared.
 
 ## `target: plugin` — sandboxed WASM Component Model plugins (c81, D-PLUGIN1=B, D-DEP-WASM1=A)
@@ -3762,7 +3761,7 @@ D-DX5-HOOK1=A: typed read-only post-sema snapshot in world
 conflate them (I8).
 
 ```jet
-// pkg.jet
+// package.jet
 name: "mathkit"
 version: "0.1.0"
 ```
@@ -3826,7 +3825,7 @@ shape) — see docs/spec/diagnostics.md.
 `jet build` checks the root program, then runs one optional unit-local
 `fn build(b: BuildContext) => BuildPlan ?` through the same interpreter used by
 comptime. The entry may live in the source file, in a managed package's
-`pkg.jet`, or in `workspace.jet`. For a workspace entry, member entries run in
+`package.jet`, or in `workspace.jet`. For a workspace entry, member entries run in
 deterministic dependency order with separate read-only plans; the workspace
 entry runs last with a fresh `BuildContext` and can add only workspace-owned
 targets. Imported dependency entries are checked but never run. With no

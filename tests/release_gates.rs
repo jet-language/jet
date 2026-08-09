@@ -313,15 +313,15 @@ fn version_banner() {
 
 #[test]
 fn edition_too_new() {
-    // A real pkg.jet asking for a future edition triggers E2001 through the
+    // A real package.jet asking for a future edition triggers E2001 through the
     // manifest loader path. We render the diagnostic the way the CLI would.
     let raw = "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n";
-    let path = std::path::Path::new("pkg.jet");
+    let path = std::path::Path::new("package.jet");
     let mf = Manifest::parse(path, raw).expect("manifest should parse");
-    let err = Manifest::check_edition_support(&mf, "pkg.jet")
+    let err = Manifest::check_edition_support(&mf, "package.jet")
         .expect_err("a future edition must be rejected");
     assert_eq!(err.code, "E2001");
-    let rendered = jet::render_diagnostics("pkg.jet", raw, std::slice::from_ref(&err));
+    let rendered = jet::render_diagnostics("package.jet", raw, std::slice::from_ref(&err));
     check_fixture("edition_too_new.txt", &rendered);
 }
 
@@ -331,17 +331,17 @@ fn supported_edition_is_accepted() {
         "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{}\"\n",
         Manifest::latest_edition()
     );
-    let mf = Manifest::parse(std::path::Path::new("pkg.jet"), &raw).unwrap();
-    assert!(Manifest::check_edition_support(&mf, "pkg.jet").is_ok());
+    let mf = Manifest::parse(std::path::Path::new("package.jet"), &raw).unwrap();
+    assert!(Manifest::check_edition_support(&mf, "package.jet").is_ok());
 }
 
 #[test]
 fn no_edition_field_is_accepted() {
     // A manifest with no edition tracks the toolchain's newest stable edition.
     let raw = "name: \"x\"\nversion: \"0.1.0\"\n";
-    let mf = Manifest::parse(std::path::Path::new("pkg.jet"), raw).unwrap();
+    let mf = Manifest::parse(std::path::Path::new("package.jet"), raw).unwrap();
     assert_eq!(mf.package.edition, None);
-    assert!(Manifest::check_edition_support(&mf, "pkg.jet").is_ok());
+    assert!(Manifest::check_edition_support(&mf, "package.jet").is_ok());
 }
 
 #[test]

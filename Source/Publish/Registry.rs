@@ -928,7 +928,7 @@ pub fn e1234(name: &str, version: &str) -> Diagnostic {
             "bump the version in `{}` and publish again, or `jet registry yank {version}` the existing \
              one first if it was a mistake (yanking hides it from new resolution; it does not \
              free the version number for reuse).",
-            crate::Syntax::PAYLOAD_FILE
+            crate::Syntax::PACKAGE_FILE
         ),
         None,
     )

@@ -1,8 +1,8 @@
 //! U11 (D-JPK-SCRIPTDEP1=A): inline script dependencies — a manifest-less
 //! `.jet` script may open with `use pkg#version;` instead of shipping a
-//! `pkg.jet`. `jet run` resolves + locks by file-content hash, `jet fetch --lock`
+//! `package.jet`. `jet run` resolves + locks by file-content hash, `jet fetch --lock`
 //! writes a `<script>.lock` sidecar, and `jet init` lifts the inline refs
-//! into a generated `pkg.jet`. See
+//! into a generated `package.jet`. See
 //! docs/plans/epoch-4/{vision,implementation}.md.
 //!
 //! Resolution is intentionally local and offline. Inline dependencies use a
@@ -185,7 +185,7 @@ pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
                 dep.name
             ),
             format!(
-                "commit a copy at `.jet/inline-deps/{}/<version>/`, materialize the source locally first, or run `jet init` and depend on `{}` through `pkg.jet`.",
+                "commit a copy at `.jet/inline-deps/{}/<version>/`, materialize the source locally first, or run `jet init` and depend on `{}` through `package.jet`.",
                 dep.name, dep.name
             ),
         ),

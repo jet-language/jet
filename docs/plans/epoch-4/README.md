@@ -29,10 +29,10 @@ folded into Tower's active replacement program (#395, #421-#434).
 
 The latest decisions override stale prose in older Epoch 4 notes:
 
-- **The reserved package file is `pkg.jet`, not `pack.jet`.**
-  `D-JPK-FILENAME2=B` keeps the shipped `pkg.jet` name and amends
-  D-JPK-TWONAMES1's reserved-file text. Do not rename fixtures or docs back to
-  `pack.jet`.
+- **The reserved package file is `package.jet`, not `pack.jet`.**
+  `D-ECO-FILEROOT1=A` makes `package.jet` the sole reserved ecosystem file.
+  `pkg.jet`, `pack.jet`, `payload.jet`, and `jet.toml` are retired names; do not
+  add them back as aliases.
 - **Role namespaces live in module declaration names.**
   `D-JPK-MODBODY1=A`: active Jetpack work writes `module env.dev { ... }`
   and `module image.server { ... }` for OCI images. `system.*`, disk images,
@@ -40,13 +40,12 @@ The latest decisions override stale prose in older Epoch 4 notes:
   D-JETOS-FREEZE1, not current Epoch 4 build scope. The shipped contribution form
   `module dev { env.dev: Env.{ ... } }` becomes teaching syntax, not a second
   canonical form.
-- **Reserved filenames are `pkg.jet`, `env.jet`, and `workspace.jet`.**
-  `pkg.jet` owns package identity and publishable package metadata. `env.jet`
-  is the dev-shell role file; `workspace.jet` is the monorepo index carrying
-  `module workspace { ... }`. Other role modules may live in any discovered
-  `.jet` file; their role is declared by module name (`module env.dev { ... }`,
-  `module image.server { ... }`). There are no required `config.jet`,
-  `build.jet`, or `fleet.jet` filenames.
+- **`package.jet` is the sole reserved ecosystem filename.** It owns package
+  identity and publishable package metadata. Other `.jet` files contribute
+  Configs; role modules such as `module env.dev { ... }`,
+  `module image.server { ... }`, and `module workspace { ... }` are discovered
+  by their declarations. `env.jet`, `workspace.jet`, `config.jet`, `build.jet`,
+  and `fleet.jet` are not parallel Package roots.
 - **Users type `jet`; engines are separate executables.**
   `D-JPK-DISPATCH1=B`: Jetpack / jetos verbs must cross a git-style process
   boundary (`jetpack`, `jetos`, or future engine binary), with exit-code,
@@ -55,11 +54,10 @@ The latest decisions override stale prose in older Epoch 4 notes:
 - **The OS product name is `jetos`.**
   `D-JPK-OSNAME1=A`; trademark sweep remains pre-release work.
 
-`pkg.jet` still owns package identity and publishable package metadata. Dev
-environments and workspace membership have their reserved role files
-(`env.jet`, `workspace.jet`); images and other role modules are discovered by
-declaration. That preserves the package/env/workspace separation while deleting
-unratified role filenames.
+`package.jet` owns package identity and publishable package metadata. Dev
+environments, workspace membership, images, and other role modules are
+discovered from `.jet` Config contributions by declaration. Retired role-file
+spellings are migration inputs, not additional Package roots.
 
 ---
 
@@ -67,7 +65,7 @@ unratified role filenames.
 
 | Gate | Decision | Outcome | Implementation meaning |
 |---|---|---|---|
-| U11 | `D-JPK-SCRIPTDEP1` | A | `use pkg#ver` inside a bare script; `jet run` resolves and locks by file hash; `jet store lock <file>` writes a sidecar; `jet init` lifts deps into `pkg.jet`. |
+| U11 | `D-JPK-SCRIPTDEP1` | A | `use pkg#ver` inside a bare script; `jet run` resolves and locks by file hash; `jet store lock <file>` writes a sidecar; `jet init` lifts deps into `package.jet`. |
 | U12 | `D-JPK-SERVICE1` | A | `services:` in `env.*`; jetpack supervises project-local processes; `jet services up/down/health/logs`; `jet dev` health-gates before running code. |
 | U13 | `D-JPK-SECRET1` | A | `secret("name")`; encrypted repo file; activation-time memory-only decrypt; reads require `Secret` effect; no plaintext in hangar. |
 | U13a | `D-JPK-SECRETCRYPTO1` | A | Use a vetted crypto bridge for age-style encryption; compiler stays zero-external-crate. |
@@ -76,9 +74,9 @@ unratified role filenames.
 | U15 | `D-JPK-FLEET1` | A | Fleet host maps remain research/capture only; rollout waits for Epoch 7 jetos ballots. |
 | U16 | `D-JPK-BRIDGE1` | A | `jet env -p`, foreign `flake.nix`/`devenv.nix` consumption, `jet run tool@nixpkgs`, `jet bridge flake`. |
 | U17 | `D-JPK-OSNAME1` | A | Spell the OS `jetos`. |
-| U18 | `D-JPK-TWONAMES1` + follow-ups | amended | Reserved files are `pkg.jet`, `env.jet`, and `workspace.jet`; role modules are shaped by declaration; engines dispatched as executables. |
+| U18 | `D-JPK-TWONAMES1` + follow-ups | amended | `package.jet` is the sole reserved ecosystem file; other `.jet` files contribute Configs and role modules are shaped by declaration; engines dispatch as executables. |
 | U19 | `D-JPK-DEVCOMPOSE1` | D | `jet env [name]` enters a tools-only shell and never runs project functions; `jet dev` explicitly runs `fn dev()` inside `env(base + env.dev)`. |
-| U20 | `D-JPK-ADAPTER1` + `D-JPK-BUILDRECIPE1` | A | Ad-hoc adapters: `Pkg.adapt(source:, recipe:)` turns fetched bytes into packages for refs with no `pkg.jet`/flake/nixpkgs path; `jet add <ref> --adapt` drafts from read-only probes; executable adapters use finite `Recipe.build(steps: […])` actions. |
+| U20 | `D-JPK-ADAPTER1` + `D-JPK-BUILDRECIPE1` | A | Ad-hoc adapters: `Pkg.adapt(source:, recipe:)` turns fetched bytes into packages for refs with no `package.jet`/flake/nixpkgs path; `jet add <ref> --adapt` drafts from read-only probes; executable adapters use finite `Recipe.build(steps: […])` actions. |
 | U21 | `D-JPK-CHANNEL1` | A | Channel refs (`#latest`, `#v0.x`, `#main`) resolve only in `jet update` / first `add`; lock stays exact; `jet outdated` read-only; unlocked channel ref in CI is an error. |
 | U22 | `D-JPK-GC1` | B (amended 2026-07-03) | Hangar disk contract: auto-GC ages out unreferenced objects (30d default, opportunistic, no daemon) + manual `jet clean` (GC + hangar optimize: hardlink/dedup, `nix store optimise` equivalent, one pass) + honest `jet hangar du`; lockfile/generation-reachable never collected; zero-/tmp guarantee golden-tested; build scratch hangar-scoped and crash-cleaned. |
 | U23 | `D-JPK-NONIX1` | A | No-Nix machines: everything Nix-free realizes; bridge-needing packages fail with one E12xx naming them + both fixes (install Nix / `--adapt`); never holds realized packages hostage. |
@@ -96,8 +94,8 @@ unratified role filenames.
 Built before this refresh:
 
 - `jet` and `jetpack` binaries exist.
-- `pkg.jet` manifest parser exists for `payload:`, `deps:`, `packages:`,
-  `edition`, with package diagnostics in E12xx.
+- `package.jet` manifest parser exists for bare `name:`/`version:`, `deps:`,
+  `packages:`, and `edition`, with package diagnostics in E12xx.
 - Typed module evaluation exists for the older contribution form:
   `EnvPlan`, `SystemPlan`, `ServicePlan`, `ImagePlan`, `find("./modules")`,
   source merge, and diagnostics around E0960-E0983. D-JETOS-FREEZE1 makes the
@@ -119,7 +117,7 @@ first work in Epoch 4 is a reconciliation pass.
 
 ```
 Phase A — foundation
-  dispatch seam + pkg.jet canon + module-declaration role form + filename cleanup
+  dispatch seam + package.jet canon + module-declaration role form + filename cleanup
 
 Phase B — independent surfaces
   D-JPK-SCRIPTDEP1 script deps

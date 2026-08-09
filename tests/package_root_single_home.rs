@@ -75,7 +75,7 @@ fn every_root_resolver_entry_point_calls_loader() {
         "project_root_marker",
         "find_canonical_package_root",
         "find_package_root",
-        "[\"pkg.jet\", \"Jet.toml\", \"jet.toml\", \".git\"]",
+        "[\"package.jet\", \"Jet.toml\", \"jet.toml\", \".git\"]",
     ] {
         assert!(
             homes_for(forbidden).is_empty(),

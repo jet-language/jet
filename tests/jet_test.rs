@@ -510,7 +510,7 @@ fn jet_test_coverage_reports_hit_and_miss() {
 
 #[test]
 fn jet_bench_target_integration() {
-    // c80 / D-TGT2: a package whose pkg.jet declares `target: benchmark` runs
+    // c80 / D-TGT2: a package whose package.jet declares `target: benchmark` runs
     // its `#Bench` regions via the existing `jet bench` engine (no new mechanism).
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();

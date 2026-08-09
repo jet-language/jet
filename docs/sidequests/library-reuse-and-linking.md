@@ -155,7 +155,7 @@ version check. This mirrors the inbound binder direction (D-FFI-UNIFY1=A,
 D-FFI-PY1=A) rather than adding a second mechanism.
 
 ```jet
-# pkg.jet
+# package.jet
 name: "flightlog"
 outputs: .{
   core: .Library.{ native: true, entry: Flightlog, bindings: [c, python, swift] }

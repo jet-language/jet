@@ -387,28 +387,31 @@ impl PackageFacts {
         Ok(facts)
     }
 
-    /// Load `package.jet`, falling back only when the migration-era `pkg.jet`
-    /// is the sole role file. Both names together are ambiguous and fail
-    /// closed before any composition or member discovery occurs.
+    /// Load the one canonical Package root. A retired manifest beside it is
+    /// rejected as an ambiguous migration input; it is never parsed as a
+    /// fallback Package root.
     pub fn load(dir: &std::path::Path) -> Option<Result<Self, PackageParseError>> {
-        let canonical = dir.join("package.jet");
-        let legacy = dir.join("pkg.jet");
+        let canonical = dir.join(crate::Syntax::PACKAGE_FILE);
+        let legacy = dir.join(crate::Syntax::PAYLOAD_FILE);
         if canonical.is_file() && legacy.is_file() {
-            return Some(Err(PackageParseError::Composition(
-                "both `package.jet` and migration-era `pkg.jet` exist; keep one Package root"
-                    .to_string(),
-            )));
+            return Some(Err(PackageParseError::Composition(format!(
+                "both `{}` and migration-era `{}` exist; keep one Package root",
+                crate::Syntax::PACKAGE_FILE,
+                crate::Syntax::PAYLOAD_FILE,
+            ))));
         }
-        let path = if canonical.is_file() { canonical } else { legacy };
+        let path = canonical;
+        if !path.is_file() {
+            return None;
+        }
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(error) if path.is_file() => {
+            Err(error) => {
                 return Some(Err(PackageParseError::Composition(format!(
                     "couldn't read Package `{}`: {error}",
                     path.display()
                 ))))
             }
-            Err(_) => return None,
         };
         let parsed = Self::parse_uncomposed(&text, path.display().to_string());
         Some(parsed.and_then(|mut facts| {
@@ -697,7 +700,9 @@ impl PackageFacts {
             let reserved = path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "package.jet" || name == "pkg.jet");
+                .is_some_and(|name| {
+                    name == crate::Syntax::PACKAGE_FILE || name == crate::Syntax::PAYLOAD_FILE
+                });
             let config = self
                 .resolved_config_paths
                 .iter()
@@ -825,9 +830,13 @@ impl PackageFacts {
                         "member reference `{relative}` resolves outside its Package root"
                     )));
                 }
-                if candidate.join("package.jet").is_file() && candidate.join("pkg.jet").is_file() {
+                if candidate.join(crate::Syntax::PACKAGE_FILE).is_file()
+                    && candidate.join(crate::Syntax::PAYLOAD_FILE).is_file()
+                {
                     return Err(PackageParseError::Composition(format!(
-                        "member Package `{relative}` contains both `package.jet` and migration-era `pkg.jet`"
+                        "member Package `{relative}` contains both `{}` and migration-era `{}`",
+                        crate::Syntax::PACKAGE_FILE,
+                        crate::Syntax::PAYLOAD_FILE,
                     )));
                 }
                 if physical.iter().any(|existing| existing == &candidate) {
@@ -1153,13 +1162,8 @@ fn package_record_bounds(value: &str) -> Option<(usize, usize)> {
 }
 
 fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let canonical = dir.join("package.jet");
-    if canonical.is_file() {
-        Some(canonical)
-    } else {
-        let legacy = dir.join("pkg.jet");
-        legacy.is_file().then_some(legacy)
-    }
+    let canonical = dir.join(crate::Syntax::PACKAGE_FILE);
+    canonical.is_file().then_some(canonical)
 }
 
 fn package_member_identity(

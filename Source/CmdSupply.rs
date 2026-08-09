@@ -99,7 +99,7 @@ fn render_signing_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) {
     } else {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", std::slice::from_ref(diagnostic))
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", std::slice::from_ref(diagnostic))
         );
     }
 }
@@ -344,7 +344,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 let raw = String::new();
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
                 );
                 eprintln!(
                     "\nerror: breaking public API change since {} requires a major version bump.",
@@ -407,7 +407,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         Err(d) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -421,7 +421,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             eprint!(
                 "{}",
                 jet::render_diagnostics(
-                    jet::Syntax::PAYLOAD_FILE,
+                    jet::Syntax::PACKAGE_FILE,
                     "",
                     &[jet::Publish::e1234(name, version)]
                 )
@@ -432,7 +432,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -445,7 +445,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -465,7 +465,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         let diagnostic = jet::Publish::e2607("registry source artifact", &error.to_string());
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
         );
         exit(ExitCodes::USER_ERROR);
     }
@@ -493,7 +493,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             Err(d) => {
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -505,7 +505,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -552,7 +552,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             Err(diagnostic) => {
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -568,7 +568,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     ) {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
         );
         exit(ExitCodes::USER_ERROR);
     }
@@ -695,7 +695,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         .unwrap_or_else(|diags| {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
             );
             exit(ExitCodes::USER_ERROR);
         });
@@ -737,7 +737,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         Err(d) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &[d])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &[d])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -825,7 +825,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     let diags: Vec<_> = matches.iter().map(|m| m.diagnostic.clone()).collect();
     eprint!(
         "{}",
-        jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+        jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
     );
 
     let critical = matches
@@ -947,7 +947,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -991,7 +991,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -1007,7 +1007,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     ) {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
         );
         exit(ExitCodes::USER_ERROR);
     }

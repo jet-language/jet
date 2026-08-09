@@ -2,7 +2,7 @@
 //! #367, D-PRODUCT-SPLIT1=C).
 //!
 //! This crate is the manifest/lock/store/ref/workspace/script *data* layer:
-//! parsing `pkg.jet`, the compiler-facing `Manifest`/`Lock` types, the C FFI
+//! parsing `package.jet`, the compiler-facing `Manifest`/`Lock` types, the C FFI
 //! binding-generation surface, inline script dependencies, and the read-only
 //! subset of the Jetpack hangar store (root resolution + listing already
 //! recorded entries). It holds no network/provider/shell engine code — that
@@ -21,7 +21,7 @@
 // `crate::Diagnostics`, `crate::Syntax`, `crate::SHA256`, `crate::Lexer`,
 // `crate::Parser`, `crate::Sema` without cross-crate path changes — same
 // pattern `jetpack` itself already uses for `jet_codegen`'s re-exports.
-// `Sema` is needed to validate the closed effect vocabulary a `pkg.jet`
+// `Sema` is needed to validate the closed effect vocabulary a `package.jet`
 // `policy: { trust:/lints: }` block names (jet-driver already depends on
 // Sema transitively through jet-codegen, so this adds nothing new to its
 // build graph — it is the compiler's checker, not Jetpack's engine).

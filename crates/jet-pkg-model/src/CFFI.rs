@@ -18,7 +18,7 @@
 //!    sema's import map.
 //!
 //! Link discovery lives in helpers here: a declared `<lib>: c@…` dep in the
-//! `deps:` block of `pkg.jet` (S59/D-CFFI2) takes precedence, else `pkg-config
+//! `deps:` block of `package.jet` (S59/D-CFFI2) takes precedence, else `pkg-config
 //! <lib>`, else E3201.
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -997,7 +997,7 @@ fn load_cache_source(
 }
 
 /// Resolve link flags for one C library (S59/D-CFFI2). Order:
-///   1. A declared `<lib>: c@…` dep in the `deps: { … }` block of `pkg.jet`:
+///   1. A declared `<lib>: c@…` dep in the `deps: { … }` block of `package.jet`:
 ///      `c@system` → pkg-config (with a bare `-l <lib>` fallback when there is
 ///      no `.pc`, e.g. libc); `c@"<path>"` → local dir (`-L`/`-I`/`-l`).
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
@@ -1404,7 +1404,7 @@ fn e3201(lib: &str) -> Diagnostic {
         format!("C library `{}` was not found.", lib),
         format!(
             "Jet looked for a `{lib}: {}@…` dep in `{}`, then tried `pkg-config {lib}` on the system; neither provided include/link paths.",
-            Syntax::DEP_PROVIDER_C, Syntax::PAYLOAD_FILE,
+            Syntax::DEP_PROVIDER_C, Syntax::PACKAGE_FILE,
         ),
         format!(
             "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}{}{}` in `deps:`.",

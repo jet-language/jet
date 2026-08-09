@@ -1509,7 +1509,7 @@ fn main() {
         "toolchain" => run_toolchain(),
         // U11 (D-JPK-SCRIPTDEP1=A): `jet init <script.jet>` lifts that
         // script's inline `use pkg#version;` deps into the freshly written
-        // `pkg.jet`; bare `jet init` is unchanged.
+        // `package.jet`; bare `jet init` is unchanged.
         "init" => run_init(args.get(1).map(|s| s.as_str()), &raw, mode),
         "split" => run_split(&args, &raw, mode),
         "fold" => run_fold(&args, &raw, mode),
@@ -2655,7 +2655,7 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// A `workspace.jet` (D-JPK-WORKSPACE2) is checked at `cwd` directly first —
 /// `jetpack::WorkspaceFile::load` never walks upward, matching every
 /// other workspace-aware call site — because a monorepo workspace root often
-/// carries no `pkg.jet` of its own (payloads live entirely in member
+/// carries no `package.jet` of its own (Package facts live entirely in member
 /// directories). Only when there's no workspace, or it has zero/one runnable
 /// member, does resolution fall back to the ordinary `find_manifest_root` +
 /// `find_project_entry` single-package convention (unchanged from before
@@ -3182,7 +3182,7 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
     if jet::Loader::find_manifest_root(script_dir).is_some() {
         eprintln!(
             "error: `{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
-            jet::Syntax::PAYLOAD_FILE
+            jet::Syntax::PACKAGE_FILE
         );
         exit(ExitCodes::USER_ERROR);
     }
@@ -3279,9 +3279,10 @@ pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> 
 }
 
 /// Find the manifest root from `cwd`, or exit. D-JPK-FILENAME2=B (A2): when
-/// there's no `pkg.jet` but a retired filename (`pack.jet`/`payload.jet`/
-/// `jet.toml`) sits where it belongs, teaches E1226 instead of the generic
-/// "no pkg.jet found" — `fallback_hint` is that generic message's body for
+/// there's no `package.jet` but a retired filename (`pkg.jet`/`pack.jet`/
+/// `payload.jet`/`jet.toml`) sits where it belongs, teaches E1226 instead of
+/// the generic "no package.jet found" — `fallback_hint` is that generic
+/// message's body for
 /// commands that genuinely have no manifest at all.
 pub(crate) fn require_manifest_root(cwd: &Path, fallback_hint: &str) -> PathBuf {
     jet::Loader::find_manifest_root(cwd).unwrap_or_else(|| {

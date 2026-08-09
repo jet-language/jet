@@ -128,7 +128,7 @@ pub(super) fn file_declares_module(text: &str, name: &str) -> bool {
 }
 
 // ──────────────────────────────────────────────
-// Tests — D-JPK-FILENAME2=B (A2) acceptance: `pkg.jet` is the only reserved
+// Tests — D-ECO-FILEROOT1=A: `package.jet` is the only reserved
 // filename; every role module (`workspace`, dev/system role names) is
 // discovered by declaration, regardless of which `.jet` file it lives in.
 // ──────────────────────────────────────────────
@@ -181,15 +181,15 @@ mod tests {
         assert_eq!(discover_module_in(&dir, "_bench").unwrap(), dir);
     }
 
-    /// Only `pkg.jet` is reserved: discovery skips it even if it happens to
+    /// Only `package.jet` is reserved: discovery skips it even if it happens to
     /// contain module-shaped text, so a module can never be "found" via the
     /// manifest file itself — only via the tree it manages.
     #[test]
-    fn pkg_jet_is_excluded_from_discovery() {
-        let dir = tempdir("pkg-jet-excluded");
+    fn package_jet_is_excluded_from_discovery() {
+        let dir = tempdir("package-jet-excluded");
         std::fs::write(
-            dir.join(Syntax::PAYLOAD_FILE),
-            "module bogus { }\npayload: { name: \"x\", version: \"0.1.0\" }\n",
+            dir.join(Syntax::PACKAGE_FILE),
+            "module bogus { }\nname: \"x\"\nversion: \"0.1.0\"\n",
         )
         .unwrap();
         assert_eq!(

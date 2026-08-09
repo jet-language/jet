@@ -246,8 +246,8 @@ fn workspace_find_example_evaluates() {
     let ranker = packages.join("ranker");
     std::fs::create_dir_all(&hello).unwrap();
     std::fs::create_dir_all(&ranker).unwrap();
-    std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
-    std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
+    std::fs::write(hello.join("package.jet"), "name: \"hello\"\n").unwrap();
+    std::fs::write(ranker.join("package.jet"), "name: \"ranker\"\n").unwrap();
     std::fs::write(
         dir.join("workspace.jet"),
         "module workspace {\n    members: find(\"./packages\")\n}\n",
@@ -311,21 +311,21 @@ fn committed_monorepo_example_indexes_and_addresses_members() {
 // ──────────────────────────────────────────────
 
 #[test]
-fn find_discovers_packages_with_pkg_jet() {
+fn find_discovers_packages_with_package_jet() {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
     let tmp = std::env::temp_dir().join(format!("ws-find-test-{nanos}"));
-    // packages/hello/pkg.jet
+    // packages/hello/package.jet
     let hello = tmp.join("packages/hello");
     std::fs::create_dir_all(&hello).unwrap();
-    std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
-    // packages/ranker/pkg.jet
+    std::fs::write(hello.join("package.jet"), "name: \"hello\"\n").unwrap();
+    // packages/ranker/package.jet
     let ranker = tmp.join("packages/ranker");
     std::fs::create_dir_all(&ranker).unwrap();
-    std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
-    // packages/bare (no pkg.jet — should be ignored)
+    std::fs::write(ranker.join("package.jet"), "name: \"ranker\"\n").unwrap();
+    // packages/bare (no package.jet — should be ignored)
     std::fs::create_dir_all(tmp.join("packages/bare")).unwrap();
 
     let src = "module workspace { members: find(\"./packages\") }\n";
