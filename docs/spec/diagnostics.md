@@ -537,7 +537,7 @@ renumbered, and no new `W` code may be allocated.
 | E4201 | sema  | HTTPS client TLS handshake failed before any response was received (D-TLS1) |
 | E4202 | sema  | HTTPS client certificate could not be trusted (D-TLS1) |
 | E4203 | sema  | HTTPS client could not find usable system certificate roots (D-TLS1) |
-| E3401 | sema  | impure call inside a `fn … =[]=>` / pure-eval context (call-trace path) |
+| E3401 | sema  | impure call inside a `fn … =[]=>` / pure-eval context, or reached from comptime evaluation (D-META-EFFECT1 c3, was E0951) — call-trace path |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
@@ -582,7 +582,7 @@ renumbered, and no new `W` code may be allocated.
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
 | E0928 | sema  | `#Job fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
-| E0951 | sema  | comptime code reaches an impure operation (shows call path) |
+| E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | $panic :: user-authored compile error (message verbatim) |
 | E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
@@ -1370,8 +1370,8 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 ## Comptime effect tiers (D-CTEFFECT1)
 
-Tier-0 (pure) calls are whitelisted Core builtins — always safe, no gate needed.
-Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
+Tier-0 (pure) calls have an empty shared effect set — always safe, no gate
+needed. Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
 Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--allow-impure`.
 
 | code | what | why | fix |
@@ -1626,7 +1626,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … =[]=>` may only call other `fn … =[]=>`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `fn … =[]=>`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … =[]=>` may only call other `fn … =[]=>`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. Compile-time (`$` blocks, `$name :: expr` bindings) shares this same call-graph walk (D-META-EFFECT1 c3): the message reads `{call}` is not allowed in comptime code instead, since there is no enclosing `=[]=>` function name to report. | Mark `{call}` as `fn … =[]=>`, or remove the call from `{pure_fn}`; at compile time, compute the value at runtime instead. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
 | E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or remove the enclosing function's explicit empty effect bound. |
 

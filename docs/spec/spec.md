@@ -836,7 +836,8 @@ impl Circle {
   UTF-8 requirement — images, fonts, any blob). **`find("glob") => [String]`**
   returns sorted relative file paths for a std-only glob (`*`, `**`, `?`,
   `{a,b}`, `[a-z]`). These are the *only* sanctioned build-time I/O; comptime is
-  otherwise pure (**E0951**). Paths/globs must be string literals resolved
+  otherwise pure (**E3401** — D-META-EFFECT1 c3: one call-graph purity walk
+  shared with the run-time `=[]=>` check; retires the former E0951). Paths/globs must be string literals resolved
   relative to the embedding file's directory, never absolute and never escaping
   the project via `..` (**E0957**). A missing or unreadable embedded file is
   **E0955**; for `embed_file`, a non-UTF-8 file is also **E0955**, with a fix

@@ -7768,7 +7768,7 @@ fn ledger_cross_check_holds() {
     // Shrink-only ratchet (D-LENS-RUN2). Every row is a real I9 parity failure,
     // so the count may fall and never rise: fix a row, delete it, lower this
     // number in the same diff. Adding a row without lowering it fails here.
-    const RUN_GAPS_CEILING: usize = 12;
+    const RUN_GAPS_CEILING: usize = 0;
     assert!(
         run_gaps.len() <= RUN_GAPS_CEILING,
         "tests/jit_gaps.txt `run_gaps:` grew to {} rows (ceiling {RUN_GAPS_CEILING}); run-tier \

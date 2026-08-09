@@ -1251,7 +1251,7 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 /// Stdout is captured but not returned; callers render with `render_pretty()`
 /// (human) or `to_json()` (machine/`--json`).
 ///
-/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+/// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
 pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_value_inner(src, file))
 }
@@ -1301,7 +1301,7 @@ fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<CtValue, Vec<D
 /// `run()` function is interpreted using the comptime engine; any print calls
 /// are captured; the captured output is returned as a JSON string value.
 ///
-/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+/// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
 pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_inner(src, file))
 }

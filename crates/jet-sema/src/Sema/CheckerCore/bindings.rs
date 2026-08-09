@@ -676,8 +676,8 @@ impl<'a> Checker<'a> {
                 // D-CTIO1: the path law already reported against the call.
             } else if b.is_comptime {
                 let globals = self.current_ct_globals();
-                // D-CTCORE1: pass core_imports so the interpreter can evaluate
-                // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
+                // D-META-EFFECT1: pass core_imports so the interpreter can
+                // resolve effect-approved Core calls (e.g. `math.sqrt(x)`).
                 // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
                 // start with the gate already open.
                 let mut mutated = std::collections::HashMap::new();

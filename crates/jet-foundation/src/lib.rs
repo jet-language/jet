@@ -12,6 +12,7 @@ pub mod CoreArchive;
 pub mod CoreModuleExports;
 pub mod Diagnostics;
 mod ExactUnitConversion;
+pub mod Effects;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;

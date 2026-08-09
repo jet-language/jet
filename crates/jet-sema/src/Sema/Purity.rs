@@ -115,8 +115,8 @@ pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
 /// This is the run-time `=[]=>` route: check `f`'s own body for a direct
 /// impure-builtin or extern call. Empty `funcs` map passed to the shared
 /// walker means it never recurses into a callee's body — a callee that
-/// itself turns out impure is instead caught by the shared effect row
-/// (`Sema::Effects::check_inferred_purity`), which doesn't need to
+/// itself turns out impure is instead caught by the whole-program effect
+/// fixpoint (`Sema::Effects::check_inferred_purity`), which doesn't need to
 /// re-walk bodies because it already has every function's solved effect row.
 pub fn check_pure_fn(f: &Func, funcs: &HashMap<String, FuncSig>) -> Vec<Diagnostic> {
     if !f.is_pure {
