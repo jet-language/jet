@@ -54,6 +54,7 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 - Tower board prep (plans/ballots): `plugins/tower/skills/tower-prep/SKILL.md`;
 - Tower backlog burndown (orchestrated closeout): `plugins/tower/skills/tower-burndown/SKILL.md`;
 - orchestrating other agents (burndown, sweep, multi-card wave): `docs/agents/orchestration.md`;
+- owner preferences, project state, technical traps: `docs/agents/agent-memory.md`;
 - Jet audits / research / cleanup routing: `.agents/skills/JetSkillsRouter.md`;
 - completion claims: `.agents/skills/verify/SKILL.md` (code closeout only);
 - a specialized task: the matching skill named in the request or skill catalog.
@@ -326,3 +327,8 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 Dispatching other agents (burndowns, sweeps, multi-card waves): `docs/agents/orchestration.md`.
 Results-not-activity, role boundaries, worker briefs, batch rhythm, board hygiene, recovery.
+
+### Agent memory
+
+Owner preferences, ratified-slate state, and technical traps: `docs/agents/agent-memory.md`.
+Owner-auditable and owner-editable; treat it as law after this file. Prune stale dated entries.
