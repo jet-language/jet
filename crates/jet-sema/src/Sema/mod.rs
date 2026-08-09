@@ -10,7 +10,8 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, Expr, ExternFn, Func, QuantityKind, Stmt, Type, VariantPayload,
+    AccessConvention, Expr, ExternFn, Func, KnowledgeVector, QuantityKind, Stmt, Type,
+    VariantPayload,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
@@ -135,9 +136,9 @@ pub(crate) enum TypeDef {
         is_comparable: bool,
         is_printable: bool,
         is_codable_as_base: bool,
-        /// D-RANGETYPE1: `distinct Int(0..10)` — the inclusive `(lo, hi)`
-        /// bounds this type provably holds. `None` for a plain distinct type.
-        range: Option<(i64, i64)>,
+        /// D-TYPE2-FOUND1: semantic facts live on the one type knowledge
+        /// vector. The interval plane is projected here for existing checks.
+        knowledge: KnowledgeVector,
     },
     /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — transparent
     /// generic shortcut; expands in sema, erases at codegen.
@@ -414,7 +415,7 @@ impl TypeRegistry {
     /// that isn't distinct.
     pub(crate) fn distinct_range(&self, name: &str) -> Option<(i64, i64)> {
         match self.types.get(name) {
-            Some(TypeDef::Distinct { range, .. }) => *range,
+            Some(TypeDef::Distinct { knowledge, .. }) => knowledge.interval(),
             _ => None,
         }
     }

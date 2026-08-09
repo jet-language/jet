@@ -595,6 +595,21 @@ impl<'a> Checker<'a> {
         /// reported); callers may add a context-specific error otherwise.
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
             if want == got {
+                if !Type::obligations_satisfy(want, got) {
+                    self.diags.push(Diagnostic::error(
+                        "E0108",
+                        format!(
+                            "this needs {}, but the callable obligations are not satisfied",
+                            want.show()
+                        ),
+                        "the callable value does not provide the obligations required here"
+                            .to_string(),
+                        "pass a callable with matching effects, labels, and view provenance"
+                            .to_string(),
+                        Some(span),
+                    ));
+                    return true;
+                }
                 return false;
             }
             if Type::compute_tensor_compatible(want, got) {

@@ -1283,7 +1283,7 @@ pub struct Param {
     /// D-APILABEL1=A: the public call label when it differs from the local
     /// name — `timeout seconds: Int` binds callers with `timeout:` while the
     /// body reads `seconds`. `None` means the public label *is* `name`.
-    /// Public labels are callable type identity; local names are not.
+    /// Public labels are callable obligations; local names are not.
     pub public_label: Option<(String, Span)>,
     /// D-APILABEL1=A: the call-form zone this parameter was declared in.
     pub zone: ParamZone,

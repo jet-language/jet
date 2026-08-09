@@ -26,6 +26,16 @@ use std::sync::LazyLock;
 
 use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
 
+/// Names of the type-v2 planes in the one registration table.
+pub const TYPE_PLANE_NOMINAL: &str = "Type.Nominal";
+pub const TYPE_PLANE_INTERVAL: &str = "Type.Interval";
+pub const TYPE_PLANE_LAYOUT: &str = "Type.Layout";
+pub const TYPE_PLANE_MEASURE: &str = "Type.Measure";
+pub const TYPE_PLANE_DIMENSION: &str = "Type.Dimension";
+pub const TYPE_PLANE_CLASSIFICATION: &str = "Type.Classification";
+pub const TYPE_PLANE_EXACTNESS: &str = "Type.Exactness";
+pub const TYPE_PLANE_OBLIGATION: &str = "Type.Obligation";
+
 /// What a row attaches to. This is the whole difference between the four uses
 /// of the one table, so `RowKind` is read off the target rather than stated
 /// twice.
@@ -147,6 +157,9 @@ pub struct RegistryRow {
     pub name: &'static str,
     /// What the row attaches to. Also names its kind.
     pub target: RowTarget,
+    /// D-TYPE2-FOUND1: whether facts on this plane contribute to type
+    /// identity. Obligations are registered too, but compare by subsumption.
+    pub identity_bearing: bool,
     /// D-FACT-LAW1=B: which way this row's facts move for free.
     pub safe_direction: SafeDirection,
     /// D-FACT-LAW1=B: the written words that move them the other way.
@@ -178,6 +191,10 @@ impl RegistryRow {
     /// True for a read-only row a prover publishes (D-FACT-OWN1=A).
     pub const fn is_prover_supplied(&self) -> bool {
         self.published_by.is_some()
+    }
+
+    pub const fn is_identity_bearing(&self) -> bool {
+        self.identity_bearing
     }
 }
 
@@ -357,6 +374,10 @@ fn fact_row(declaration: &FactDeclaration) -> RegistryRow {
     RegistryRow {
         name: declaration.name,
         target: declaration.target,
+        // Existing D-FACT rows are scope/value facts, not Type-v2 identity
+        // declarations. Type-v2 planes state their identity policy explicitly
+        // in `type_plane_row` below.
+        identity_bearing: false,
         safe_direction: declaration.safe_direction,
         gates: declaration.gates,
         published_by: declaration.published_by,
@@ -381,6 +402,7 @@ const fn truth_row(
     RegistryRow {
         name,
         target: RowTarget::Corpus,
+        identity_bearing: false,
         safe_direction: SafeDirection::None,
         gates: &[],
         published_by: None,
@@ -402,6 +424,7 @@ fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
     RegistryRow {
         name: rule.name,
         target: RowTarget::Code(rule.sites),
+        identity_bearing: false,
         safe_direction: SafeDirection::None,
         gates: &[],
         published_by: None,
@@ -410,6 +433,22 @@ fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
         renderers: &[],
         guard: None,
         decision: "D-VERDICT-1455-1",
+    }
+}
+
+const fn type_plane_row(name: &'static str, identity_bearing: bool) -> RegistryRow {
+    RegistryRow {
+        name,
+        target: RowTarget::Value,
+        identity_bearing,
+        safe_direction: SafeDirection::Gain,
+        gates: &[],
+        published_by: None,
+        rule: None,
+        home: None,
+        renderers: &[],
+        guard: None,
+        decision: "D-TYPE2-FOUND1",
     }
 }
 
@@ -507,6 +546,16 @@ static REGISTRY: LazyLock<Vec<RegistryRow>> = LazyLock::new(|| {
         .iter()
         .map(marker_row)
         .chain(FACT_DECLARATIONS.iter().map(fact_row))
+        .chain([
+            type_plane_row(TYPE_PLANE_NOMINAL, true),
+            type_plane_row(TYPE_PLANE_INTERVAL, true),
+            type_plane_row(TYPE_PLANE_LAYOUT, true),
+            type_plane_row(TYPE_PLANE_MEASURE, true),
+            type_plane_row(TYPE_PLANE_DIMENSION, true),
+            type_plane_row(TYPE_PLANE_CLASSIFICATION, false),
+            type_plane_row(TYPE_PLANE_EXACTNESS, true),
+            type_plane_row(TYPE_PLANE_OBLIGATION, false),
+        ])
         .chain(TRUTH_ROWS.iter().copied())
         .collect()
 });
@@ -638,7 +687,10 @@ fn truth_violations(row: &RegistryRow) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{law_violations, row, rows, RowKind, RowTarget, SafeDirection};
+    use super::{
+        law_violations, row, rows, RowKind, RowTarget, SafeDirection, TYPE_PLANE_INTERVAL,
+        TYPE_PLANE_OBLIGATION,
+    };
 
     #[test]
     fn the_one_table_holds_all_five_kinds() {
@@ -667,6 +719,20 @@ mod tests {
     }
 
     #[test]
+    fn type_plane_rows_declare_identity_policy() {
+        assert!(
+            row(TYPE_PLANE_INTERVAL)
+                .expect("interval plane is registered")
+                .is_identity_bearing()
+        );
+        assert!(
+            !row(TYPE_PLANE_OBLIGATION)
+                .expect("obligation plane is registered")
+                .is_identity_bearing()
+        );
+    }
+
+    #[test]
     fn every_row_obeys_the_one_way_law() {
         assert_eq!(law_violations(), Vec::<String>::new());
     }
@@ -679,6 +745,7 @@ mod tests {
         let gate_with_no_direction = RegistryRow {
             name: "Wrong",
             target: RowTarget::Value,
+            identity_bearing: false,
             safe_direction: SafeDirection::None,
             gates: &["approx"],
             published_by: None,
@@ -717,6 +784,7 @@ mod tests {
         let guarded = RegistryRow {
             name: "Wrong",
             target: RowTarget::Corpus,
+            identity_bearing: false,
             safe_direction: SafeDirection::None,
             gates: &[],
             published_by: None,

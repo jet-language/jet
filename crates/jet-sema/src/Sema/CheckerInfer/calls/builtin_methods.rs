@@ -965,8 +965,23 @@ impl<'a> Checker<'a> {
                         // Skip E0108 for closure methods with ret: None (open return type).
                         let open_ret =
                             matches!(et, Type::Fn { ret: None, .. }) && matches!(gt, Type::Fn { .. });
-                        let union_match = matches!(et, Type::Union(members) if members.iter().any(|member| member == &gt));
-                        if !open_ret && !union_match && !fn_types_compatible(et, &gt) && gt != *et {
+                        let union_match = matches!(et, Type::Union(members) if members.iter().any(|member| {
+                            member == &gt
+                                && if matches!(member, Type::Fn { .. }) && matches!(&gt, Type::Fn { .. }) {
+                                    fn_types_compatible(member, &gt)
+                                } else {
+                                    Type::obligations_satisfy(member, &gt)
+                                }
+                        }));
+                        let callable_mismatch = matches!(et, Type::Fn { .. })
+                            && matches!(gt, Type::Fn { .. })
+                            && !fn_types_compatible(et, &gt);
+                        let obligation_mismatch = gt == *et
+                            && !Type::obligations_satisfy(et, &gt);
+                        if !open_ret
+                            && !union_match
+                            && (callable_mismatch || obligation_mismatch || gt != *et)
+                        {
                             self.diags.push(Diagnostic::error(
                                 "E0108",
                                 format!(

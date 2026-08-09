@@ -130,6 +130,294 @@ fn unescape_axis(axis: &str) -> Option<String> {
     Some(out)
 }
 
+/// One compile-time number attached to a type. The measure plane owns the
+/// value; the use site gives it meaning through kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Measure {
+    Literal { kind: String, value: u64 },
+    Symbol { kind: String, name: String },
+}
+
+impl Measure {
+    pub fn literal(kind: impl Into<String>, value: u64) -> Self {
+        Self::Literal {
+            kind: kind.into(),
+            value,
+        }
+    }
+
+    pub fn symbol(kind: impl Into<String>, name: impl Into<String>) -> Self {
+        Self::Symbol {
+            kind: kind.into(),
+            name: name.into(),
+        }
+    }
+
+    fn canonical(&self) -> String {
+        match self {
+            Self::Literal { kind, value } => format!("{kind}:{value}"),
+            Self::Symbol { kind, name } => format!("{kind}:{name}"),
+        }
+    }
+}
+
+/// Function obligations are facts about how a callable may be used. They are
+/// deliberately absent from type identity; sema checks them by subsumption.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FunctionObligations {
+    pub effect_bound: Option<Vec<String>>,
+    pub param_contract: Option<Vec<(String, super::ParamZone)>>,
+    pub return_view_provenance: Option<super::ViewProvenanceMap>,
+}
+
+impl FunctionObligations {
+    fn canonical(&self) -> String {
+        let effects = self.effect_bound.as_ref().map_or_else(String::new, |row| {
+            let mut sorted = row.clone();
+            sorted.sort();
+            sorted.join(",")
+        });
+        let contract = self
+            .param_contract
+            .as_ref()
+            .map(|row| {
+                row.iter()
+                    .map(|(name, zone)| format!("{name}:{zone:?}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        let provenance = self
+            .return_view_provenance
+            .as_ref()
+            .map(super::canonical_view_provenance_map)
+            .unwrap_or_default();
+        format!("effects=[{effects}];contract=[{contract}];provenance=[{provenance}]")
+    }
+
+    /// required is the contract at the use site. offered is the contract
+    /// carried by the function value. A value satisfies a contract when its
+    /// obligations are at least as strong as the required ones.
+    pub fn satisfies(&self, required: &Self) -> bool {
+        let effects_ok = match &required.effect_bound {
+            None => true,
+            Some(required) => self.effect_bound.as_ref().is_some_and(|offered| {
+                offered.iter().all(|effect| required.contains(effect))
+            }),
+        };
+        if !effects_ok {
+            return false;
+        }
+
+        let contract_ok = match &required.param_contract {
+            None => true,
+            // An absent call contract is the unconstrained structural form:
+            // it accepts either spelling at the call site. A declared
+            // contract can narrow that surface and must be checked below.
+            Some(required) => self.param_contract.as_ref().is_none_or(|offered| {
+                offered.len() == required.len()
+                    && offered.iter().zip(required).all(|((on, oz), (rn, rz))| {
+                        on == rn && match (oz, rz) {
+                            (super::ParamZone::Either, _) => true,
+                            (offered, required) => offered == required,
+                        }
+                    })
+            }),
+        };
+        if !contract_ok {
+            return false;
+        }
+
+        match (
+            &required.return_view_provenance,
+            &self.return_view_provenance,
+        ) {
+            (None, _) => true,
+            (Some(required), Some(offered)) => required.iter().all(|(slot, contract)| {
+                offered.get(slot).is_some_and(|candidate| {
+                    (!contract.mutable || candidate.mutable)
+                        && candidate.sources.is_subset(&contract.sources)
+                })
+            }),
+            (Some(_), None) => false,
+        }
+    }
+}
+
+/// A fact projected onto one registered plane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KnowledgeFact {
+    Interval { lo: i128, hi: i128 },
+    Layout { bytes: u8 },
+    Measure(Measure),
+    Dimension(Dimension),
+    Classification(String),
+    Nominal(String),
+    Obligation(FunctionObligations),
+}
+
+impl KnowledgeFact {
+    pub fn canonical(&self) -> String {
+        match self {
+            Self::Interval { lo, hi } => format!("interval:{lo}..{hi}"),
+            Self::Layout { bytes } => format!("layout:{bytes}"),
+            Self::Measure(measure) => format!("measure:{}", measure.canonical()),
+            Self::Dimension(dimension) => format!("dimension:{}", dimension.identity()),
+            Self::Classification(name) => format!("classification:{name}"),
+            Self::Nominal(name) => format!("nominal:{name}"),
+            Self::Obligation(obligation) => {
+                format!("obligation:{}", obligation.canonical())
+            }
+        }
+    }
+}
+
+/// The one semantic knowledge vector carried by a type. Entries are sorted and
+/// deduplicated so identity and reflection do not depend on declaration order.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KnowledgeVector {
+    entries: Vec<KnowledgeEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeEntry {
+    /// Structural slot of the fact inside the carrier. The empty path is the
+    /// type itself; nested paths keep `Map<Length, Int>` distinct from
+    /// `Map<Int, Length>` after their runtime carriers erase dimensions.
+    pub path: Vec<String>,
+    pub plane: &'static str,
+    pub fact: KnowledgeFact,
+}
+
+impl KnowledgeVector {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, plane: &'static str, fact: KnowledgeFact) {
+        self.push_at(&[], plane, fact);
+    }
+
+    pub fn push_at(&mut self, path: &[String], plane: &'static str, fact: KnowledgeFact) {
+        let entry = KnowledgeEntry {
+            path: path.to_vec(),
+            plane,
+            fact,
+        };
+        if self.entries.contains(&entry) {
+            return;
+        }
+        self.entries.push(entry);
+        self.entries.sort_by(|left, right| {
+            left.path
+                .cmp(&right.path)
+                .then_with(|| left.plane
+                .cmp(right.plane)
+                .then_with(|| left.fact.canonical().cmp(&right.fact.canonical())))
+        });
+    }
+
+    pub fn extend(&mut self, other: &Self) {
+        self.extend_at(&[], other);
+    }
+
+    pub fn extend_at(&mut self, path: &[String], other: &Self) {
+        for entry in &other.entries {
+            let mut full_path = path.to_vec();
+            full_path.extend(entry.path.iter().cloned());
+            self.push_at(&full_path, entry.plane, entry.fact.clone());
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &KnowledgeEntry> {
+        self.entries.iter()
+    }
+
+    pub fn facts(&self, plane: &'static str) -> impl Iterator<Item = &KnowledgeFact> {
+        self.entries
+            .iter()
+            .filter(move |entry| entry.plane == plane)
+            .map(|entry| &entry.fact)
+    }
+
+    pub fn identity_only(&self) -> Self {
+        Self {
+            entries: self
+                .entries
+                .iter()
+                .filter(|entry| {
+                    crate::Registry::row(entry.plane)
+                        .is_some_and(|row| row.is_identity_bearing())
+                })
+                .cloned()
+                .collect(),
+        }
+    }
+
+    pub fn identity_key(&self) -> String {
+        self.identity_only()
+            .entries
+            .iter()
+            .map(|entry| {
+                let path = if entry.path.is_empty() {
+                    "self".to_string()
+                } else {
+                    entry.path.join(".")
+                };
+                format!("{path}:{}={}", entry.plane, entry.fact.canonical())
+            })
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn interval_i128(&self) -> Option<(i128, i128)> {
+        self.entries
+            .iter()
+            .find_map(|entry| match (&entry.path.is_empty(), &entry.fact) {
+                (true, KnowledgeFact::Interval { lo, hi }) => Some((*lo, *hi)),
+                _ => None,
+            })
+    }
+
+    pub fn interval(&self) -> Option<(i64, i64)> {
+        let (lo, hi) = self.interval_i128()?;
+        Some((lo.try_into().ok()?, hi.try_into().ok()?))
+    }
+
+    pub fn obligations(&self) -> Option<&FunctionObligations> {
+        self.entries.iter().find_map(|entry| {
+            match (&entry.path.is_empty(), &entry.fact) {
+                (true, KnowledgeFact::Obligation(obligations)) => Some(obligations),
+                _ => None,
+            }
+        })
+    }
+
+    pub fn from_interval(lo: i64, hi: i64) -> Self {
+        let mut vector = Self::new();
+        vector.push(
+            crate::Registry::TYPE_PLANE_INTERVAL,
+            KnowledgeFact::Interval {
+                lo: i128::from(lo),
+                hi: i128::from(hi),
+            },
+        );
+        vector
+    }
+}
+
+/// Stable type identity: runtime carrier plus the identity-bearing projection
+/// of the knowledge vector. Function obligations are intentionally absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeIdentity {
+    pub carrier: String,
+    pub knowledge: KnowledgeVector,
+}
+
 /// The marker carried by `Type::Tagged`: either a user-written D-QUAL4 tag
 /// name, or one compiler-internal provenance/access fact. Card #1662: the
 /// internal facts used to be NUL-prefixed strings smuggled through the same
@@ -263,15 +551,16 @@ pub enum Type {
     /// call-site obligation on whatever callback is passed (E0747) — it is **not**
     /// part of structural type identity (see the manual `PartialEq for Type`,
     /// which ignores it in the `Fn` arm), so `fn(Int) =[]=>` and `fn(Int)` are the
-    /// same type for assignability; the bound is an *extra* check, not a subtype.
+    /// same identity; sema still rejects an offered callable whose obligation
+    /// cannot satisfy a stricter required bound.
     Fn {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
         effect_bound: Option<Vec<(String, Span)>>,
         /// D-APILABEL1=A: the declared call contract — public label and zone
-        /// per parameter, parallel to `params`. Part of callable identity, so
-        /// a `fn(*, force: Bool)` value rejects a positional call. `None` for
-        /// a bare structural `fn(Int) => Int`, which keeps its old meaning.
+        /// per parameter, parallel to `params`. It is a callable obligation,
+        /// so sema checks it by subsumption instead of making equality depend
+        /// on it. `None` means the callable has no declared call contract.
         param_contract: Option<Vec<(String, super::ParamZone)>>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
@@ -356,102 +645,13 @@ fn is_core_crypto(marker: &TagMarker) -> bool {
     matches!(marker, TagMarker::Internal(InternalTag::CoreCryptoNominal))
 }
 
-/// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
-/// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
-/// call-site obligation, not part of a function type's identity, so a
-/// `fn(Int) =[]=>` value is assignable wherever a `fn(Int)` is expected. The
-/// bound is enforced separately at the call site (E0747).
+/// Type equality is the carrier plus identity-bearing knowledge projection
+/// (D-TYPE2-FOUND1). Callable obligations remain in the vector for reflection,
+/// but the registry marks that plane non-identity-bearing; sema checks it by
+/// subsumption at use sites.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
-        use Type::*;
-        match (self, other) {
-            (Int, Int)
-            | (Float, Float)
-            | (Bool, Bool)
-            | (String, String)
-            | (Char, Char)
-            | (Float32, Float32) => true,
-            (List(a), List(b)) => a == b,
-            (
-                Map {
-                    key: k1,
-                    value: v1,
-                    ..
-                },
-                Map {
-                    key: k2,
-                    value: v2,
-                    ..
-                },
-            ) => k1 == k2 && v1 == v2,
-            (Shared(a), Shared(b)) => a == b,
-            (Option(a), Option(b)) => a == b,
-            (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
-            // D-EFF2: effect_bound deliberately excluded from the comparison.
-            // D-APILABEL1=A: the call contract — public labels and zones — IS
-            // callable identity, so `fn(*, force: Bool)` and `fn(Bool)` are
-            // different types. A type that declares no contract still matches
-            // one that does; only a declared contract constrains a caller.
-            (
-                Fn {
-                    params: p1,
-                    ret: r1,
-                    param_contract: c1,
-                    ..
-                },
-                Fn {
-                    params: p2,
-                    ret: r2,
-                    param_contract: c2,
-                    ..
-                },
-            ) => {
-                p1 == p2
-                    && r1 == r2
-                    && match (c1, c2) {
-                        (Some(a), Some(b)) => a == b,
-                        _ => true,
-                    }
-            }
-            (Named(a), Named(b)) => a == b,
-            (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
-            (TraitObject(a), TraitObject(b)) => a == b,
-            (Tuple(a), Tuple(b)) => a == b,
-            (FixedList { elem: e1, len: l1, len_symbol: s1 }, FixedList { elem: e2, len: l2, len_symbol: s2 }) => {
-                e1 == e2 && l1 == l2 && s1 == s2
-            }
-            (
-                IntN {
-                    signed: s1,
-                    bits: b1,
-                },
-                IntN {
-                    signed: s2,
-                    bits: b2,
-                },
-            ) => s1 == s2 && b1 == b2,
-            // Internal core nominal provenance is identity-bearing. User-written
-            // D-QUAL4 tags remain transparent flow annotations.
-            (Tagged { marker: ma, inner: a }, Tagged { marker: mb, inner: b })
-                if is_core_crypto(ma) && is_core_crypto(mb) =>
-            {
-                a == b
-            }
-            (Tagged { marker, inner }, other) if !is_core_crypto(marker) => {
-                inner.as_ref() == other
-            }
-            (other, Tagged { marker, inner }) if !is_core_crypto(marker) => {
-                other == inner.as_ref()
-            }
-            (Tagged { marker, .. }, _) | (_, Tagged { marker, .. })
-                if is_core_crypto(marker) => false,
-            (Union(a), Union(b)) => a == b,
-            (Quantity { base: b1, dimension: d1 }, Quantity { base: b2, dimension: d2 }) => {
-                b1 == b2 && d1 == d2
-            }
-            (ComputeDim(a), ComputeDim(b)) => a == b,
-            _ => false,
-        }
+        self.identity() == other.identity()
     }
 }
 
@@ -569,6 +769,412 @@ fn effect_names(row: &[(String, Span)]) -> String {
 }
 
 impl Type {
+    /// Project all compile-time facts carried by this type onto the one
+    /// knowledge vector. The old enum payloads are read here once; sema
+    /// consumers must use this projection instead of inventing a second
+    /// identity or obligation check.
+    pub fn knowledge_vector(&self) -> KnowledgeVector {
+        let mut vector = KnowledgeVector::new();
+        match self {
+            Type::List(inner) => {
+                vector.extend_at(&["element".to_string()], &inner.knowledge_vector());
+            }
+            Type::Shared(inner) => {
+                vector.extend_at(&["inner".to_string()], &inner.knowledge_vector());
+            }
+            Type::Option(inner) => {
+                vector.extend_at(&["some".to_string()], &inner.knowledge_vector());
+            }
+            Type::Map { key, value, .. } => {
+                vector.extend_at(&["key".to_string()], &key.knowledge_vector());
+                vector.extend_at(&["value".to_string()], &value.knowledge_vector());
+            }
+            Type::Result { ok, err } => {
+                vector.extend_at(&["ok".to_string()], &ok.knowledge_vector());
+                vector.extend_at(&["err".to_string()], &err.knowledge_vector());
+            }
+            Type::Tuple(fields) => {
+                for (name, field) in fields {
+                    vector.extend_at(
+                        &["field".to_string(), name.clone()],
+                        &field.knowledge_vector(),
+                    );
+                }
+            }
+            Type::Union(members) => {
+                for (index, member) in members.iter().enumerate() {
+                    vector.extend_at(
+                        &["member".to_string(), index.to_string()],
+                        &member.knowledge_vector(),
+                    );
+                }
+            }
+            Type::IntN { signed, bits } => {
+                let (lo, hi) = int_range(*signed, *bits);
+                vector.push(
+                    crate::Registry::TYPE_PLANE_INTERVAL,
+                    KnowledgeFact::Interval { lo, hi },
+                );
+                vector.push(
+                    crate::Registry::TYPE_PLANE_LAYOUT,
+                    KnowledgeFact::Layout {
+                        bytes: (*bits + 7) / 8,
+                    },
+                );
+            }
+            Type::FixedList {
+                elem,
+                len, len_symbol, ..
+            } => {
+                vector.extend_at(&["element".to_string()], &elem.knowledge_vector());
+                let measure = len_symbol
+                    .as_ref()
+                    .map_or_else(|| Measure::literal("length", *len), |(name, _)| {
+                        Measure::symbol("length", name)
+                    });
+                vector.push(
+                    crate::Registry::TYPE_PLANE_MEASURE,
+                    KnowledgeFact::Measure(measure),
+                );
+            }
+            Type::Fn { params, ret, .. } => {
+                for (index, param) in params.iter().enumerate() {
+                    vector.extend_at(
+                        &["param".to_string(), index.to_string()],
+                        &param.knowledge_vector(),
+                    );
+                }
+                if let Some(ret) = ret {
+                    vector.extend_at(&["return".to_string()], &ret.knowledge_vector());
+                }
+                if let Some(obligations) = self.function_obligations() {
+                    vector.push(
+                        crate::Registry::TYPE_PLANE_OBLIGATION,
+                        KnowledgeFact::Obligation(obligations),
+                    );
+                }
+            }
+            Type::Quantity { base, dimension } => {
+                vector.extend_at(&["base".to_string()], &base.knowledge_vector());
+                vector.push(
+                    crate::Registry::TYPE_PLANE_DIMENSION,
+                    KnowledgeFact::Dimension(dimension.clone()),
+                );
+            }
+            Type::ComputeDim(value) => {
+                vector.push(
+                    crate::Registry::TYPE_PLANE_MEASURE,
+                    KnowledgeFact::Measure(Measure::literal("shape", *value)),
+                );
+            }
+            Type::Tagged { marker, inner } if is_core_crypto(marker) => {
+                vector.extend_at(&["inner".to_string()], &inner.knowledge_vector());
+                vector.push(
+                    crate::Registry::TYPE_PLANE_NOMINAL,
+                    KnowledgeFact::Nominal(marker.to_string()),
+                );
+            }
+            Type::Tagged { marker, inner } => {
+                // User tags are transparent flow classifications. Do not add
+                // a structural path around the identity-bearing inner facts.
+                vector.extend(&inner.knowledge_vector());
+                vector.push(
+                    crate::Registry::TYPE_PLANE_CLASSIFICATION,
+                    KnowledgeFact::Classification(marker.to_string()),
+                );
+            }
+            Type::Apply { args, .. } => {
+                for (index, arg) in args.iter().enumerate() {
+                    if matches!(arg, Type::ComputeDim(_)) {
+                        continue;
+                    }
+                    vector.extend_at(
+                        &["argument".to_string(), index.to_string()],
+                        &arg.knowledge_vector(),
+                    );
+                }
+                for (index, dimension) in self
+                    .compute_shape_dimensions()
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                {
+                    vector.push_at(
+                        &["shape".to_string(), index.to_string()],
+                        crate::Registry::TYPE_PLANE_MEASURE,
+                        KnowledgeFact::Measure(Measure::literal("shape", dimension)),
+                    );
+                }
+            }
+            Type::Named(name) => {
+                let lanes = match name.as_str() {
+                    "F32x4" => Some(4),
+                    "F64x2" => Some(2),
+                    _ => None,
+                };
+                if let Some(lanes) = lanes {
+                    vector.push(
+                        crate::Registry::TYPE_PLANE_MEASURE,
+                        KnowledgeFact::Measure(Measure::literal("lane", lanes)),
+                    );
+                }
+            }
+            _ => {}
+        }
+        vector
+    }
+
+    fn function_obligations(&self) -> Option<FunctionObligations> {
+        let Type::Fn {
+            effect_bound,
+            param_contract,
+            return_view_provenance,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        if effect_bound.is_none()
+            && param_contract.is_none()
+            && return_view_provenance.is_none()
+        {
+            return None;
+        }
+        Some(FunctionObligations {
+            effect_bound: effect_bound
+                .as_ref()
+                .map(|row| row.iter().map(|(name, _)| name.clone()).collect()),
+            param_contract: param_contract.clone(),
+            return_view_provenance: return_view_provenance.clone(),
+        })
+    }
+
+    /// Compare callable obligations from required type to offered type.
+    pub fn obligations_satisfy(required: &Type, offered: &Type) -> bool {
+        fn nested(required: &Type, offered: &Type) -> bool {
+            match (required, offered) {
+                (
+                    Type::Fn {
+                        params: required_params,
+                        ret: required_ret,
+                        ..
+                    },
+                    Type::Fn {
+                        params: offered_params,
+                        ret: offered_ret,
+                        ..
+                    },
+                ) => {
+                    let function_ok = match required.function_obligations() {
+                        None => true,
+                        Some(required) => offered
+                            .function_obligations()
+                            .unwrap_or_default()
+                            .satisfies(&required),
+                    };
+                    function_ok
+                        && required_params.len() == offered_params.len()
+                        && required_params
+                            .iter()
+                            .zip(offered_params)
+                            .all(|(required, offered)| nested(required, offered))
+                        && match (required_ret, offered_ret) {
+                            (None, None) => true,
+                            (Some(required), Some(offered)) => nested(required, offered),
+                            _ => false,
+                        }
+                }
+                (Type::List(required), Type::List(offered))
+                | (Type::Shared(required), Type::Shared(offered))
+                | (Type::Option(required), Type::Option(offered)) => nested(required, offered),
+                (
+                    Type::Map {
+                        key: required_key,
+                        value: required_value,
+                        ..
+                    },
+                    Type::Map {
+                        key: offered_key,
+                        value: offered_value,
+                        ..
+                    },
+                )
+                | (
+                    Type::Result {
+                        ok: required_key,
+                        err: required_value,
+                    },
+                    Type::Result {
+                        ok: offered_key,
+                        err: offered_value,
+                    },
+                ) => {
+                    nested(required_key, offered_key) && nested(required_value, offered_value)
+                }
+                (
+                    Type::Tuple(required_fields),
+                    Type::Tuple(offered_fields),
+                ) => {
+                    required_fields.len() == offered_fields.len()
+                        && required_fields
+                            .iter()
+                            .zip(offered_fields)
+                            .all(|((required_name, required), (offered_name, offered))| {
+                                required_name == offered_name && nested(required, offered)
+                            })
+                }
+                (Type::FixedList { elem: required, .. }, Type::FixedList { elem: offered, .. })
+                | (Type::Quantity { base: required, .. }, Type::Quantity { base: offered, .. }) => {
+                    nested(required, offered)
+                }
+                (Type::Apply { args: required, .. }, Type::Apply { args: offered, .. }) => {
+                    required.len() == offered.len()
+                        && required
+                            .iter()
+                            .zip(offered)
+                            .all(|(required, offered)| nested(required, offered))
+                }
+                (Type::Union(required), Type::Union(offered)) => {
+                    required.len() == offered.len()
+                        && required
+                            .iter()
+                            .zip(offered)
+                            .all(|(required, offered)| nested(required, offered))
+                }
+                (Type::Tagged { marker, inner }, offered) if !is_core_crypto(marker) => {
+                    nested(inner, offered)
+                }
+                (required, Type::Tagged { marker, inner }) if !is_core_crypto(marker) => {
+                    nested(required, inner)
+                }
+                _ => true,
+            }
+        }
+
+        nested(required, offered)
+    }
+
+    /// Return the stable identity projection required by D-TYPE2-FOUND1.
+    pub fn identity(&self) -> TypeIdentity {
+        TypeIdentity {
+            carrier: self.carrier_identity_name(),
+            knowledge: self.knowledge_vector().identity_only(),
+        }
+    }
+
+    pub fn identity_key(&self) -> String {
+        let identity = self.identity();
+        if identity.knowledge.is_empty() {
+            identity.carrier
+        } else {
+            format!("{}|{}", identity.carrier, identity.knowledge.identity_key())
+        }
+    }
+
+    /// Remove compile-time knowledge before a typed-IR boundary. This method
+    /// is a foundation operation; engines only receive its carrier result.
+    pub fn erased_carrier(&self) -> Type {
+        match self {
+            Type::List(inner) => Type::List(Box::new(inner.erased_carrier())),
+            Type::Map { key, key_span, value } => Type::Map {
+                key: Box::new(key.erased_carrier()),
+                key_span: *key_span,
+                value: Box::new(value.erased_carrier()),
+            },
+            Type::Shared(inner) => Type::Shared(Box::new(inner.erased_carrier())),
+            Type::Option(inner) => Type::Option(Box::new(inner.erased_carrier())),
+            Type::Result { ok, err } => Type::Result {
+                ok: Box::new(ok.erased_carrier()),
+                err: Box::new(err.erased_carrier()),
+            },
+            Type::Quantity { base, .. } => base.erased_carrier(),
+            Type::FixedList { elem, .. } => Type::List(Box::new(elem.erased_carrier())),
+            Type::ComputeDim(_) => Type::Int,
+            Type::Tagged { inner, .. } => inner.erased_carrier(),
+            Type::Fn {
+                params, ret, ..
+            } => Type::Fn {
+                params: params.iter().map(Type::erased_carrier).collect(),
+                ret: ret
+                    .as_ref()
+                    .map(|return_type| Box::new(return_type.erased_carrier())),
+                effect_bound: None,
+                param_contract: None,
+                return_view_provenance: None,
+            },
+            Type::Apply { name, args } => Type::Apply {
+                name: name.clone(),
+                args: args.iter().map(Type::erased_carrier).collect(),
+            },
+            Type::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.erased_carrier())))
+                    .collect(),
+            ),
+            Type::Union(members) => canonicalize_union(
+                members.iter().map(Type::erased_carrier).collect(),
+            ),
+            _ => self.clone(),
+        }
+    }
+
+    fn carrier_identity_name(&self) -> String {
+        match self {
+            Type::List(inner) => format!("[{}]", inner.carrier_identity_name()),
+            Type::Map { key, value, .. } => format!(
+                "[{}: {}]",
+                key.carrier_identity_name(),
+                value.carrier_identity_name()
+            ),
+            Type::Shared(inner) => format!("Shared<{}>", inner.carrier_identity_name()),
+            Type::Option(inner) => format!("{}?", inner.carrier_identity_name()),
+            Type::Result { ok, err } => {
+                format!("{} ? {}", ok.carrier_identity_name(), err.carrier_identity_name())
+            }
+            Type::Fn { params, ret, .. } => {
+                let params = params
+                    .iter()
+                    .map(Type::carrier_identity_name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = ret
+                    .as_ref()
+                    .map(|return_type| format!(" => {}", return_type.carrier_identity_name()))
+                    .unwrap_or_default();
+                format!("fn({params}){ret}")
+            }
+            Type::Apply { name, args } => format!(
+                "{}<{}>",
+                name,
+                args.iter()
+                    .map(Type::carrier_identity_name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Type::Tuple(fields) => format!(
+                "({})",
+                fields
+                    .iter()
+                    .map(|(name, ty)| format!("{name}: {}", ty.carrier_identity_name()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Type::FixedList { elem, .. } => {
+                format!("[{}]", elem.carrier_identity_name())
+            }
+            Type::Tagged { inner, .. } => inner.carrier_identity_name(),
+            Type::Union(members) => members
+                .iter()
+                .map(Type::carrier_identity_name)
+                .collect::<Vec<_>>()
+                .join(" | "),
+            Type::Quantity { base, .. } => base.carrier_identity_name(),
+            Type::ComputeDim(_) => "Int".to_string(),
+            _ => self.name(),
+        }
+    }
+
     /// D-COMPUTE-TYPE1: preserve a fixed compute dimension in the type tree.
     pub fn compute_dimension_type(value: u64) -> Type {
         Type::ComputeDim(value)
@@ -872,6 +1478,25 @@ impl Type {
         }
     }
 
+    /// Bounds projected from the interval plane for an integer carrier.
+    pub fn integer_range(&self) -> Option<(i128, i128)> {
+        match self {
+            Type::Int => Some(int_range(true, 64)),
+            Type::IntN { .. } => self.knowledge_vector().interval_i128(),
+            Type::Tagged { inner, .. } => inner.integer_range(),
+            _ => None,
+        }
+    }
+
+    fn integer_layout(&self) -> Option<(bool, u8)> {
+        match self {
+            Type::Int => Some((true, 64)),
+            Type::IntN { signed, bits } => Some((*signed, *bits)),
+            Type::Tagged { inner, .. } => inner.integer_layout(),
+            _ => None,
+        }
+    }
+
     /// D-SG9/D-FLOATW1: any float type — the default `Float` or `F32`.
     pub fn is_float(&self) -> bool {
         if let Some((base, _)) = self.quantity_parts() {
@@ -896,24 +1521,16 @@ impl Type {
             return Some(false);
         }
 
-        let integer = |ty: &Type| match ty {
-            Type::Int => Some((true, 64)),
-            Type::IntN { signed, bits } => Some((*signed, *bits)),
-            _ => None,
-        };
-
-        if let (Some((source_signed, source_bits)), Some((target_signed, target_bits))) =
-            (integer(self), integer(target))
+        if let (Some((source_min, source_max)), Some((target_min, target_max))) =
+            (self.integer_range(), target.integer_range())
         {
-            let (source_min, source_max) = int_range(source_signed, source_bits);
-            let (target_min, target_max) = int_range(target_signed, target_bits);
             return (target_min <= source_min && source_max <= target_max).then_some(false);
         }
 
         match (self, target) {
             (Type::Float32, Type::Float) => Some(false),
             (source, Type::Float | Type::Float32) if source.is_integer() => {
-                let (signed, bits) = integer(source)?;
+                let (signed, bits) = source.integer_layout()?;
                 let precision = if matches!(target, Type::Float32) {
                     24
                 } else {
@@ -979,7 +1596,10 @@ impl Type {
 
 #[cfg(test)]
 mod tests {
-    use super::{numeric_type_from_name, Dimension, InternalTag, TagMarker, Type};
+    use super::{
+        numeric_type_from_name, Dimension, InternalTag, KnowledgeFact, Measure, TagMarker, Type,
+    };
+    use crate::AST::ParamZone;
 
     fn core_secret() -> Type {
         Type::Tagged {
@@ -1064,6 +1684,107 @@ mod tests {
         assert_ne!(length, time);
         assert!(length.name().contains("length.Unit"));
         assert!(time.name().contains("time.Unit"));
+    }
+
+    #[test]
+    fn knowledge_vector_projects_facts_and_erases_before_typed_ir() {
+        let quantity = Type::quantity(
+            Type::IntN {
+                signed: false,
+                bits: 8,
+            },
+            Dimension::base("Length"),
+        );
+        let vector = quantity.knowledge_vector();
+        assert!(vector.iter().any(|entry| {
+            matches!(&entry.fact, KnowledgeFact::Dimension(_))
+        }));
+        assert!(vector.iter().any(|entry| {
+            matches!(&entry.fact, KnowledgeFact::Interval { lo: 0, hi: 255 })
+        }));
+        assert_eq!(
+            quantity.erased_carrier(),
+            Type::IntN {
+                signed: false,
+                bits: 8
+            }
+        );
+        assert_eq!(
+            Type::compute_shape_type("Vec", &[3]).erased_carrier(),
+            Type::Apply {
+                name: "Vec".to_string(),
+                args: vec![Type::Int]
+            }
+        );
+        assert!(
+            quantity
+                .identity()
+                .knowledge
+                .identity_key()
+                .contains("Type.Dimension")
+        );
+        assert!(
+            Type::List(Box::new(quantity.clone()))
+                .identity()
+                .knowledge
+                .identity_key()
+                .contains("Type.Dimension")
+        );
+        let length_key = Type::Map {
+            key: Box::new(quantity.clone()),
+            key_span: None,
+            value: Box::new(Type::Int),
+        };
+        let length_value = Type::Map {
+            key: Box::new(Type::Int),
+            key_span: None,
+            value: Box::new(quantity.clone()),
+        };
+        assert_ne!(length_key.identity_key(), length_value.identity_key());
+        assert!(Type::Named("F32x4".to_string())
+            .knowledge_vector()
+            .facts(crate::Registry::TYPE_PLANE_MEASURE)
+            .any(|fact| matches!(
+                fact,
+                KnowledgeFact::Measure(Measure::Literal { kind, value })
+                    if kind == "lane" && *value == 4
+            )));
+    }
+
+    #[test]
+    fn function_identity_is_transitive_and_obligations_use_subsumption() {
+        let callable = |zone| Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: Some(vec![("force".to_string(), zone)]),
+            return_view_provenance: None,
+        };
+        let positional = callable(ParamZone::PositionalOnly);
+        let labelled = callable(ParamZone::LabelOnly);
+        let flexible = callable(ParamZone::Either);
+        let bare = Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: None,
+            return_view_provenance: None,
+        };
+
+        assert_eq!(positional, bare);
+        assert_eq!(labelled, bare);
+        assert_eq!(positional, labelled);
+        assert!(!Type::obligations_satisfy(&positional, &labelled));
+        assert!(Type::obligations_satisfy(&positional, &flexible));
+        assert!(!Type::obligations_satisfy(
+            &Type::List(Box::new(positional.clone())),
+            &Type::List(Box::new(labelled.clone()))
+        ));
+        assert!(Type::obligations_satisfy(
+            &Type::List(Box::new(positional.clone())),
+            &Type::List(Box::new(bare.clone()))
+        ));
+        assert_eq!(positional.identity(), bare.identity());
     }
 
     #[test]
