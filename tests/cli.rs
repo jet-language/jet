@@ -4649,6 +4649,7 @@ fn expand_layout_human_and_json_are_deterministic() {
         assert!(human.contains(&format!("{type_name}.$layout")), "{type_name}: {human}");
     }
     assert!(human.contains("size=unknown") && human.contains("offset=unknown"));
+    assert!(human.contains("byte_facts=unavailable") && human.contains("E0959"));
     check_snapshot("expand_layout.txt", &human);
 
     let json_run = || {
@@ -4669,6 +4670,69 @@ fn expand_layout_human_and_json_are_deterministic() {
     assert!(json.contains("\"kind\":\"c\"") && json.contains("\"kind\":\"columnar\""));
     assert!(json.contains("\"type\":\"PacketState\"") && json.contains("\"size\":null"));
     assert!(json.contains("\"offset\":null"));
+    assert!(json.contains("\"byte_facts\":{\"status\":\"unavailable\""));
+    assert!(json.contains("\"code\":\"E0959\""));
+}
+
+fn expand_effects_layout_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/expand_effects_layout.jet")
+}
+
+#[test]
+fn expand_effects_and_layout_report_checked_facts() {
+    let fixture = expand_effects_layout_fixture();
+    let effects = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "effects"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(effects.status.code(), Some(0));
+    let effects_human = scrub_fixture(&String::from_utf8_lossy(&effects.stdout), &fixture);
+    assert!(effects_human.contains("audit"), "{effects_human}");
+    assert!(effects_human.contains("resolved=[Log.Audit]"), "{effects_human}");
+
+    let layout = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "layout"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(layout.status.code(), Some(0));
+    let layout_human = scrub_fixture(&String::from_utf8_lossy(&layout.stdout), &fixture);
+    assert!(layout_human.contains("AuditPacket.$layout"), "{layout_human}");
+    assert!(layout_human.contains("byte_facts=unavailable"), "{layout_human}");
+    assert!(layout_human.contains("[E0959]"), "{layout_human}");
+    check_snapshot(
+        "expand_effects_layout.txt",
+        &format!("effects\n{effects_human}layout\n{layout_human}"),
+    );
+
+    let effects_json = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "effects", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(effects_json.status.code(), Some(0));
+    let effects_json = String::from_utf8_lossy(&effects_json.stdout);
+    assert!(parse_json(&effects_json).is_ok(), "{effects_json}");
+    assert!(effects_json.contains("\"selection\":\"effects\""));
+    assert!(effects_json.contains("\"inferred\":[\"Log.Audit\"]"));
+
+    let layout_json = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "layout", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(layout_json.status.code(), Some(0));
+    let layout_json = String::from_utf8_lossy(&layout_json.stdout);
+    assert!(parse_json(&layout_json).is_ok(), "{layout_json}");
+    assert!(layout_json.contains("\"selection\":\"layout\""));
+    assert!(layout_json.contains("\"byte_facts\":{\"status\":\"unavailable\""));
+    assert!(layout_json.contains("\"code\":\"E0959\""));
 }
 
 #[test]
@@ -4687,6 +4751,8 @@ fn expand_json_bare_projects_every_lens() {
     assert!(stdout.contains("\"name\":\"inline\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"memory\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"web\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"effects\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"layout\""), "{stdout}");
     assert!(!stdout.contains("inline —"), "human output leaked into JSON: {stdout}");
 }
 

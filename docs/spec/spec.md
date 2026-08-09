@@ -3494,12 +3494,22 @@ checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by the
 time the bundle compiled at all) — the same side-channel `jet inspect semindex`/
 `jet inspect impact` already read, not a parallel pipeline.
 
-**Floor lenses (this card):**
+**Shipped lenses:**
 
 - `inline` (D-INLINE-PARAM1) — every fn/method carrying `#Inline` or
   `#Inline(Always)`: the contract and the Rust attribute codegen emits
   (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
   no line — the lens reports contracts, not every function in the program.
+
+- `memory` (D-MEM-FACTS1) — declared and projected `no_alloc`, `zero_rc`, and
+  `arena_bounded` facts.
+- `web` (D-WEBAPP1) — the checked application graph: routes, actions, mounts,
+  and policy.
+- `effects` (D-EFF1 / D-SEMINDEX1) — each checked function's resolved effect
+  row, including direct effects, callees, and provenance.
+- `layout` (D-LAYOUT-FACTS1=B) — compiler-owned type layout facts. Physical
+  byte facts remain optional; when absent, the lens names the registered
+  diagnostic and the reason.
 
 A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
 stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright
