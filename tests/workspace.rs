@@ -4,9 +4,6 @@
 //! - E0995: workspace.jet has no `module workspace { … }` declaration
 //! - E0996: `members:` evaluated to something other than `[String]`
 //! - E0997: `find("…")` names a missing directory
-//!
-//! These diagnostics fire from `jetpack::WorkspaceFile::evaluate`, not from
-//! `jet check`, so coverage is via programmatic assertion rather than .stderr snapshots.
 
 use jetpack::WorkspaceFile;
 use std::path::{Path, PathBuf};
@@ -63,6 +60,10 @@ fn e0995_no_workspace_module_fires() {
         "expected E0995, got {} — {:?}",
         d.code, d.what
     );
+    assert_eq!(
+        d.render("workspace.jet", src),
+        include_str!("ui/workspace_e0995.stderr")
+    );
 }
 
 #[test]
@@ -86,6 +87,10 @@ fn e0996_members_not_a_list() {
         "expected E0996, got {} — {:?}",
         d.code, d.what
     );
+    assert_eq!(
+        d.render("workspace.jet", src),
+        include_str!("ui/workspace_e0996.stderr")
+    );
 }
 
 #[test]
@@ -102,13 +107,17 @@ fn e0996_members_list_with_non_string_element() {
 
 #[test]
 fn e0997_find_missing_dir() {
-    let src = "module workspace { members: find(\"./definitely-no-such-packages\") }\n";
+    let src = "module workspace { members: find(\"./no-such-packages\") }\n";
     let d =
         WorkspaceFile::evaluate(src, Path::new("/tmp")).expect_err("find of missing dir must fail");
     assert_eq!(
         d.code, "E0997",
         "expected E0997, got {} — {:?}",
         d.code, d.what
+    );
+    assert_eq!(
+        d.render("workspace.jet", src),
+        include_str!("ui/workspace_e0997.stderr")
     );
 }
 

@@ -1683,40 +1683,33 @@ exists but can't be evaluated to a valid `WorkspacePlan`.
 ### E0995 — No workspace module
 
 ```
-error[E0995]: `workspace.jet` must declare `module workspace { … }`
-  --> workspace.jet
-  |
-  = `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must
-    contain exactly one `module workspace { members: … }` declaration
-  = write `module workspace { members: find("./packages") }` in `workspace.jet`
+Error [E0995]: `workspace.jet` must declare `module workspace { … }`
+ Why: `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one `module workspace { … }` declaration
+ Fix: write `module workspace { members: find("./packages") }` in `workspace.jet`
 ```
 
 ### E0996 — members: not a list
 
 ```
-error[E0996]: `members:` must evaluate to a list of package paths
-  --> workspace.jet:2:14
-  |
-2 |     members: 42
-  |              ^^ not a `[String]`
-  |
-  = `members:` describes the packages in this workspace; it must be a `[String]`
-    list of relative paths or a `find("…")` call
-  = example: `members: find("./packages")` or `members: ["./pkg/hello"]`
+Error [E0996]: `members:` must evaluate to a list of package paths
+  --> workspace.jet:1:29
+    |
+  1 | module workspace { members: 42 }
+    |                             ^^
+ Why: `members:` describes the packages in this workspace; it must be a `[String]` list of relative paths or a `find("…")` call
+ Fix: example: `members: find("./packages")` or `members: ["./pkg/hello"]`
 ```
 
 ### E0997 — find dir missing
 
 ```
-error[E0997]: `find` can't read the directory `./no-such-packages`
-  --> workspace.jet:2:14
-  |
-2 |     members: find("./no-such-packages")
-  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-  = `members: find("<dir>")` scans that directory for package subdirectories;
-    it must exist relative to this file
-  = create the directory, or fix the path so it points at your packages folder
+Error [E0997]: `find` can't read the directory `/tmp/no-such-packages`
+  --> workspace.jet:1:29
+    |
+  1 | module workspace { members: find("./no-such-packages") }
+    |                             ^^^^
+ Why: `members: find("<dir>")` scans that directory for package subdirectories; it must exist relative to this file
+ Fix: create the directory, or fix the path so it points at your packages folder
 ```
 
 ## Package management diagnostics (M12, D-JPK-FILES)

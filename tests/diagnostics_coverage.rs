@@ -163,8 +163,8 @@ fn is_retired(code: &str, diag_md: &str) -> bool {
     false
 }
 
-/// All [EL]NNNN codes that appear in any snapshot file (*.stderr, *.warn,
-/// tests/cli/*.txt, tests/release/*.txt, and subdirectory stderr files).
+/// All [EL]NNNN codes that appear in snapshot files or legacy test assertions.
+/// Required rendered-snapshot codes are excluded from the legacy fallback.
 fn snapshot_codes() -> BTreeSet<String> {
     let root = root();
     let mut out: BTreeSet<String> = BTreeSet::new();
@@ -257,7 +257,9 @@ fn snapshot_codes() -> BTreeSet<String> {
             {
                 if let Ok(content) = fs::read_to_string(path) {
                     for code in extract_assert_codes(&content) {
-                        out.insert(code);
+                        if !RENDERED_SNAPSHOT_REQUIRED.contains(&code.as_str()) {
+                            out.insert(code);
+                        }
                     }
                 }
             }
@@ -346,6 +348,10 @@ fn diagnostic_voice_scope_includes_owned_runtime_artifacts() {
 fn extract_assert_codes(text: &str) -> Vec<String> {
     extract_delimited_codes(text, b'"', b'"')
 }
+
+/// Workspace diagnostics must have rendered snapshots. Code assertions in
+/// `tests/workspace.rs` do not satisfy I4(b).
+const RENDERED_SNAPSHOT_REQUIRED: &[&str] = &["E0995", "E0996", "E0997"];
 
 /// Extract numeric or word-shaped bracket codes from snapshot text.
 fn extract_snapshot_codes(text: &str) -> Vec<String> {
