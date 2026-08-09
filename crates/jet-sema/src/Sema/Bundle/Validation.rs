@@ -1832,10 +1832,23 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
 
 pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
     fn carrier_compatible(want: &Type, got: &Type) -> bool {
-        match (want, got) {
-            (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
-            _ => want == got,
-        }
+        let mut compatible = true;
+        let shape = Type::for_each_composite_pair(want, got, &mut |want, got| {
+            if compatible {
+                compatible = match (want, got) {
+                    (Type::List(_), Type::List(_))
+                    | (Type::Option(_), Type::Option(_))
+                    | (Type::Result { .. }, Type::Result { .. }) => true,
+                    (
+                        Type::Apply { name: want_name, .. },
+                        Type::Apply { name: got_name, .. },
+                    ) => want_name == got_name,
+                    (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
+                    _ => want == got,
+                };
+            }
+        });
+        shape.is_ok() && compatible
     }
     let (
         Type::Fn {
@@ -1931,6 +1944,50 @@ mod callable_contract_tests {
         assert!(!fn_types_compatible(&labelled, &bare));
         assert!(fn_types_compatible(&labelled, &either));
         assert!(!fn_types_compatible(&either, &labelled));
+    }
+
+    #[test]
+    fn composite_callable_assignability_walks_nested_carriers() {
+        fn nested(zone: ParamZone) -> Type {
+            Type::Fn {
+                params: vec![Type::Bool],
+                ret: Some(Box::new(Type::Int)),
+                effect_bound: None,
+                param_contract: Some(vec![("force".to_string(), zone)]),
+                return_view_provenance: None,
+            }
+        }
+        fn outer(name: &str, inner: Type) -> Type {
+            Type::Fn {
+                params: vec![Type::Apply {
+                    name: name.to_string(),
+                    args: vec![
+                        Type::List(Box::new(inner)),
+                        Type::Option(Box::new(Type::Result {
+                            ok: Box::new(Type::Int),
+                            err: Box::new(Type::String),
+                        })),
+                    ],
+                }],
+                ret: None,
+                effect_bound: None,
+                param_contract: None,
+                return_view_provenance: None,
+            }
+        }
+
+        assert!(fn_types_compatible(
+            &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
+            &outer("SyntheticCarrier", nested(ParamZone::Either)),
+        ));
+        assert!(!fn_types_compatible(
+            &outer("SyntheticCarrier", nested(ParamZone::LabelOnly)),
+            &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
+        ));
+        assert!(!fn_types_compatible(
+            &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
+            &outer("OtherCarrier", nested(ParamZone::PositionalOnly)),
+        ));
     }
 }
 

@@ -666,6 +666,12 @@ pub enum Type {
     ComputeDim(u64),
 }
 
+/// Failure returned when two composite types do not have the same shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompositeTypePairError {
+    ShapeMismatch,
+}
+
 fn is_core_crypto(marker: &TagMarker) -> bool {
     matches!(marker, TagMarker::Internal(InternalTag::CoreCryptoNominal))
 }
@@ -819,6 +825,65 @@ fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)
 }
 
 impl Type {
+    /// Visit matched pairs under the shared composite carriers.
+    ///
+    /// The walker owns structural recursion for `List`, `Option`, `Result`,
+    /// and `Apply`. Judgments own leaf meaning. `Apply` names stay with the
+    /// caller because unification and obligation checks use different rules.
+    pub fn for_each_composite_pair(
+        left: &Type,
+        right: &Type,
+        visit: &mut impl FnMut(&Type, &Type),
+    ) -> Result<(), CompositeTypePairError> {
+        match (left, right) {
+            (Type::List(left), Type::List(right))
+            | (Type::Option(left), Type::Option(right)) => {
+                visit(left, right);
+                Self::for_each_composite_pair(left, right, visit)
+            }
+            (
+                Type::Result {
+                    ok: left_ok,
+                    err: left_err,
+                },
+                Type::Result {
+                    ok: right_ok,
+                    err: right_err,
+                },
+            ) => {
+                visit(left, right);
+                Self::for_each_composite_pair(left_ok, right_ok, visit)?;
+                Self::for_each_composite_pair(left_err, right_err, visit)
+            }
+            (
+                Type::Apply {
+                    args: left_args, ..
+                },
+                Type::Apply {
+                    args: right_args, ..
+                },
+            ) if left_args.len() == right_args.len() => {
+                visit(left, right);
+                for (left, right) in left_args.iter().zip(right_args) {
+                    Self::for_each_composite_pair(left, right, visit)?;
+                }
+                Ok(())
+            }
+            (Type::List(_), _)
+            | (_, Type::List(_))
+            | (Type::Option(_), _)
+            | (_, Type::Option(_))
+            | (Type::Result { .. }, _)
+            | (_, Type::Result { .. })
+            | (Type::Apply { .. }, _)
+            | (_, Type::Apply { .. }) => Err(CompositeTypePairError::ShapeMismatch),
+            _ => {
+                visit(left, right);
+                Ok(())
+            }
+        }
+    }
+
     /// Project all compile-time facts carried by this type onto the one
     /// knowledge vector. The old enum payloads are read here once; sema
     /// consumers must use this projection instead of inventing a second
@@ -1034,9 +1099,29 @@ impl Type {
                             _ => false,
                         }
                 }
-                (Type::List(required), Type::List(offered))
-                | (Type::Shared(required), Type::Shared(offered))
-                | (Type::Option(required), Type::Option(offered)) => nested(required, offered),
+                (Type::List(_), Type::List(_))
+                | (Type::Option(_), Type::Option(_))
+                | (Type::Result { .. }, Type::Result { .. })
+                | (Type::Apply { .. }, Type::Apply { .. }) => {
+                    let mut satisfied = true;
+                    let shape = Type::for_each_composite_pair(
+                        required,
+                        offered,
+                        &mut |required, offered| {
+                            if satisfied {
+                                match (required, offered) {
+                                    (Type::List(_), Type::List(_))
+                                    | (Type::Option(_), Type::Option(_))
+                                    | (Type::Result { .. }, Type::Result { .. })
+                                    | (Type::Apply { .. }, Type::Apply { .. }) => {}
+                                    _ => satisfied = nested(required, offered),
+                                }
+                            }
+                        },
+                    );
+                    shape.is_ok() && satisfied
+                }
+                (Type::Shared(required), Type::Shared(offered)) => nested(required, offered),
                 (
                     Type::Map {
                         key: required_key,
@@ -1047,16 +1132,6 @@ impl Type {
                         key: offered_key,
                         value: offered_value,
                         ..
-                    },
-                )
-                | (
-                    Type::Result {
-                        ok: required_key,
-                        err: required_value,
-                    },
-                    Type::Result {
-                        ok: offered_key,
-                        err: offered_value,
                     },
                 ) => {
                     nested(required_key, offered_key) && nested(required_value, offered_value)
@@ -1076,13 +1151,6 @@ impl Type {
                 (Type::FixedList { elem: required, .. }, Type::FixedList { elem: offered, .. })
                 | (Type::Quantity { base: required, .. }, Type::Quantity { base: offered, .. }) => {
                     nested(required, offered)
-                }
-                (Type::Apply { args: required, .. }, Type::Apply { args: offered, .. }) => {
-                    required.len() == offered.len()
-                        && required
-                            .iter()
-                            .zip(offered)
-                            .all(|(required, offered)| nested(required, offered))
                 }
                 (Type::Union(required), Type::Union(offered)) => {
                     required.len() == offered.len()

@@ -166,6 +166,33 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     }
 }
 
+fn unify_composite_pair(
+    expected: &Type,
+    found: &Type,
+    subst: &mut HashMap<String, Type>,
+    type_params: &HashSet<String>,
+) -> bool {
+    let mut unified = true;
+    let shape = Type::for_each_composite_pair(expected, found, &mut |expected, found| {
+        if unified {
+            match (expected, found) {
+                (Type::List(_), Type::List(_))
+                | (Type::Option(_), Type::Option(_))
+                | (Type::Result { .. }, Type::Result { .. }) => {}
+                (
+                    Type::Apply {
+                        name: expected_name,
+                        ..
+                    },
+                    Type::Apply { name: found_name, .. },
+                ) => unified = expected_name == found_name,
+                _ => unified = unify_types(expected, found, subst, type_params),
+            }
+        }
+    });
+    shape.is_ok() && unified
+}
+
 /// Unify two types; extend `subst` with inferred type-parameter bindings.
 ///
 /// `type_params` is the declared parameter name set for the current generic context
@@ -192,17 +219,14 @@ pub fn unify_types(
                 true
             }
         }
-        (Type::Apply { name: n1, args: a1 }, Type::Apply { name: n2, args: a2 })
-            if n1 == n2 && a1.len() == a2.len() =>
-        {
-            a1.iter()
-                .zip(a2.iter())
-                .all(|(x, y)| unify_types(x, y, subst, type_params))
+        (Type::Apply { args: a1, .. }, Type::Apply { args: a2, .. }) => {
+            a1.len() == a2.len()
+                && unify_composite_pair(&expected, &found, subst, type_params)
         }
-        (Type::List(e1), Type::List(e2)) => unify_types(e1, e2, subst, type_params),
-        (Type::Option(e1), Type::Option(e2)) => unify_types(e1, e2, subst, type_params),
-        (Type::Result { ok: o1, err: e1 }, Type::Result { ok: o2, err: e2 }) => {
-            unify_types(o1, o2, subst, type_params) && unify_types(e1, e2, subst, type_params)
+        (Type::List(_), Type::List(_))
+        | (Type::Option(_), Type::Option(_))
+        | (Type::Result { .. }, Type::Result { .. }) => {
+            unify_composite_pair(&expected, &found, subst, type_params)
         }
         (Type::TraitObject(t1), Type::TraitObject(t2)) if t1 == t2 => true,
         (
@@ -825,6 +849,77 @@ pub fn split_qualified(name: &str) -> (Option<&str>, &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composite_walker_drives_assignability_and_unification() {
+        let callable = |zone| Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: Some(vec![("force".to_string(), zone)]),
+            return_view_provenance: None,
+        };
+        let required = Type::Apply {
+            name: "SyntheticCarrier".to_string(),
+            args: vec![
+                Type::List(Box::new(callable(crate::AST::ParamZone::PositionalOnly))),
+                Type::Option(Box::new(Type::Result {
+                    ok: Box::new(Type::Int),
+                    err: Box::new(Type::String),
+                })),
+            ],
+        };
+        let offered = Type::Apply {
+            name: "SyntheticCarrier".to_string(),
+            args: vec![
+                Type::List(Box::new(callable(crate::AST::ParamZone::Either))),
+                Type::Option(Box::new(Type::Result {
+                    ok: Box::new(Type::Int),
+                    err: Box::new(Type::String),
+                })),
+            ],
+        };
+        assert!(Type::obligations_satisfy(&required, &offered));
+
+        let expected = Type::Apply {
+            name: "SyntheticCarrier".to_string(),
+            args: vec![
+                Type::List(Box::new(Type::Named("T".to_string()))),
+                Type::Option(Box::new(Type::Result {
+                    ok: Box::new(Type::Named("U".to_string())),
+                    err: Box::new(Type::Int),
+                })),
+            ],
+        };
+        let found = Type::Apply {
+            name: "SyntheticCarrier".to_string(),
+            args: vec![
+                Type::List(Box::new(Type::String)),
+                Type::Option(Box::new(Type::Result {
+                    ok: Box::new(Type::Bool),
+                    err: Box::new(Type::Int),
+                })),
+            ],
+        };
+        let mut subst = HashMap::new();
+        let type_params = ["T".to_string(), "U".to_string()]
+            .into_iter()
+            .collect::<HashSet<_>>();
+        assert!(unify_types(&expected, &found, &mut subst, &type_params));
+        assert_eq!(subst.get("T"), Some(&Type::String));
+        assert_eq!(subst.get("U"), Some(&Type::Bool));
+
+        let wrong_arity = Type::Apply {
+            name: "SyntheticCarrier".to_string(),
+            args: vec![Type::Int],
+        };
+        let mut visited = 0;
+        assert_eq!(
+            Type::for_each_composite_pair(&expected, &wrong_arity, &mut |_, _| visited += 1),
+            Err(CompositeTypePairError::ShapeMismatch)
+        );
+        assert_eq!(visited, 0);
+    }
 
     #[test]
     fn generic_depth_limit_detects_long_chains() {
