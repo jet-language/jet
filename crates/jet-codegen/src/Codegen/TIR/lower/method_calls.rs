@@ -178,7 +178,8 @@ fn lower_compute_transform_call(
     }
     let function = args.first()?;
     let lowered_function = lower_expr(&function.expr, cx, env);
-    let mut lowered_args = vec![lowered_function.clone()];
+    let function_ty = lowered_function.ty.clone();
+    let mut lowered_args = vec![lowered_function];
     let mut value_args = Vec::new();
     let mut wrt = None;
     for arg in args.iter().skip(1) {
@@ -194,7 +195,7 @@ fn lower_compute_transform_call(
         }
     }
     let Some(parameter_names) = compute_transform_parameter_names(&function.expr, cx)
-        .or_else(|| match &lowered_function.ty {
+        .or_else(|| match &function_ty {
             Type::Fn {
                 param_contract: Some(contract),
                 ..
