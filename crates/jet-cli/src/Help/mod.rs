@@ -35,6 +35,10 @@ use crate::CLI;
 pub mod Interactive;
 pub mod Render;
 
+const OBSERVATION_QUERY: &str = "why is my program slow";
+const OBSERVATION_GUIDE: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/spec/observability.md"));
+
 /// One command in the help index.
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -362,6 +366,13 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
 /// the best matches (or the verbatim code page) as plain text; no raw mode,
 /// no box drawing beyond what `Render` already produces for NO_COLOR.
 pub fn run_query(query: &str, color: bool) -> String {
+    if query
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .eq(OBSERVATION_QUERY.split_whitespace().map(str::to_string))
+    {
+        return OBSERVATION_GUIDE.to_string();
+    }
     if let Some(symbol) = crate::SemanticSymbols::lookup(query.trim()) {
         return format!(
             "{}\n{}\nExample: {}\nSource: {} ({})\n",
@@ -540,5 +551,14 @@ mod tests {
     fn run_query_no_match_is_a_helpful_pointer_not_empty() {
         let out = run_query("zzzznonsense", false);
         assert!(out.contains(BINARY_NAME));
+    }
+
+    #[test]
+    fn slow_program_query_renders_the_single_observation_guide() {
+        let out = run_query("Why   is my program slow", false);
+        assert_eq!(out, OBSERVATION_GUIDE);
+        for surface in ["Live scheduler", "GC promotions", "Wall-clock session", "Browser rows"] {
+            assert!(out.contains(surface), "guide missing {surface}: {out}");
+        }
     }
 }

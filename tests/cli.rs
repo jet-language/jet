@@ -2824,6 +2824,21 @@ fn question_mark_task_phrase_resolves_to_a_real_command() {
 }
 
 #[test]
+fn question_mark_observe_slow_program_routes_to_observation_guide() {
+    let out = Command::new(jet())
+        .args(["?", "why", "is", "my", "program", "slow"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for surface in ["Live scheduler", "GC promotions", "Wall-clock session", "Browser rows"] {
+        assert!(stdout.contains(surface), "observation guide missing {surface}: {stdout}");
+    }
+    check_snapshot("observability_guide.txt", &stdout);
+}
+
+#[test]
 fn file_sugar_runs_without_run_subcommand() {
     let stem = std::env::temp_dir().join("jet_cli_file_sugar");
     let file = stem.with_extension("jet");
