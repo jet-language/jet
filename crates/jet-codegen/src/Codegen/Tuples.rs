@@ -562,7 +562,7 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
         .all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
                 && !is_move_only_cell_guard(t)
-                && field_type_comparable(t, &cx.type_names, &no_params)
+                && field_type_rust_eq_compatible(t, &cx.type_names, &no_params)
         })
     {
         derives.push("PartialEq");

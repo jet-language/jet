@@ -135,15 +135,12 @@ pub(crate) struct Cx {
     /// struct lowers to the generated `user_<S>_columns` struct-of-arrays type;
     /// `rust_type` maps the list type and the list ops route to its inherent API.
     pub(crate) columnar: HashSet<String>,
-    pub(crate) comparable: HashSet<String>,
     pub(crate) auto_printable: HashSet<String>,
     pub(crate) auto_debug: HashSet<String>,
     pub(crate) auto_equatable: HashSet<String>,
     /// D-TAG1: types whose fields are all Eq+Hash-capable (comparable minus
     /// float fields) — gates `derive(Eq, Hash)` for `Bag<T>` keys.
     pub(crate) hashable: HashSet<String>,
-    /// S55: explicit `derive Comparable;` → PartialOrd in Rust.
-    pub(crate) partial_ord: HashSet<String>,
     pub(crate) patchable: HashSet<String>,
     /// D-FIELDPOL1: struct name -> computed field names. Sema already
     /// synthesized a `fn <field>(self) => T` getter for each on `s.methods`
@@ -2462,7 +2459,15 @@ pub(crate) fn register_bundle_unit_metadata(
                     );
                     cx.type_names.insert(name.clone());
                     cx.distinct_types
-                        .insert(name.clone(), (member.base.clone(), member.is_numeric));
+                        .insert(
+                            name.clone(),
+                            (
+                                member.base.clone(),
+                                member.derives.iter().any(|(derive, _)| {
+                                    derive == crate::Syntax::MARKER_NUMERIC
+                                }),
+                            ),
+                        );
                     let kind = member
                         .quantity
                         .map(|(_, kind)| kind)
@@ -2818,12 +2823,10 @@ pub(crate) fn build_cx_items(
         cloneable: HashSet::new(),
         migrations: HashMap::new(),
         columnar: HashSet::new(),
-        comparable: HashSet::new(),
         auto_printable: HashSet::new(),
         auto_debug: HashSet::new(),
         auto_equatable: HashSet::new(),
         hashable: HashSet::new(),
-        partial_ord: HashSet::new(),
         patchable: HashSet::new(),
         computed_fields: HashMap::new(),
         src: src.to_string(),
@@ -3355,7 +3358,15 @@ pub(crate) fn build_cx_items(
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
                 cx.distinct_types
-                    .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                    .insert(
+                        d.name.clone(),
+                        (
+                            d.base.clone(),
+                            d.derives
+                                .iter()
+                                .any(|(name, _)| name == crate::Syntax::MARKER_NUMERIC),
+                        ),
+                    );
                 if let Some((lo, hi, _)) = d.range {
                     cx.distinct_ranges.insert(d.name.clone(), (lo, hi));
                 }
@@ -3372,7 +3383,15 @@ pub(crate) fn build_cx_items(
                 for d in uf.distinct_defs() {
                     cx.type_names.insert(d.name.clone());
                     cx.distinct_types
-                        .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                        .insert(
+                            d.name.clone(),
+                            (
+                                d.base.clone(),
+                                d.derives
+                                    .iter()
+                                    .any(|(name, _)| name == crate::Syntax::MARKER_NUMERIC),
+                            ),
+                        );
                     // Mirror sema `unit_fact`: derive Point/Delta from the type
                     // name when `quantity` is unset (affine families).
                     let kind = d
@@ -3455,9 +3474,6 @@ pub(crate) fn build_cx_items(
                 if type_is_cloneable_struct(s, &cx.type_names) {
                     cx.cloneable.insert(s.name.clone());
                 }
-                if type_is_comparable_struct(s, &cx.type_names) {
-                    cx.comparable.insert(s.name.clone());
-                }
                 if crate::Traits::struct_auto_derive_ok(s) {
                     for (trait_name, selected) in [
                         (Generics::PRINTABLE, &mut cx.auto_printable),
@@ -3481,12 +3497,6 @@ pub(crate) fn build_cx_items(
                         {
                             selected.insert(s.name.clone());
                         }
-                    }
-                }
-                for (t, _) in &s.derives {
-                    if t == Generics::COMPARABLE {
-                        cx.partial_ord.insert(s.name.clone());
-                        cx.comparable.insert(s.name.clone());
                     }
                 }
                 for m in &s.methods {
@@ -3537,9 +3547,6 @@ pub(crate) fn build_cx_items(
                 if type_is_cloneable_enum(e, &cx.type_names) {
                     cx.cloneable.insert(e.name.clone());
                 }
-                if type_is_comparable_enum(e, &cx.type_names) {
-                    cx.comparable.insert(e.name.clone());
-                }
                 if crate::Traits::enum_auto_derive_ok(e) {
                     for (trait_name, selected) in [
                         (Generics::PRINTABLE, &mut cx.auto_printable),
@@ -3564,13 +3571,6 @@ pub(crate) fn build_cx_items(
                             selected.insert(e.name.clone());
                         }
                     }
-                }
-                if e.derives
-                    .iter()
-                    .any(|(trait_name, _)| trait_name == Generics::COMPARABLE)
-                {
-                    cx.partial_ord.insert(e.name.clone());
-                    cx.comparable.insert(e.name.clone());
                 }
                 for m in &e.methods {
                     if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
@@ -3935,27 +3935,10 @@ pub(crate) fn field_type_cloneable(
     }
 }
 
-pub(crate) fn type_is_comparable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
-    // c148: pass the struct's declared type-param names.
-    let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
-    s.fields
-        .iter()
-        .all(|f| field_type_comparable(&f.ty, types, &param_names))
-}
-
-pub(crate) fn type_is_comparable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
-    // c148: pass the enum's declared type-param names.
-    let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
-    e.variants.iter().all(|v| match &v.payload {
-        VariantPayload::Unit => true,
-        VariantPayload::Single(t, _) => field_type_comparable(t, types, &param_names),
-        VariantPayload::Named(fs) => fs
-            .iter()
-            .all(|f| field_type_comparable(&f.ty, types, &param_names)),
-    })
-}
-
-pub(crate) fn field_type_comparable(
+/// Backend-only compatibility for the synthetic tuple representation. This
+/// decides whether Rust can derive `PartialEq` for that erased storage shape;
+/// Jet capability requests are checked and expanded in sema.
+pub(crate) fn field_type_rust_eq_compatible(
     ty: &Type,
     types: &HashSet<String>,
     param_names: &HashSet<String>,
@@ -3963,12 +3946,12 @@ pub(crate) fn field_type_comparable(
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
-        Type::Option(inner) => field_type_comparable(inner, types, param_names),
+        Type::Option(inner) => field_type_rust_eq_compatible(inner, types, param_names),
         Type::Result { ok, err } => {
-            field_type_comparable(ok, types, param_names)
-                && field_type_comparable(err, types, param_names)
+            field_type_rust_eq_compatible(ok, types, param_names)
+                && field_type_rust_eq_compatible(err, types, param_names)
         }
-        Type::List(inner) => field_type_comparable(inner, types, param_names),
+        Type::List(inner) => field_type_rust_eq_compatible(inner, types, param_names),
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
@@ -3995,19 +3978,19 @@ pub(crate) fn field_type_comparable(
         Type::Apply { name, .. } if name == "Id" => true,
         Type::Apply { args, .. } => args
             .iter()
-            .all(|a| field_type_comparable(a, types, param_names)),
+            .all(|a| field_type_rust_eq_compatible(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()
-            .all(|(_, t)| field_type_comparable(t, types, param_names)),
+            .all(|(_, t)| field_type_rust_eq_compatible(t, types, param_names)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
-        Type::FixedList { elem, .. } => field_type_comparable(elem, types, param_names),
-        Type::Tagged { inner, .. } => field_type_comparable(inner, types, param_names),
+        Type::FixedList { elem, .. } => field_type_rust_eq_compatible(elem, types, param_names),
+        Type::Tagged { inner, .. } => field_type_rust_eq_compatible(inner, types, param_names),
         Type::Union(members) => members
             .iter()
-            .all(|m| field_type_comparable(m, types, param_names)),
+            .all(|m| field_type_rust_eq_compatible(m, types, param_names)),
         // Runtime values carry no dimension metadata (I3): comparable iff the
         // erased base numeric type is.
-        Type::Quantity { base, .. } => field_type_comparable(base, types, param_names),
+        Type::Quantity { base, .. } => field_type_rust_eq_compatible(base, types, param_names),
         // Same as the retired `\0compute.dimension.N` string encoding: it
         // never matched the `Type::Named` user-type-registry lookup above
         // (only ever reached as an `Apply` arg via the fallback above it).
@@ -4033,7 +4016,7 @@ pub(crate) fn type_is_hashable_enum(e: &EnumDef, types: &HashSet<String>) -> boo
     })
 }
 
-/// Same shape as `field_type_comparable`, minus `Float`/`Float32` — Rust's
+/// Same shape as `field_type_rust_eq_compatible`, minus `Float`/`Float32` — Rust's
 /// `f64`/`f32` don't implement `Eq`/`Hash` (NaN breaks both laws).
 pub(crate) fn field_type_hashable(
     ty: &Type,
@@ -4052,7 +4035,8 @@ pub(crate) fn field_type_hashable(
         Type::List(inner) => field_type_hashable(inner, types, param_names),
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
-        // D-TUPLE-DESTRUCT1: same opaque-handle exclusion as `field_type_comparable`.
+        // D-TUPLE-DESTRUCT1: same opaque-handle exclusion as the backend
+        // equality compatibility walk above.
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
@@ -4061,7 +4045,7 @@ pub(crate) fn field_type_hashable(
         {
             false
         }
-        // D-MEM1 S6: same `Pool`/`Id` split as `field_type_comparable` above.
+        // D-MEM1 S6: same `Pool`/`Id` split as the backend equality walk above.
         Type::Apply { name, .. } if name == "Pool" => false,
         Type::Apply { name, .. } if name == "Id" => true,
         Type::Apply { args, .. } => args

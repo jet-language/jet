@@ -196,7 +196,13 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
             .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
             .map(|(_, span)| *span)
             .unwrap_or(s.name_span);
-        match parse_builtin_serde_fragment(&source, &s.name, trigger_span, diags) {
+        match parse_generated_fragment(
+            &source,
+            format!("built-in codec derive generated invalid Jet for `{}`", s.name),
+            "built-in derives must emit valid ordinary Jet".to_string(),
+            trigger_span,
+            diags,
+        ) {
             Some(generated) => {
                 generated_items.extend(generated.into_iter().filter_map(|item| match item {
                     Item::Impl(mut imp) => {
@@ -336,7 +342,13 @@ fn expand_builtin_enum_serde(
         .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
         .map(|(_, span)| *span)
         .unwrap_or(e.name_span);
-    match parse_builtin_serde_fragment(&source, &e.name, trigger_span, diags) {
+    match parse_generated_fragment(
+        &source,
+        format!("built-in codec derive generated invalid Jet for `{}`", e.name),
+        "built-in derives must emit valid ordinary Jet".to_string(),
+        trigger_span,
+        diags,
+    ) {
         Some(generated) => {
             generated_items.extend(generated.into_iter().filter_map(|item| match item {
                 Item::Impl(mut imp) => {
@@ -350,9 +362,10 @@ fn expand_builtin_enum_serde(
     }
 }
 
-fn parse_builtin_serde_fragment(
+pub(super) fn parse_generated_fragment(
     source: &str,
-    type_name: &str,
+    what: String,
+    fix: String,
     trigger_span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Vec<Item>> {
@@ -371,11 +384,11 @@ fn parse_builtin_serde_fragment(
                 .unwrap_or_else(|| "generated codec source was invalid".to_string());
             diags.push(Diagnostic::error(
                 "E2710",
-                format!("built-in codec derive generated invalid Jet for `{type_name}`"),
+                what,
                 format!(
                     "generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"
                 ),
-                "report this compiler bug; built-in derives must emit valid ordinary Jet".to_string(),
+                fix,
                 Some(trigger_span),
             ));
             None
@@ -418,9 +431,10 @@ mod serde_source_tests {
     fn malformed_builtin_codec_points_at_derive_trigger() {
         let trigger = Span::new(17, 26);
         let mut diags = Vec::new();
-        assert!(parse_builtin_serde_fragment(
+        assert!(parse_generated_fragment(
             "impl Broken.Encode { fn encode(self) => DataTree {",
-            "Broken",
+            "built-in codec derive generated invalid Jet for `Broken`".to_string(),
+            "report this compiler bug".to_string(),
             trigger,
             &mut diags,
         ).is_none());

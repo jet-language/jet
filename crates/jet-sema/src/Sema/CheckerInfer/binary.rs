@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::{substitute_type, COMPARABLE};
+use crate::Generics::{e0905, substitute_type, COMPARABLE};
 use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
@@ -421,11 +421,10 @@ impl<'a> Checker<'a> {
         self.operator_expr_type(expr)
             .is_some_and(|ty| match &ty {
                 Type::Named(name) => {
-                    !self.registry.is_distinct(name)
-                        && (self.trait_reg
-                            .trait_impls
-                            .contains(&(name.clone(), trait_name.to_string()))
-                            || self.type_param_has_bound(&ty, trait_name))
+                    self.trait_reg
+                        .trait_impls
+                        .contains(&(name.clone(), trait_name.to_string()))
+                        || self.type_param_has_bound(&ty, trait_name)
                 }
                 _ => false,
             })
@@ -613,12 +612,11 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some((trait_name, method, ret)) = hook {
-                    if !self.registry.is_distinct(type_name)
-                        && (self
-                            .trait_reg
-                            .trait_impls
-                            .contains(&(type_name.clone(), trait_name.to_string()))
-                            || self.type_param_has_bound(&lt, trait_name))
+                    if self
+                        .trait_reg
+                        .trait_impls
+                        .contains(&(type_name.clone(), trait_name.to_string()))
+                        || self.type_param_has_bound(&lt, trait_name)
                     {
                         if self.fn_name == method
                             && self
@@ -1373,6 +1371,18 @@ impl<'a> Checker<'a> {
         if lt == rt && matches!(lt, Type::Int | Type::Float) {
             Some(Type::Bool)
         } else if lt == rt
+            && matches!(lt, Type::Named(name) if self.registry.is_distinct(name))
+        {
+            let Type::Named(name) = lt else {
+                unreachable!("distinct relational branch only matches named types")
+            };
+            if self.trait_reg.implements_trait(name, COMPARABLE) {
+                Some(Type::Bool)
+            } else {
+                self.diags.push(e0905(name, COMPARABLE, span, false));
+                None
+            }
+        } else if lt == rt
             && (types_comparable(lt, self.registry) || self.type_param_has_bound(lt, COMPARABLE))
         {
             Some(Type::Bool)
@@ -1417,14 +1427,11 @@ impl<'a> Checker<'a> {
                     let uses_hook = lt == rt
                         && match lt {
                             Type::Named(type_name) => {
-                                !self.registry.is_distinct(type_name)
-                                    && (self.trait_reg.trait_impls.contains(&(
-                                        type_name.clone(),
-                                        crate::Syntax::TRAIT_COMPARABLE.to_string(),
-                                    )) || self.type_param_has_bound(
-                                        lt,
-                                        crate::Syntax::TRAIT_COMPARABLE,
-                                    ))
+                                self.trait_reg.trait_impls.contains(&(
+                                    type_name.clone(),
+                                    crate::Syntax::TRAIT_COMPARABLE.to_string(),
+                                )) || self
+                                    .type_param_has_bound(lt, crate::Syntax::TRAIT_COMPARABLE)
                             }
                             _ => false,
                         };

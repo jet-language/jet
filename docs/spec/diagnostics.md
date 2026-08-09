@@ -585,6 +585,7 @@ renumbered, and no new `W` code may be allocated.
 | E0920 | retired | `#InlineAlways` condensed into `#Inline(Always)`; one marker cannot conflict with itself |
 | E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
 | E0922 | sema | body-level `derive Debug;` remains retired; use the signed type marker or a hand implementation (D-AUTODERIVE-SYNTAX1=D) |
+| E0929 | parse | body-level `derive X;` is retired; request the capability with `#X` and reserve `derive` for provider definitions (D-ONCE-DERIVE1=A) |
 | E0925 | parse | `#Job`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Job` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
@@ -1564,8 +1565,8 @@ trait:
 Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
   --> derive.jet:6:12
     |
-  6 |     derive Reviewed
-    |            ^^^^^^^^
+  6 |     #Reviewed
+      |     ^^^^^^^^
  Why: a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`
  Fix: declare `Reviewed` as a `trait` with the method(s) it should provide
 ```
@@ -2010,6 +2011,16 @@ did not restore the older body-level derive statement.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `derive Debug` inside a type body is retired ``. | Signed type markers are the one control for compiler-generated Debug implementations. | Write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand. |
+
+### E0929 — body-level capability derive is retired (D-ONCE-DERIVE1=A)
+
+The ratified spelling law leaves `derive` with one job: defining a provider
+(`derive T.Trait { … }`). A type requests a built-in or user capability with
+the marker before its declaration.
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `derive {Trait}` inside a type body is retired ``. | Capability requests have one marker spelling, while `derive` defines providers. | Write `#{Trait}` before the type. |
 
 ### E0925 — `#Job`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
 

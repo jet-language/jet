@@ -101,13 +101,7 @@ impl<'a> Parser<'a> {
             let start = self.peek().span;
             // D-CAPBUNDLE1: zero or more stacked bundle markers (retired `#`
             // spelling on any of them teaches E0062).
-            let mut is_numeric = false;
-            let mut is_comparable = false;
-            let mut comparable_span = None;
-            let mut is_printable = false;
-            let mut printable_span = None;
-            let mut is_codable_as_base = false;
-            let mut codable_as_base_span = None;
+            let mut derives = Vec::new();
             let mut invariant_range = None;
             let mut invariant = None;
             let mut type_markers = Vec::new();
@@ -148,16 +142,14 @@ impl<'a> Parser<'a> {
                     ct: None,
                 });
                 if attr == Syntax::MARKER_NUMERIC {
-                    is_numeric = true;
+                    derives.push((attr.clone(), attr_span));
                 } else if attr == Syntax::MARKER_BUNDLE_COMPARABLE {
-                    is_comparable = true;
-                    comparable_span = Some(attr_span);
+                    derives.push((attr.clone(), attr_span));
                 } else if attr == Syntax::MARKER_BUNDLE_PRINTABLE {
-                    is_printable = true;
-                    printable_span = Some(attr_span);
+                    derives.push((attr.clone(), attr_span));
                 } else if attr == Syntax::MARKER_BUNDLE_CODABLE_AS_BASE {
-                    is_codable_as_base = true;
-                    codable_as_base_span = Some(attr_span);
+                    derives.push((crate::Generics::ENCODE.to_string(), attr_span));
+                    derives.push((crate::Generics::DECODE.to_string(), attr_span));
                 }
             }
             if marker_count > 1 {
@@ -304,13 +296,7 @@ impl<'a> Parser<'a> {
                 is_pub,
                 is_package_pub,
                 type_markers,
-                is_numeric,
-                is_comparable,
-                comparable_span,
-                is_printable,
-                printable_span,
-                is_codable_as_base,
-                codable_as_base_span,
+                derives,
                 quantity: None,
                 name,
                 name_span,
@@ -1141,7 +1127,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if matches!(self.peek().kind, TokKind::KwDerive) {
-                    derives.push(self.derive_line()?);
+                    return Err(self.retired_derive_line());
                 } else if matches!(self.peek().kind, TokKind::KwImpl) {
                     trait_impls.push(self.trait_impl_block()?);
                 } else if self.at_validate_block() {

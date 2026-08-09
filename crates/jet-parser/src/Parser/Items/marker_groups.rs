@@ -1470,18 +1470,16 @@ impl<'a> Parser<'a> {
                     d.type_markers = markers.clone();
                     for marker in markers {
                         match marker.name.as_str() {
-                            Syntax::MARKER_NUMERIC => d.is_numeric = true,
-                            Syntax::MARKER_BUNDLE_COMPARABLE => {
-                                d.is_comparable = true;
-                                d.comparable_span = Some(marker.span);
-                            }
-                            Syntax::MARKER_BUNDLE_PRINTABLE => {
-                                d.is_printable = true;
-                                d.printable_span = Some(marker.span);
+                            Syntax::MARKER_NUMERIC
+                            | Syntax::MARKER_BUNDLE_COMPARABLE
+                            | Syntax::MARKER_BUNDLE_PRINTABLE => {
+                                d.derives.push((marker.name.clone(), marker.name_span));
                             }
                             Syntax::MARKER_BUNDLE_CODABLE_AS_BASE => {
-                                d.is_codable_as_base = true;
-                                d.codable_as_base_span = Some(marker.span);
+                                d.derives
+                                    .push((crate::Generics::ENCODE.to_string(), marker.name_span));
+                                d.derives
+                                    .push((crate::Generics::DECODE.to_string(), marker.name_span));
                             }
                             Syntax::MARKER_INVARIANT => {
                                 let (bounds, span, text) =

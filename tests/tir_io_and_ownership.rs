@@ -164,9 +164,9 @@ fn largest<T: Comparable>(xs: [T]) => (T?) {
 fn print_area(s: Shape) {
     print(\"{s.name()}: {s.area()}\")
 }
+#Comparable
 struct Score {
     points: Int
-    derive Comparable
 }
 fn run() {
 shapes :: [Shape].{ Circle.{radius: 1.0}, Square.{side: 2.0} }

@@ -9,8 +9,8 @@ use crate::Generics::{
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef, TraitDef,
-    TraitImplBlock, TraitMethodSig, Type, TypeParam,
+    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef,
+    TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -207,38 +207,14 @@ impl TraitRegistry {
                 // existing Display/derive machinery rather than a second
                 // mechanism). `#Numeric` arithmetic is a separate, older gate
                 // (D-DIST3/E0127) left untouched — see CheckerInfer/binary.rs.
-                Item::Distinct(d) => {
-                    self.auto_equatable.insert(d.name.clone());
-                    if d.is_printable {
-                        self.trait_impls
-                            .insert((d.name.clone(), DISPLAY.to_string()));
-                    }
-                    if d.is_comparable {
-                        self.derives
-                            .entry(d.name.clone())
-                            .or_default()
-                            .insert(COMPARABLE.to_string());
-                    }
-                    if d.is_numeric && d.range.is_none() {
-                        for trait_name in [
-                            Syntax::TRAIT_ADD,
-                            Syntax::TRAIT_SUB,
-                            Syntax::TRAIT_MUL,
-                            Syntax::TRAIT_DIV,
-                        ] {
-                            self.trait_impls
-                                .insert((d.name.clone(), trait_name.to_string()));
-                        }
-                    }
-                    if d.is_codable_as_base {
-                        self.derives
-                            .entry(d.name.clone())
-                            .or_default()
-                            .insert(ENCODE.to_string());
-                        self.derives
-                            .entry(d.name.clone())
-                            .or_default()
-                            .insert(DECODE.to_string());
+                Item::Distinct(d) => self.register_distinct_meta(d),
+                // D-QUAL3 lowers virtual family members to the same distinct
+                // declarations before generated impls are registered. They
+                // must be local types here so the ordinary orphan check accepts
+                // the generated Equatable/Comparable blocks.
+                Item::UnitFamily(family) => {
+                    for d in family.distinct_defs() {
+                        self.register_distinct_meta(&d);
                     }
                 }
                 _ => {}
@@ -279,6 +255,46 @@ impl TraitRegistry {
         self.collect_iter_index_metadata(items);
     }
 
+    fn register_distinct_meta(&mut self, d: &DistinctDef) {
+        self.local_types.insert(d.name.clone());
+        self.auto_equatable.insert(d.name.clone());
+        if d.derives.iter().any(|(name, _)| name == PRINTABLE) {
+            self.trait_impls
+                .insert((d.name.clone(), DISPLAY.to_string()));
+        }
+        if d.derives.iter().any(|(name, _)| name == COMPARABLE) {
+            self.derives
+                .entry(d.name.clone())
+                .or_default()
+                .insert(COMPARABLE.to_string());
+        }
+        if d.derives.iter().any(|(name, _)| name == Syntax::MARKER_NUMERIC)
+            && d.range.is_none()
+        {
+            for trait_name in [
+                Syntax::TRAIT_ADD,
+                Syntax::TRAIT_SUB,
+                Syntax::TRAIT_MUL,
+                Syntax::TRAIT_DIV,
+            ] {
+                self.trait_impls
+                    .insert((d.name.clone(), trait_name.to_string()));
+            }
+        }
+        if d.derives.iter().any(|(name, _)| name == ENCODE)
+            && d.derives.iter().any(|(name, _)| name == DECODE)
+        {
+            self.derives
+                .entry(d.name.clone())
+                .or_default()
+                .insert(ENCODE.to_string());
+            self.derives
+                .entry(d.name.clone())
+                .or_default()
+                .insert(DECODE.to_string());
+        }
+    }
+
     fn reject_partial_comparable_derives(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for item in items {
             let (types, span) = match item {
@@ -314,8 +330,15 @@ impl TraitRegistry {
                         .collect();
                     (types, *span)
                 }
-                Item::Distinct(d) if d.is_comparable => {
-                    let span = d.comparable_span.unwrap_or(d.name_span);
+                Item::Distinct(d)
+                    if d.derives.iter().any(|(name, _)| name == COMPARABLE) =>
+                {
+                    let span = d
+                        .derives
+                        .iter()
+                        .find(|(name, _)| name == COMPARABLE)
+                        .map(|(_, span)| *span)
+                        .unwrap_or(d.name_span);
                     (vec![&d.base], span)
                 }
                 _ => continue,
@@ -397,7 +420,7 @@ impl TraitRegistry {
                         }
                     }
                     Some(Item::Distinct(d)) => {
-                        if d.is_comparable {
+                        if d.derives.iter().any(|(derive, _)| derive == COMPARABLE) {
                             self.partial_comparable_offender(&d.base, items, visiting)
                         } else {
                             Some(name.clone())

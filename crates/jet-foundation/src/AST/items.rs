@@ -1436,7 +1436,7 @@ pub struct StructDef {
     pub methods: Vec<Func>,
     /// S28: in-type `impl Trait { … }` blocks.
     pub trait_impls: Vec<TraitImplBlock>,
-    /// S55: `derive Comparable;` / `derive Serialize;` lines.
+    /// D-ONCE-DERIVE1=A: marker-derived capabilities lowered into ordinary rows.
     pub derives: Vec<(String, Span)>,
     /// D-AUTODERIVE1=E: package default for missing signed derive markers.
     pub auto_derive_default: bool,
@@ -1500,25 +1500,15 @@ pub struct DistinctDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) Name :: distinct Base`.
     pub is_package_pub: bool,
-    /// Source-ordered applied rules. Capability booleans below are semantic
-    /// projections; the formatter preserves this order.
+    /// Source-ordered applied rules. Capability requests are lowered into the
+    /// ordinary derive rows below; this is the one declaration-side home for
+    /// every derived capability.
     pub type_markers: Vec<Marker>,
-    /// D-DIST3: whether `#Numeric` marker was present — enables same-type arithmetic.
-    pub is_numeric: bool,
-    /// D-CAPBUNDLE1: `#Comparable` was present — grants hash/sort on top of the
-    /// ordering the base type already carries (D-DIST1 makes every distinct type
-    /// `==`/`<`-comparable unconditionally already; that overlap is left alone
-    /// per the ballot). Stacks with the other three bundles.
-    pub is_comparable: bool,
-    pub comparable_span: Option<Span>,
-    /// D-CAPBUNDLE1: `#Printable` was present — grants `{value}` string
-    /// interpolation (Display), forwarding to the base type's rendering.
-    pub is_printable: bool,
-    pub printable_span: Option<Span>,
-    /// D-CAPBUNDLE1: `#CodableAsBase` was present — grants encode/decode via
-    /// the base type's wire representation.
-    pub is_codable_as_base: bool,
-    pub codable_as_base_span: Option<Span>,
+    /// D-DIST3/D-CAPBUNDLE1: lowered capability requests. `Numeric`,
+    /// `Comparable`, and `Printable` retain their marker names; the wire
+    /// bundle lowers to the ordinary `Encode`/`Decode` pair, like `#Codable`
+    /// on a struct or enum.
+    pub derives: Vec<(String, Span)>,
     /// D-QUANTITY-TYPE1=A: compiler-only physical quantity facts carried by a
     /// concrete D-QUAL3 type. `None` for ordinary distinct types.
     pub quantity: Option<(Dimension, QuantityKind)>,
@@ -1666,13 +1656,25 @@ impl UnitFamilyDef {
                     type_markers: Vec::new(),
                     // Affine points deliberately do not inherit point+point arithmetic;
                     // the closed Point/Delta algebra is added by sema, never by this sugar.
-                    is_numeric: !is_point,
-                    is_comparable: is_point,
-                    comparable_span: None,
-                    is_printable: false,
-                    printable_span: None,
-                    is_codable_as_base: self.resolved_dimension.is_some(),
-                    codable_as_base_span: None,
+                    derives: [
+                        (!is_point)
+                            .then(|| (crate::Syntax::MARKER_NUMERIC.to_string(), member.name_span)),
+                        is_point.then(|| {
+                            (
+                                crate::Syntax::MARKER_BUNDLE_COMPARABLE.to_string(),
+                                member.name_span,
+                            )
+                        }),
+                        self.resolved_dimension
+                            .is_some()
+                            .then(|| (crate::Generics::ENCODE.to_string(), member.name_span)),
+                        self.resolved_dimension
+                            .is_some()
+                            .then(|| (crate::Generics::DECODE.to_string(), member.name_span)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
                     quantity: self.resolved_dimension.clone().map(|dimension| {
                         let kind = if affine {
                             if is_point { QuantityKind::Point } else { QuantityKind::Delta }
@@ -1941,7 +1943,9 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                     }
                     Item::Distinct(def) if def.name == name => {
                         return def
-                            .is_codable_as_base
+                            .derives
+                            .iter()
+                            .any(|(derive, _)| derive == crate::Generics::ENCODE)
                             .then(|| resolve(items, &def.base, seen))
                             .flatten();
                     }
@@ -1954,7 +1958,9 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                             family.distinct_defs().into_iter().find(|def| def.name == name)
                         {
                             return def
-                                .is_codable_as_base
+                                .derives
+                                .iter()
+                                .any(|(derive, _)| derive == crate::Generics::ENCODE)
                                 .then(|| resolve(items, &def.base, seen))
                                 .flatten();
                         }

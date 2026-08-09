@@ -1490,9 +1490,8 @@ struct Header {
 }
 
 #[test]
-fn fmt_keeps_body_derive_line_when_no_brackets() {
-    // A struct that uses ONLY a body `derive Comparable` line (no `#[…]` list)
-    // must keep emitting it in the body — the new bracket path must not eat it.
+fn fmt_rejects_retired_body_derive_line() {
+    // Capability requests have one spelling: a marker before the type.
     let src = "\
 struct Score {
     points: Int
@@ -1500,13 +1499,7 @@ struct Score {
     derive Comparable
 }
 ";
-    assert_fmt_keeps(src, &["derive Comparable"], "body derive line");
-    // And it must NOT be promoted to a bracket marker (contract plane: `#[Comparable]`).
-    let out = jet::format_source(src).unwrap();
-    assert!(
-        !out.contains("#[Comparable]") && !out.contains("#Comparable"),
-        "body derive must not become bracket:\n{out}"
-    );
+    assert!(jet::format_source(src).is_err());
 }
 
 #[test]

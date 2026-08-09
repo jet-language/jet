@@ -1,9 +1,10 @@
 //! Integration tests for D-METAREFLECT1 / D-REFLECT1 rich reflection.
 
-use jet::Comptime::{build_struct_type_info, CtValue};
+use jet::Comptime::{build_distinct_type_info, build_struct_type_info, CtValue};
 use jet::Diagnostics::Span;
 use jet::AST::{
-    AccessConvention, Expr, Field, Func, Marker, Param, ParamZone, StructDef, Type, TypeParam,
+    AccessConvention, DistinctDef, Expr, Field, Func, Marker, Param, ParamZone, StructDef, Type,
+    TypeParam,
 };
 
 fn span() -> Span {
@@ -282,5 +283,49 @@ fn marker_arguments_are_typed_in_the_written_view() {
                                 && variant == "Always"
                                 && args.is_empty()
                     ))
+    ));
+}
+
+#[test]
+fn distinct_capability_marker_is_visible_in_reflection() {
+    let marker = Marker {
+        name: "Comparable".to_string(),
+        negated: false,
+        name_span: span(),
+        args: Vec::new(),
+        arg_labels: Vec::new(),
+        span: span(),
+        ct: None,
+    };
+    let info = build_distinct_type_info(
+        &DistinctDef {
+            is_pub: true,
+            is_package_pub: false,
+            type_markers: vec![marker],
+            derives: vec![("Comparable".to_string(), span())],
+            quantity: None,
+            name: "CustomerId".to_string(),
+            name_span: span(),
+            base: Type::Int,
+            base_span: span(),
+            range: None,
+            invariant: None,
+            span: span(),
+        },
+        "main",
+    );
+    assert!(matches!(
+        struct_field(&info, "markers"),
+        CtValue::List(values)
+            if values.iter().any(|value| matches!(
+                value,
+                CtValue::Struct { fields, .. }
+                    if fields.iter().any(|(name, value)|
+                        name == "name" && matches!(value, CtValue::Str(value) if value == "Comparable"))
+            ))
+    ));
+    assert!(matches!(
+        struct_field(&info, "expanded_markers"),
+        CtValue::List(values) if values.len() == 1
     ));
 }

@@ -783,7 +783,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if matches!(self.peek().kind, TokKind::KwDerive) {
-                    derives.push(self.derive_line()?);
+                    return Err(self.retired_derive_line());
                 } else if matches!(self.peek().kind, TokKind::KwImpl) {
                     trait_impls.push(self.trait_impl_block()?);
                 } else if self.at_validate_block() {
