@@ -115,7 +115,7 @@ pub fn apply_repl_authorized_core_call(
         None
     };
     let request = repl_effect_request(module, method, &args);
-    let Some(mut authorizer) = authorizer else {
+    let Some(authorizer) = authorizer else {
         return Err(Diagnostic::error(
             "E1803",
             format!(

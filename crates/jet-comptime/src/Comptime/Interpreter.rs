@@ -119,6 +119,15 @@ pub trait ReplAuthorizer {
     fn reset_session(&mut self) {}
 }
 
+pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
+    authorizer: &'short mut Option<&'long mut dyn ReplAuthorizer>,
+) -> Option<&'short mut (dyn ReplAuthorizer + 'short)> {
+    match authorizer {
+        Some(authorizer) => Some(&mut **authorizer),
+        None => None,
+    }
+}
+
 pub(super) struct Interp<'a> {
     pub(super) funcs: &'a HashMap<String, &'a Func>,
     pub(super) base_dir: &'a Path,
@@ -345,7 +354,7 @@ impl<'a> Interp<'a> {
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
         let repl_grants = &self.repl_grants;
-        let repl_authorizer = self.repl_authorizer.as_deref_mut();
+        let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
         let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut req = super::TirBridge::BlockEvalRequest {
@@ -510,7 +519,7 @@ impl<'a> Interp<'a> {
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
         let repl_grants = &self.repl_grants;
-        let repl_authorizer = self.repl_authorizer.as_deref_mut();
+        let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
         let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut mutated = HashMap::new();

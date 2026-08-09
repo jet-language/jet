@@ -1838,7 +1838,9 @@ fn xml_shape_error_value(reason: String) -> CtValue {
 
 pub(super) fn xml_render(value: &CtValue) -> String {
     xml_from_ct(value)
-        .and_then(|value| jet_foundation::XmlKernel::render_document(&value))
+        .and_then(|value| {
+            jet_foundation::XmlKernel::render_document(&value).map_err(|error| error.reason)
+        })
         .unwrap_or_default()
 }
 

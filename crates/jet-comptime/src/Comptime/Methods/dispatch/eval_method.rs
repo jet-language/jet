@@ -1,5 +1,6 @@
 use super::*;
 use crate::AST::CtReport;
+use super::super::super::Interpreter::reborrow_repl_authorizer;
 
 fn decode_path(path: &str) -> String {
     if path == "$" {
@@ -394,7 +395,9 @@ impl<'a> Interp<'a> {
                                 Some(span),
                             ));
                         }
-                        let Some(authorizer) = self.repl_authorizer.as_deref_mut() else {
+                        let Some(authorizer) =
+                            reborrow_repl_authorizer(&mut self.repl_authorizer)
+                        else {
                             return Err(Diagnostic::error(
                                 "E1803",
                                 "Rand.Draw for `shuffle` was denied".to_string(),
@@ -662,7 +665,7 @@ impl<'a> Interp<'a> {
                             self.base_dir,
                             self.sink.as_deref_mut(),
                             &self.repl_grants,
-                            self.repl_authorizer.as_deref_mut(),
+                            reborrow_repl_authorizer(&mut self.repl_authorizer),
                         );
                     }
                     if self.impure_depth == 0 {

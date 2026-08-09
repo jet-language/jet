@@ -265,7 +265,7 @@ impl JetInstant {
     }
 }
 impl PartialEq for JetInstant {
-    pub(crate) fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.start == other.start
     }
 }
