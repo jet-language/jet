@@ -36,6 +36,7 @@ pub mod SyncLite;
 mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
+mod EmailAdapter;
 mod Interpreter;
 mod JSONInterp;
 pub mod MathLayout;

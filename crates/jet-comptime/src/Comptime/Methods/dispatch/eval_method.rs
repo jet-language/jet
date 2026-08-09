@@ -305,16 +305,19 @@ impl<'a> Interp<'a> {
                     _ => unreachable!("Syntax returned a closed duration unit"),
                 };
                 let value = self.eval(&args[0].expr, scope)?;
-                let ns = match value {
-                    CtValue::Int(n) => n.checked_mul(scale),
-                    CtValue::Float(n) => {
-                        let scaled = n.as_f64() * scale as f64;
-                        (scaled.is_finite()
-                            && scaled >= i64::MIN as f64
-                            && scaled < 9_223_372_036_854_775_808.0)
-                            .then_some(scaled.trunc() as i64)
-                    }
-                    _ => None,
+                let (ns, reason) = match value {
+                    CtValue::Int(n) => (
+                        super::super::core_calls::duration_kernel::jet_duration_kernel_from_int(n, scale),
+                        super::super::core_calls::duration_kernel::jet_duration_kernel_int_error_reason(),
+                    ),
+                    CtValue::Float(n) => (
+                        super::super::core_calls::duration_kernel::jet_duration_kernel_from_float(n.as_f64(), scale),
+                        super::super::core_calls::duration_kernel::jet_duration_kernel_float_error_reason(),
+                    ),
+                    _ => (
+                        None,
+                        super::super::core_calls::duration_kernel::jet_duration_kernel_float_error_reason(),
+                    ),
                 };
                 return Ok(match ns {
                     Some(ns) => CtValue::Present(Box::new(CtValue::Struct {
@@ -325,7 +328,7 @@ impl<'a> Interp<'a> {
                         type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
                         fields: vec![(
                             "reason".to_string(),
-                            CtValue::Str("duration must be finite and inside the supported range".to_string()),
+                            CtValue::Str(reason.to_string()),
                         )],
                     })),
                 });

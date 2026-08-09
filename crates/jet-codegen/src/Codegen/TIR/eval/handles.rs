@@ -6,6 +6,10 @@ use crate::Codegen::TIR::THandleOp;
 use super::unsupported;
 use super::browser;
 
+mod duration_kernel {
+    include!("../../../Prelude/Core/Duration.rs");
+}
+
 fn handle_op_name(op: &THandleOp) -> String {
     let name = match op {
         THandleOp::HTTPClientMethod { kind, method } => {
@@ -542,7 +546,7 @@ pub(super) fn eval_handle(
                     .unwrap_or(0),
                 _ => 0,
             };
-            Ok(CtValue::Bool(ns == 0))
+            Ok(CtValue::Bool(duration_kernel::jet_duration_kernel_is_zero(ns)))
         }
         THandleOp::DurationTotalSeconds => {
             let ns = match recv {
@@ -556,7 +560,7 @@ pub(super) fn eval_handle(
                     .unwrap_or(0),
                 _ => 0,
             };
-            Ok(CtValue::Int(ns / 1_000_000_000))
+            Ok(CtValue::Int(duration_kernel::jet_duration_kernel_total_seconds(ns)))
         }
         THandleOp::DurationDifference => {
             let a = match recv {
@@ -583,7 +587,10 @@ pub(super) fn eval_handle(
             };
             Ok(CtValue::Struct {
                 type_name: "Duration".to_string(),
-                fields: vec![("ns".to_string(), CtValue::Int(a.saturating_sub(b)))],
+                fields: vec![(
+                    "ns".to_string(),
+                    CtValue::Int(duration_kernel::jet_duration_kernel_difference(a, b)),
+                )],
             })
         }
         THandleOp::FileReaderReadLine => Err(unsupported("handle `FileReaderReadLine`", span)),
@@ -889,7 +896,7 @@ fn duration_new(
         "Hours" => 3_600_000_000_000,
         _ => return Err(unsupported(&format!("Duration unit `{unit}`"), span)),
     };
-    let ms = if float {
+    let (ms, reason) = if float {
         let n = match recv {
             CtValue::Float(n) => n.as_f64(),
             CtValue::Int(n) => *n as f64,
@@ -900,16 +907,18 @@ fn duration_new(
                 ));
             }
         };
-        let scaled = n * scale as f64;
-        (scaled.is_finite()
-            && scaled >= i64::MIN as f64
-            && scaled < 9_223_372_036_854_775_808.0)
-            .then_some(scaled.trunc() as i64)
+        (
+            duration_kernel::jet_duration_kernel_from_float(n, scale),
+            duration_kernel::jet_duration_kernel_float_error_reason(),
+        )
     } else {
-        match recv {
-            CtValue::Int(n) => n.checked_mul(scale),
-            _ => None,
-        }
+        (
+            match recv {
+                CtValue::Int(n) => duration_kernel::jet_duration_kernel_from_int(*n, scale),
+                _ => None,
+            },
+            duration_kernel::jet_duration_kernel_int_error_reason(),
+        )
     };
     Ok(match ms {
         Some(ms) => CtValue::Present(Box::new(CtValue::Struct {
@@ -920,9 +929,7 @@ fn duration_new(
             type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
             fields: vec![(
                 "reason".to_string(),
-                CtValue::Str(
-                    "duration must be finite and inside the supported range".to_string(),
-                ),
+                CtValue::Str(reason.to_string()),
             )],
         })),
     })
