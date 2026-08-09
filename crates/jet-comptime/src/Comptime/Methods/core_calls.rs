@@ -1593,11 +1593,9 @@ pub fn apply_core_call(
         )),
         // --- core.path (pure) ---
         ("core.path", "join") => {
-            let a = as_string(one(0)?, span)?;
-            let b = as_string(one(1)?, span)?;
-            Ok(CtValue::Str(path_kernel::jet_std_path_join(
-                a, b,
-            )))
+            let a = as_string(one(0)?, span)?.to_string();
+            let b = as_string(one(1)?, span)?.to_string();
+            Ok(CtValue::Str(path_kernel::jet_std_path_join(&a, &b)))
         }
         // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
@@ -1614,16 +1612,16 @@ pub fn apply_core_call(
             crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
         }
         ("core.path", "parent") => {
-            let p = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(path_kernel::jet_std_path_parent(p)))
+            let p = as_string(one(0)?, span)?.to_string();
+            Ok(CtValue::Str(path_kernel::jet_std_path_parent(&p)))
         }
         ("core.path", "extension") => {
-            let p = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(path_kernel::jet_std_path_extension(p)))
+            let p = as_string(one(0)?, span)?.to_string();
+            Ok(CtValue::Str(path_kernel::jet_std_path_extension(&p)))
         }
         ("core.path", "normalize") => {
-            let p = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(path_kernel::jet_std_path_normalize(p)))
+            let p = as_string(one(0)?, span)?.to_string();
+            Ok(CtValue::Str(path_kernel::jet_std_path_normalize(&p)))
         }
         // --- core.encoding.json ---
         ("core.encoding.json", "parse") => {
@@ -2054,43 +2052,43 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.plural count must be Int", span)),
             };
-            let singular = as_string(one(1)?, span)?;
-            let plural = as_string(one(2)?, span)?;
+            let singular = as_string(one(1)?, span)?.to_string();
+            let plural = as_string(one(2)?, span)?.to_string();
             Ok(CtValue::Str(fmt_kernel::jet_fmt_plural(
-                count, singular, plural,
+                count, &singular, &plural,
             )))
         }
         ("core.fmt", "pad_left") => {
-            let text = as_string(one(0)?, span)?;
+            let text = as_string(one(0)?, span)?.to_string();
             let width = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.pad_left width must be Int", span)),
             };
-            let fill = as_string(one(2)?, span)?;
+            let fill = as_string(one(2)?, span)?.to_string();
             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_left(
-                text, width, fill,
+                &text, width, &fill,
             )))
         }
         ("core.fmt", "pad_right") => {
-            let text = as_string(one(0)?, span)?;
+            let text = as_string(one(0)?, span)?.to_string();
             let width = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.pad_right width must be Int", span)),
             };
-            let fill = as_string(one(2)?, span)?;
+            let fill = as_string(one(2)?, span)?.to_string();
             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_right(
-                text, width, fill,
+                &text, width, &fill,
             )))
         }
         ("core.fmt", "pad_center") => {
-            let text = as_string(one(0)?, span)?;
+            let text = as_string(one(0)?, span)?.to_string();
             let width = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.pad_center width must be Int", span)),
             };
-            let fill = as_string(one(2)?, span)?;
+            let fill = as_string(one(2)?, span)?.to_string();
             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_center(
-                text, width, fill,
+                &text, width, &fill,
             )))
         }
         // --- D-ANY-JAI1: core.reflect (the runtime reflection floor, pure).

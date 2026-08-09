@@ -423,6 +423,7 @@ fn jet_compute_trace_inputs(
         tracked.push(input);
         debug_assert_eq!(index, node);
     }
+    drop(guard);
     (tape, tracked)
 }
 
@@ -2735,15 +2736,12 @@ fn jet_compute_jvp_rule(
             };
             let left_values = jet_compute_tensor_values(&left_value);
             let right_values = jet_compute_tensor_values(&right_value);
-            let left_tangents = jet_compute_tensor_values(&left_tangent);
-            let right_tangents = jet_compute_tensor_values(&right_tangent);
             let mut left_mask = Vec::with_capacity(output_values.len());
             let mut right_mask = Vec::with_capacity(output_values.len());
-            for (((output, a), b), (left, right)) in output_values
+            for ((output, a), b) in output_values
                 .iter()
                 .zip(left_values.iter())
                 .zip(right_values.iter())
-                .zip(left_tangents.iter().zip(right_tangents.iter()))
             {
                 if *a == *b {
                     return Err(JetComputeError::Unsupported(

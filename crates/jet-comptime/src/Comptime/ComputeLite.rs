@@ -504,7 +504,7 @@ fn trace_from_ct(value: &CtValue, span: Span) -> Result<JetComputeTrace, Diagnos
         CtValue::Int(node) if *node >= 0 => usize::try_from(*node).map_err(|_| unsupported("autodiff trace node", span))?,
         _ => return Err(unsupported("autodiff trace node", span)),
     };
-    let inputs = match field("inputs")? {
+    let _inputs = match field("inputs")? {
         CtValue::List(values) => values
             .iter()
             .map(|value| ct_to_tensor_inner(value, span, false))
