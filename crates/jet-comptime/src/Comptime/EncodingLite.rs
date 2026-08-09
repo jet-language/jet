@@ -25,6 +25,7 @@
 //! `json_payload`) every accessor method (`.field`/`.at`/...) already reads,
 //! so no new value machinery is needed — just new parse/render walkers that
 //! build/consume that shape instead of `DataTree`.
+//! parity: guard tests/encoding_parity.rs::whole_value_codecs_match_aot_comptime_and_default_dev
 
 use std::collections::{BTreeMap, HashMap};
 

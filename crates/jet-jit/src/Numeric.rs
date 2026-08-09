@@ -10,6 +10,7 @@ use jet_foundation::Numeric::{CtDecimal, CtFraction};
 /// Record an invalid `BigInt(...)` literal as a trap (mirrors AOT's
 /// `JetBigInt::from_str(...).expect(...)` panic, but as a JIT-safe trap
 /// instead of a Rust panic unwinding through a JIT frame — I1).
+/// parity: guard tests/dev.rs::bigint_example_matches_interpreter_resident_jit_default_dev_and_aot
 fn trap_bigint(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap(msg);
@@ -321,7 +322,6 @@ host_fns! {
     fraction_to_float: "jet_jit_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     fraction_is_zero: "jet_jit_fraction_is_zero" => jet_jit_fraction_is_zero: sig_unary_bool;
 }
-
 
 
 

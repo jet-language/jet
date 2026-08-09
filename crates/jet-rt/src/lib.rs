@@ -634,6 +634,7 @@ impl JetArena {
     /// `Err` on a malformed literal (mirrors AOT's `JetBigInt::from_str(...).expect(...)`
     /// panic path — the caller traps instead of unwinding a Rust panic through the
     /// JIT frame, I1).
+    /// parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
     pub fn alloc_bigint_from_str(&mut self, s: &str) -> Result<i64, String> {
         let v = jet_foundation::Numeric::CtBigInt::from_str(s)?;
         let id = self.values.len() as i64;

@@ -441,6 +441,7 @@ fn run() {
 /// (I3). The emit forms (`(x).abs()`, `(a).min(b)`, `jet_std_random_pick(&(xs))`,
 /// `eprintln!`) reproduce `emit_core_call` byte-for-byte. `random.pick` returns
 /// `Int?` (the element type wrapped in Option), proving the resolved_ret writeback.
+/// parity: guard tests/tir_unsafe_and_runtime.rs::polymorphic_core_specials
 #[test]
 fn polymorphic_core_specials() {
     if !have_rustc() {

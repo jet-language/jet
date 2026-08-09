@@ -326,6 +326,7 @@ fn as_string_rows(v: &CtValue, span: Span) -> Result<Vec<Vec<String>>, Diagnosti
 /// `jet_enc_csv_to_string` and the resident JIT's `csv_render_datatree` cell for
 /// cell. Returns `None` when the value is not a list of records, so the caller
 /// can fall back to the dynamic `[[String]]` rows shape.
+/// parity: guard tests/encoding_parity.rs::typed_csv_encode_matches_aot_and_default_dev
 fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
     let CtValue::List(items) = v else {
         return None;
@@ -375,6 +376,7 @@ fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
 /// Mirrors AOT's `JetURL` field shape 1:1 so `.scheme`/`.host`/`.path`/
 /// `.query`/`.fragment` struct-field reads (generic member access,
 /// `Interpreter.rs`) work the same as any other `CtValue::Struct`.
+/// parity: guard tests/repl.rs::repl_core_url_dispatch
 fn url_parts_to_ct(u: &super::super::UrlLite::UrlParts) -> CtValue {
     CtValue::Struct {
         type_name: "Url".to_string(),
@@ -740,6 +742,7 @@ pub(in super::super) fn random_float(state: &mut u64) -> f64 {
 /// formulas — so an ambient `core.random.*` call at comptime and the same
 /// call at AOT runtime draw the identical sequence from the identical seed
 /// (R12 parity).
+/// parity: guard tests/comptime_diff.rs::comptime_module_calls_match_runtime
 fn random_float_open(state: &mut u64) -> f64 {
     let x = random_float(state);
     if x <= 0.0 {
@@ -1600,6 +1603,7 @@ pub fn apply_core_call(
         // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
         // --- core.event (shared TIR evaluator / deopt; mirrors AOT JetEvent*) ---
+        // parity: guard tests/event_hooks.rs::decision_hook_outcomes_transform_and_short_circuit
         ("core.event", "scope") => Ok(crate::Comptime::core_event_scope()),
         ("core.event", "policy_sync") => Ok(crate::Comptime::core_event_policy_sync()),
         ("core.event", "new") => Ok(crate::Comptime::core_event_new()),
@@ -2136,6 +2140,7 @@ pub fn apply_core_call(
         // --- core.encoding.base64 URL-safe variant (pure; mirrors AOT's
         // `jet_std_b64url_*`, EncodingCodecs.rs — the same alphabet with
         // `+`/`/` swapped for `-`/`_` and no padding) ---
+        // parity: include path=crates/jet-codegen/src/Prelude/Core/EncodingBase.rs
         ("core.encoding.base64", "encode_url") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(
@@ -2159,6 +2164,7 @@ pub fn apply_core_call(
         }
         // --- core.encoding.base32 (pure; mirrors AOT's `jet_std_base32_*`,
         // EncodingCodecs.rs, byte-for-byte — same alphabet, same bit-packing) ---
+        // parity: guard tests/encoding_parity.rs::whole_value_codecs_match_aot_comptime_and_default_dev
         ("core.encoding.base32", "encode") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(base32_encode(&bytes)))

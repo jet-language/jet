@@ -3262,6 +3262,7 @@ impl<'a> EvalCtx<'a> {
                 // comptime keeps depth 0 and must reject — never fall through
                 // to `apply_core_call`, which still hosts AuthLite/SyncLite
                 // and would const-fold storeful Ok(literals) (I9).
+                // parity: guard tests/dev.rs::dev_default_matches_compiled_binary
                 if self.repl_mode {
                     let mut sink = self
                         .sink

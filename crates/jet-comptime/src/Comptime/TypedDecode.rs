@@ -7,6 +7,7 @@
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
 //! and the `[FieldError]` / `MigrationStatus{migrated,from,steps}` shapes
 //! `jet_std` defines.
+//! parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
 //!
 //! Operates directly on the `JSON`-tagged `CtValue` tree `JSONInterp`/
 //! `EncodingLite` already build for every codec (json/csv/toml/yaml) — its

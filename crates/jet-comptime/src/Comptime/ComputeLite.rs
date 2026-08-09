@@ -1,6 +1,7 @@
 //! D-COMPUTE1=D / I9: `core.compute` ambient mirrors AOT Prelude `jet_compute_*`
 //! by including the same source (`Prelude/CoreLib/Top/Compute.rs`). Marshalling
 //! to `CtValue` lives here; engines must not re-encode tensor law.
+//! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs
 
 use crate::AST::{
     ClosureData, CtFloat, CtOpaque, CtReport, CtValue, Lambda, LambdaBody, LambdaMeta, Type,

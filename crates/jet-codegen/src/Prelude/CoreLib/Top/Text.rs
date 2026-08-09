@@ -292,6 +292,7 @@ fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
 // identical algorithm and the conformance tests (this AOT copy is validated
 // by that mirror, not a separate compiled test — it is spliced flat into the
 // user's generated program, not compiled as part of this crate).
+// parity: guard tests/text_unicode.rs::pinned_unicode_tables_regenerate_byte_identically
 
 fn jet_text_bsearch_triple(table: &[(u32, u32, u8)], cp: u32) -> u8 {
     table

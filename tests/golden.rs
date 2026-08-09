@@ -802,6 +802,7 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_atomic_windows");
     // D-CRYPTO-RNG1=A: direct OS entropy calls and volatile zeroization live in
     // one std-only vetted module shared byte-for-byte by AOT and the FFI bridge.
+    // parity: guard tests/golden.rs::examples_compile_and_run
     let s = strip_mod(&s, "jet_crypto_entropy");
     let s = strip_mod(&s, "jet_gtk");
     // Tower #126 / I1: the emitted scheduler ships raw epoll/kqueue syscalls, the

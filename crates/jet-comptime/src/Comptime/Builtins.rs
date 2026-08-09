@@ -740,6 +740,7 @@ pub fn apply_method(
         // D-BIGINT1: explicit method-call form of the same arithmetic the
         // `+`/`-`/`*` operators reach in `eval_binop` (mirrors AOT's
         // `bigint_method_return` table in `jet-foundation/Numeric.rs`).
+        // parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
         (CtValue::BigInt(a), "add") => match args.into_iter().next() {
             Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.add(&b))),
             _ => Err(unsupported("`BigInt.add` with a non-BigInt argument", span)),

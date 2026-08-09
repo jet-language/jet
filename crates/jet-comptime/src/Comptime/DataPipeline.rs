@@ -9,6 +9,7 @@
 //! these need the call-site type argument at runtime — only ordinary Jet
 //! lambdas over rows, applied through the same `call_closure` path
 //! `list.map`/`.filter`/`.sort_by` already use.
+//! parity: guard tests/dataflow_stream.rs::rolling_mean_nonfinite_matches_aot_and_default_dev
 
 use std::collections::{BTreeMap, HashMap};
 

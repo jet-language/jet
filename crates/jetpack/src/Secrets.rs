@@ -436,6 +436,7 @@ fn spawn_helper_command(helper: &Path, command: &str, directory: Option<&Path>) 
 // crates (this one and the hidden bridge) that can't share Rust types, so the
 // wire format is duplicated rather than imported, same reasoning as
 // `core.db`'s bind-param wire encoding.
+// parity: guard tests/vault_keys.rs::actual_typed_vault_bridge_fixture_compiles_and_runs
 // ──────────────────────────────────────────────
 
 fn encode_pairs(pairs: &[(String, String)]) -> Vec<u8> {

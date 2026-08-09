@@ -36,6 +36,7 @@ mod seeded_random_kernel {
 
 // Keep this seeded SplitMix64 stream byte-for-byte with the AOT `jet_rng_*`
 // helpers. `core.random`'s ambient interpreter RNG is intentionally separate.
+// parity: include path=crates/jet-codegen/src/Prelude/Core/SeededRandom.rs
 fn seeded_rng_next(state: &mut u64) -> u64 {
     seeded_random_kernel::jet_seeded_rng_next(state)
 }

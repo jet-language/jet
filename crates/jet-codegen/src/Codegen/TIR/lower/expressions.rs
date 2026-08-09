@@ -478,6 +478,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // check — so a const takes precedence even over a same-named local, matching
             // byte-for-byte). The evaluated value supplies the total scalar type so an
             // inlined F32 keeps its width in every TIR consumer.
+            // parity: guard tests/tir_patterns_and_fields.rs::comptime_local_is_literal_data
             if cx.consts.contains_key(name) {
                 let value = cx.const_values.get(name);
                 let ty = env
