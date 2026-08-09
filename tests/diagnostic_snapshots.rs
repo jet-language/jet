@@ -3,7 +3,8 @@
 //! .warn), both driven by the same `UPDATE_EXPECT` snapshot harness.
 //!
 //! Each flat tests/ui/NAME.jet has a sibling NAME.stderr holding the exact
-//! rendered output. A directory fixture uses `main.jet` + `stderr`, or
+//! rendered output. A directory fixture uses `run.jet` or legacy `main.jet`
+//! plus `stderr`, or
 //! `workspace.jet` + tests/ui/NAME.stderr. Each tests/ui_lint/NAME.jet has a
 //! sibling NAME.warn.
 //! To update after an INTENTIONAL wording change:
@@ -105,14 +106,18 @@ fn ui_snapshots() {
                 entries.push((path, format!("tests/ui/{}", name)));
             }
         } else if path.is_dir() {
-            let main = path.join(format!("main.{}", ext));
-            if main.is_file() {
+            let entry = ["run", "main"]
+                .into_iter()
+                .map(|name| path.join(format!("{name}.{ext}")))
+                .find(|candidate| candidate.is_file());
+            if let Some(entry) = entry {
+                let entry_name = entry.file_name().unwrap().to_string_lossy().into_owned();
                 let rel = format!(
-                    "tests/ui/{}/main.{}",
+                    "tests/ui/{}/{}",
                     path.file_name().unwrap().to_string_lossy(),
-                    ext
+                    entry_name
                 );
-                entries.push((main, rel));
+                entries.push((entry, rel));
             } else {
                 let workspace = path.join(jet::Syntax::WORKSPACE_FILE);
                 if workspace.is_file() {
@@ -405,7 +410,11 @@ fn ui_snapshots() {
         drop(cex_lock);
         let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
 
-        let expect_path = if path.file_name().unwrap() == "main.jet" {
+        let is_directory_entry = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "main.jet" || name == "run.jet");
+        let expect_path = if is_directory_entry {
             path.parent().unwrap().join("stderr")
         } else if path.file_name().and_then(|name| name.to_str())
             == Some(jet::Syntax::WORKSPACE_FILE)
