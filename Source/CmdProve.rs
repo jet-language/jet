@@ -97,7 +97,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if let Some(opts) = crate::ProveReplay::parse_capture_flag(arg) {
             if capture.is_some() || replay.is_some() {
-                eprintln!("error: `jet prove` accepts at most one of `--capture` / `--replay`");
+                crate::cli_error!("E2104", "`jet prove` accepts at most one of `--capture` / `--replay`");
                 exit(ExitCodes::USAGE);
             }
             capture = Some(opts);
@@ -106,7 +106,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if let Some(parsed) = crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str)) {
             if capture.is_some() || replay.is_some() {
-                eprintln!("error: `jet prove` accepts at most one of `--capture` / `--replay`");
+                crate::cli_error!("E2104", "`jet prove` accepts at most one of `--capture` / `--replay`");
                 exit(ExitCodes::USAGE);
             }
             match parsed {
@@ -115,7 +115,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                     i += if arg == "--replay" { 2 } else { 1 };
                 }
                 Err(message) => {
-                    eprintln!("error: {message}");
+                    crate::cli_error!("E2104", "{message}");
                     exit(ExitCodes::USAGE);
                 }
             }
@@ -135,21 +135,20 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             continue;
         }
         if arg.starts_with('-') {
-            eprintln!("error: unknown `jet prove` flag `{arg}`");
+            crate::cli_error!("E2102", "unknown `jet prove` flag `{arg}`");
             exit(ExitCodes::USAGE);
         }
         positional.push(arg);
         i += 1;
     }
     if positional.len() != 1 {
-        eprintln!("error: `jet prove` needs exactly one file, package, or workspace target");
-        eprintln!(" Fix: jet prove path/to/program.jet");
+        crate::cli_error!(@fix "E2104", "`jet prove` needs exactly one file, package, or workspace target", "jet prove path/to/program.jet");
         exit(ExitCodes::USAGE);
     }
     let target = match resolve_target(positional[0]) {
         Ok(target) => target,
         Err(message) => {
-            eprintln!("error: {message}");
+            crate::cli_error!("E2105", "{message}");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -333,7 +332,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         ) {
             Ok(items) => items,
             Err(message) => {
-                eprintln!("error: solver producer failed: {message}");
+                crate::cli_error!("E2105", "solver producer failed: {message}");
                 exit(ExitCodes::ICE);
             }
         }
@@ -415,7 +414,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     // object for every producer outcome that has a valid report.
     if exit_code != ExitCodes::ICE {
         if let Err(message) = write_jetproof(&target, &report) {
-            eprintln!("error: failed to write .jetproof: {message}");
+            crate::cli_error!("E2105", "failed to write .jetproof: {message}");
             exit(ExitCodes::ICE);
         }
     }
@@ -1588,16 +1587,7 @@ fn validate_lens(value: &str, target: &str, json_mode: bool) {
     let what = format!("unknown proof lens `{value}`");
     let why = "`jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver";
     let fix = format!("try `jet prove {target} --lens tests`");
-    if json_mode {
-        println!(
-            "{{\"schema_version\":1,\"code\":\"E2941\",\"severity\":\"error\",\"message\":{},\"why\":{},\"fix\":{},\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}",
-            json(&what), json(why), json(&fix)
-        );
-    } else {
-        eprintln!("Error [E2941]: {what}");
-        eprintln!(" Why: {why}");
-        eprintln!(" Fix: {fix}");
-    }
+    crate::emit_cli_report("E2941", what, why.to_string(), fix, json_mode);
     exit(ExitCodes::USAGE);
 }
 
@@ -1898,7 +1888,7 @@ mod supervision_tests {
     #[ignore]
     fn child_helper() {
         match std::env::var("JET_PROVE_CHILD_MODE").as_deref() {
-            Ok("exit70") => std::process::exit(70),
+            Ok("exit70") => std::process::exit(jet_foundation::ExitCodes::RUNTIME_PANIC),
             Ok("crash") => std::process::abort(),
             Ok("timeout") => {
                 std::thread::sleep(Duration::from_millis(300));

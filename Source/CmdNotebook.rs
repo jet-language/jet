@@ -49,9 +49,7 @@ pub(crate) fn run_notebook(raw: &[String]) {
     let addr = bind.unwrap_or("127.0.0.1:0");
     if !addr.starts_with("127.0.0.1") && !addr.starts_with("localhost") && bind.is_some() {
         if token.as_deref().unwrap_or("").is_empty() {
-            eprintln!("Error: non-loopback `jet notebook --bind` requires `--token <bearer>`");
-            eprintln!(" Why: D-NOTEBOOK-SURFACE1=D keeps the notebook client loopback-only unless auth is explicit");
-            eprintln!(" Fix: pass `--token <secret>` or bind `127.0.0.1`");
+            crate::cli_error!(@full "E2104", "non-loopback `jet notebook --bind` requires `--token <bearer>`", "D-NOTEBOOK-SURFACE1=D keeps the notebook client loopback-only unless auth is explicit", "pass `--token <secret>` or bind `127.0.0.1`");
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -59,7 +57,7 @@ pub(crate) fn run_notebook(raw: &[String]) {
     match serve_loopback(&mut kernel, addr, &token, path.as_deref()) {
         Ok(code) => exit(code),
         Err(e) => {
-            eprintln!("error: notebook server failed: {e}");
+            crate::cli_error!("E2105", "notebook server failed: {e}");
             exit(ExitCodes::ICE);
         }
     }

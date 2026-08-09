@@ -31,17 +31,16 @@ pub(crate) fn run_schema(args: &[String]) {
             run_squash(before.as_deref());
         }
         other => {
-            if let Some(v) = other {
-                eprintln!("error: `jet inspect schema {}` isn't a schema command", v);
-            } else {
-                eprintln!("error: `jet inspect schema` needs a verb");
-            }
-            eprintln!(
-                " Fix: use `jet inspect schema {}` to inspect published schemas, or \
-                 `jet inspect schema {} --before <version>` to re-baseline them",
+            let fix = format!(
+                "use `jet inspect schema {}` to inspect published schemas, or `jet inspect schema {} --before <version>` to re-baseline them",
                 Syntax::SCHEMA_VERB_STATUS,
                 Syntax::SCHEMA_VERB_SQUASH
             );
+            if let Some(v) = other {
+                crate::cli_error!(@fix "E2101", format!("`jet inspect schema {}` isn't a schema command", v), fix);
+            } else {
+                crate::cli_error!(@fix "E2104", "`jet inspect schema` needs a verb", fix);
+            }
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -146,18 +145,7 @@ fn pending_breaks(root: &std::path::Path) -> Vec<String> {
 /// `jet inspect schema squash --before <ver>` — re-baseline snapshots to current shape.
 fn run_squash(before: Option<&str>) {
     let Some(before) = before else {
-        eprintln!(
-            "error: `jet inspect schema {}` needs `--before <version>`",
-            Syntax::SCHEMA_VERB_SQUASH
-        );
-        eprintln!(
-            " Why: squash re-baselines to the current shape and marks migrations before \
-             a version as no longer required — so it needs that cutoff version"
-        );
-        eprintln!(
-            " Fix: run `jet inspect schema {} --before 2.0.0` (the version whose migrations you want to retire)",
-            Syntax::SCHEMA_VERB_SQUASH
-        );
+        crate::cli_error!(@full "E2104", format!("`jet inspect schema {}` needs `--before <version>`", Syntax::SCHEMA_VERB_SQUASH), "squash re-baselines to the current shape and marks migrations before a version as no longer required, so it needs that cutoff version", format!("run `jet inspect schema {} --before 2.0.0` (the version whose migrations you want to retire)", Syntax::SCHEMA_VERB_SQUASH));
         exit(ExitCodes::USER_ERROR);
     };
 
@@ -180,7 +168,7 @@ fn run_squash(before: Option<&str>) {
     let bundle = match jet::Loader::load_entry_with_overlay(&entry_str, None, true) {
         Ok(b) => b,
         Err(_) => {
-            eprintln!("error: couldn't load the project to read its current schema shape");
+            crate::cli_error!("E2105", "couldn't load the project to read its current schema shape");
             exit(ExitCodes::USER_ERROR);
         }
     };

@@ -739,6 +739,7 @@ renumbered, and no new `W` code may be allocated.
 | E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
 | E1338 | jet   | a loadable `.jetlib` artifact's compiler-identity stamp doesn't match the running compiler — refused before mapping (D-LIB-REUSE1=B) |
 | E1339 | jet   | a loaded library declares an effect the load site's grant doesn't cover — refused before mapping (D-LIB-DYNTRUST1=A) |
+| E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
 | E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
 | E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
@@ -785,6 +786,8 @@ renumbered, and no new `W` code may be allocated.
 | E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
 | E2103 | jet   | external completion could not read a verified JetCommandSchema record (D-SHAPE-CLI-CARRIER1, D-SHAPE-CLI-COMPLETE1) |
+| E2104 | jet   | a command has missing, malformed, or conflicting input |
+| E2105 | jet   | a driver file, tool, or operating-system operation failed |
 | E2110 | jet   | automatic GC or its trace failed safely (D-OPTGC1, cards #658/#659) |
 | E2111 | sema  | collector-owned graph escapes into an ownership-only function (D-OPTGC1, card #658) |
 | E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
@@ -936,6 +939,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 | E1300 | `--profile` is retired | Profile answers how hard to optimize a build. A named environment composition is a preset, so one word never answers two questions. | Select the composition with `--preset <name>`, declared under `presets:`. |
 | E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
+| E1340 | {problem} | Jetpack could not complete the command because the named input, project fact, tool, or operating-system operation did not satisfy it. | Correct the named problem, then run the command again. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -1154,10 +1158,9 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 E2702 is emitted only after parsing, effect checking, and ordinary typing have
 succeeded; those diagnostics win at the same call site. Dynamic or
 attacker-controlled values remain ordinary `CryptoError` results at runtime and
-never become E2702. Its machine projection is one `jet.diagnostic/v1` object
-with `code`, `class`, `severity`, `phase`, `what`, `why`, `fix`, a closed
-`reason`, `operation`, optional `expected`/`actual`, `primarySpan`, and an empty
-`relatedSpans` list. LSP carries the same object in diagnostic `data`. Neither
+never become E2702. Its machine projection is one `jet.report/v1` object with
+the standard report fields plus a closed `reason`, `operation`, and optional
+`expected`/`actual`. LSP carries the same object in diagnostic `data`. Neither
 projection may include secret material, ciphertext, parser offsets, operating
 system errors or paths, dependency errors, backend prose, or generated Rust.
 The closed `reason` spellings are `invalid_length`, `nonce_length`,
@@ -1652,6 +1655,8 @@ command/flag is within edit distance 2. Their golden transcripts live in
 | E2101 | Unknown or retired CLI route. Moved bare form: `` `{cmd}` moved under `jet {group}` ``. Invalid nested form: `` `{action}` isn't a jet {group} command ``. | Moved bare form: `infrequent commands live in a named area so daily Jet commands stay easy to scan`. Invalid nested form: `jet {group} accepts only commands in its named area`. | Moved bare form: ``run `jet {group} {cmd} {args}` ``. Invalid nested form: ``run `jet {group} help` ``. Human output renders these as Error/Why/Fix lines; JSON uses these exact message, why, and fix strings with control characters, quotes, and backslashes escaped. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 | E2103 | Couldn't read command metadata from `{program}`. | The path has no safe command basename, contains a control character, could not be opened once as a regular file, exceeded the 512 MiB bounded read, is not ELF/PE/Mach-O/Wasm, or its JetCommandSchema record is missing, malformed, duplicated, unsupported, nested inside another universal Mach-O container, or inconsistent across universal Mach-O slices. Completion discovery never executes the program and never accepts unverified metadata. | Rebuild the program with this Jet toolchain, then try again. Exits 1 (user error), not 2. |
+| E2104 | `{problem}` | Jet needs valid command input before it can run this command. | Correct the named argument or input, then run the command again. |
+| E2105 | `{problem}` | Jet could not complete the named file, tool, or operating-system operation. | Correct the named problem, then run the command again. |
 | E2110 | Automatic memory management failed, or its trace cannot be reported. | The private collector rejected an unsafe or impossible operation, or the trace is missing, unsafe to read, larger than 4 MiB, malformed, incompatible, stale, or incomplete. Reports never estimate promotions omitted by a bounded trace. | Check the trace path and retry with a smaller workload; for reports, run `jet run --gc-trace <file.jet>` before `jet gc report`. Exits 1 (user error). |
 | E2111 | A collector-owned graph cannot leave its scoped GC policy here. | The callee returns hidden traced storage, but the receiving function is governed by ordinary ownership. | Add `#Policy(gc)` to the receiving function or convert the graph to ordinary ownership before the boundary. |
 
@@ -1836,66 +1841,38 @@ front-end `.jet` diagnostics).
 
 ## Machine-readable diagnostics (`--json`)
 
-Passing `--json` to `jet check`, `jet build`, or `jet test` makes the
-driver emit diagnostics as **data** instead of prose, for scripts, CI,
-and editors. This is decision **D-DX1** (ratified 2026-06-16): a single,
-**stable, versioned** schema, shared by the `--json` CLI flag, the future
-`jet fix` engine, and the LSP. The serializer lives in
-`crates/jet-foundation/src/Diagnostics.rs`
-(`to_json` / `render_all_json`); this section is its single source of
-truth. Adding a field is allowed any time; **removing or repurposing one
-requires bumping `schema_version`.**
+Decision D-REPORT-MACHINE1 defines one schema for every machine-readable
+report. `render_all_json` emits JSON Lines. Each report is one complete
+`jet.report/v1` object followed by `\n`. An empty report batch emits no bytes.
+The output never contains ANSI bytes.
 
-**Shape — JSON Lines.** One self-contained JSON object per diagnostic,
-each terminated by `\n`, matching `cargo --message-format=json`. A run
-with N diagnostics prints N lines on **stdout**; a clean run prints
-nothing on stdout. Human prose and the `jet explain` footer still go to
-**stderr** in the non-`--json` path, and `--json` emits **no ANSI ever**
-(scripts must never parse ANSI). Field order is fixed and numbers are
-integers, so the bytes are deterministic and snapshot-pinnable.
-
-**Fields (schema_version 1):**
+Every report has these fields:
 
 | Field | Type | Meaning |
-|-------|------|---------|
-| `schema_version` | integer | Schema version; `1` today. Bumped only for breaking changes. |
-| `code` | string | The diagnostic code, e.g. `"E0037"`. Pairs with `jet explain`. |
-| `severity` | string | `"error"` or `"warning"`. |
-| `message` | string | The one-line *what* (same text as the human `Error [...]:` line). |
-| `why` | string | The *why* — the rule behind the diagnostic. |
-| `fix` | string | The *fix* — the concrete next step (human text). |
-| `file` | string | Path of the source file the diagnostic is about. |
-| `span` | object \| null | Source location, or `null` for whole-file diagnostics. |
-| `suggestions` | array | Machine-applicable fixes (possibly empty). |
-| `detail` | string \| null | Extra indented detail (e.g. tool output), or `null`. |
+|---|---|---|
+| `schema` | string | Always `jet.report/v1`. |
+| `moment` | string | Report source, such as `compile` or `test`. |
+| `severity` | string | `error`, `warning`, or `stop`. |
+| `code` | string | Stable report code. |
+| `what` | string | One-line problem text. |
+| `why` | string | Rule that explains the problem. |
+| `fix` | string | Concrete next action. |
+| `detail` | string or null | Extra bounded detail. |
+| `file` | string or null | Source path when one exists. |
+| `line` / `col` | integer or null | One-based source position. |
+| `span` | object or null | Byte range with `start` and `end`. |
+| `fix_edits` | array | Machine-applicable replacements. |
+| `cause` | array | Causal report chain. |
 
-A **`span`** object carries both human and machine coordinates:
-`start_byte`, `end_byte` (byte offsets into the file, the range a fix
-slices), and 1-based `start_line` / `start_col` / `end_line` / `end_col`.
-
-A **`suggestions`** entry is `{ "message", "replacements": [...] }`, where
-each replacement is `{ "file", "span", "new_text" }` — apply `new_text`
-over the byte range `[start_byte, end_byte)` in `file`. This is the
-contract the future `jet fix` engine and LSP code actions consume; today
-it is populated from live teaching auto-corrects (e.g. E0037 "replace
-`println` with `print`"). Diagnostics with no mechanical fix emit
-`"suggestions": []` — the field is always present so consumers never
-special-case its absence.
-
-Example (`jet check`, one teaching error, wrapped for readability —
-the real output is one line):
+Example; real output stays on one line:
 
 ```json
-{"schema_version":1,"code":"E0037","severity":"error",
- "message":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`",
- "file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},
- "suggestions":[{"message":"replace `println` with `print`",
-   "replacements":[{"file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},"new_text":"print"}]}],
- "detail":null}
+{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[]}
 ```
 
-The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
-(blessed using `.claude/skills/verify/SKILL.md`).
+Command status and ledger objects can keep their command schemas. Any report
+inside them uses `jet.report/v1`. No consumer of the shared renderer retains
+its legacy diagnostic envelope.
 ### E0910 — Published schema breaking change
 
 `#PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A

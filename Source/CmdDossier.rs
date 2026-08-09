@@ -28,10 +28,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
                 }
             }
             Err(msg) => {
-                eprintln!("error: {msg}");
-                eprintln!(
-                    " Fix: jet inspect dossier target board.sensor_v1  (or board.virt_aarch64)"
-                );
+                crate::cli_error!(@fix "E2105", msg, "jet inspect dossier target board.sensor_v1 (or board.virt_aarch64)");
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -49,10 +46,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         [path] => (*path, None),
         [path, target] => (*path, Some(*target)),
         _ => {
-            eprintln!("error: `jet inspect dossier` needs an entry file and optional symbol");
-            eprintln!(" Fix: jet inspect dossier examples/features/basics/hello.jet run");
-            eprintln!(" Fix: jet inspect dossier target board.sensor_v1");
-            eprintln!(" Fix: jet inspect dossier data");
+            crate::cli_error!(@fix "E2104", "`jet inspect dossier` needs an entry file and optional symbol", "jet inspect dossier examples/features/basics/hello.jet run; use `target board.sensor_v1` or `data` for those dossiers");
             exit(ExitCodes::USER_ERROR);
         }
     };
