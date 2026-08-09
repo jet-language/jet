@@ -142,8 +142,9 @@ to `()`. This decision does not add or change tuple syntax. D-NEVER1=C keeps
 non-returning paths as a compiler-only bottom fact; Jet has no public `Never`
 type.
 
-**S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
-`fn run() => () ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
+**S12 — Entry point** *(amended by D-FAIL-EXIT1/D-FAIL-UNIT1)*: `fn run()`;
+no `pub` required; it is fallible by default. An expert may pin
+`fn run() ? E`. **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/`#Doc("...")` markers, bracket form matching `#Codable`); an
@@ -1096,23 +1097,41 @@ user type of the same name shadows the core surface entirely.
 
 **S7 — Propagation**: postfix `?` on a fallible call.
 
-**S34 — Fallible return**: `T ? E`; bare `T ?` means `T ? Err`. Lowers to
-Rust `Result` (not surface syntax).
+**S34 — Fallible return**: `T ? E`; bare `T ?` means `T ? Err`. A `? E`
+clause after a parameter list is a full unit-fallible return annotation per
+D-FAIL-UNIT1; value-returning signatures keep `=> T ? E`. Lowers to Rust
+`Result` (not surface syntax).
 
-**S80 — Default error value** *(D-ERR2 and D-FAIL-ERROR1=A, amended
-2026-08-06, card #1528)*: `Err` is both the default error type and its
-constructor. `Err("msg")`, `Err("msg", code: "CFG404")`, and
+**S80 — Default error value** *(D-ERR2, D-S80-RUN1 and D-FAIL-ERROR1=A,
+amended by D-FAIL-EXIT1, 2026-08-06, card #1528)*: `Err` is both the default
+error type and its constructor. `Err("msg")`, `Err("msg", code: "CFG404")`, and
 `Err("msg", cause: e)` build one Prelude-owned value with readable `message`,
 `code`, and `cause` fields. `Error` is deleted, not aliased. Bare `T ?` means
 `T ? Err`; `T ? Err` is the explicit form. An `Err(e)` in a result-arm context
 still wraps the typed error value `e`. Argument shape distinguishes the two
-readings. Returned default errors print one report frame and exit non-zero.
-Cross-type conversion remains governed by the failure-family conversion rail.
+readings. `fn run()` is fallible by default; an expert may pin `fn run() ? E`.
+Returned default errors print one report frame and exit non-zero. Cross-type
+`?` conversion uses declared `impl Source => Target`; the `Fallible` trait and
+`to_error` are deleted by D-FAIL-CONV1.
 
-**D-ERRCTX1 — Error context**: automatic `?`-propagation trace in dev builds;
-stdlib `.context("msg {var}")` (lazy) for human wording. No new grammar.
+**D-ERRCTX1 — Error context** *(amended by D-FAIL-CTX1)*: a postfix `?` may
+carry a lazy string note. Every `?` hop joins the failure journey on every
+tier. The `.context` method and the `"__Fallible__"` lowering sentinel are
+deleted. No new binder grammar is added.
 
-**D-FAIL-CARRIER1 — One outcome carrier** *(ratified 2026-08-06, card
+**D-FAIL-MODEL1=A — one report, three routes** *(ratified 2026-08-06, card
+#1507)*: every failure is one product: a report with a code, message, why,
+fix, and source location. Attribution picks the route. A broken world promise
+returns a value in the signature. A broken code promise stops the program with
+attribution. A substrate failure stops and is contained at the nearest
+boundary. Routes change only at spelled boundaries, such as a task join or the
+process edge. No failure is lost or reworded.
+
+E0401/E0402 and `.drop("reason")` remain delivery-exactly-once rules on the
+value route. I2 and exit 101 remain substrate attribution. S36 owns the
+process-edge conversion. D-VALIDATE1's three layers are the attribution split.
+
+**D-FAIL-CARRIER1=A — one outcome carrier** *(ratified 2026-08-06, card
 #1527)*: `T?` and `T ? E` are two views of one carrier, not two types. The
 two type spellings are unchanged (D-RESULT-OPTION-CANON1 stands). An outcome
 has three facts: a payload, a verdict, and the reports it collected. Three
@@ -1145,8 +1164,76 @@ so every tier names one type. Examples:
 `examples/features/errors/or_err.jet` and
 `examples/features/errors/partial_and_notes.jet`.
 
-**S36 — Bug stops**: `panic("msg")` (friendly report, exit 70);
-`require(cond[, "msg"])` for invariants/preconditions. Prelude builtins.
+**D-FAIL-ERROR1=A — `Err` is the default error value** *(ratified 2026-08-06,
+card #1528)*: `Err("msg")` builds the default error. Labels add `code` and
+`cause`, and programs read `.message`, `.code`, and `.cause`. The default
+error type is `Err`; bare `T ?` implies it. This amends S80's builder spelling
+and deletes `Error` as a type name, not an alias.
+
+**D-FAIL-CONV1=A — one conversion rail** *(ratified 2026-08-06, card #1529)*:
+the `Fallible` trait, `to_error`, and `TryConvert::Fallible` are deleted.
+Error conversion uses the declared `impl Source => Target` form, including a
+conversion into the default error. The default-error target may name a foreign
+source type; typed targets keep E2406's orphan rule. This amends D-ERR2 and
+D-LIB3. E2402 and E2406 teach the one rail and their registered UI snapshots
+follow it.
+
+**D-FAIL-CTX1=A — notes ride `?` and the journey is automatic** *(ratified
+2026-08-06, card #1532)*: a postfix `?` may carry a string note. Each `?` hop
+joins the failure journey on every tier, whether it has a note or not. Notes
+use D-ERRCTX1's lazy interpolation rule. The `.context` method and the
+`"__Fallible__"` lowering sentinel are deleted.
+
+**D-FAIL-BREACH1=A — one runtime report family and one renderer** *(ratified
+2026-08-06, card #1530)*: arithmetic traps, bounds traps, contract failures,
+`require`, `panic`, and `#Todo` carry registered E30xx codes. One Prelude
+renderer owns the what/why/fix text and source arrow on every tier. `jet
+explain` answers runtime codes, `.expect_fail(E3010)` names an expected stop,
+and web throws carry the same report. `#Todo` is a real stop at exit 70, not
+exit 101. I4 and I9 apply to runtime failures.
+
+**D-FAIL-TIER1=A — contracts check on every tier and erase under proof**
+*(ratified 2026-08-06, card #1531)*: contracts have a TIR node and one
+Prelude check, so AOT, JIT, and the interpreter run the same check. A `#Pre`
+breach points at the call site. A `#Post` or `require` breach points at the
+body. A range proof removes a check; the unproven case keeps it. This amends
+D-PREPOST1 with proof-keyed erasure while keeping its explicit strip opt-out.
+
+**D-FAIL-EXIT1=A — fallible entry and one exit law** *(ratified 2026-08-06,
+card #1533)*: `fn run()` is fallible by default. An unhandled error reaches the
+process edge as a full report and exits 1. A breach or program-side fault exits
+70. Exit 101 belongs to Jet defects. `#Todo`, raw Prelude panics, and direct
+program-side exit sites route through the report boundary; the `CryptoError`
+entry arm is deleted. This amends S80's entry clause, retires E0122 and its
+allow-list, and updates S36, the architecture exit table's producer column,
+and E3001's entry text.
+
+**D-FAIL-UNIT1=A — unit-fallible signatures omit arrow and unit** *(ratified
+2026-08-06, card #1534)*: `fn save(path: String) ? IOError` has no arrow and no
+unit. Bare `fn sync() ?` means the default error. A value-returning signature
+keeps the arrow: `fn load() => Config ? E`. This amends S80's `fn run() => ()
+?` form and extends S34 so a `?` clause after the parameter list is a full
+return annotation.
+
+**D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
+2026-08-06, card #1535)*: inside a `??` fallback for a fallible value, `err`
+names the report. It is in scope only in that fallback. Optional fallbacks
+reject `err`. No lambda, binder, or parentheses are added. The
+`?? (next)` value form in D-ORRETURN-CANON1 is unchanged.
+
+**D-FAIL-EDGE1=A — the program edge uses target-native delivery** *(ratified
+2026-08-06, card #1536)*: an unhandled error crosses the final boundary in the
+target's native shape while carrying the same report. A CLI prints the frame
+and exits 1. A web app raises a typed error object. A wasm module returns a
+host-visible error value. A service emits a structured report, and a test
+fails with the report. Program source is unchanged; the target kind selects
+the boundary. D-FAIL-BREACH1 owns report words. Raw JavaScript throws and raw
+wasm panic paths are replaced.
+
+**S36 — Bug stops** *(amended by D-FAIL-BREACH1 and D-FAIL-EXIT1)*:
+`panic("msg")` and `require(cond[, "msg"])` are Prelude builtins. Program-side
+stops use the registered E30xx report family and exit 70. Exit 101 is reserved
+for Jet defects.
 
 **D-IGNORERET1 / D-IGNORERET2** *(as amended by D-MARK-DISCARD1=A,
 2026-07-11, card #498)*: discarding a fallible/`#MustUse` result requires
@@ -2097,10 +2184,12 @@ consumed exactly once on every path — `^` param, return,
 or `consume(x)` inside `#Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;
 one-branch-only E0141; lending instead E0142.
 
-**D-PREPOST1 — Contracts**: `#Pre(cond, "msg")` / `#Post(cond, "msg")` on a
-signature (`result` in Post); conditions pure; checked in every build;
-per-module build-policy strip is an explicit opt-out. Violation quotes the
-clause at the call site.
+**D-PREPOST1 — Contracts** *(amended by D-FAIL-TIER1)*:
+`#Pre(cond, "msg")` / `#Post(cond, "msg")` on a signature (`result` in Post);
+conditions pure; checked in every build; per-module build-policy strip is an
+explicit opt-out. A proof of the condition is a second, proof-keyed erasure
+disposition. A `#Pre` violation quotes the clause at the call site; a `#Post`
+violation points at the body.
 
 **D-METHODMACRO1=A / D-INLINE-PARAM1=A — Checked inline contracts**:
 `#Inline`/`#Inline(Always)` on
@@ -6038,30 +6127,21 @@ Retired rows also stop applying effects. `#Pure` set `is_pure` and
 spellings kept working and the registry's status column lied about them. They
 now teach their replacement and apply nothing.
 
-**2026-08-06 — D-CONF-PLANE1=A / D-CONF-NAME1=A**: `package.jet` has one
-parser and one field vocabulary. Before this decision, the compile path read
-the legacy flat parser (`payload:`/`packages:`/`effects:`/`build:`, no
-`outputs:` vocabulary) while tooling and Canvas read the role-typed
-`Package` parser (`identity:`/`outputs:`/`policy:`) — two parsers, two
-truths, and a declared `outputs:` output that never reached `jet build`.
-`jet_pkg_model::Package` (`crates/jet-pkg-model/src/Package/`) is now the
-only reader, wired into the compile path at `jet-driver`'s `Loader.rs` and
-`Manifest::parse`; the legacy parser directory
-(`crates/jet-pkg-model/src/PackageManifest/`) is deleted, not deprecated.
+**D-CONF-PLANE1=A — one fact plane, one parser** *(ratified 2026-08-06,
+card #1517)*: configuration is the program's knowledge about itself. Every
+build fact is a typed value on one registered plane, with one contribution law
+and one audit command. The role-typed `Package` shape is the only manifest
+vocabulary. The legacy flat parser is deleted. `build.os` is the plane's first
+row. The fact registry follows D-VERDICT-1455-1 and D-TYPE2-PLANE1: every fact
+is nameable, reflectable, and registered. Facts are comptime values that erase
+at codegen; S26 stands. This implements D-SHAPE5a/b and D-ECO-DECL1 on the
+compile path.
 
-The field vocabulary is judged as one coherent set (D-CONF-NAME1, option A):
-identity is bare `name:`/`version:` at the top level — no wrapper. The
-`identity: .{ }` block (D-SHAPE5) and the `payload: { }` block (U10) are both
-retired; either now reports the ordinary unknown-field E1206, naming the
-ratified spelling. The block nouns are `deps:`, `outputs:`, `settings:`,
-`build:`, `policy:`, `members:` (`MANIFEST_FIELD_NAME`, `MANIFEST_FIELD_VERSION`,
-`MANIFEST_BLOCK_DEPS`, `MANIFEST_BLOCK_OUTPUTS`, `MANIFEST_BLOCK_SETTINGS`,
-`MANIFEST_BLOCK_MEMBERS` in `crates/jet-foundation/src/Syntax/jetpack_config.rs`;
-`build:`/`effects:`/`grants:`/`policy:` keep their own prior decision IDs —
-D-BUILDPROFILE1, D-EFFBUDGET1, D-JPK-GRANTSCHEMA1 — unchanged by this ballot).
-`settings:` is accepted and stored structurally; typed `$build.settings.*`
-reads are the separate, unratified D-CONF-KEY1/D-CONF-READ1 ballots and are
-not wired here.
+**D-CONF-NAME1=A — bare identity, ratified nouns** *(ratified 2026-08-06,
+card #1517)*: `name:` and `version:` sit at the top level with no wrapper.
+The block nouns are `deps:`, `outputs:`, `settings:`, `build:`, `policy:`,
+and `members:`. The `identity:` wrapper is deleted. This amends D-SHAPE5a/b;
+all other ratified block nouns keep their decision IDs.
 
 Every block noun's grammar accepts nested records with or without the
 dot-construction prefix (`deps: .{ … }` and `deps: { … }` both parse; new
@@ -6073,44 +6153,137 @@ D-BUILDSCOPE1's package-scoped `fn build` may still live beside the manifest
 fields in the same file; the one parser steps over that one declaration
 rather than reporting it as a malformed field.
 
-Every in-repo `package.jet`/`pkg.jet` (examples, tests, fixtures) moved to
-the bare-identity spelling in the same change; no fallback parse path
-remains. Flagship: `examples/features/packages/outputs_build/`. Card #1517.
+Every in-repo `package.jet`/`pkg.jet` (examples, tests, fixtures) uses the
+bare-identity spelling; no fallback parse path remains. Flagship:
+`examples/features/packages/outputs_build/`. Card #1517.
 
-## D-CONF-WORD1=A — one meaning for the word profile (2026-08-06, card #1526)
+**D-CONF-READ1=A — `$build.*` fact reads** *(ratified 2026-08-06, card
+#1518)*: facts are read with the metaprogramming splice:
+`$build.package.version`, `$build.os`, and `$build.settings.tls`. `$` carries
+the compile-time meaning, so `build` remains an ordinary identifier. One
+spelling covers compiler facts, identity, settings, and stamps. Reads fold to
+constants before codegen; bare scripts use fallback identity from the file
+name and `0.0.0`. The `build.os` dispatch subject becomes
+`#Known if $build.os == { ... }`, and value-position fact reads are legal.
+This amends D-OSTARGET2 and D-CANVASSTATE1 and rides D-META-ONE1/S4. All I9
+tiers see one folded program.
+
+**D-CONF-KEY1=A — declared typed settings** *(ratified 2026-08-06, card
+#1519)*: a package declares each setting with a Tier-0 type and a default in a
+`settings:` block. Profiles and the command line contribute values by the
+contribution law. `#Known if` can fold on a setting, and a fact read is a
+constant. Undeclared settings are compile errors. `--set key=value` is the CLI
+spelling. `features:` and `env:` are deleted from `Build.{}`. This amends
+D-BUILDPROFILE1. The setting value set is Bool, Int, Char, String, and
+fieldless enum, as ratified by D-GENMOD-VALUE1.
+
+**D-CONF-MERGE1=A — nearest source, most explicit layer, `.Force` pins**
+*(ratified 2026-08-06, card #1520)*: one contribution law has two halves. In
+source scopes, the nearest scope wins across item, block, function, module,
+file, and package. Across layers, the most explicit writer wins:
+declaration, profile, workspace, environment, system, fleet, and CLI. Two
+writers at one layer with different values remain a hard error that names both
+sources. At system and fleet layers, `.Force` pins a value against later
+layers, including the CLI, and `jet explain` names the pin. This extends
+D-MARK-SCOPE1 and amends the Config composition conflict rule so cross-layer
+overrides are legal while same-layer conflicts still error. Safety facts
+tighten only. Ambient contributions remain forbidden. The
+D-JOS-PRIORITY-SURFACE2 surface is unchanged.
+
+**D-CONF-SPLIT1=A — facts in text, actions in `fn build`** *(ratified
+2026-08-06, card #1522)*: manifest text is the complete index of configurable
+facts. Each fact has a type and default. `fn build` performs probes, steps, and
+code generation. It may contribute a value to a declared fact. Every computed
+contribution is recorded in `.jet/lock` and named by `jet explain`. `fn build`
+cannot mint an undeclared fact. D-BUILDCTX-FLAGS1 survives only as
+`b.contribute(fact, value)` against a declared fact. Computed contributions
+follow D-MODCOMPUTE1. Build actions keep the D-BUILDTARGET1/D-BUILDACTION1
+family.
+
+**D-CONF-ENTRY1=A — one build entry per package** *(ratified 2026-08-06,
+card #1521)*: `fn build` follows `fn run` discovery. A package has at most one
+`fn build`, in any package file; the compiler discovers it. Duplicate
+candidates are a compile error that names both sites. A workspace runs member
+builds in dependency order, root last. `jet build <name>` resolves a package
+through the members graph and runs its build. No pointer field is required;
+an Output-level `entry:` override remains available. No `fn build` means the
+batteries pipeline. This extends D-BUILDENTRY1, uses D-ECO-MEMBERS1, and keeps
+the D-SHAPE-OUTPUT-CALLABLE1 override.
+
+**D-CONF-MODULE1=A — one value substrate** *(ratified 2026-08-06, card
+#1524)*: settings and module value parameters share one evaluator, one fuel
+budget, and one diagnostic family. A build fact is a legal module value
+argument, so the final module spelling can read
+`module tuned :: cache<Int>($build.settings.cache_slots)`. The closed-
+expression rule in D-GENMOD-VALUE1 admits facts as value arguments. The
+ratified `[T#capacity]` layout carve-out admits fact-fed `Int` parameters. A
+profile change produces a different cached specialization. Defaults and named
+arguments remain forbidden in the parameter list. S26 still says values
+specialize bodies and the one layout slot, never type identity or dispatch.
+D-CONF-GENSPELL1 owns the punctuation; this decision owns the shared
+substrate.
+
+**D-CONF-GENSPELL1=A — generic modules mirror functions** *(ratified
+2026-08-06, card #1523)*: generic modules use angle brackets for types and
+bounds, parentheses for typed value parameters, and `::` for the module alias.
+The canonical form is:
+
+```jet
+module cache<K>(capacity: Int) { ... }
+module int_cache :: cache<Int>(64)
+module tuned :: cache<Int>($build.settings.cache_slots)
+```
+
+A module with no value parameters has no parentheses. The value-parameter
+rules remain Tier-0, with no defaults or named arguments and the
+`[T#capacity]` slot. This amends D-GENMOD2. Migration is mechanical:
+`<K, capacity: Int>` becomes `<K>(capacity: Int)`, and `=` becomes `::`.
+E0851/E0853 keep their arity and type meanings. D-CONF-MODULE1 facts use the
+value position.
+
+**D-CONF-STAMP1=B — stamps plus a lock-pinned timestamp** *(ratified
+2026-08-06, card #1525)*: `$build.stamp.git` is the commit hash, with a
+`-dirty` suffix for an unclean tree and no value outside a repository.
+`$build.stamp.toolchain` is the Jet version. `$build.stamp.at` is captured once
+when the lock is written and replayed from the lock. All stamps are recorded
+in `.jet/lock`; a locked rebuild does not read the wall clock. Repository state
+is a Tier-1 locked input under D-CTEFFECT1. The timestamp describes lock
+history, not source.
+
+**D-CONF-WORD1=A — one meaning for the word `profile`** *(ratified 2026-08-06,
+card #1526)*:
 
 `profile` names exactly one thing: the optimize bundle selected by
 `--profile` and its ratified `--release` sugar. `release`, `debug`, and `ci`
-keep the word, and D-BUILDPROFILE1 is untouched.
+keep the word, and D-BUILDPROFILE1 is unchanged.
 
-The board identity is a machine description, so it moved into the machine
-vocabulary: `TargetProfile` is now `TargetMachine`, and `--target` selects it
-by a declared machine name (`board.sensor_v1`, `board.virt_aarch64`, `hosted`)
-beside an ordinary rustc triple. A no-OS machine carries the freestanding fact
-itself, so naming it is enough. The `targets:` manifest field (D-TGT1-4) and
-build-graph targets (D-BUILDTARGET1) keep their own words, and E1216 is
-unchanged.
+The board identity is a machine description and uses the machine vocabulary.
+`--target=<triple|board>` selects it. The `targets:` manifest field
+(D-TGT1-4) and build-graph targets (D-BUILDTARGET1) keep their own words, and
+E1216 is unchanged.
 
-A named environment composition is a preset. `ENV_FIELD_PROFILES` becomes
-`ENV_FIELD_PRESETS` (`presets:`) and `ENV_FLAG_PROFILE` becomes
-`ENV_FLAG_PRESET` (`--preset`); the retired `--profile` spelling teaches E1300
-and selects nothing. `ProfileSpec`, `ProfileSet`, `ResolvedProfile`, and
-`ProfileError` renamed to their `Preset` spellings.
+Under D-ENV-PROFILE1, environment `profiles:` becomes `presets:`. Under
+D-ENV-FACET1, `--env-profile` and the environment `--profile` become
+`--preset`. Under D-JPK-PROFILE1, package and user profile prose uses
+`generation`. These renames do not change behavior.
 
-Package and user profiles are generations. D-JPK-PROFILE1's wording only:
-docs and diagnostic text (E1332, E1335) read `generation`, and no flag,
-field, or on-disk schema changed.
+**D-META-ONE1=A — compile time is one Jet program** *(ratified 2026-08-06,
+card #1539)*: Compiler rules are Jet declarations in the Prelude program. Marker
+rows, effect roots, and the compile-time dimension vocabulary are not separate
+Rust-only language mechanisms. User rules use the same declaration and checking
+path. This fulfills D-VERDICT-1455-1: one law-zero registry and one declaration
+model govern built-in and user-defined compile-time behavior.
 
-Every in-repo consumer moved in the same change; no alias or fallback
-spelling remains. `--env-profile` still selects one `env.<name>` module and
-is the one slice this card left open: the ruling folds it into `--preset`,
-but that name is taken by the `presets:` selector, so the replacement word is
-an owner call. Card #1526.
+**D-META-REG1=A — one registration table** *(ratified 2026-08-06, card
+#1538)*: A marker, knowledge-plane entry, right, or build fact is one row in the
+shared registration table. The row records its name, target, law columns,
+publisher where needed, and marker signature where code is attached. Reflection,
+`jet explain`, and drift guards read that table. No category gets a second table,
+lookup, or guard.
 
-**2026-08-06 — one registration table: D-META-REG1=A, D-META-NAME1=A,
-D-META-FORM1=A** *(card #1538, proposal
-`docs/proposals/metaprogramming-one-compile-time-program.md`)*. Four registries
-were proposed in one week for one job. This ruling makes them one.
+**D-META-NAME1=A — the declaring word is `marker`** *(ratified 2026-08-06, card
+#1538)*: `marker` is the contextual keyword for a compile-time rule declaration.
+`rule`, `derive`, and a clause-only declaration are not language spellings.
 
 **2026-08-06 — D-META-EFFECT1=A** *(card #1543, same proposal)*. One effect
 model applies at both stages. Tier 0 is an empty effect set; Tier 1 is recorded
@@ -6130,34 +6303,60 @@ Reflection, `jet explain`, and the drift guards read that one table and are
 written once: no kind gets a second table, a second lookup, or a guard of its
 own. Marker rows come from the marker registry, so law zero (`D-VERDICT-1455-1`)
 is unchanged and every marker is still a row.
+**D-META-FORM1=A — one named-parameter list** *(ratified 2026-08-06, card
+#1538)*: A marker declaration uses one ordinary named parameter list. Plain
+parameters are use-site arguments; `$`-marked parameters are facts about the
+rule, such as `$sites` and `$repeatable`. There is no second parameter list,
+trailing clause, or scope block. A new rule fact is a new named parameter. Typed
+rule arguments use D-RULEARG-TYPES1.
 
-**D-META-NAME1 = A — the declaring word is `marker`.** The spec, the glossary,
-and the diagnostics already say marker, so no second name for one thing enters
-the language. `KW_MARKER` is the contextual keyword; `rule`, `derive`, and a
-clause-only form were declined.
+**D-META-USER1=A — user rules record facts or add code** *(ratified 2026-08-06,
+card #1540)*: A bodyless rule records its facts. A rule body adds code through the
+same checked path. The rule law is additive: it does not mutate or shadow an
+existing declaration. This amends D-METADEPTH1: additive user rules are inside
+the compile-time ceiling, while mutation and grammar changes remain outside it.
 
-**D-META-FORM1 = A — one named-parameter list, facts marked at compile time.** A
-rule declaration is an ordinary Jet declaration. The rule's own arguments and the
-facts about the rule share one parameter list, and the compile-time mark says
-which is which:
+**D-META-CODE1=A — generated code is real Jet code** *(ratified 2026-08-06, card
+#1541)*: `derive` and `b.generate` bodies are Jet code with typed holes. A filled
+template re-enters ordinary semantic checking, while D-CTCODEGEN1 remains the
+code-generation boundary.
 
-```jet
-marker Inline(mode: InlineMode = .Hint,
-              $sites: [.Function, .Method, .Constant])
+**D-META-BODY1=A — derive bodies are implementations** *(ratified 2026-08-06,
+card #1541)*: A derive body is a real implementation body. Compile-time flow may
+add members through that body, and member collisions are errors under the normal
+declaration rules.
 
-marker Pre(condition: Any, message: String,
-           $sites: [.Function, .Method], $repeatable: true)
-```
+**D-META-DSL1=A — libraries may declare checked text blocks** *(ratified
+2026-08-06, card #1542)*: A library can declare a checked text block. Jet owns the
+boundary and grammar contract; the library supplies the domain content. This
+amends D-DSLBLOCK1 and retires the marker-only `STDLIB_DSL_BLOCK_MARKERS`
+mechanism.
 
-`mode`, `condition`, and `message` are what a use site writes. `$sites` and
-`$repeatable` are facts about the rule itself. No keyword enters beyond the
-declaring word and the grammar gains no clause form: a trailing `on` clause, a
-second parameter list, and a scope block were each declined by name and each
-teaches E0381. A new fact about rules is a new named parameter, never a new
-clause. `$sites` takes `[Site]`, and `Site` is the eighteen-member menu published
-in `core.lang` beside the other marker-argument enums (`SITE_VARIANTS` in
-`crates/jet-foundation/src/Policy.rs`, generated from `RuleSite::ALL` under
-D-RULEARG-TYPES1=A).
+**D-META-EFFECT1=A — one effect model at both stages** *(ratified 2026-08-06,
+card #1543)*: Compile-time and runtime use the same effect syntax and checker.
+D-CTCORE1's special allow-list is retired. The effect tiers remain: Tier 0 is
+empty, Tier 1 records an effect, and Tier 2 requires `#Impure` plus permission.
+
+**D-META-CONST1=A — comptime values are constants** *(ratified 2026-08-06, card
+#1544)*: Any computable compile-time value is legal wherever a constant is legal.
+The literal-only E0963 and E0035 restrictions are retired; S26 remains the
+constant-evaluation law.
+
+**D-META-MODNAME1=A — instance members use the instance path** *(ratified
+2026-08-06, card #1541)*: Generated members are reached through the module
+instance path, for example `three_ints.Buffer`. Any mangled implementation name
+is internal and is not a second user-facing naming form.
+
+**D-META-STAGE1=B — `$` marks every compile-time mention** *(ratified
+2026-08-06, card #1537)*: `$` belongs to the name at every compile-time mention.
+It marks a declaration, use, and fact read; `#Known`, `#Known if`, and the
+`#Known { ... }` form retire from the marker plane. This amends
+D-VERDICT-1308-1 and D-VERDICT-1308-2 and retires D-CTMARKER1.
+
+**D-META-AUTO1=A — derive all eligible structure unless refused** *(ratified
+2026-08-06, card #1545)*: Every structurally derivable capability is derived by
+default unless the user refuses it. The existing refusal spelling and eligibility
+gates remain. This amends D-AUTODERIVE1=E and D-AUTODERIVE-SYNTAX1.
 
 **2026-08-07 — the compiler-facts slate: D-FACT-LAW1=B, D-FACT-WORD1=A,
 D-FACT-GATE1=A, D-FACT-READ1=A, D-FACT-HOME1=A, D-FACT-OWN1=A,
@@ -6313,7 +6512,7 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
 - **D-ONCE-HASH1=B** — interpolation format selectors respell to colon (`{x:Fixed(2)}`, `{user:Debug}`); `#` keeps its three non-colliding jobs: applied rules, fixed-size lists (`[T#4]`), and package version pins.
 
-## Marker rows are Prelude declarations (D-META-ONE1=A, card #1539)
+## Implementation note — marker rows are Prelude declarations
 
 The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
