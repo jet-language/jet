@@ -74,6 +74,23 @@ pub struct OutputFact {
     pub payload: OutputPayload,
 }
 
+impl OutputFact {
+    /// D-LIB-NAME1=A: `Library.{ loadable: true }` requests a `.jetlib`
+    /// artifact. The manifest parser owns the field shape; callers read the
+    /// checked boolean instead of re-parsing the payload.
+    pub fn is_loadable(&self) -> bool {
+        self.kind == PackageOutputKind::Library
+            && matches!(
+                &self.payload,
+                OutputPayload::Object(fields)
+                    if matches!(
+                        fields.get(crate::Syntax::OUTPUT_FIELD_LOADABLE),
+                        Some(OutputPayload::Bool(true))
+                    )
+            )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputPayload {
     Null,
@@ -1995,6 +2012,17 @@ fn parse_output_value(key: &str, raw: &str) -> Result<OutputFact, PackageParseEr
                     value,
                 });
             }
+            let loadable_is_bool = matches!(
+                &payload,
+                OutputPayload::Object(fields)
+                    if matches!(fields.get(&field), Some(OutputPayload::Bool(_)))
+            );
+            if field == crate::Syntax::OUTPUT_FIELD_LOADABLE && !loadable_is_bool {
+                return Err(PackageParseError::InvalidValue {
+                    field: format!("outputs.{key}.{field}"),
+                    value,
+                });
+            }
             Ok((field, scalar(&value)))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -2179,7 +2207,10 @@ fn parse_members(value: &str) -> Result<Vec<MemberRef>, PackageParseError> {
 
 fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
     match kind {
-        PackageOutputKind::Library => matches!(field, "name" | "modules"),
+        PackageOutputKind::Library => matches!(
+            field,
+            "name" | "modules" | "entry" | crate::Syntax::OUTPUT_FIELD_LOADABLE
+        ),
         PackageOutputKind::Executable | PackageOutputKind::Service | PackageOutputKind::Check => {
             matches!(field, "name" | "entry")
         }
@@ -2806,6 +2837,32 @@ defaults: .{ run: app, test: check }
         assert_eq!(facts.outputs["app"].kind, PackageOutputKind::Executable);
         assert_eq!(facts.select_output("run", None, None).unwrap().name, "app");
         assert_eq!(facts.select_output("test", None, None).unwrap().name, "check");
+    }
+
+    #[test]
+    fn loadable_library_uses_ratified_field_and_formats_round_trip() {
+        let source = r#"name: "skyhawk"
+outputs: .{ mod: .Library.{ entry: Skyhawk, loadable: true } }"#;
+        let facts = PackageFacts::parse(source, "package.jet").unwrap();
+        let output = &facts.outputs["mod"];
+        assert_eq!(output.entry.as_deref(), Some("Skyhawk"));
+        assert!(output.is_loadable());
+
+        let formatted = format_source(source, "package.jet").unwrap();
+        assert!(formatted.contains("loadable: true"), "{formatted}");
+        let reparsed = PackageFacts::parse(&formatted, "package.jet").unwrap();
+        assert_eq!(&reparsed.outputs["mod"], output);
+    }
+
+    #[test]
+    fn loadable_library_requires_a_boolean() {
+        let error = PackageFacts::parse(
+            r#"name: "skyhawk"
+outputs: .{ mod: .Library.{ loadable: "yes" } }"#,
+            "package.jet",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("outputs.mod.loadable"), "{error}");
     }
 
     #[test]

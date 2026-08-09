@@ -5990,6 +5990,15 @@ prerequisite closes.
 
 **2026-08-07 — D-NAME-FILES1 = C** *(card #1625, proposal `docs/proposals/names-one-tree.md`)*. Manual named imports stay: every cross-file name keeps an explicit import line, and no invisible auto-import of project files ships. Owner's words: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot. The rest of the D-NAME slate stays open on the card.
 
+**2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
+D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
+`loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,
+grant: .{ ... })?` is the load form, and `mod.on_tick(dt)` is the typed member
+call form. The grant maps declared effects to normalized path sets and is
+checked before mapping. Native export produces static and shared libraries,
+the C header, and generated bindings for named languages. No new lexer token,
+keyword, or Jet-to-Jet ABI promise enters the surface.
+
 ## The say-it-once slate (D-ONCE-*, ratified 2026-08-07, card #1656)
 
 The corpus-wide first-principles audit's rulings. Tower is the decision home (D-ONCE-LEDGER1=A); this block is the spec render.
