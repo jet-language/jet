@@ -242,3 +242,121 @@ fn measurement_has_one_semantic_home() {
         assert!(!jit.contains(fingerprint), "JIT wrapper copied `{fingerprint}`");
     }
 }
+
+#[test]
+fn round_three_value_kernels_have_one_semantic_home() {
+    for (kernel, users) in [
+        (
+            "Core/Fmt.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/Fmt.rs",
+                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+            ],
+        ),
+        (
+            "Core/Path.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/CoreHost.rs",
+                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+            ],
+        ),
+        (
+            "Core/SeededRandom.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/Random.rs",
+                "crates/jet-comptime/src/Comptime/Methods/dispatch.rs",
+            ],
+        ),
+        (
+            "Core/EncodingBase.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/Encoding.rs",
+                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+            ],
+        ),
+        (
+            "Core/NetPure.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/net_http_rt.rs",
+                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+            ],
+        ),
+        (
+            "CoreLib/Top/MathLibPure.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/build.rs",
+                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+            ],
+        ),
+        (
+            "Core/Loadable.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/Reactive.rs",
+                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+            ],
+        ),
+        (
+            "CoreLib/Top/Text.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/Text.rs",
+                "crates/jet-comptime/src/Comptime/TextLite.rs",
+            ],
+        ),
+        (
+            "CoreLib/JetStd/UrlMime.rs",
+            [
+                "crates/jet-codegen/src/Codegen/mod.rs",
+                "crates/jet-jit/src/Net.rs",
+                "crates/jet-comptime/src/Comptime/UrlLite.rs",
+            ],
+        ),
+    ] {
+        for path in users {
+            assert!(read(path).contains(kernel), "{path} must include {kernel}");
+        }
+    }
+
+    let codecs = read("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs");
+    assert!(!codecs.contains("fn jet_std_hex_encode"));
+    assert!(!codecs.contains("fn jet_std_b64_encode"));
+    assert!(!codecs.contains("fn jet_std_base32_encode"));
+    let core_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
+    let jit_encoding = read("crates/jet-jit/src/Encoding.rs");
+    for decoder in [
+        "base_encoding_dispatch::decode_base64",
+        "base_encoding_dispatch::decode_base64url",
+        "base_encoding_dispatch::decode_base32",
+    ] {
+        assert!(core_calls.contains(decoder), "comptime must use {decoder}");
+        assert!(jit_encoding.contains(decoder), "JIT must use {decoder}");
+    }
+
+    let data_fmt = read("crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs");
+    assert!(!data_fmt.contains("fn jet_fmt_number"));
+
+    assert!(
+        read("crates/jet-comptime/src/Comptime/Builtins.rs").contains("Core/Loadable.rs")
+    );
+
+    let text = read("crates/jet-comptime/src/Comptime/TextLite.rs");
+    assert!(!text.contains("fn nfd_inner"));
+    assert!(!text.contains("fn ccc("));
+
+    let url = read("crates/jet-comptime/src/Comptime/UrlLite.rs");
+    assert!(!url.contains("fn url_valid_scheme"));
+
+    let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
+    assert!(!pure.contains("parse::<std::net::IpAddr>"));
+    assert!(!pure.contains("parse::<std::net::SocketAddr>"));
+
+    assert!(!core_calls.contains("std::path::Path::new(a)"));
+    assert!(!core_calls.contains("fn comma_int_ct"));
+}

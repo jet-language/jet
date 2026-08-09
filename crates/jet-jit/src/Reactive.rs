@@ -9,6 +9,10 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::sync::Arc;
 
+mod loadable_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
+}
+
 /// Canonical reactive core (JetSignal / JetDerived / jet_reactive_effect*).
 #[allow(dead_code, unused_imports)]
 pub(crate) mod reactive_rt {
@@ -216,20 +220,20 @@ extern "C" fn jet_jit_reactive_effect_rooted(
 
 extern "C" fn jet_jit_loadable_idle() -> i64 {
     // disc=Idle(0), no payload — packed enum ABI
-    0
+    i64::from(loadable_kernel::JET_LOADABLE_IDLE)
 }
 extern "C" fn jet_jit_loadable_loading() -> i64 {
-    1
+    i64::from(loadable_kernel::JET_LOADABLE_LOADING)
 }
 extern "C" fn jet_jit_loadable_loaded(payload: i64) -> i64 {
-    (payload << 8) | 2
+    (payload << 8) | i64::from(loadable_kernel::JET_LOADABLE_LOADED)
 }
 extern "C" fn jet_jit_loadable_failed(payload: i64) -> i64 {
-    (payload << 8) | 3
+    (payload << 8) | i64::from(loadable_kernel::JET_LOADABLE_FAILED)
 }
 
 extern "C" fn jet_jit_loadable_is(handle: i64, kind: i64) -> i8 {
-    if (handle & 0xff) == kind {
+    if loadable_kernel::jet_loadable_is_tag((handle & 0xff) as u8, kind as u8) {
         1
     } else {
         0
@@ -241,7 +245,7 @@ extern "C" fn jet_jit_loadable_payload(handle: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_loadable_or_else(handle: i64, default: i64) -> i64 {
-    if (handle & 0xff) == 2 {
+    if loadable_kernel::jet_loadable_has_value((handle & 0xff) as u8) {
         handle >> 8
     } else {
         default

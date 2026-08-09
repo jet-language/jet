@@ -1,197 +1,58 @@
-//! `core.fmt` host shims (#729). Mirrors `jet_fmt_*` in
-//! `jet-codegen/.../DataFmt.rs` (prelude is string-embedded; same algorithm).
+//! `core.fmt` host shims (#729). The formatting rules live in the shared
+//! Prelude kernel; this file only marshals JIT strings.
 
-use crate::Marshal::{clone_string, alloc_string};
+use crate::Marshal::{alloc_string, clone_string};
 
-fn comma_int(value: i64) -> String {
-    let raw = value.abs().to_string();
-    let mut out = String::new();
-    for (i, ch) in raw.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    let mut text: String = out.chars().rev().collect();
-    if value < 0 {
-        text.insert(0, '-');
-    }
-    text
-}
-
-fn comma_decimal(raw: String) -> String {
-    let (sign, rest) = raw
-        .strip_prefix('-')
-        .map_or(("", raw.as_str()), |s| ("-", s));
-    let mut split = rest.splitn(2, '.');
-    let whole = split.next().unwrap_or("0");
-    let frac = split.next();
-    let whole_value = whole.parse::<i64>().unwrap_or(0);
-    let whole_text = comma_int(whole_value);
-    match frac {
-        Some(frac) => format!("{sign}{whole_text}.{frac}"),
-        None => format!("{sign}{whole_text}"),
-    }
-}
-
-fn pad_need(text: &str, width: i64) -> usize {
-    let width = width.max(0) as usize;
-    width.saturating_sub(text.chars().count())
-}
-
-fn pad_fill(fill: &str, len: usize) -> String {
-    if len == 0 {
-        return String::new();
-    }
-    let fill = if fill.is_empty() { " " } else { fill };
-    let mut out = String::new();
-    while out.chars().count() < len {
-        out.push_str(fill);
-    }
-    out.chars().take(len).collect()
-}
-
-fn fmt_number(value: i64) -> String {
-    comma_int(value)
-}
-
-fn fmt_decimal(value: f64, precision: i64) -> String {
-    let precision = precision.clamp(0, 9) as usize;
-    comma_decimal(format!("{:.*}", precision, value))
-}
-
-fn fmt_percent(value: f64, precision: i64) -> String {
-    format!("{}%", fmt_decimal(value * 100.0, precision))
-}
-
-fn fmt_bytes(value: i64) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let mut size = (value as f64).abs();
-    let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
-    let mut unit = 0usize;
-    while size >= 1000.0 && unit + 1 < units.len() {
-        size /= 1000.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{}{} {}", sign, size as i64, units[unit])
-    } else if size >= 10.0 {
-        format!("{}{} {}", sign, size.round() as i64, units[unit])
-    } else {
-        let shown = format!("{:.1}", size);
-        format!("{}{} {}", sign, shown.trim_end_matches(".0"), units[unit])
-    }
-}
-
-fn fmt_duration(ms: i64) -> String {
-    let sign = if ms < 0 { "-" } else { "" };
-    let mut rest = ms.abs();
-    if rest < 1000 {
-        return format!("{sign}{rest}ms");
-    }
-    let days = rest / 86_400_000;
-    rest %= 86_400_000;
-    let hours = rest / 3_600_000;
-    rest %= 3_600_000;
-    let minutes = rest / 60_000;
-    rest %= 60_000;
-    let seconds = rest / 1000;
-    let mut parts = Vec::new();
-    if days > 0 {
-        parts.push(format!("{days}d"));
-    }
-    if hours > 0 {
-        parts.push(format!("{hours}h"));
-    }
-    if minutes > 0 {
-        parts.push(format!("{minutes}m"));
-    }
-    if seconds > 0 || parts.is_empty() {
-        parts.push(format!("{seconds}s"));
-    }
-    format!(
-        "{}{}",
-        sign,
-        parts.into_iter().take(3).collect::<Vec<_>>().join(" ")
-    )
-}
-
-fn fmt_ordinal(value: i64) -> String {
-    let n = value.abs();
-    let suffix = if (11..=13).contains(&(n % 100)) {
-        "th"
-    } else {
-        match n % 10 {
-            1 => "st",
-            2 => "nd",
-            3 => "rd",
-            _ => "th",
-        }
-    };
-    format!("{}{}", comma_int(value), suffix)
+mod fmt_rt {
+    include!("../../jet-codegen/src/Prelude/Core/Fmt.rs");
 }
 
 extern "C" fn jet_jit_fmt_number(value: i64) -> i64 {
-    alloc_string(fmt_number(value))
+    alloc_string(fmt_rt::jet_fmt_number(value))
 }
 
 extern "C" fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
-    alloc_string(fmt_decimal(value, precision))
+    alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
 }
 
 extern "C" fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
-    alloc_string(fmt_percent(value, precision))
+    alloc_string(fmt_rt::jet_fmt_percent(value, precision))
 }
 
 extern "C" fn jet_jit_fmt_bytes(value: i64) -> i64 {
-    alloc_string(fmt_bytes(value))
+    alloc_string(fmt_rt::jet_fmt_bytes(value))
 }
 
 extern "C" fn jet_jit_fmt_duration(ms: i64) -> i64 {
-    alloc_string(fmt_duration(ms))
+    alloc_string(fmt_rt::jet_fmt_duration(ms))
 }
 
 extern "C" fn jet_jit_fmt_ordinal(value: i64) -> i64 {
-    alloc_string(fmt_ordinal(value))
+    alloc_string(fmt_rt::jet_fmt_ordinal(value))
 }
 
 extern "C" fn jet_jit_fmt_plural(count: i64, singular: i64, plural: i64) -> i64 {
     let singular = clone_string(singular);
     let plural = clone_string(plural);
-    let word = if count.abs() == 1 {
-        &singular
-    } else {
-        &plural
-    };
-    alloc_string(format!("{} {}", comma_int(count), word))
+    alloc_string(fmt_rt::jet_fmt_plural(count, &singular, &plural))
 }
 
 extern "C" fn jet_jit_fmt_pad_left(text: i64, width: i64, fill: i64) -> i64 {
     let text = clone_string(text);
     let fill = clone_string(fill);
-    let need = pad_need(&text, width);
-    alloc_string(format!("{}{}", pad_fill(&fill, need), text))
+    alloc_string(fmt_rt::jet_fmt_pad_left(&text, width, &fill))
 }
 
 extern "C" fn jet_jit_fmt_pad_right(text: i64, width: i64, fill: i64) -> i64 {
     let text = clone_string(text);
     let fill = clone_string(fill);
-    let need = pad_need(&text, width);
-    alloc_string(format!("{}{}", text, pad_fill(&fill, need)))
+    alloc_string(fmt_rt::jet_fmt_pad_right(&text, width, &fill))
 }
 
 extern "C" fn jet_jit_fmt_pad_center(text: i64, width: i64, fill: i64) -> i64 {
     let text = clone_string(text);
     let fill = clone_string(fill);
-    let need = pad_need(&text, width);
-    let left = need / 2;
-    let right = need - left;
-    alloc_string(format!(
-        "{}{}{}",
-        pad_fill(&fill, left),
-        text,
-        pad_fill(&fill, right)
-    ))
+    alloc_string(fmt_rt::jet_fmt_pad_center(&text, width, &fill))
 }
 
 host_fns! {
@@ -213,8 +74,6 @@ host_fns! {
         sig_i64x3.params.push(AbiParam::new(types::I64));
         sig_i64x3.params.push(AbiParam::new(types::I64));
         sig_i64x3.returns.push(AbiParam::new(types::I64));
-
-
     }
     number: "jet_jit_fmt_number" => jet_jit_fmt_number: sig_i64;
     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;
@@ -227,8 +86,3 @@ host_fns! {
     pad_right: "jet_jit_fmt_pad_right" => jet_jit_fmt_pad_right: sig_i64x3;
     pad_center: "jet_jit_fmt_pad_center" => jet_jit_fmt_pad_center: sig_i64x3;
 }
-
-
-
-
-

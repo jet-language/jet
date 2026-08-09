@@ -315,6 +315,9 @@ pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../../jet-codegen/src/Prelude/Core/NetPure.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;

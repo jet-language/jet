@@ -78,70 +78,42 @@ fn jet_std_rng_new(seed: i64) -> jet_std::Rng {
 }
 // SplitMix64 step — a small, well-distributed deterministic PRNG (public domain).
 fn jet_det_rng_next(r: &mut jet_std::Rng) -> u64 {
-    r.state = r.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = r.state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
+    jet_seeded_rng_next(&mut r.state)
 }
 fn jet_rng_int(r: &mut jet_std::Rng, lo: i64, hi: i64) -> i64 {
-    if hi <= lo {
-        return lo;
-    }
-    let span = (hi - lo + 1) as u64;
-    lo + (jet_det_rng_next(r) % span) as i64
+    jet_seeded_rng_int(&mut r.state, lo, hi)
 }
 fn jet_rng_float(r: &mut jet_std::Rng) -> f64 {
-    // 53-bit mantissa → [0, 1).
-    (jet_det_rng_next(r) >> 11) as f64 / (1u64 << 53) as f64
+    jet_seeded_rng_float(&mut r.state)
 }
 fn jet_rng_float_open(r: &mut jet_std::Rng) -> f64 {
-    let x = jet_rng_float(r);
-    if x <= 0.0 { f64::MIN_POSITIVE } else { x }
+    jet_seeded_rng_float_open(&mut r.state)
 }
 fn jet_rng_float_range(r: &mut jet_std::Rng, low: f64, high: f64) -> f64 {
-    if !(high > low) {
-        return low;
-    }
-    low + (high - low) * jet_rng_float(r)
+    jet_seeded_rng_float_range(&mut r.state, low, high)
 }
 // D-DET-CAPAPI: the widened deterministic draws — coin, uniform choice, in-place
 // Fisher–Yates shuffle. Each advances the SplitMix64 stream, so they are
 // reproducible from the seed and mirror the ambient `random.*` set.
 fn jet_rng_bool(r: &mut jet_std::Rng) -> bool {
-    (jet_det_rng_next(r) & 1) == 1
+    jet_seeded_rng_bool(&mut r.state)
 }
 fn jet_rng_bool_p(r: &mut jet_std::Rng, p: f64) -> bool {
-    if p <= 0.0 || p.is_nan() {
-        false
-    } else if p >= 1.0 {
-        true
-    } else {
-        jet_rng_float(r) < p
-    }
+    jet_seeded_rng_bool_p(&mut r.state, p)
 }
 fn jet_rng_normal(r: &mut jet_std::Rng, mean: f64, stddev: f64) -> f64 {
-    let u1 = jet_rng_float_open(r);
-    let u2 = jet_rng_float(r);
-    let z0 = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
-    mean + z0 * stddev.max(0.0)
+    jet_seeded_rng_normal(&mut r.state, mean, stddev)
 }
 fn jet_rng_exponential(r: &mut jet_std::Rng, lambda: f64) -> f64 {
-    if lambda <= 0.0 || lambda.is_nan() {
-        return 0.0;
-    }
-    -jet_rng_float_open(r).ln() / lambda
+    jet_seeded_rng_exponential(&mut r.state, lambda)
 }
 fn jet_rng_bytes(r: &mut jet_std::Rng, n: i64) -> Vec<u8> {
-    let n = n.max(0) as usize;
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        out.push(jet_det_rng_next(r) as u8);
-    }
-    out
+    jet_seeded_rng_bytes(&mut r.state, n)
 }
 fn jet_rng_split(r: &mut jet_std::Rng) -> jet_std::Rng {
-    jet_std::Rng { state: jet_det_rng_next(r) }
+    jet_std::Rng {
+        state: jet_seeded_rng_split(&mut r.state),
+    }
 }
 fn jet_rng_pick<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>) -> JetOutcome<T, JetAbsent> {
     if xs.is_empty() {

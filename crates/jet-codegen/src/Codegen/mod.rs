@@ -58,6 +58,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // every other part builds outcomes on top of it.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
+    include_str!("../Prelude/Core/Loadable.rs"),
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
@@ -749,13 +750,11 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.db",
         ],
     );
-    // DataFmt.rs holds the `jet_fmt_*` helpers behind `core.fmt` and the
-    // toml/yaml/csv text helpers behind `core.encoding`, not just the
-    // `core.data` surface it is filed under. Gate it on every surface that
-    // calls into it, or a program using only one of them emits calls to
-    // helpers the generated file never included and rustc rejects it (I2).
-    let needs_data_fmt =
-        needs_data || needs_encoding || core_usage_matches(used_core, &["core.fmt"]);
+    // DataFmt.rs contains the data/codec helpers filed under `core.data`, but
+    // its old `jet_fmt_*` helpers now live in the shared Fmt kernel. Keep the
+    // two emission gates separate so a fmt-only program gets only Fmt.rs.
+    let needs_fmt = core_usage_matches(used_core, &["core.fmt"]);
+    let needs_data_fmt = needs_data || needs_encoding;
     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
     let needs_net = core_usage_matches(
         used_core,
@@ -808,18 +807,22 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     // NetHTTP is TCP/TLS only — HTTP serve/router lives in HTTPServer (gated).
     out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
+    out.push_str(include_str!("../Prelude/Core/Path.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
+    out.push_str(include_str!("../Prelude/Core/EncodingBase.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/SHA256Raw.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
     out.push_str(include_str!("../Prelude/Deadline.rs"));
+    out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
+    out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
 
     if needs_email {
@@ -883,6 +886,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     }
     if needs_data {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataPlot.rs"));
+    }
+    if needs_fmt {
+        out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
     }
     if needs_data_fmt {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));

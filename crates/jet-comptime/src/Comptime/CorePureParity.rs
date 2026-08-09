@@ -815,7 +815,8 @@ fn net_error(operation: &str, address: Option<String>, message: String) -> CtVal
 
 fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
-    Ok(match text.parse::<std::net::IpAddr>() {
+    let input = text.to_string();
+    Ok(match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
         Ok(address) => CtValue::Present(Box::new(structure("IPAddr", vec![("text", CtValue::Str(address.to_string()))]))),
         Err(error) => CtValue::failed(Box::new(net_error(
             "parse IP address",
@@ -830,16 +831,33 @@ fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
         Some(CtValue::Str(text)) => text,
         _ => return Err(unsupported("malformed IPAddr value", span)),
     };
-    Ok(CtValue::Bool(text.parse::<std::net::Ipv4Addr>().is_ok()))
+    let input = text.to_string();
+    let address = match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
+        Ok(address) => address,
+        Err(_) => return Ok(CtValue::Bool(false)),
+    };
+    Ok(CtValue::Bool(
+        super::net_pure_kernel::jet_net_pure_ip_is_ipv4(&address),
+    ))
 }
 
 fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
-    Ok(match text.parse::<std::net::SocketAddr>() {
+    let input = text.to_string();
+    Ok(match super::net_pure_kernel::jet_net_pure_parse_socket_addr(&input) {
         Ok(address) => CtValue::Present(Box::new(structure("SocketAddr", vec![
-            ("host", CtValue::Str(address.ip().to_string())),
-            ("port", CtValue::Int(i64::from(address.port()))),
-            ("text", CtValue::Str(address.to_string())),
+            (
+                "host",
+                CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_host(&address)),
+            ),
+            (
+                "port",
+                CtValue::Int(super::net_pure_kernel::jet_net_pure_socket_port(&address)),
+            ),
+            (
+                "text",
+                CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_to_string(&address)),
+            ),
         ]))),
         Err(error) => CtValue::failed(Box::new(net_error(
             "parse socket address",

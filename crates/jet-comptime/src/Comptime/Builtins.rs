@@ -14,6 +14,10 @@ mod range_semantics {
 mod duration_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
 }
+
+mod loadable_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
+}
 use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
@@ -1827,16 +1831,32 @@ pub fn apply_method(
             if type_name == "Loadable"
                 && matches!(method, "is_idle" | "is_loading" | "is_loaded" | "is_failed") =>
         {
-            let expected = match method {
-                "is_idle" => "Idle",
-                "is_loading" => "Loading",
-                "is_loaded" => "Loaded",
-                _ => "Failed",
+            let actual = match variant.as_str() {
+                "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
+                "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
+                "Loaded" => loadable_semantics::JET_LOADABLE_LOADED,
+                "Failed" => loadable_semantics::JET_LOADABLE_FAILED,
+                _ => u8::MAX,
             };
-            Ok(CtValue::Bool(variant == expected))
+            let expected = match method {
+                "is_idle" => loadable_semantics::JET_LOADABLE_IDLE,
+                "is_loading" => loadable_semantics::JET_LOADABLE_LOADING,
+                "is_loaded" => loadable_semantics::JET_LOADABLE_LOADED,
+                _ => loadable_semantics::JET_LOADABLE_FAILED,
+            };
+            Ok(CtValue::Bool(loadable_semantics::jet_loadable_is_tag(
+                actual, expected,
+            )))
         }
         (CtValue::Enum { type_name, variant, args }, "loaded") if type_name == "Loadable" => {
-            Ok(if variant == "Loaded" {
+            let tag = match variant.as_str() {
+                "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
+                "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
+                "Loaded" => loadable_semantics::JET_LOADABLE_LOADED,
+                "Failed" => loadable_semantics::JET_LOADABLE_FAILED,
+                _ => u8::MAX,
+            };
+            Ok(if loadable_semantics::jet_loadable_has_value(tag) {
                 args.first()
                     .map(|(_, value)| CtValue::Present(Box::new(value.clone())))
                     .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Named("Unit".to_string())))
@@ -1845,7 +1865,14 @@ pub fn apply_method(
             })
         }
         (CtValue::Enum { type_name, variant, args: values }, "or_else") if type_name == "Loadable" => {
-            if variant == "Loaded" {
+            let tag = match variant.as_str() {
+                "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
+                "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
+                "Loaded" => loadable_semantics::JET_LOADABLE_LOADED,
+                "Failed" => loadable_semantics::JET_LOADABLE_FAILED,
+                _ => u8::MAX,
+            };
+            if loadable_semantics::jet_loadable_has_value(tag) {
                 Ok(values.first().map(|(_, value)| value.clone()).unwrap_or(CtValue::Unit))
             } else {
                 args.into_iter()
