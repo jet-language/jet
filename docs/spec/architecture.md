@@ -623,8 +623,13 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.crypto` | Copied | Move `CryptoLite` algorithms to Prelude kernels. |
   | `core.crypto.expert` | Copied | Move expert crypto calls to the same Prelude kernels as AOT. |
   | `core.data` | Kernel | `DataStats.rs` and `DataPlot.rs`; comptime marshals values. |
+  | `core.data line renderers need groups` | Kernel | `DataPlot.rs` owns line-renderer argument validation. |
+  | `core.data line renderers need options` | Kernel | `DataPlot.rs` owns line-renderer option validation. |
+  | `core.data: argument must be `[DataGroup]`` | Kernel | `DataPlot.rs` owns `DataGroup` validation. |
+  | `core.data: argument must be `[Float]`` | Kernel | `DataStats.rs` owns numeric input validation. |
   | `core.email` | Kernel | `Prelude/CoreLib/Email.rs`; `EmailAdapter` marshals values. |
   | `core.encoding` | Copied | Move shared encoding value rules from `EncodingLite` to Prelude kernels. |
+  | `core.encoding.` | Copied | Encoding dispatch keeps one shared kernel home. |
   | `core.encoding.base32` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
   | `core.encoding.base64` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
   | `core.encoding.cbor` | Copied | Move CBOR rules to `EncodingCodecs.rs` adapters. |
@@ -632,6 +637,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.encoding.hex` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
   | `core.encoding.json` | Copied | Move JSON rules to the Prelude encoding kernel. |
   | `core.encoding.jsonl` | Copied | Move JSONL rules to the Prelude encoding kernel. |
+  | `core.encoding.jsonl.to_string: expected a list` | Copied | JSONL value validation stays with the encoding kernel. |
   | `core.encoding.toml` | Copied | Move TOML rules to the Prelude encoding kernel. |
   | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime/JIT marshal `DataTree` values. |
   | `core.encoding.yaml` | Copied | Move YAML rules to the Prelude encoding kernel. |
@@ -644,6 +650,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.json` | Compatibility alias | Route to `core.encoding.json`; do not add semantics. |
   | `core.linalg` | Copied | Move linear-algebra arithmetic to its Prelude kernel. |
   | `core.math` | Mixed | `MathLibPure.rs` is shared; move remaining inline rules or keep true numeric intrinsics. |
+  | `core.math.abs: non-numeric argument` | Mixed | Numeric argument validation stays with the shared math rules. |
   | `core.measurement` | Compatibility alias | Route to `core.science.measurement`; do not add semantics. |
   | `core.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
   | `core.net` | Mixed | Host network calls stay capability-bound; move pure value rules to Prelude. |
@@ -665,6 +672,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic capabilities call Prelude; harness and host work stay adapters. |
   | `core.text` | Copied | Move Unicode and text rules from `TextLite` to Prelude kernels. |
+  | `core.text.ends_any: non-list argument` | Copied | Text argument validation stays with the text kernel. |
+  | `core.text.starts_any: non-list argument` | Copied | Text argument validation stays with the text kernel. |
   | `core.text.unicode` | Copied | Move Unicode rules from `TextLite` to Prelude kernels. |
   | `core.time` | Mixed | Civil and duration rules live in `Prelude/Core/Time.rs` and `Duration.rs`; ambient clock reads remain host effects. |
   | `core.time.date` | Mixed | `Prelude/Core/Time.rs` owns calendar rules; `today` reads the host clock. |
@@ -673,8 +682,14 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.time.instant` | Host | Monotonic clock read stays a host adapter; elapsed math uses Prelude. |
   | `core.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
   | `core.ui` | Intrinsic | `CtValue` constructors and field projection only. |
+  | `core.ui.box() needs UiNode children` | Intrinsic | UI node-shape validation stays with the intrinsic constructor path. |
+  | `core.ui.box() needs [UiNode]` | Intrinsic | UI list validation stays with the intrinsic constructor path. |
+  | `core.ui.node_role(): missing role` | Intrinsic | UI role validation stays with the intrinsic constructor path. |
   | `core.units` | Intrinsic | Exact unit conversion uses the foundation kernel. |
   | `core.url` | Copied | Move URL parse and render rules to `JetStd/UrlMime.rs`. |
+  | `core.url.data: first argument must be a Mime` | Copied | URL data validation stays with the shared URL/MIME kernel. |
+  | `core.url.data: mime.sub must be String` | Copied | URL MIME field validation stays with the shared kernel. |
+  | `core.url.data: mime.top must be String` | Copied | URL MIME field validation stays with the shared kernel. |
   | `core.xml` | Compatibility alias | Route to `core.encoding.xml`; do not add semantics. |
 
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.

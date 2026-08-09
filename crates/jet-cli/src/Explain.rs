@@ -328,7 +328,25 @@ fn normalize(code: &str) -> String {
 
 pub fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
+    if b.len() == 5
+        && (b[0] == b'E' || b[0] == b'L')
+        && b[1..].iter().all(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    let Some(rest) = s.strip_prefix("E-").or_else(|| s.strip_prefix("L-")) else {
+        return false;
+    };
+    let mut words = rest.split('-');
+    let valid = |part: &str| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+    };
+    words.next().is_some_and(valid)
+        && words.next().is_some_and(valid)
+        && words.all(valid)
 }
 
 /// Yield each markdown table row as a vector of trimmed cells. Separator rows

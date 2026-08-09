@@ -1,7 +1,7 @@
 //! Integration tests for `workspace.jet` evaluation (D-WORKSPACE1=B, D-WORKSPACE2=A).
 //!
 //! Covers I4 snapshot requirements for E0995, E0996, E0997:
-//! - E0995: workspace.jet has no `module workspace { … }` declaration
+//! - E0995: workspace.jet has no `module workspace { … }` body
 //! - E0996: `members:` evaluated to something other than `[String]`
 //! - E0997: `find("…")` names a missing directory
 
@@ -47,7 +47,7 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 }
 
 // ──────────────────────────────────────────────
-// E0995 — no `module workspace { … }`
+// E0995 — no `module workspace { … }` body
 // ──────────────────────────────────────────────
 
 #[test]
@@ -147,7 +147,7 @@ fn dot_form_classified_when_source_is_declared() {
 }
 
 #[test]
-fn colon_form_still_works() {
+fn source_form_still_works() {
     use jetpack::RefSpec::{classify_in, ProviderKind, Source, SourceTable};
 
     let table = SourceTable::from_decls([(
@@ -156,7 +156,7 @@ fn colon_form_still_works() {
         ProviderKind::default(),
     )]);
 
-    let r = classify_in("mono:ranker", &table).expect("colon form should still classify");
+    let r = classify_in("ranker@mono", &table).expect("source form should classify");
     assert!(matches!(r.source, Source::Named(_)));
     assert_eq!(r.package, "ranker");
 }

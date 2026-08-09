@@ -1693,7 +1693,7 @@ exists but can't be evaluated to a valid `WorkspacePlan`.
 
 ```
 Error [E0995]: `workspace.jet` must declare `module workspace { … }`
- Why: `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one `module workspace { … }` declaration
+ Why: `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one `module workspace { members: … }` body
  Fix: write `module workspace { members: find("./packages") }` in `workspace.jet`
 ```
 
@@ -1705,7 +1705,7 @@ Error [E0996]: `members:` must evaluate to a list of package paths
     |
   1 | module workspace { members: 42 }
     |                             ^^
- Why: `members:` describes the packages in this workspace; it must be a `[String]` list of relative paths or a `find("…")` call
+ Why: The `members:` value must evaluate to a `[String]` — a list of relative package directory paths
  Fix: example: `members: find("./packages")` or `members: ["./pkg/hello"]`
 ```
 
@@ -1717,7 +1717,7 @@ Error [E0997]: `find` can't read the directory `/tmp/no-such-packages`
     |
   1 | module workspace { members: find("./no-such-packages") }
     |                             ^^^^
- Why: `members: find("<dir>")` scans that directory for package subdirectories; it must exist relative to this file
+ Why: `find` scans that directory for subdirectories containing `package.jet`; the directory must exist relative to `workspace.jet`
  Fix: create the directory, or fix the path so it points at your packages folder
 ```
 
