@@ -1763,12 +1763,13 @@ predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
 owned `String`. Local use remains codegen-invisible; crossing a return or field
 boundary uses D-MEM-VIEWRET1's named, provenance-carrying `View<str>` contract.
 `split` later joined the lazy `Iter` model under D-ITERTOOLS1=A (was eager
-`Vec<String>` through S5). **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
-lock-guarded shared handle — `Shared.new(x)` constructs (bare type-name call,
-`T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read- or
-write-locked view, the lock scoped to the call only; cloning is always a
-cheap handle clone (never a deep copy), so it crosses a `tasks.spawn` boundary
-with no `take`. (`Shared<T>`'s *type* predates this stage as inert signature
+`Vec<String>` through S5). **S6 shipped (2026-07-04), amended by
+D-CONC-SHARE1=A**: `Shared<T>` (D-SHARED-API1=A) is a lock-guarded shared
+value — `shared expr` constructs the cell; plain field reads and writes take
+one statement step; several steps commit under `#Transact`; expert guards and
+`Condition` remain. Cloning is always a cheap handle clone (never a deep copy),
+so it crosses a task boundary with no `take`. (`Shared<T>`'s *type* predates
+this stage as inert signature
 plumbing over a plain `Arc<T>` — never actually constructible, see
 `tests/ownership.rs`'s pre-existing param-signature tests; S6 gives it a real
 constructor and upgrades the representation to `Arc<RwLock<T>>`.) `Pool<T>`/
@@ -1860,28 +1861,109 @@ There is no general deferred statement or block: `defer action()` and
 ordinary close-call resolution proves that `close(^resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
 
-**S53 — Concurrency** *(deferred core; combinators live)*: tasks/channels
-deferred past v1.0 (planned: `tasks.spawn(closure) => Task<T>`, `t.join()`,
-`tasks.channel<T>()`; no shared mutable state). Already ratified around it:
-**D-CONCCOMB1** structured combinators `g.all` / `g.race` / `g.any`
-(race cancels losers; all fails fast; any takes first Ok, D-RACEWIN1);
-**D-DETACH1** `task.detach()` consumes the handle, detached capture of a
-borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
-`async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
-*(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
-`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
-`.sender()` method. Destructure with the existing S74 tuple form:
-`(tx, rx) := tasks.channel<T>()`; a second sender is `~tx`. A
-`Receiver<T>` is what `g.select().recv(rx)` takes.
+### Concurrency — ratified law
 
-**D-STM1=A — atomic memory transactions** *(ratified by owner
-2026-07-12, card #506)*: `#Transact` gains the `Shared<T>` plane — reads
-and writes to Shared handles inside the block form one atomic commit,
-retried on conflict; either every handle's change lands or none does.
-No new marker (I8); E0746 keeps rejecting irreversible effects inside.
-The single-task local-rollback behavior (D-TXN1–4) is unchanged.
-Expert floor: `Shared.edit_all` canonical-order multi-lock stays
-available for code that wants locking, not retry, semantics.
+**D-CONC-UNIT1=A — one substrate for state, duty, and reach** *(ratified
+2026-08-06, card #1505)*: task lifecycles are typestate rows; the join duty
+uses the same single-use obligation as every other single-use value; and the
+five separate crossing checks become one registered fact plane. Every
+concurrency error uses one vocabulary. The facts erase before codegen, so this
+decision changes no user-facing surface and amends no prior semantics.
+
+**D-CONC-JOIN1=A — dropping a bound task handle is an error** *(ratified
+2026-08-06, card #1505)*: a bound `Task<T>` must be joined, used through its
+result, or detached. Dropping it without discharge is a compile error, not a
+warning or an implicit join. The rule extends D-LIN1 to task handles and the
+task-list forms from D-VERDICT-1323-1, and amends L1101. Unbound spawns still
+join at scope end under D-CONC-SPAWN1.
+
+**D-CONC-GROUP1=A — group borrows work in any parameter position** *(ratified
+2026-08-06, card #1505)*: a group may be a direct parameter of a free function
+or method. A group may not be stored, returned, captured, or placed in a field.
+The storage ban and E1110 rationale remain. This amends
+D-TASKGROUP-PARAM1=A only at its parameter-position boundary.
+
+**D-CONC-OUTCOME1=A — typed outcome and status** *(ratified 2026-08-06,
+card #1505; retired by D-CONC-FAIL1=A)*: the ballot first ratified consuming
+`outcome()` with `TaskOutcome` and borrowing `status()` with `TaskStatus`,
+covering `Finished`, `Panicked`, `Cancelled`, and `DeadlineBlown`; `status()`
+covered running, paused, and cancel-requested states. The later
+D-CONC-FAIL1=A ruling retires that separate surface. `TaskOutcome`,
+`TaskStatus`, `trace()`, and `exception()` do not ship. It amends
+D-COROUTINE1's handle surface; D-CONC-FAIL1=A is the later retirement ruling.
+
+**D-CONC-CROSS1=A — one crossing plane and one error family** *(ratified
+2026-08-06, card #1505)*: sendability is a registered fact about a type. One
+prover handles task captures, parallel adapters, kernels, cells, and fixed
+backings. Each rejection names what cannot cross, the boundary, and the fix.
+E1111 and the kernel wording join the E1101/E1102 family. The semantics
+ratified by D-PARCAPTURE1 and the kernel decisions stay unchanged; this
+decision amends their prover and diagnostic implementation only.
+
+**D-CONC-STM1=A — one-run, ordered transaction commit** *(ratified
+2026-08-06, card #1505; amends D-STM1)*: a transaction body runs exactly once.
+Participants acquire write locks in stable order, buffered changes apply, and
+locks release. Contention waits instead of retrying. Log lines and other body
+effects do not run twice. Irreversible-effect checks remain unchanged.
+
+**D-CONC-SCHED1=A — typed schedule data and one job word** *(ratified
+2026-08-06, card #1505)*: the value behind the unchanged schedule marker is
+typed `Duration` or wall-clock time on the D-TYPE2-TIME1 rail. `jet dev`,
+services, and jetos timers read that value. A job is a task the runtime starts.
+The service plane uses supervisor tasks, groups, and restart data. This amends
+the value grammar of D-SCHEDULE1=A, aligns D-TAG-SURFACE1 and D-TASK-META1,
+and does not change schedule placement rules.
+
+**D-CONC-STREAM1=A — a stream is a task** *(ratified 2026-08-06, card #1505;
+amends D-STREAMYIELD1)*: dropping a stream iterator cancels its producer. The
+producer unwinds at its next wait point and runs its cleanups. `yield` is a
+wait point and drop-close is cancellation. The generator delegates to
+D-CANCELMODEL1=C and subsumes the separate generator-lifecycle work; it has no
+separate shutdown law.
+
+**D-CONC-CHAN1=A — builtin channels and arm-table draining** *(ratified
+2026-08-06, card #1505; its wait spelling is amended by D-CONC-CHAN2=D)*:
+`channel<T>()` is builtin and needs no import. `loop value, receiver` drains
+until close. `Receiver<T>` and `Sender<T>` are nameable in signatures. The
+wait works on plain endpoints in any task. The fluent builder, dead `Channel`
+entry, and silently dropped `.read` arm are deleted. `after` takes a duration
+on the D-TYPE2-TIME1 rail. This amends D-CONCSELECT1=A and narrows
+D-TASKRUNTIME1's module surface; cancellation remains D-CANCELMODEL1=C.
+
+**D-CONC-SHARE1=A — shared values use plain access** *(ratified 2026-08-06,
+card #1505; amends D-SHARED-API1 and D-TXN2)*: `shared expr` builds the cell;
+field reads and writes use ordinary access; each statement is one atomic step;
+and several steps commit under `#Transact`. The `read` and `edit` closure
+forms are deleted. Expert guards and `Condition` remain. Lock order and
+crossing safety stay checked. It amends D-SHARED-API1=A, D-TXN2, and uses the
+ordered commit law of D-CONC-STM1=A.
+
+**D-CONC-SPAWN1=D — one nested task keyword family** *(ratified 2026-08-06,
+card #1505)*: the surface is `task f()`, `task.all { … }`, `task.race { … }`,
+`task.any { … }`, and `task.group g(limit: n) { … }`. Only `task` is reserved;
+`all`, `race`, `any`, and `group` remain free identifiers. Scope-end joins,
+fail-fast, cancel-losers, and first-`Ok` laws stay. It respells the surfaces of
+D-TASKSCOPE1, D-NURSERY1, D-CONCCOMB1, and D-TASKGROUP-PARAM1 without changing
+their lifetime laws. This is the final spelling for the spawn surface.
+
+**D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
+2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
+`join()` returns `T ? TaskFailure`. `TaskFailure` is a normal enum with
+`.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` returns
+its tuple on the same rail. A joined child panic becomes `.Panicked(reason)`;
+it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
+`TaskStatus` are deleted. It amends D-COROUTINE1 and retires
+D-CONC-OUTCOME1=A; conversion uses D-FAIL-CONV1.
+
+**D-CONC-CHAN2=D — the readiness wait rides subjectless `if`** *(ratified
+2026-08-07, card #1505; amends D-IFGUARD1, D-CONCSELECT1, and the wait
+spelling in D-CONC-CHAN1)*: a subjectless `if` table whose every arm head is a
+binding/source pair is one atomic readiness wait. `after` takes a Time delta;
+an optional `else` arm makes the wait non-blocking; mixed readiness and Bool
+heads are a registered diagnostic; a closed source stops matching. Expression
+form follows the `if` value-table law. `select` stays a free identifier
+everywhere. It amends D-IFGUARD1, D-CONCSELECT1, and D-CONC-CHAN1's spelling;
+`after` uses D-TYPE2-TIME1=A and cancellation follows D-CANCELMODEL1=C.
 
 **D-CANCELMODEL1 = C** *(ratified 2026-07-11, card #126)*: cancellation is
 preemptive at wait points. A cancelled task (race loser, fail-fast sibling,
@@ -2038,16 +2120,15 @@ effect summary and records per-dependency provenance in the lock.
 (E1220 names the dependency); `grants: { "dep": [Effect] }` per-dep escape;
 malformed block E1221.
 
-**D-STREAMYIELD1 — Generators**: `fn f() => Stream<T>` uses `yield expr` to
-hand a value to the consumer and suspend until the next pull; falling off
-the end (or a bare `return;`) ends the stream; `return value;` is E0806.
-Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
-async/await coloring. The emitted program uses the scheduler-backed Prelude
-receiver and an owned pull iterator: `yield` blocks the producer until the
-consumer pulls, and dropping the iterator on `break` closes the receiver. A
-failed producer send returns through the active lexical cleanups, so no
-statement after the last accepted pull runs. This is one pull/cancellation
-law for AOT, JIT, and the interpreter; it does not require coroutine syntax.
+**D-STREAMYIELD1 — Generators** *(amended by D-CONC-STREAM1=A)*:
+`fn f() => Stream<T>` uses `yield expr` to hand a value to the consumer and
+suspend until the next pull; falling off the end (or a bare `return;`) ends the
+stream; `return value;` is E0806. Consumers are ordinary `loop x; f() { }`
+loops — one keyword, one type, no async/await coloring. The producer is a task:
+`yield` is a wait point, dropping the iterator is cancellation, and the
+producer unwinds at its next wait point with normal cleanup. This is the task
+cancellation law on AOT, JIT, and the interpreter; it does not require
+coroutine syntax.
 
 ### Comptime & metaprogramming
 
@@ -3123,14 +3204,13 @@ index, not a substitute for that law.
 - **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers collection
   adapters. Collections expose beginner-friendly methods returning lazy views;
   materialization is explicit via `collect`, `to_list`, or reducers.
-- **D-TASKRUNTIME1=A**: task groups remain the structured lifetime boundary.
-  Channels, timers, deadlines, cancellation, and select produce typed event
-  values; scheduler budgets, tracing, and deterministic tests are expert hooks.
-  Implemented Epoch 3 surface: `tasks.channel<T>()`, bounded
-  `tasks.channel<T>(capacity: N)`, `tasks.after(ms: N)`,
-  `tasks.after(ms: N, value: fallback)`, `tasks.interval(ms: N)`, and
-  `g.select().recv(rx).after(ms: N, value: fallback).wait()` over one return
-  type. Bounded channel pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
+- **D-TASKRUNTIME1=A** *(amended by D-CONC-SPAWN1=D,
+  D-CONC-CHAN1=A, and D-CONC-CHAN2=D)*: structured task scopes remain the
+  lifetime boundary. The current surface is the nested `task` family,
+  builtin `channel<T>()`, `loop value, receiver`, and a subjectless `if`
+  readiness table on plain endpoints. Timers, deadlines, cancellation, and
+  readiness waits use typed values and the shared scheduler laws. Bounded
+  channel pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
 - **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
   typed rows, lazy query plans, joins, windows, missing values, and plotting.
   Eager helpers and lazy plans share the same operations. Current shipped floor:
@@ -5395,7 +5475,8 @@ Control flow).
 **S29 — dotless struct literal**: superseded by D-DOTCTOR2 `T.{ }` (E0320).
 **S35 — `or` fallback**: superseded by `??` (S71).
 **S43 — `test` blocks**: superseded by `#Test("name")` (see Testing).
-**S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
+**S53 — concurrency**: superseded as a deferral. Concurrency is live ratified
+law; see the D-CONC entries above. Implementation remains on its own cards.
 **S81 — `?continue`**: superseded by `expr ?? next` (D-LOOP-CONTROLWORD1=B).
 **D-MARKER-FAMILY1 / D-MARKERMOVE1/2/3 — two-plane `@`/`#` sigil law**:
 superseded by D-VERDICT-732-1; every marker is back on `#`, `@` is reserved
@@ -5567,8 +5648,8 @@ destructure. `<:` and `:>` are longest-match digraphs; `:>`
 suppresses line termination and neither digraph ends a statement. The formatter
 retains one authored fence and wraps wide explicit fences one name per line.
 `tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
-returns their results in list order; taskgroup combinators remain the structured
-ownership surface. Card #1239.
+returns their results in list order; the nested `task` combinators retain the
+structured ownership surface under D-CONC-SPAWN1=D. Card #1239.
 
 **2026-07-30 — D-VERDICT-1320-1 (amends D-EACH1)**: the fence respells as
 symmetric `$[ a, b ]$`. `$[` and `]$` are longest-match digraphs (`$[` before
