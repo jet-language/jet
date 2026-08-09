@@ -1724,7 +1724,7 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
     std::fs::create_dir_all(&app).unwrap();
     std::fs::create_dir_all(&dep).unwrap();
     std::fs::write(
-        app.join("pkg.jet"),
+        app.join("package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\n",
     )
     .unwrap();
@@ -1734,7 +1734,7 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
     )
     .unwrap();
     std::fs::write(
-        dep.join("pkg.jet"),
+        dep.join("package.jet"),
         "name: \"dep\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -1819,7 +1819,7 @@ fn custom_axis_identity_ignores_checkout_root_and_separates_packages() {
     ) -> (jet::AST::Dimension, String) {
         std::fs::create_dir_all(root).unwrap();
         std::fs::write(
-            root.join("pkg.jet"),
+            root.join("package.jet"),
             format!("name: \"{package}\"\nversion: \"1.0.0\"\n"),
         )
         .unwrap();

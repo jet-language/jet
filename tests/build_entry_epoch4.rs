@@ -188,18 +188,18 @@ fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
     .to_string();
     fs::write(root.join("workspace.jet"), workspace_source).unwrap();
     fs::write(
-        root.join("pkg.jet"),
-        "payload: { name: \"workspace\", version: \"0.1.0\" }\ndeps: { b: ./packages/b }\n",
+        root.join("package.jet"),
+        "name: \"workspace\"\nversion: \"0.1.0\"\ndeps: { b: ./packages/b }\n",
     )
     .unwrap();
     fs::write(
-        packages.join("a").join("pkg.jet"),
-        "payload: { name: \"a\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n",
+        packages.join("a").join("package.jet"),
+        "name: \"a\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n",
     )
     .unwrap();
     fs::write(
-        packages.join("b").join("pkg.jet"),
-        "payload: { name: \"b\", version: \"0.1.0\" }\ndeps: { a: ../a }\nbuild: { allow: #(Exec) }\n",
+        packages.join("b").join("package.jet"),
+        "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\nbuild: { allow: #(Exec) }\n",
     )
     .unwrap();
     fs::write(

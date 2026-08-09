@@ -295,7 +295,7 @@ fn crypto_misuse_diagnostic(
         "aes256gcm_open" => "aes256gcm_open",
         "ed25519_sign" => "ed25519_sign",
         "ed25519_verify_strict" => "ed25519_verify_strict",
-        "x25519" => "x25519",
+        "x25519_raw" => "x25519_raw",
         _ => return None,
     };
     let material_requirements: &[(usize, &str, &str, usize)] = match (module, name) {
@@ -312,7 +312,7 @@ fn crypto_misuse_diagnostic(
             (0, "Ed25519 public key", "public key", 32),
             (2, "Ed25519 signature", "signature", 64),
         ],
-        ("core.crypto.expert", "x25519") => &[
+        ("core.crypto.expert", "x25519_raw") => &[
             (0, "X25519 secret key", "secret key", 32),
             (1, "X25519 public key", "public key", 32),
         ],
@@ -4812,7 +4812,7 @@ impl<'a> Checker<'a> {
             // hatch, not a safe compute constructor. Keep the fixed signature
             // and normal type checking, but require the same lexical audit
             // gate as the other low-level memory/device operations.
-            if module == "core.crypto.expert" && name == "x25519" {
+            if module == "core.crypto.expert" && name == "x25519_raw" {
                 let validation_diag_start = self.diags.len();
                 if !(2..=3).contains(&args.len()) {
                     self.diags

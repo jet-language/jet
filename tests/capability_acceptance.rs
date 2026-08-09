@@ -604,7 +604,7 @@ fn run() {
         "I5 taint/IFC slice example must remain"
     );
     assert!(
-        read("examples/features/packages/effect_budget/pkg.jet").contains("effects:"),
+        read("examples/features/packages/effect_budget/package.jet").contains("effects:"),
         "I5 effect-budget example must remain"
     );
     let replay_ui = read("tests/ui/replayable_reaches_io.stderr");

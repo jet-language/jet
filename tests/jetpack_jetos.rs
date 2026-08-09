@@ -2375,8 +2375,8 @@ fn os_build_bare_host_uses_current_repo_config() {
     fs::create_dir_all(pkg.join("boot")).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2420,8 +2420,8 @@ fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
     fs::create_dir_all(&pkg).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2489,8 +2489,8 @@ fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
     fs::create_dir_all(&pkg).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2555,8 +2555,8 @@ fn os_systemd_init_requires_first_party_source() {
     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
     fs::create_dir_all(pkg.join("boot")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library }\n",
     )
     .unwrap();
     fs::write(
@@ -2598,8 +2598,8 @@ fn os_default_gnome_desktop_requires_first_party_packages() {
     fs::create_dir_all(kernel.join("boot")).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2643,8 +2643,8 @@ fn os_cachyos_kernel_requires_boot_artifacts() {
     fs::create_dir_all(&pkg).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2686,8 +2686,8 @@ fn os_cachyos_kernel_rejects_text_boot_artifacts() {
     fs::create_dir_all(pkg.join("boot")).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2732,8 +2732,8 @@ fn os_cachyos_kernel_requires_source_recipe() {
     fs::create_dir_all(pkg.join("boot")).unwrap();
     fs::create_dir_all(systemd.join("bin")).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(
@@ -2776,8 +2776,8 @@ fn os_systemd_init_requires_init_artifact() {
     fs::create_dir_all(kernel.join("boot")).unwrap();
     fs::create_dir_all(&systemd).unwrap();
     fs::write(
-        proj.join("jet-pkgs/pkg.jet"),
-        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+        proj.join("jet-pkgs/package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
     )
     .unwrap();
     fs::write(

@@ -191,7 +191,6 @@ fn escape(value: &str) -> String {
 }
 
 fn fail(message: &str) -> ! {
-    eprintln!("error: {message}");
-    eprintln!("fix: run `jet remote help`");
+    crate::cli_error!(@fix "E2104", message, "run `jet remote help`");
     std::process::exit(ExitCodes::USAGE);
 }

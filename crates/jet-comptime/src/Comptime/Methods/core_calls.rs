@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
 use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
-use crate::AST::{CtReport, CtValue};
+use crate::AST::{as_bytes, CtReport, CtValue};
 
 use super::repl_process::run_repl_process;
 
@@ -22,6 +22,39 @@ mod progress_semantics {
 
 mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
+}
+
+mod mime_kernel {
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
+}
+
+mod solver_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone)]
+        pub(crate) struct Solver {
+            pub(crate) seed: i64,
+            pub(crate) checked: i64,
+            pub(crate) failures: i64,
+        }
+    }
+
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
+}
+
+mod sketch_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
+}
+
+mod time_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+}
+
+pub(super) mod duration_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
+}
+
+mod measurement_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Measurement.rs");
 }
 
 // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
@@ -181,13 +214,9 @@ thread_local! {
 }
 
 // ---------------------------------------------------------------------------
-// D-CTCORE1 (ratified 2026-06-22): curated pure Core whitelist for comptime.
-//
-// Only deterministic, pure functions may run at comptime. I/O (`fs.read`,
-// `env.get`, etc.) is rejected here with a teaching diagnostic; the user
-// can get build-time I/O via the explicit `embed_file`/`embed_bytes` tier.
-//
-// The whitelist grows with tests; start with core.math and core.string.
+// D-META-EFFECT1: this is the implementation dispatch for Core calls that the
+// shared effect facts admit at comptime. Eligibility is decided by
+// `Effects::core_effect`; this table only supplies evaluator implementations.
 // ---------------------------------------------------------------------------
 
 pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
@@ -229,29 +258,6 @@ pub(in super::super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagn
         CtValue::Str(s) => Ok(s.as_str()),
         _ => Err(unsupported(
             "non-string argument to comptime string call",
-            span,
-        )),
-    }
-}
-
-/// D-UUIDENC1=A: a `[U8]` argument — either the literal `Bytes` shape
-/// (`embed_bytes`'s output) or a `List` of `Int` elements (an ordinary `[U8]`
-/// list literal), matching whichever the caller happens to be holding.
-pub(super) fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    match v {
-        CtValue::Bytes(bs) => Ok(bs.clone()),
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-                _ => Err(unsupported(
-                    "a `[U8]` list with an out-of-range element",
-                    span,
-                )),
-            })
-            .collect(),
-        _ => Err(unsupported(
-            "non-`[U8]` argument to comptime encoding call",
             span,
         )),
     }
@@ -1006,7 +1012,7 @@ fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
     (ambiguous_wide, controls_reject)
 }
 
-/// Evaluate a whitelisted pure Core call at comptime / in the REPL.
+/// Evaluate an effect-approved, implemented Core call at comptime / in the REPL.
 /// `module` is the full path (e.g. `"core.math"`, `"core.regex"`).
 pub fn apply_core_call(
     module: &str,
@@ -1133,7 +1139,7 @@ pub fn apply_core_call(
             PERF_FIDELITY.with(|c| c.set(PERF_DEFAULT_FIDELITY_BITS));
             Ok(CtValue::Unit)
         }
-        // --- core.math whitelist ---
+        // --- core.math implementation surface ---
         ("core.math", "sqrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sqrt())),
         ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
@@ -1602,7 +1608,7 @@ pub fn apply_core_call(
                 (a / x).saturating_mul(b).abs()
             }))
         }
-        // --- core.text module whitelist (card #392: `"core.string"` was a
+        // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
         // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was
         // unreachable and every `use core.text as t; t.trim(s)`-style call
@@ -1922,7 +1928,7 @@ pub fn apply_core_call(
         ("core.encoding.yaml", "to_string") => {
             Ok(CtValue::Str(super::super::EncodingLite::yaml_render(one(0)?)))
         }
-        // --- core.encoding.xml (ported verbatim, `EncodingLite.rs`) ---
+        // --- core.encoding.xml (CtValue adapters over XmlKernel) ---
         ("core.encoding.xml", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse(text) {
@@ -2713,7 +2719,7 @@ pub fn apply_core_call(
             ),
             Some(span),
         )),
-        // --- unknown / not yet whitelisted ---
+        // --- unknown / not yet implemented ---
         _ => {
             if repl_mode {
                 if let Some(_) = repl_native_only_module(module) {
@@ -3117,9 +3123,11 @@ pub fn apply_impure_core_call(
         }
         // Ambient impure depth must not block pure-tier CorePureParity surfaces
         // that TirBridge already evaluates (date/math/measurement/testing/…).
-        // Pure style/net helpers share the AST allowlist so impure_depth>0
-        // (TirBridge / jet run deopt) still hits CorePureParity.
-        ("core.io", method) if super::dispatch::is_pure_tier2_call("core.io", method) => {
+        // Pure style/net helpers share the implementation dispatch so
+        // impure_depth>0 (TirBridge / jet run deopt) still hits CorePureParity.
+        ("core.io", method)
+            if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
+        {
             apply_core_call(module, method, args, span, repl_mode)
         }
         ("core.random", _) | ("core.testing", "fake_rng") => {
@@ -3151,13 +3159,10 @@ pub fn apply_impure_core_call(
         | ("core.time.datetime", _)
         | ("core.science.measurement", _) => apply_core_call(module, method, args, span, repl_mode),
         // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
-        // Keep E3412 for the rest. Shares the allowlist with the REPL/comptime
-        // AST evaluator (`dispatch::is_pure_tier2_call`) so both tiers agree.
+        // Keep E3412 for the rest. D-META-EFFECT1: "pure" is what the effect
+        // table says, so both tiers agree without a second list here.
         ("core.net", method)
-            if matches!(
-                method,
-                "ip_addr" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "is_ipv6"
-            ) || super::dispatch::is_pure_tier2_call("core.net", method) =>
+            if jet_foundation::Effects::core_effect("core.net", method).is_none() =>
         {
             apply_core_call(module, method, args, span, repl_mode)
         }

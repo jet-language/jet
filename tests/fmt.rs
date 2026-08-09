@@ -2358,8 +2358,8 @@ fn run() {
 
 #[test]
 fn fmt_preserves_unit_literal() {
-    // D-UNITLIT1: `500ms` must survive with no space inserted between the
-    // number and the suffix, and the suffix itself must not be dropped.
+    // D-UNITLIT1 / D-TYPE2-TIME1: `500ms` must survive with no space inserted
+    // between the number and the suffix, and the suffix itself must not be dropped.
     let src = "\
 #UnitFamily(Time) { ms, s }
 
@@ -2414,9 +2414,10 @@ fn run() {
 
 #[test]
 fn fmt_preserves_range_constraint() {
-    // D-RANGETYPE1: `distinct Int(0..10)` — distinct declarations are emitted
-    // verbatim, so the `(0..10)` clause survives structurally; this pins it
-    // down explicitly rather than relying on that being an accident.
+    // D-RANGETYPE1 / D-TYPE2-REFINE1: `distinct Int(0..10)` — distinct
+    // declarations are emitted verbatim, so the `(0..10)` clause survives
+    // structurally; this pins it down explicitly rather than relying on that
+    // being an accident.
     let src = "\
 Severity :: distinct Int(0..10)
 

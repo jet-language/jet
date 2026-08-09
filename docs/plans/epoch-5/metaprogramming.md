@@ -149,7 +149,7 @@ spelling open as **D-BUILDSCOPE1** / **D-BUILDPOLICY1**):
 | Layer | Lives | Job |
 |---|---|---|
 | **Declare** | on the code: `#Impure("why") =[FS, Net]=>` | what this build fn needs; travels with the file; statically readable |
-| **Permit** | pkg.jet `build:` block, or a flag/prompt for a lone file | whether this project grants it |
+| **Permit** | package.jet `build:` block, or a flag/prompt for a lone file | whether this project grants it |
 | **Cap** | workspace.jet policy block | org ceiling no member grant can exceed |
 
 The declare layer is why **a single file works with no manifest** — the lone
@@ -229,17 +229,17 @@ stays frozen on c154 (e7) and would need its own future vote.
 
 ## 8. Scale ladder — solo to enterprise, one model
 
-Layering: **workspace ⊃ payloads ⊃ packages ⊃ modules.** A payload *contains*
-packages; `pkg.jet` (ratified name, U10 revised) defines one payload — the
-publish/version/fetch unit. The monorepo surface is `workspace.jet`
-(D-WORKSPACE1/2, implemented), never pkg.jet.
+Layering: **workspace ⊃ Packages ⊃ modules.** A Package contains its outputs;
+`package.jet` (ratified name, U10 revised) defines one publish/version/fetch
+unit. Workspace membership is a declaration-discovered Config, not a second
+Package root.
 
 | Scale | Files | Build entry | Grant |
 |---|---|---|---|
 | single file | none | in the file, beside `fn main` | per-invocation (flag/prompt) |
-| project | `pkg.jet` (+ `env.jet` dev shell) | package scope | pkg.jet `build:` |
-| multi-package payload | one `pkg.jet`, several `packages:` | one entry per payload | same |
-| monorepo | `workspace.jet` + N `pkg.jet` | member entries + optional workspace entry | workspace policy caps all members |
+| project | `package.jet` (+ Config contributions) | package scope | package.jet `build:` |
+| multi-package payload | one `package.jet`, several `packages:` | one entry per payload | same |
+| monorepo | one workspace Config + N `package.jet` | member entries + optional workspace entry | workspace policy caps all members |
 | enterprise | same + policy block | workspace entry runs org rules (§7) | hermetic CI is the default |
 
 Workspace composition: the workspace entry runs member builds in dependency
@@ -504,7 +504,7 @@ D-NETDEP1 fetch backend (shipped — `Comptime/Methods.rs::eval_net_fetch`,
 sha256-pinned, lock-recorded) · D-CTCODEGEN1 source re-entry ·
 D-METAREFLECT1 reflection (shipped) · D-METADERIVE1 user derives (shipped) ·
 D-METADEPTH1 ceiling · D-BUILDPROFILE1 profiles (shipped) ·
-D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `pkg.jet`.
+D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `package.jet`.
 
 **Ratified 2026-07-01 (card c1nixrpd, e4) — plan in §15:**
 
@@ -512,7 +512,7 @@ D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `pkg.jet`.
 |---|---|---|
 | D-BUILDENTRY1 | B | `fn build(b: BuildContext) => BuildPlan ?`, run by `jet build` when root defines one, else default pipeline |
 | D-BUILDPOLICY1 | A | tiered authority, `BuildContext`-only; Tier 2 needs `#Impure` + permission; deps denied Tier 2 by default |
-| D-BUILDSCOPE1 | A | entry lives in the unit's own file at every rung; grant chain flag → pkg.jet `build:` → workspace `policy:` |
+| D-BUILDSCOPE1 | A | entry lives in the unit's own file at every rung; grant chain flag → package.jet `build:` → workspace `policy:` |
 | D-BUILDGEN1 | A | generated modules materialize under `.jet/generated/<package>/`, never committed, additive-only, lock-hashed |
 | D-METADEPTH2 | B | read-only post-sema program snapshot + structured `b.error` from the build entry only |
 
@@ -632,7 +632,7 @@ D-BUILDTARGET1=A and D-BUILDACTION1=A.
   fix: "write `fn build(b: BuildContext) => BuildPlan ?`"
   fixture: `tests/ui/build_entry_bad_sig.{jet,stderr}`
 - **E3520** — two build entries for one unit (file `fn build` **and** a
-  `pkg.jet`/`workspace.jet` entry). (Shared with SCOPE1, §15.5.)
+  `package.jet`/`workspace.jet` entry). (Shared with SCOPE1, §15.5.)
   fixture: `tests/ui/build_entry_conflict.{jet,stderr}`
 
 **Example (I5).** `metaprogramming/build_entry.jet` — a `fn build` returning a
@@ -744,7 +744,7 @@ D-CTEFFECT1/E3411; the build-grant spelling is balloted as D-BUILDFLAGS1);
   **and** only when the resolved grant permits that effect. `#Impure` parsing
   already exists; reuse it.
 - Grant resolution: new `crates/jet-driver/src/Jetpack/BuildPolicy.rs` — merges
-  CLI flag/prompt + pkg.jet `build:` + workspace `policy:` into an effective
+  CLI flag/prompt + package.jet `build:` + workspace `policy:` into an effective
   capability set handed to the interpreter run.
 - Provenance: extend `Lock.rs` with the selected entry, its declared effects,
   executed `#Impure` regions (+ reason text), and allowed external tool
@@ -765,7 +765,7 @@ construction; pinned `fetch` (Tier 1) is the D-NETDEP1 backend.
 - **E3503** — Tier-2 effect gated but not permitted by policy. what: "this
   build asks for `{Effect}`, which the project has not granted" · why: "ambient
   authority is deny-by-default so CI stays hermetic" · fix: "add `{Effect}` to
-  the `build:` block in pkg.jet, or pass `--allow-{effect}`" · fixture
+  the `build:` block in package.jet, or pass `--allow-{effect}`" · fixture
   `tests/ui/build_effect_denied.{jet,stderr}`.
 - **E3504** — a **dependency's** build requested authority the root denies.
   what: "dependency `{dep}` build asks for `{Effect}`, denied by default" ·
@@ -788,9 +788,9 @@ three fixtures blessed; provenance visible in `.jet/lock` and via
 ### 15.5 D-BUILDSCOPE1=A — entry home + grant chain
 
 **Ratified semantics.** The entry lives in the unit's own definition file at
-every rung — `fn build` beside `fn main` in a single file, inside `pkg.jet` for
+every rung — `fn build` beside `fn main` in a single file, inside `package.jet` for
 a package, inside `workspace.jet` for a workspace. No new filenames. The grant
-chain mirrors containment: per-invocation flag/prompt (single file) → `pkg.jet`
+chain mirrors containment: per-invocation flag/prompt (single file) → `package.jet`
 `build:` standing grant (package) → `workspace.jet` `policy:` ceiling
 (workspace) that no member grant can exceed. A workspace entry runs member
 builds in dependency order and may add workspace-level targets and cap members;
@@ -799,8 +799,9 @@ without executing anything.
 
 **API surface (manifest, not grammar).**
 ```jet
-// pkg.jet
-payload: .{ name: "atlasgen", version: "1.2.0" }
+// package.jet
+name: "atlasgen"
+version: "1.2.0"
 packages: .{ atlasgen: library }
 build: .{ allow: #(FS) }                    // standing grant for this package's fn build
 
@@ -814,7 +815,7 @@ module workspace {
 ```
 
 **Lands in.**
-- Parse `build:` block in pkg.jet:
+- Parse `build:` block in package.jet:
   `crates/jet-driver/src/Jetpack/PackageManifest/ParseBlocks.rs`. Parse
   `policy:` block in `crates/jet-driver/src/Jetpack/WorkspaceFile.rs`.
 - Home selection + grant-chain merge: `BuildPolicy.rs` (from §15.4) resolves
@@ -840,7 +841,7 @@ that denies `#(Net, Exec)`; expected: member builds run in order, the cap
 holds. Reuse `metaprogramming/build_entry.jet` for the single-file rung.
 
 **Targeted tests.** `crates/jet-driver/tests/build_scope.rs` — same `fn build`
-works as single file (flag grant), package (pkg.jet grant), and workspace
+works as single file (flag grant), package (package.jet grant), and workspace
 member under a ceiling; workspace entry runs members in dependency order;
 member-plan mutation attempt is impossible by API (read-only handle);
 conflicting entries → E3520; `jet inspect audit` prints all three layers, executes

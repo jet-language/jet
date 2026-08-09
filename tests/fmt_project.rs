@@ -95,15 +95,15 @@ fn explicit_dir_arg_formats_files() {
     assert_ne!(read(&f), UNFORMATTED);
 }
 
-/// Directory traversal skips `pkg.jet`; an explicit `pkg.jet` path stays intentional.
+/// Directory traversal validates `package.jet`; an explicit path stays intentional.
 #[test]
-fn explicit_dir_ignores_payload_manifest() {
+fn explicit_dir_reports_invalid_package_manifest() {
     let dir = tmpdir(&line!().to_string());
     let source = write(&dir, "src/main.jet", UNFORMATTED);
     let manifest = write(
         &dir,
-        jet::Syntax::PAYLOAD_FILE,
-        "payload: {\n    name: \"demo\",\n}\ndeps: {\n    helpers: notaref,\n}\n",
+        jet::Syntax::PACKAGE_FILE,
+        "name: \"demo\"\ndeps: {\n    helpers: notaref,\n}\n",
     );
     let manifest_before = fs::read(&manifest).unwrap();
 
@@ -115,14 +115,11 @@ fn explicit_dir_ignores_payload_manifest() {
         .unwrap();
     assert_eq!(
         check.status.code(),
-        Some(1),
-        "only the ordinary source should need formatting\nstderr: {}",
+        Some(2),
+        "invalid package manifest must fail project formatting\nstderr: {}",
         String::from_utf8_lossy(&check.stderr)
     );
-    assert!(
-        !String::from_utf8_lossy(&check.stdout).contains(jet::Syntax::PAYLOAD_FILE),
-        "directory check must not report pkg.jet"
-    );
+    assert_eq!(read(&source), UNFORMATTED);
     assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
 
     let format = Command::new(jet())
@@ -133,11 +130,11 @@ fn explicit_dir_ignores_payload_manifest() {
         .unwrap();
     assert_eq!(
         format.status.code(),
-        Some(0),
-        "directory format should ignore pkg.jet\nstderr: {}",
+        Some(2),
+        "directory format should reject invalid package.jet\nstderr: {}",
         String::from_utf8_lossy(&format.stderr)
     );
-    assert_ne!(read(&source), UNFORMATTED);
+    assert_eq!(read(&source), UNFORMATTED);
     assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
 
     let explicit = Command::new(jet())
@@ -149,7 +146,7 @@ fn explicit_dir_ignores_payload_manifest() {
     assert_eq!(
         explicit.status.code(),
         Some(2),
-        "an explicit pkg.jet path must still reach the formatter"
+        "an explicit package.jet path must still reach the formatter"
     );
 }
 

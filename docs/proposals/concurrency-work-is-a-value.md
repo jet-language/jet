@@ -1,9 +1,11 @@
 # Concurrency — work is a value
 
-Status: proposal v2, 2026-08-06. Owner decisions: ten ballots on card #1505.
-Scope: tasks, groups, channels, select, shared state, transactions, schedules,
-streams, protocols, and the unbuilt service plane.
-Design-only until S53 unfreezes. Nothing here starts implementation.
+Status: ratified record, 2026-08-08. Thirteen `D-CONC-*` decisions on card
+#1505 are ratified and define settled law.
+Scope: tasks, groups, channels, readiness waits, shared state, transactions,
+schedules, streams, protocols, and the service-plane substrate.
+This document records the ratified design. Implementation is tracked on
+separate cards.
 
 ## Executive summary
 
@@ -24,13 +26,14 @@ code.
 
 **The surface wins, before and after.**
 
-| Job | Today | Proposed |
+| Job | Today | Ratified form |
 |---|---|---|
-| Run two things at once | 5 lines, a group, two handles, a list call | `(a, b) :: all { f(), g() }` |
-| First result wins | group + handles + `g.race([slow, fast])` | `race { slow(), fast() }` |
+| Run two things at once | 5 lines, a group, two handles, a list call | `(a, b) :: task.all { f(), g() }` |
+| First result wins | group + handles + `g.race([slow, fast])` | `task.race { slow(), fast() }` |
+| First successful result | group + handles + `g.any([try_a, try_b])` | `task.any { try_a(), try_b() }` |
 | One background task | `tasks.spawn(() => work())` | `task work()` |
 | Task failure | `h.exception() == "cancelled"` string test | `h.join() ?? fallback` — the normal `?` rail |
-| Bounded worker pool | 49 lines of hand-made channel tokens | `group g(limit: 4) { … }` |
+| Bounded worker pool | 49 lines of hand-made channel tokens | `task.group g(limit: 4) { … }` |
 | Drain a channel | `loop { v :: rx.receive() ?? break … }` | `loop v, rx { … }` |
 | Wait on two channels | `g.select().recv(a).recv(b).after(ms: 100, value: -1).wait()` | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
 | Read shared state | `config.read(c => c.name)` | `config.name` |
@@ -41,16 +44,17 @@ fact the compiler already proves. Structure stays: a task can never outlive
 its scope. Data-race freedom stays: every crossing is checked. The magic is
 checked magic.
 
-**What the ballots ask.** Three machinery choices (one substrate, one crossing
-checker, one stream law), and seven surface choices (spawn shape, failure on
-the `?` rail, drop rule, channels and select, shared state, schedules, and the
-transaction law). The surface choices lead; a machinery ballot that a surface
-pick makes moot is withdrawn.
+**Ratified slate.** The decisions settle one substrate, one crossing checker,
+one stream law, the nested task surface, the task-failure rail, the join duty,
+channels and readiness waits, shared state, schedules, transactions, and group
+parameter positions. `D-CONC-FAIL1=A` retires the separate task outcome
+surface from `D-CONC-OUTCOME1=A`; `D-CONC-CHAN2=D` changes the readiness-table
+spelling selected by `D-CONC-CHAN1=A`.
 
 **Breaking changes.** This is a greenfield redesign. `taskgroup`, `g.task =>`,
 `tasks.spawn(() => …)`, the select builder chain, and the `read`/`edit`
-closures are all replaced if their ballots pass. Each ballot names the
-ratified decisions it amends.
+closures are replaced by the ratified forms. Each decision names the earlier
+law it amends.
 
 ## Glossary
 
@@ -75,10 +79,10 @@ ratified decisions it amends.
 three facts about it — state, duty, reach — with the machines it already has.
 The surface then says only what the machines cannot infer.**
 
-For a beginner: write `task`, `all`, `race`, and plain field access on shared
-values. The compiler quietly proves that no work is lost, no child outlives
-its scope, and no data races. Every failure arrives on the same `?` rail as a
-file error.
+For a beginner: write `task`, `task.all`, `task.race`, `task.any`, and plain
+field access on shared values. The compiler quietly proves that no work is
+lost, no child outlives its scope, and no data races. Every failure arrives on
+the same `?` rail as a file error.
 
 For an expert: every fact is a value you can name, query, and reflect. Handles,
 groups, endpoints, and failures are ordinary typed values, so they compose
@@ -106,10 +110,10 @@ line references prove each claim.
 
 ## The surface
 
-This is the heart of the proposal. Each area shows today's code, the proposed
-code, and what gets deleted. Every proposed line is marked by its ballot.
+This is the heart of the record. Each area shows today's code, the ratified
+code, and what gets deleted. Every ratified form is marked by its decision.
 
-### 1. Spawning and fan-out — D-CONC-SPAWN1
+### 1. Spawning and fan-out — D-CONC-SPAWN1=D
 
 **Today.** Two spawn forms, one behind a module import and a lambda.
 
@@ -125,19 +129,20 @@ h :: tasks.spawn(() => work())
 h.join()
 ```
 
-**Proposed.** Four spellings cover everything. No import. No lambda wrapper.
+**Ratified law.** One keyword covers the spawn surface. No import. No lambda
+wrapper for the common forms.
 
 ```jet
-(a, b) :: all { sum_range(1, 25), sum_range(26, 50) }   // run both, wait, get both
+(a, b) :: task.all { sum_range(1, 25), sum_range(26, 50) }   // run both, wait, get both
 print(a + b)
 
-winner :: race { slow(), fast() }        // first done wins; the loser is cancelled
-first  :: any  { try_eu(), try_us() }    // first Ok wins; errors wait for a winner
+winner :: task.race { slow(), fast() }   // first result wins; the loser is cancelled
+first  :: task.any  { try_eu(), try_us() } // first Ok wins; errors wait for a winner
 
 h :: task work()                         // one child task, handle in hand
 h.join()
 
-group g(limit: 4) {                      // dynamic fan-out with a worker cap
+task.group g(limit: 4) {                  // dynamic fan-out with a worker cap
     loop url, urls { task fetch(url) }
 }                                        // the group joins every child here
 ```
@@ -147,18 +152,20 @@ The rules, in plain words:
 - `task f()` starts a child of the current scope. Bind the handle and the
   duty to join or detach it is yours. Leave it unbound and the scope joins it
   at the end.
-- `all` / `race` / `any` keep their ratified meanings (fail fast, cancel
-  losers, first Ok). They need no handles at all.
-- `group g(limit: N)` is for dynamic counts and caps. `g` is a value you can
-  pass to helpers (`fn drain(g: Group, rx: Receiver<Job>)`). It can never be
-  stored, so no child outlives its scope.
+- `task.all` / `task.race` / `task.any` keep their ratified meanings (fail
+  fast, cancel losers, first Ok). They need no handles at all.
+- `task.group g(limit: N)` is for dynamic counts and caps. `g` is a value you
+  can pass to helpers (`fn drain(g: Group, rx: Receiver<Job>)`). It can never
+  be stored, so no child outlives its scope.
+- `D-CONC-GROUP1=A` allows a group borrow in free-function and method
+  parameters. Storage, return, capture, and fields remain banned.
 
 **Deleted:** `taskgroup` blocks, `g.task =>`, `g.all([…])`, `g.race`, `g.any`,
-`tasks.spawn(() => …)`, `tasks.spawn_group`. Amends D-TASKSCOPE1,
-D-NURSERY1's spelling (not its law), D-CONCCOMB1's call shape, and
-D-TASKGROUP-PARAM1 (the group parameter rule carries over to `Group`).
+`tasks.spawn(() => …)`, `tasks.spawn_group`. D-CONC-SPAWN1=D keeps the
+structured lifetime and combinator laws while changing their spelling.
+D-CONC-GROUP1=A amends D-TASKGROUP-PARAM1's parameter-position rule.
 
-### 2. Task failure on the `?` rail — D-CONC-FAIL1
+### 2. Task failure on the `?` rail — D-CONC-FAIL1=A
 
 **Today.** Failure facts hide in strings, and a child panic kills the process.
 
@@ -168,8 +175,8 @@ if h.exception() == "cancelled" { print("stopped") }
 print(h.trace())     // "paused=false,cancel=true"
 ```
 
-**Proposed.** `join` is fallible like any other call. One rail for every error
-in the language.
+**Ratified law.** `join` is fallible like any other call. One rail carries
+every error in the language.
 
 ```jet
 score :: task compute()
@@ -186,16 +193,18 @@ if slow.join() == {                      // tell the failures apart (S68 arm tab
 `join()` returns `T ? TaskFailure`. `TaskFailure` is a normal enum:
 `.Cancelled`, `.DeadlineBlown`, `.Panicked(reason)`. It converts up through
 `impl TaskFailure => AppErr` like every other error family (D-ERR-CONV).
-`all { }` returns its tuple on the same rail, so one failed branch is one
+`task.all { }` returns its tuple on the same rail, so one failed branch is one
 `??` away from a fallback.
 
 There is no separate outcome type. A task failure is an error. This is the
 type-system-v2 answer: no parallel concept beside results.
 
-**Deleted:** `trace()`, `exception()`, and the panic-kills-process rule for
-joined children. Amends D-COROUTINE1's handle surface.
+**Deleted:** `trace()`, `exception()`, `TaskOutcome`, `TaskStatus`, and the
+panic-kills-process rule for joined children. D-CONC-FAIL1=A amends
+D-COROUTINE1 and retires the task-outcome surface ratified by
+D-CONC-OUTCOME1=A.
 
-### 3. Channels and select — D-CONC-CHAN1
+### 3. Channels and readiness waits — D-CONC-CHAN1=A, D-CONC-CHAN2=D
 
 **Today.** A module call, a manual drain dance, and a builder chain.
 
@@ -208,9 +217,10 @@ loop {
 winner :: g.select().recv(ch1).recv(ch2).after(ms: 100, value: -1).wait()
 ```
 
-**Proposed.** Channels are builtin values. Draining is a loop. Waiting on
-several sources is a subjectless `if` table — no second branching keyword
-(D-CONC-CHAN2=D; amends the `select` spelling below).
+**Ratified law.** Channels are builtin values. Draining is a loop. Waiting on
+several sources is a subjectless `if` table. It adds no branching keyword.
+D-CONC-CHAN2=D amends the readiness-table spelling selected by
+D-CONC-CHAN1=A.
 
 ```jet
 (tx, rx) :: channel<Int>(capacity: 8)
@@ -225,17 +235,17 @@ if {
 ```
 
 - `Receiver<T>` and `Sender<T>` become nameable in signatures.
-- The wait table works anywhere in a task, on plain endpoints. It no longer
-  needs a group. `select` is not a keyword; it stays a free identifier.
+- The wait table works anywhere in a task, on plain endpoints. It does not
+  need a group. `select` is not a keyword; it stays a free identifier.
 - The dead `Channel` table entry and the `.read` arm (accepted today, silently
   dropped on every tier) are deleted.
 
-**Deleted:** the `g.select()` builder, `tasks.channel`, the `.read` arm.
-Amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module surface; the wait
-spelling is D-CONC-CHAN2=D, not the `select { … }` table shown above in an
-earlier draft of this proposal.
+**Deleted:** the `g.select()` builder, `tasks.channel`, and the `.read` arm.
+D-CONC-CHAN1=A amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module
+surface. D-CONC-CHAN2=D makes the wait spelling the subjectless `if` table
+shown above.
 
-### 4. Shared state and transactions — D-CONC-SHARE1, D-CONC-STM1
+### 4. Shared state and transactions — D-CONC-SHARE1=A, D-CONC-STM1=A
 
 **Today.** A closure per touch.
 
@@ -245,8 +255,8 @@ label :: config.read(c => c.name)
 config.edit(c => { c.hits += 1 })
 ```
 
-**Proposed.** A shared value reads and writes like a value. Each statement is
-one atomic step. Several statements commit together under `#Transact`.
+**Ratified law.** A shared value reads and writes like a value. Each statement
+is one atomic step. Several statements commit together under `#Transact`.
 
 ```jet
 config :: shared AppConfig.{name: "jet-server", hits: 0}   // Shared<AppConfig>
@@ -265,21 +275,20 @@ one commit, and the compiler orders every lock, so programs cannot deadlock
 on shared values. Expert guards (`guard_read`, `guard_edit`, `Condition`)
 stay for manual control.
 
-D-CONC-STM1 settles a real drift in the same area: the ratified STM text says
-"retried on conflict", but the runtime takes locks in address order and runs
-the block exactly once. The ballot picks which one is law. The recommendation
-is the shipped behavior — your code runs once, logs print once.
+D-CONC-STM1=A settles the drift in the earlier STM text: the block body runs
+exactly once, locks are acquired in fixed order, and contention waits instead
+of retrying. A log line inside the block runs once.
 
-**Deleted (if SHARE1 passes):** the `read`/`edit` closure forms and the
-`#Transact(tx)` mandatory name (the name stays only for `on_commit` /
-`on_rollback` hooks). Amends D-SHARED-API1 and D-TXN2.
+**Deleted:** the `read`/`edit` closure forms and the `#Transact(tx)` mandatory
+name. The name stays for `on_commit` and `on_rollback` hooks. D-CONC-SHARE1=A
+amends D-SHARED-API1 and D-TXN2.
 
-### 5. Schedules, pools, and services — D-CONC-SCHED1
+### 5. Schedules, pools, and services — D-CONC-SCHED1=A
 
 **Today.** The schedule marker parses its own private duration table. There is
 no worker cap. The service plane is ratified but unbuilt.
 
-**Proposed.** Scheduling is data on the work.
+**Ratified law.** Scheduling is typed data on the work.
 
 ```jet
 #[Job, Every(5min)]                   // spelling stays; 5min is now the one
@@ -287,7 +296,7 @@ fn prune_sessions() { … }             // Duration literal every API uses
 
 #[Job, Every("03:00")]
 fn nightly_backup() {
-    group g(limit: 4) {
+    task.group g(limit: 4) {
         loop shard, shards { task back_up(shard) }
     }
 }
@@ -313,7 +322,7 @@ protocol Payment {
 }
 
 fn run() {
-    (c, s) :: Payment.pair()                  // proposed: both endpoints, one call
+    (c, s) :: Payment.pair()                  // generated endpoint pair
     task serve(s)                             // hand the server end to a child
 
     c1 :: c.Charge(1200) ?? return            // send; the endpoint moves to its next state
@@ -335,12 +344,12 @@ What the compiler enforces, with no runtime cost:
 
 That is state, duty, and reach — the same three facts as every task. Today
 each endpoint is minted by string-generated code and the two ends are made
-separately. The proposed `pair()` constructor and honest generated types ride
-the same machinery ballot (D-CONC-UNIT1).
+separately. The `pair()` constructor and honest generated types use the same
+machinery settled by D-CONC-UNIT1.
 
 ## How this uses type system v2
 
-Direct answers to the open questions:
+Settled answers:
 
 - **Results.** Task failure is not a new concept. `join` returns `T ?
   TaskFailure`, an ordinary enum on the one error rail, with `??`, `?`,
@@ -349,22 +358,24 @@ Direct answers to the open questions:
 - **Time.** `after 100ms`, `Every(5min)`, and deadlines all read the one
   Duration rail that D-TYPE2-TIME1 (card #1497) defines. The private schedule
   suffix table dies.
-- **Knowledge planes.** State, duty, and reach become registered planes in
-  the v2 fact registry. Send-safety is the plane the v2 inventory missed; this
-  proposal adds it. Facts become nameable and reflectable like every other
+- **Knowledge planes.** State, duty, and reach are registered planes in the
+  v2 fact registry. Send-safety is the crossing plane settled by
+  D-CONC-CROSS1=A. Facts become nameable and reflectable like every other
   plane.
-- **One branching engine.** `select` arms are S68 arm-table arms, not a
-  private grammar. The binding `v, source` mirrors `loop v, source`.
+- **One branching engine.** Readiness arms are S68 arm-table arms inside a
+  subjectless `if`, not a private grammar. The binding `v, source` mirrors
+  `loop v, source`.
 
 ## What this unlocks
 
-- **Parallel code reads like plain code.** `all { f(), g() }` says exactly
+- **Parallel code reads like plain code.** `task.all { f(), g() }` says exactly
   what happens. No handles, no lists, no group name for the common case.
 - **One error lesson.** A beginner who learned `?? 0` on file reads already
   knows how to handle a task failure.
-- **Worker pools are one line.** `group g(limit: 4)` replaces the 49-line
+- **Worker pools are one line.** `task.group g(limit: 4)` replaces the 49-line
   token pattern the pragmatism audit flagged.
-- **Channel services are two lines.** `loop job, rx` plus `select` covers the
+- **Channel services are two lines.** `loop job, rx` plus a readiness `if`
+  table covers the
   most common concurrency shape in real code.
 - **Shared state loses its closure tax.** Counters and config are field
   reads and writes again, still race-free.
@@ -384,35 +395,38 @@ Direct answers to the open questions:
 - **`para_map` and friends stay**: the one-word answer for data parallelism.
 - **Walls stay**: no actors, no mutex surface, no top type, protocols hold at
   two endpoints. All knowledge erases before codegen — zero runtime cost, and
-  tier parity (I9) is repaired where it is broken today (select on the
-  interpreter, the `.read` arm).
+  tier parity (I9) is repaired where it is broken today (the readiness wait on
+  the interpreter, the `.read` arm).
 
-## Decisions for the owner
+## Ratified decisions
 
-Surface ballots lead. A machinery ballot that a surface pick makes moot is
-withdrawn before ratification.
+All thirteen decisions are ratified. The table records each outcome and its
+settled law. Superseded surfaces stay named only where the later decision
+records the amendment.
 
-| Ballot | Question | Kind |
+| Decision | Outcome | Settled law |
 |---|---|---|
-| D-CONC-SPAWN1 | Adopt `task` / `all` / `race` / `any` / `group(limit:)` and delete the old spawn surface? | surface |
-| D-CONC-FAIL1 | Put task failure on the `?` rail as `TaskFailure`? (owner direction 2026-08-06) | surface |
-| D-CONC-JOIN1 | A bound handle that is dropped: error, auto-join, or warning? | surface |
-| D-CONC-CHAN1 | Builtin channels, `loop v, rx`, arm-table `select`; delete the builder? | surface |
-| D-CONC-SHARE1 | Shared values read and write like values; statements lock; `#Transact` commits? | surface |
-| D-CONC-SCHED1 | Typed schedule data, one job vocabulary, service plane on the substrate? | surface |
-| D-CONC-STM1 | Transaction law: ordered one-run commit, or retry? | law |
-| D-CONC-UNIT1 | Re-found the internals on typestate + obligations + one fact registry? | machinery |
-| D-CONC-CROSS1 | One crossing checker and one error voice for every worker boundary? | machinery |
-| D-CONC-STREAM1 | One lifecycle law for streams and tasks? | machinery |
+| D-CONC-UNIT1 | A | State, duty, and reach use one substrate: typestate, single-use obligations, and one crossing plane. No surface change. |
+| D-CONC-JOIN1 | A | Dropping a bound task handle is a compile error. Join it, use its result, or detach it. The rule extends D-LIN1 and amends L1101. |
+| D-CONC-GROUP1 | A | A group borrow works in free-function and method parameters. It cannot be stored, returned, captured, or put in a field. |
+| D-CONC-OUTCOME1 | A, retired by FAIL1=A | The typed outcome/status surface was ratified, then retired. `TaskOutcome` and `TaskStatus` do not ship; `trace()` and `exception()` stay deleted. |
+| D-CONC-CROSS1 | A | Crossing safety is one registered fact plane with one error family. Existing task, adapter, kernel, cell, and fixed-backing semantics stay unchanged. |
+| D-CONC-STM1 | A | A transaction body runs once. The commit takes locks in fixed order. Contention waits; it does not retry. |
+| D-CONC-SCHED1 | A | Schedule values use the typed time rail. A job is a task the runtime starts. Services use supervisor tasks and groups. |
+| D-CONC-STREAM1 | A | A stream is a task. Dropping its iterator cancels its producer at the next wait point, with normal cleanup. |
+| D-CONC-CHAN1 | A, spelling amended by CHAN2=D | `channel<T>()` is builtin. `loop value, receiver` drains it. The readiness wait uses the arm-table shape on plain endpoints. |
+| D-CONC-SHARE1 | A | `shared` values use plain field access. Each statement is one atomic step. Several steps use `#Transact`; expert guards stay. |
+| D-CONC-SPAWN1 | D | One reserved word owns the family: `task`, `task.all`, `task.race`, `task.any`, and `task.group`. Only `task` is reserved. |
+| D-CONC-FAIL1 | A | `join()` returns `T ? TaskFailure`. `TaskFailure` has `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. It retires the separate outcome types. |
+| D-CONC-CHAN2 | D | The readiness wait is a subjectless `if` table with binding/source heads, `after` time, optional non-blocking `else`, and one atomic wait. `select` stays a free identifier. |
 
 ## Implementation shape
 
-Design-only until S53 unfreezes. After the gate and ratification:
+This record and its decision slate are complete. Implementation is separate
+from this closeout and must use the settled law above.
 
-- **Phase A — machinery.** Land UNIT1/CROSS1/STREAM1 internals with today's
-  surface and every test green. Fix the interpreter select gap.
-- **Phase B — surface.** Land each ratified surface ballot as one greenfield
-  migration: new spelling in, old spelling deleted, spec, examples, goldens,
-  and docs updated in the same change.
-- **Phase C — build the owed features on the substrate.** Service plane,
-  typed job scopes, Windows IOCP conformance.
+- **Substrate.** Land UNIT1, CROSS1, and STREAM1 on the shared engines.
+- **Surface.** Migrate each ratified spelling as one greenfield change. Delete
+  every replaced consumer, example, golden, snapshot, and doc in that change.
+- **Owed features.** Build the service plane, typed job scopes, and Windows
+  IOCP conformance on the substrate.

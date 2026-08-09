@@ -2,6 +2,7 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{AccessConvention, CModule, ExternFn, ExternRustBlock, Type, VariantPayload};
+use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 
 pub(crate) fn cpp_callback_abi_type(ty: &Type) -> Option<&Type> {
@@ -423,13 +424,9 @@ pub(crate) fn register_extern_fn(
     consts: &HashMap<String, Type>,
     diags: &mut Vec<Diagnostic>,
     is_c_abi: bool,
+    prelude_enabled: bool,
 ) {
-    if ef.name == Syntax::BUILTIN_PRINT
-        || ef.name == Syntax::BUILTIN_PANIC
-        || ef.name == Syntax::BUILTIN_REQUIRE
-        || ef.name == Syntax::BUILTIN_REQUIRE_EQ
-        || ef.name == Syntax::BUILTIN_EXPECT
-    {
+    if ef.name == Syntax::BUILTIN_REQUIRE_EQ || ef.name == Syntax::BUILTIN_EXPECT {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", ef.name),
@@ -438,6 +435,9 @@ pub(crate) fn register_extern_fn(
             Some(ef.name_span),
         ));
         return;
+    }
+    if prelude_enabled && CorePrelude::entry(&ef.name).is_some() {
+        diags.push(crate::Sema::Prelude::shadow_warning(&ef.name, ef.name_span));
     }
     if name_defined(&ef.name, funcs, registry, consts) {
         diags.push(defined_twice(

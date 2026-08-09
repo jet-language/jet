@@ -10,6 +10,10 @@ mod range_semantics {
     pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
+
+mod duration_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
+}
 use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
@@ -1885,7 +1889,9 @@ pub fn apply_method(
                     },
                 _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
             };
-            Ok(CtValue::Present(Box::new(CtValue::Int(ns / scale))))
+            Ok(CtValue::Present(Box::new(CtValue::Int(
+                duration_semantics::jet_duration_kernel_in(ns, scale),
+            ))))
         }
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),

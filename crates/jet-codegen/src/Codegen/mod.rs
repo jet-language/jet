@@ -65,6 +65,10 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Disjoint.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
+    include_str!("../Prelude/Core/Duration.rs"),
+    include_str!("../Prelude/Core/Measurement.rs"),
+    include_str!("../Prelude/Core/Time.rs"),
+    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
     // (Codegen/Web.rs) so every tier runs one power.
@@ -87,10 +91,94 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../../../jet-foundation/src/StreamCursor.rs"),
 ];
 
+/// Native builders split this exact block into the content-addressed runtime
+/// rlib. Keep the markers stable: emitted Rust remains a complete standalone
+/// program, while the AOT link seam can replace the block with one `--extern`.
+pub const CACHED_RUNTIME_BEGIN: &str = "// jet:cached-runtime-begin\n";
+pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
+
 fn push_prelude(out: &mut String) {
     for part in PRELUDE_PARTS {
         out.push_str(part);
     }
+}
+
+fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
+    let Some(link) = link else {
+        out.push_str("fn jet_ffi_install_reporter() {}\n\n");
+        return;
+    };
+    out.push_str(&format!(
+        concat!(
+            "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter\n",
+            "extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {{\n",
+            "    let message = if message.is_null() {{ \"panic: a foreign function panicked\".into() }} else {{ String::from_utf8_lossy(unsafe {{ std::slice::from_raw_parts(message, len) }}).into_owned() }};\n",
+            "    eprintln!(\"{{message}}\");\n",
+            "}}\n",
+            "// JET_VETTED_UNSAFE_END: ffi_reporter\n",
+            "fn jet_ffi_install_reporter() {{ {}::jet_ffi_set_reporter(jet_ffi_reporter); }}\n\n"
+        ),
+        link.crate_name,
+    ));
+}
+
+/// Traits used by both the fixed runtime and generated root-program types.
+/// Imported Jet modules keep their module-local traits; the root imports these
+/// from the cached runtime rlib after the native builder splits the source.
+fn push_cached_runtime_traits(out: &mut String) {
+    out.push_str("pub trait user_Display {\n");
+    out.push_str("    fn display(&self) -> String;\n");
+    out.push_str("}\n\n");
+    out.push_str("pub trait user_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
+    for ty in [
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
+        "bool", "char", "String",
+    ] {
+        out.push_str(&format!(
+            "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+        ));
+    }
+    out.push('\n');
+}
+
+fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
+    if link.is_some() {
+        push_ffi_reporter(out, link);
+    }
+    out.push_str(CACHED_RUNTIME_BEGIN);
+    if link.is_none() {
+        // EnvInit is part of cached runtime and calls this hook. Keep no-FFI
+        // stub inside marker block so split rlib has symbol too.
+        push_ffi_reporter(out, None);
+    }
+    push_cached_runtime_traits(out);
+    push_prelude(out);
+    out.push_str(ENV_INIT_PRELUDE);
+    push_mem_prelude(out);
+    push_gc_prelude(out);
+    out.push_str(LAYOUT_PRELUDE);
+    out.push_str(CACHED_RUNTIME_END);
+}
+
+fn is_in_cached_runtime(source: &str, position: usize) -> bool {
+    let Some(begin) = source.find(CACHED_RUNTIME_BEGIN) else {
+        return false;
+    };
+    let Some(end) = source[begin + CACHED_RUNTIME_BEGIN.len()..]
+        .find(CACHED_RUNTIME_END)
+        .map(|offset| begin + CACHED_RUNTIME_BEGIN.len() + offset)
+    else {
+        return false;
+    };
+    begin < position && position < end
+}
+
+/// Exact fixed-runtime identity used by the final native-binary cache as well
+/// as the rlib cache. A Prelude edit must invalidate both layers.
+pub fn cached_runtime_fingerprint() -> String {
+    let mut source = String::new();
+    push_cached_runtime(&mut source, None);
+    crate::SHA256::sha256_hex(source.as_bytes())
 }
 
 fn emit_command_metadata(
@@ -361,6 +449,7 @@ fn jet_cov_dump() {
 const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Mime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
@@ -634,6 +723,10 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str("\nmod jet_xml_pull {\n");
     out.push_str(include_str!("../../../jet-foundation/src/XmlPull.rs"));
     out.push_str("\n}\n");
+    out.push_str("\n#[allow(non_snake_case)]\nmod XmlPull { pub use crate::jet_xml_pull::*; }\n");
+    out.push_str("\nmod jet_xml_kernel {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/XmlKernel.rs"));
+    out.push_str("\n}\n");
     out.push_str("\nmod jet_base_encoding_strict {\n");
     out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
     out.push_str("\n}\n");
@@ -654,7 +747,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     // needs_xml / needs_base still drive encoding Top reachability below.
 
     for part in CORELIB_KERNEL_PARTS {
-        out.push_str(part);
+        // Host crates include UrlMime.rs directly, so it includes its sibling
+        // MIME kernel. AOT already embeds that kernel as the preceding part.
+        out.push_str(part.strip_prefix("    include!(\"Mime.rs\");\n\n").unwrap_or(part));
     }
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
@@ -810,6 +905,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
     out.push_str(include_str!("../Prelude/Deadline.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
 
     if needs_email {
@@ -1066,6 +1162,9 @@ fn strip_unused_mem_prelude(out: String) -> String {
     let Some(start) = out.find("mod jet_mem") else {
         return out;
     };
+    if is_in_cached_runtime(&out, start) {
+        return out;
+    }
     // Brace-match the module body to find its end.
     let bytes = out.as_bytes();
     let mut depth = 0usize;
@@ -1106,6 +1205,9 @@ fn strip_unused_gc_prelude(out: String) -> String {
     let Some(start) = out.find("mod jet_gc") else {
         return out;
     };
+    if is_in_cached_runtime(&out, start) {
+        return out;
+    }
     let bytes = out.as_bytes();
     let mut depth = 0usize;
     let mut seen = false;
@@ -1177,6 +1279,9 @@ fn strip_unused_txn_prelude(out: String) -> String {
     let Some(start) = out.find("mod jet_txn") else {
         return out;
     };
+    if is_in_cached_runtime(&out, start) {
+        return out;
+    }
     let bytes = out.as_bytes();
     let mut depth = 0usize;
     let mut seen = false;
@@ -1243,6 +1348,9 @@ fn strip_unused_term_prelude(out: String) -> String {
     let Some(unix_mod) = out.find("mod jet_term_unix {") else {
         return out;
     };
+    if is_in_cached_runtime(&out, unix_mod) {
+        return out;
+    }
     let block_start = out[..unix_mod].rfind("#[cfg(unix)]").unwrap_or(unix_mod);
     let Some(read_key) = out.find("fn jet_term_read_key") else {
         return out;
@@ -1325,16 +1433,18 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
     s
 }
 
-pub(crate) fn emit_synthetic_display_trait(out: &mut String) {
-    out.push_str("pub trait user_Display {\n");
-    out.push_str("    fn display(&self) -> String;\n");
-    out.push_str("}\n\n");
+pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_owned: bool) {
+    if include_runtime_owned {
+        out.push_str("pub trait user_Display {\n");
+        out.push_str("    fn display(&self) -> String;\n");
+        out.push_str("}\n\n");
+    }
     out.push_str("pub trait user_Debug {\n");
     out.push_str("    fn debug(&self) -> String;\n");
     out.push_str("}\n\n");
 }
 
-pub(crate) fn emit_synthetic_operator_traits(out: &mut String) {
+pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_owned: bool) {
     out.push_str("#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n");
     out.push_str("pub enum user_Ordering { user_Less, user_Equal, user_Greater }\n\n");
     for (name, method, ret) in [
@@ -1345,6 +1455,9 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String) {
         ("Equatable", "equal", "bool"),
         ("Comparable", "compare", "user_Ordering"),
     ] {
+        if name == "Equatable" && !include_runtime_owned {
+            continue;
+        }
         if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
             let trait_rust = mangle(name);
             out.push_str(&format!(
@@ -1383,13 +1496,15 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String) {
             ));
         }
     }
-    for ty in [
-        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
-        "bool", "char", "String",
-    ] {
-        out.push_str(&format!(
-            "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
-        ));
+    if include_runtime_owned {
+        for ty in [
+            "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
+            "bool", "char", "String",
+        ] {
+            out.push_str(&format!(
+                "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+            ));
+        }
     }
     for ty in [
         "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char",
@@ -1842,6 +1957,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
         }
     }
     out.push_str("#![allow(warnings)]\n\n");
+    push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -1854,8 +1970,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
     emit_anonymous_unions(&cx, &prog.items, &mut out);
 
-    emit_synthetic_display_trait(&mut out);
-    emit_synthetic_operator_traits(&mut out);
+    emit_synthetic_display_trait(&mut out, true);
+    emit_synthetic_operator_traits(&mut out, true);
     emit_synthetic_close_trait(&mut out);
     emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
@@ -1956,6 +2072,32 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aot_ffi_host_installs_bridge_reporter() {
+        let link = FfiLink {
+            crate_name: "jet_ffi_fixture".into(),
+            rlib_path: "fixture.rlib".into(),
+            cdylib_path: "fixture.so".into(),
+            target_deps_dir: "deps".into(),
+            host_deps_dir: "deps".into(),
+            helper_bin_path: None,
+            secrets_helper_bin_path: None,
+        };
+        let mut source = String::new();
+        push_ffi_reporter(&mut source, Some(&link));
+        assert!(source.contains("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)"));
+        assert!(source.contains("panic: a foreign function panicked"));
+
+        let mut cached = String::new();
+        push_cached_runtime(&mut cached, Some(&link));
+        let reporter = cached
+            .find("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)")
+            .unwrap();
+        let marker = cached.find(CACHED_RUNTIME_BEGIN).unwrap();
+        assert!(reporter < marker);
+        assert!(!cached[marker..].contains("jet_ffi_fixture::jet_ffi_set_reporter"));
+    }
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
@@ -2050,6 +2192,8 @@ mod tests {
     fn core_prelude_stays_split_by_runtime_ownership() {
         const MAX_MODULE_LINES: usize = 2500;
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let outcome =
+            std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
@@ -2061,6 +2205,12 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let set_algebra =
             std::fs::read_to_string(root.join("src/Prelude/Core/SetAlgebra.rs")).unwrap();
+        let duration =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Duration.rs")).unwrap();
+        let measurement =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Measurement.rs")).unwrap();
+        let time = std::fs::read_to_string(root.join("src/Prelude/Core/Time.rs")).unwrap();
+        let sketch = std::fs::read_to_string(root.join("src/Prelude/Core/Sketch.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
         let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
         let division =
@@ -2088,6 +2238,7 @@ mod tests {
         let stream_cursor =
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
         for (relative, source) in [
+            ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
@@ -2097,6 +2248,10 @@ mod tests {
                 expiring_secret.as_str(),
             ),
             ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
+            ("src/Prelude/Core/Duration.rs", duration.as_str()),
+            ("src/Prelude/Core/Measurement.rs", measurement.as_str()),
+            ("src/Prelude/Core/Time.rs", time.as_str()),
+            ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
             ("src/Prelude/Core/Division.rs", division.as_str()),
@@ -2136,6 +2291,9 @@ mod tests {
 
         let codegen = std::fs::read_to_string(root.join("src/Codegen/mod.rs")).unwrap();
         let production_codegen = codegen.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let outcome_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/Outcome.rs\")")
+            .unwrap();
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
             .unwrap();
@@ -2153,6 +2311,18 @@ mod tests {
             .unwrap();
         let set_algebra_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/SetAlgebra.rs\")")
+            .unwrap();
+        let duration_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Duration.rs\")")
+            .unwrap();
+        let measurement_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Measurement.rs\")")
+            .unwrap();
+        let time_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Time.rs\")")
+            .unwrap();
+        let sketch_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Sketch.rs\")")
             .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
@@ -2176,12 +2346,17 @@ mod tests {
             .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
             .unwrap();
         assert!(
-            unicode_pos < values_pos
+            outcome_pos < unicode_pos
+                && unicode_pos < values_pos
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
                 && expiring_secret_pos < set_algebra_pos
-                && set_algebra_pos < core_pos
+                && set_algebra_pos < duration_pos
+                && duration_pos < measurement_pos
+                && measurement_pos < time_pos
+                && time_pos < sketch_pos
+                && sketch_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
@@ -2195,12 +2370,17 @@ mod tests {
         assert_eq!(
             PRELUDE_PARTS,
             [
+                outcome.as_str(),
                 unicode.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
                 disjoint.as_str(),
                 expiring_secret.as_str(),
                 set_algebra.as_str(),
+                duration.as_str(),
+                measurement.as_str(),
+                time.as_str(),
+                sketch.as_str(),
                 core.as_str(),
                 power.as_str(),
                 division.as_str(),
@@ -2222,12 +2402,17 @@ mod tests {
         let mut emitted = String::new();
         push_prelude(&mut emitted);
         let expected = [
+            outcome.as_str(),
             unicode.as_str(),
             values.as_str(),
             range_bounds.as_str(),
             disjoint.as_str(),
             expiring_secret.as_str(),
             set_algebra.as_str(),
+            duration.as_str(),
+            measurement.as_str(),
+            time.as_str(),
+            sketch.as_str(),
             core.as_str(),
             power.as_str(),
             division.as_str(),
@@ -2248,11 +2433,51 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 331_699, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 344_633, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "4c073a5981cdb4e6476d54c674972a2157cbfec83b24be2a5630a6c7d04c83cf",
+            "5f06e715b4c38dbd0d75f561b08abd6e57e2584278568e92b32c049954d2f5d7",
             "split changed historical prelude bytes, order, or boundary newline"
+        );
+    }
+
+    #[test]
+    fn cached_runtime_block_covers_every_fixed_runtime_source_part() {
+        let mut emitted = String::new();
+        push_cached_runtime(&mut emitted, None);
+        let body = emitted
+            .strip_prefix(CACHED_RUNTIME_BEGIN)
+            .and_then(|source| source.strip_suffix(CACHED_RUNTIME_END))
+            .expect("cached runtime markers must enclose one exact block");
+        assert!(body.contains("fn jet_ffi_install_reporter() {}"));
+        for part in PRELUDE_PARTS {
+            assert!(
+                body.contains(part),
+                "every PRELUDE_PARTS byte string must affect the runtime cache key"
+            );
+        }
+        for part in [
+            ENV_INIT_PRELUDE,
+            UNINIT_PRELUDE,
+            MEM_PRELUDE,
+            GC_RUNTIME_PRELUDE,
+            LAYOUT_PRELUDE,
+        ] {
+            assert!(
+                body.contains(part),
+                "every fixed runtime source part must affect the runtime cache key"
+            );
+        }
+        assert_eq!(emitted.matches(CACHED_RUNTIME_BEGIN).count(), 1);
+        assert_eq!(emitted.matches(CACHED_RUNTIME_END).count(), 1);
+
+        let program = format!("{emitted}fn main() {{}}\n");
+        let pruned = strip_unused_term_prelude(strip_unused_gc_prelude(
+            strip_unused_txn_prelude(strip_unused_mem_prelude(program)),
+        ));
+        assert!(
+            pruned.starts_with(emitted.as_str()),
+            "program-specific pruning must not create runtime-cache variants"
         );
     }
 
@@ -2412,6 +2637,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
@@ -2430,8 +2656,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
     emit_anonymous_unions(&cx, &prog.items, &mut out);
 
-    emit_synthetic_display_trait(&mut out);
-    emit_synthetic_operator_traits(&mut out);
+    emit_synthetic_display_trait(&mut out, true);
+    emit_synthetic_operator_traits(&mut out, true);
     emit_synthetic_close_trait(&mut out);
     emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
@@ -2864,11 +3090,7 @@ pub fn emit_bundle_dbg(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_prelude(&mut out);
-    out.push_str(ENV_INIT_PRELUDE);
-    push_mem_prelude(&mut out);
-    push_gc_prelude(&mut out);
-    out.push_str(LAYOUT_PRELUDE);
+    push_cached_runtime(&mut out, link);
     if needs_embedded_runtime(bundle) {
         push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
@@ -2920,7 +3142,7 @@ pub fn emit_bundle_dbg(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
-        emit_program_items(&cx, &module.items, &mut out, true);
+        emit_program_items(&cx, &module.items, &mut out, true, true);
         out.push_str("}\n\n");
     }
 
@@ -2986,7 +3208,7 @@ pub fn emit_bundle_dbg(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
-    emit_program_items(&cx, &entry.items, &mut out, true);
+    emit_program_items(&cx, &entry.items, &mut out, true, false);
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
@@ -3049,11 +3271,7 @@ pub fn emit_bundle_tests_cov(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_prelude(&mut out);
-    out.push_str(ENV_INIT_PRELUDE);
-    push_mem_prelude(&mut out);
-    push_gc_prelude(&mut out);
-    out.push_str(LAYOUT_PRELUDE);
+    push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
@@ -3110,7 +3328,7 @@ pub fn emit_bundle_tests_cov(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
-        emit_program_items(&cx, &module.items, &mut out, false);
+        emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
 
@@ -3140,7 +3358,7 @@ pub fn emit_bundle_tests_cov(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
-    emit_program_items(&cx, &entry.items, &mut out, false);
+    emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_output_check_fns(&checks, &mut out);
@@ -3258,11 +3476,7 @@ pub fn emit_bundle_fuzz(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_prelude(&mut out);
-    out.push_str(ENV_INIT_PRELUDE);
-    push_mem_prelude(&mut out);
-    push_gc_prelude(&mut out);
-    out.push_str(LAYOUT_PRELUDE);
+    push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
@@ -3316,7 +3530,7 @@ pub fn emit_bundle_fuzz(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
-        emit_program_items(&cx, &module.items, &mut out, false);
+        emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
 
@@ -3345,7 +3559,7 @@ pub fn emit_bundle_fuzz(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
-    emit_program_items(&cx, &entry.items, &mut out, false);
+    emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_fuzz_main(&cx, tests[target], target, file_label, &mut out);
@@ -3521,11 +3735,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_prelude(&mut out);
-    out.push_str(ENV_INIT_PRELUDE);
-    push_mem_prelude(&mut out);
-    push_gc_prelude(&mut out);
-    out.push_str(LAYOUT_PRELUDE);
+    push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
@@ -3582,7 +3792,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
-        emit_program_items(&cx, &module.items, &mut out, false);
+        emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
 
@@ -3612,7 +3822,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
-    emit_program_items(&cx, &entry.items, &mut out, false);
+    emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     out.push_str(
         "fn jet_bench_check(result: Result<(), String>) {\n\

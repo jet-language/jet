@@ -671,6 +671,28 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
     out
 }
 
+fn package_lints_deny(bundle: &ProgramBundle) -> Vec<String> {
+    let Some(entry) = bundle.modules.get(bundle.entry) else {
+        return Vec::new();
+    };
+    // `compile_src`/eval bundles are intentionally filesystem-free. A package
+    // wall belongs only to a loaded project bundle, whose entry path is real.
+    if !entry.path.is_file() {
+        return Vec::new();
+    }
+    for file in [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE] {
+        let path = bundle.project_root.join(file);
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        return jet_foundation::LintPolicy::parse_package_source(&source)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+    }
+    Vec::new()
+}
+
 fn declare_name(
     ledger: &mut jet_foundation::Names::NameLedger,
     module: usize,
@@ -1225,6 +1247,7 @@ fn check_bundle_opts_for_output_inner(
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
     diags.extend(inject_units_prelude(bundle));
+    super::Prelude::inject(bundle);
     diags.extend(super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `$if build.os == {
@@ -1447,7 +1470,16 @@ fn check_bundle_opts_for_output_inner(
         let st = &mut states[idx];
         for item in &module.items {
             match item {
-                Item::Func(f) => register_func_item(f, st, &mut diags),
+                Item::Func(f) => {
+                    st.func_spans.insert(f.name.clone(), f.name_span);
+                }
+                Item::Const(c) => {
+                    st.const_spans.insert(c.name.clone(), c.name_span);
+                }
+                _ => {}
+            }
+            match item {
+                Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                 Item::Struct(s) => {
                     register_struct(
                         s,
@@ -1543,6 +1575,7 @@ fn check_bundle_opts_for_output_inner(
                                 &st.consts,
                                 &mut diags,
                                 false,
+                                !module.no_prelude,
                             );
                         }
                     }
@@ -1575,6 +1608,7 @@ fn check_bundle_opts_for_output_inner(
                                 &st.consts,
                                 &mut diags,
                                 true,
+                                !module.no_prelude,
                             );
                         }
                     }
@@ -1756,16 +1790,31 @@ fn check_bundle_opts_for_output_inner(
                                 }
                                 // E2710: derive body failed at comptime. Wrap with context
                                 // pointing at the #TraitName trigger on the struct.
-                            Err(inner) => diags.push(Diagnostic::error(
+                            Err(inner) => {
+                                let layout_refusal =
+                                    inner.code == "E0956" && inner.what.contains("D-LAYOUT-FACTS1=B");
+                                let why = if layout_refusal {
+                                    format!("{}; {}", inner.what, inner.why)
+                                } else {
+                                    inner.what.clone()
+                                };
+                                let fix = if layout_refusal {
+                                    inner.fix.clone()
+                                } else {
+                                    "fix the `derive` body so it generates valid Jet at compile time"
+                                        .to_string()
+                                };
+                                diags.push(Diagnostic::error(
                                     "E2710",
                                     format!(
                                         "`derive T.{}` body failed while expanding `#{}` on `{}`",
                                         derive_name, derive_name, s.name
                                     ),
-                                    inner.what.clone(),
-                                    "fix the `derive` body so it generates valid Jet at compile time".to_string(),
+                                    why,
+                                    fix,
                                     Some(*derive_span),
-                            )),
+                                ));
+                            }
                         }
                     }
                 }
@@ -1774,7 +1823,7 @@ fn check_bundle_opts_for_output_inner(
                 // the normal sema pipeline.
                 for item in &new_items {
                     match item {
-                        Item::Func(f) => register_func_item(f, st, &mut diags),
+                        Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                         Item::Struct(s) => {
                             register_struct(
                                 s,
@@ -2751,6 +2800,10 @@ fn check_bundle_opts_for_output_inner(
     bundle.ffi_callback_fns = ffi_callback_fns;
     diags.extend(super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
+    let lints_deny = package_lints_deny(bundle);
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    bundle.parse_teaching = jet_foundation::LintPolicy::apply(&lints_deny, parse_teaching);
+    let diags = jet_foundation::LintPolicy::apply(&lints_deny, diags);
     bundle.name_ledger = name_ledger.clone();
     (
         diags,

@@ -1,17 +1,24 @@
-//! D-SOLVER-LIB1: resident-JIT host implementation of the finite Solver.
-//! Handles index runtime-owned state; checked TIR fixes every operation/type.
+//! D-SOLVER-LIB1: resident-JIT adapter for the shared finite-solver kernel.
 
 use super::Concurrency;
 
-#[derive(Default)]
-pub(crate) struct SolverState {
-    pub(crate) checked: i64,
-    pub(crate) failures: i64,
+mod solver_kernel {
+    pub(crate) mod jet_std {
+        pub(crate) struct Solver {
+            pub(crate) seed: i64,
+            pub(crate) checked: i64,
+            pub(crate) failures: i64,
+        }
+    }
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
 }
 
-extern "C" fn jet_jit_solver_new(_seed: i64) -> i64 {
+pub(crate) use solver_kernel::jet_std::Solver as SolverState;
+
+extern "C" fn jet_jit_solver_new(seed: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.solvers.push(SolverState::default());
+        rt.solvers.push(solver_kernel::jet_solver_new(seed));
         rt.solvers.len() as i64
     })
 }
@@ -22,36 +29,28 @@ extern "C" fn jet_jit_solver_require(handle: i64, ok: i8) {
             .solvers
             .get_mut(handle.saturating_sub(1) as usize)
             .expect("jit solver require: bad handle");
-        solver.checked += 1;
-        if ok == 0 {
-            solver.failures += 1;
-        }
+        solver_kernel::jet_solver_require(solver, ok != 0);
     });
 }
 
 extern "C" fn jet_jit_solver_failure_count(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.solvers
+        let solver = rt
+            .solvers
             .get(handle.saturating_sub(1) as usize)
-            .expect("jit solver failure_count: bad handle")
-            .failures
+            .expect("jit solver failure_count: bad handle");
+        solver_kernel::jet_solver_failure_count(solver)
     })
 }
 
 extern "C" fn jet_jit_solver_status(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let status = if rt
+        let solver = rt
             .solvers
             .get(handle.saturating_sub(1) as usize)
-            .expect("jit solver status: bad handle")
-            .failures
-            == 0
-        {
-            "ok"
-        } else {
-            "failed"
-        };
-        rt.heap.alloc_string(status.to_string())
+            .expect("jit solver status: bad handle");
+        let status = solver_kernel::jet_solver_status(solver);
+        rt.heap.alloc_string(status)
     })
 }
 
@@ -76,8 +75,6 @@ host_fns! {
     failure_count: "jet_jit_solver_failure_count" => jet_jit_solver_failure_count: unary;
     status: "jet_jit_solver_status" => jet_jit_solver_status: unary;
 }
-
-
 
 
 

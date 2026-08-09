@@ -2418,21 +2418,36 @@ pub fn jet_scheduler_any<T: Send + 'static>(
         .expect("any result missing")
 }
 
-/// D-CONCSELECT1=A: JIT/AOT entry for fluent `g.select()` over scheduler channels.
-pub fn jet_scheduler_select_int_channels(
-    channels: &[JetSchedulerChannel<i64>],
-    after_ms: Vec<u64>,
-) -> i64 {
-    let inners: Vec<_> = channels.iter().map(|c| c.select_inner()).collect();
-    match jet_scheduler_select(inners, after_ms) {
+/// D-SELECT-GENERIC1=A: the one typed select door. Every engine supplies
+/// scheduler-channel handles and the value slot for each timer arm; this
+/// Prelude function owns readiness, waiting, arm choice, and failure meaning.
+pub(crate) fn jet_scheduler_select_values<T: Send>(
+    recvs: Vec<Arc<ChannelInner<T>>>,
+    after_values: Vec<(u64, Option<T>)>,
+) -> T {
+    let after_ms: Vec<u64> = after_values.iter().map(|(ms, _)| *ms).collect();
+    match jet_scheduler_select(recvs, after_ms) {
         JetSelectOutcome::Recv { value, .. } => value,
-        JetSelectOutcome::After { .. } => {
-            jet_scheduler_fatal("select timer arm has no receive value");
-        }
-        JetSelectOutcome::Closed => {
-            jet_scheduler_fatal("select closed");
-        }
+        JetSelectOutcome::After { arm } => after_values
+            .into_iter()
+            .nth(arm)
+            .and_then(|(_, value)| value)
+            .unwrap_or_else(|| jet_scheduler_fatal("select timer arm has no receive value")),
+        JetSelectOutcome::Closed => jet_scheduler_fatal("select closed"),
     }
+}
+
+/// Cranelift keeps this ABI symbol while its payload is now generic at the
+/// Prelude door. The `i64` spelling is a host ABI detail, not a language type.
+pub fn jet_scheduler_select_int_channels<T: Send>(
+    channels: &[JetSchedulerChannel<T>],
+    after_ms: Vec<u64>,
+) -> T {
+    let recvs: Vec<_> = channels.iter().map(|c| c.select_inner()).collect();
+    jet_scheduler_select_values(
+        recvs,
+        after_ms.into_iter().map(|ms| (ms, None)).collect(),
+    )
 }
 
 /// Submit `f` to the M:N pool and return a join handle.

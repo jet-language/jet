@@ -47,7 +47,7 @@ fn manifest_rejects_retired_std_runtime_name() {
 fn math_import_infers_core_layer() {
     let dir = tmp_project("math");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -77,7 +77,7 @@ fn run() {
 fn solve_import_infers_alloc_layer() {
     let dir = tmp_project("solve");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -108,7 +108,7 @@ fn run() {
 fn fs_import_infers_std_layer() {
     let dir = tmp_project("fs");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -138,7 +138,7 @@ fn run() {
 fn ceiling_blocks_std_import() {
     let dir = tmp_project("ceiling");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n",
     )
     .unwrap();
@@ -164,7 +164,7 @@ fn run() {
 fn alloc_ceiling_allows_mem_not_fs() {
     let dir = tmp_project("alloc_ok");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\nruntime: alloc\n",
     )
     .unwrap();
@@ -191,7 +191,7 @@ fn run() {
 fn ambient_input_infers_std_layer() {
     let dir = tmp_project("input");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -220,7 +220,7 @@ fn run() {
 fn ceiling_blocks_ambient_input_helper() {
     let dir = tmp_project("input_ceiling");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n",
     )
     .unwrap();

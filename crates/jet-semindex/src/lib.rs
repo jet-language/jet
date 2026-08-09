@@ -373,7 +373,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("pkg.jet"),
-            "payload: { name: \"legacy\", version: \"0.1.0\" }\n",
+            "name: \"legacy\"\nversion: \"0.1.0\"\n",
         )
         .unwrap();
         let entry = root.join("main.jet");

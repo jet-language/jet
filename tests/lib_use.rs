@@ -76,8 +76,8 @@ fn realized_library_is_consumed_with_use() {
     // top-level `pub fn` in the module file (S16 module form).
     let producer = s.join("jsonutil-src");
     write(
-        &producer.join("pkg.jet"),
-        "payload: { name: \"jsonutil\", version: \"0.1.0\" }\npackages: { jsonutil: library }\n",
+        &producer.join("package.jet"),
+        "name: \"jsonutil\"\nversion: \"0.1.0\"\npackages: { jsonutil: library }\n",
     );
     write(
         &producer.join("jsonutil.jet"),
@@ -97,8 +97,8 @@ fn realized_library_is_consumed_with_use() {
     // exercising the new extra search root rather than the M12.1 path-dep path.
     let consumer = s.join("app");
     write(
-        &consumer.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
+        &consumer.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
     );
     write(
         &consumer.join("main.jet"),
@@ -135,8 +135,8 @@ fn executable_is_not_importable() {
     // Producer repo: an `executable` package `deploy` with a prebuilt bin/.
     let producer = s.join("deploy-src");
     write(
-        &producer.join("pkg.jet"),
-        "payload: { name: \"deploy\", version: \"0.1.0\" }\npackages: { deploy: executable }\n",
+        &producer.join("package.jet"),
+        "name: \"deploy\"\nversion: \"0.1.0\"\npackages: { deploy: executable }\n",
     );
     write(&producer.join("deploy.jet"), "module deploy { }\n");
     write(&producer.join("bin/deploy"), "#!/bin/sh\necho deploying\n");
@@ -150,8 +150,8 @@ fn executable_is_not_importable() {
 
     let consumer = s.join("app");
     write(
-        &consumer.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { deploy: acme/deploy/abc123@github }\n",
+        &consumer.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { deploy: acme/deploy/abc123@github }\n",
     );
     write(
         &consumer.join("main.jet"),
@@ -178,7 +178,7 @@ fn executable_is_not_importable() {
         "why line: {stderr}"
     );
     assert!(
-        stderr.contains("change `deploy` to `library` in `pkg.jet`"),
+        stderr.contains("change `deploy` to `library` in `package.jet`"),
         "fix line: {stderr}"
     );
 }
@@ -196,8 +196,8 @@ fn unrealized_library_points_at_build() {
     // dep) its source isn't on disk either.
     let consumer = s.join("app");
     write(
-        &consumer.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
+        &consumer.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
     );
     write(
         &consumer.join("main.jet"),

@@ -16,7 +16,7 @@ pub struct Program {
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
     pub pub_file: bool,
-    /// D-PRELUDEX1=A: `#NoPrelude` disables ambient `print`/`input` in this file.
+    /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — this file's default CLI
     /// backend is the web target, so `jet run`/`jet dev`/`jet build` don't
@@ -383,7 +383,7 @@ pub struct LoadedModule {
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
     pub pub_file: bool,
-    /// D-PRELUDEX1=A: `#NoPrelude` disables ambient `print`/`input` in this file.
+    /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.

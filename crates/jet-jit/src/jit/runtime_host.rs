@@ -15,6 +15,14 @@ use super::{
     TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
+pub(crate) mod duration_kernel {
+    include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
+}
+
+mod measurement_kernel {
+    include!("../../../jet-codegen/src/Prelude/Core/Measurement.rs");
+}
+
 thread_local! {
     static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
 }
@@ -1263,65 +1271,26 @@ extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
     });
 }
 
-fn measurement_ct(value: f64, uncertainty: f64) -> Option<jet_codegen::AST::CtValue> {
-    use jet_codegen::AST::{CtFloat, CtValue};
-    jet_codegen::Comptime::apply_core_call(
-        "core.science.measurement",
-        "from",
-        vec![
-            CtValue::Float(CtFloat::f64(value)),
-            CtValue::Float(CtFloat::f64(uncertainty)),
-        ],
-        jet_codegen::Diagnostics::Span::new(0, 0),
-        false,
-    )
-    .ok()
-}
-
-fn measurement_parts(value: &jet_codegen::AST::CtValue) -> Option<(f64, f64)> {
-    use jet_codegen::AST::CtValue;
-    let CtValue::Struct { type_name, fields } = value else {
-        return None;
-    };
-    if type_name != "Measurement" {
-        return None;
-    }
-    let field = |name: &str| {
-        fields.iter().find_map(|(field, value)| {
-            (field == name).then_some(value).and_then(|value| match value {
-                CtValue::Float(value) => Some(value.as_f64()),
-                _ => None,
-            })
-        })
-    };
-    Some((field("value")?, field("uncertainty")?))
-}
-
-fn alloc_measurement(rt: &mut JitRuntime, value: &jet_codegen::AST::CtValue) -> i64 {
-    let Some((measured, uncertainty)) = measurement_parts(value) else {
-        rt.set_trap("the canonical Measurement operation returned a malformed value");
-        return 0;
-    };
+fn alloc_measurement(rt: &mut JitRuntime, value: (f64, f64)) -> i64 {
     let handle = rt.heap.alloc_record(2);
-    let _ = rt.heap.record_set_float(handle, 0, measured);
-    let _ = rt.heap.record_set_float(handle, 1, uncertainty);
+    let _ = rt.heap.record_set_float(handle, 0, value.0);
+    let _ = rt.heap.record_set_float(handle, 1, value.1);
     handle
 }
 
-fn read_measurement(rt: &mut JitRuntime, handle: i64) -> Option<jet_codegen::AST::CtValue> {
-    measurement_ct(
+fn read_measurement(rt: &mut JitRuntime, handle: i64) -> Option<(f64, f64)> {
+    Some((
         rt.heap.record_get_float(handle, 0)?,
         rt.heap.record_get_float(handle, 1)?,
-    )
+    ))
 }
 
 extern "C" fn jet_jit_measurement_new(value: f64, uncertainty: f64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match measurement_ct(value, uncertainty) {
-        Some(value) => alloc_measurement(rt, &value),
-        None => {
-            rt.set_trap("the canonical Measurement constructor rejected Float inputs");
-            0
-        }
+    Concurrency::with_runtime_mut(|rt| {
+        alloc_measurement(
+            rt,
+            measurement_kernel::jet_measurement_kernel_new(value, uncertainty),
+        )
     })
 }
 
@@ -1334,28 +1303,17 @@ extern "C" fn jet_jit_measurement_arithmetic(left: i64, right: i64, op: i64) -> 
             rt.set_trap("the JIT received an invalid Measurement handle");
             return 0;
         };
-        let method = match op {
-            0 => "add",
-            1 => "sub",
-            2 => "mul",
-            3 => "div",
+        let value = match op {
+            0 => measurement_kernel::jet_measurement_kernel_add(left, right),
+            1 => measurement_kernel::jet_measurement_kernel_sub(left, right),
+            2 => measurement_kernel::jet_measurement_kernel_mul(left, right),
+            3 => measurement_kernel::jet_measurement_kernel_div(left, right),
             _ => {
                 rt.set_trap("the JIT received an invalid Measurement operation");
                 return 0;
             }
         };
-        match jet_codegen::Comptime::Builtins::apply_method(
-            &left,
-            method,
-            vec![right],
-            jet_codegen::Diagnostics::Span::new(0, 0),
-        ) {
-            Ok(value) => alloc_measurement(rt, &value),
-            Err(_) => {
-                rt.set_trap("the canonical Measurement operation rejected valid operands");
-                0
-            }
-        }
+        alloc_measurement(rt, value)
     })
 }
 
@@ -1376,10 +1334,7 @@ extern "C" fn jet_jit_measurement_show(handle: i64) -> i64 {
             rt.set_trap("the JIT received an invalid Measurement handle");
             return 0;
         };
-        let Some(rendered) = jet_codegen::Comptime::display_core_pure_value(&value) else {
-            rt.set_trap("the canonical Measurement display rejected a valid value");
-            return 0;
-        };
+        let rendered = measurement_kernel::jet_measurement_kernel_show(value);
         rt.heap.alloc_string(rendered)
     })
 }
@@ -1425,25 +1380,29 @@ extern "C" fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_duration_from_int(value: i64, scale: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match value.checked_mul(scale) {
+    Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_from_int(value, scale) {
         Some(ms) => alloc_jit_result(rt, true, ms as u64),
         None => alloc_jit_result(rt, false, 0),
     })
 }
 
 extern "C" fn jet_jit_duration_from_float(value: f64, scale: i64) -> i64 {
-    let ms = value * scale as f64;
     Concurrency::with_runtime_mut(|rt| {
-        if ms.is_finite() && ms >= i64::MIN as f64 && ms < 9_223_372_036_854_775_808.0 {
-            alloc_jit_result(rt, true, ms.trunc() as i64 as u64)
-        } else {
-            alloc_jit_result(rt, false, 0)
+        match duration_kernel::jet_duration_kernel_from_float(value, scale) {
+            Some(value) => alloc_jit_result(rt, true, value as u64),
+            None => alloc_jit_result(rt, false, 0),
         }
     })
 }
 
 extern "C" fn jet_jit_duration_in(value: i64, scale: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, (value / scale) as u64))
+    Concurrency::with_runtime_mut(|rt| {
+        alloc_jit_result(
+            rt,
+            true,
+            duration_kernel::jet_duration_kernel_in(value, scale) as u64,
+        )
+    })
 }
 
 extern "C" fn jet_jit_duration_in_unit(value: i64, unit: i64) -> i64 {
@@ -1461,15 +1420,15 @@ extern "C" fn jet_jit_duration_in_unit(value: i64, unit: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_duration_is_zero(value: i64) -> i8 {
-    i8::from(value == 0)
+    i8::from(duration_kernel::jet_duration_kernel_is_zero(value))
 }
 
 extern "C" fn jet_jit_duration_total_seconds(value: i64) -> i64 {
-    value / 1_000_000_000
+    duration_kernel::jet_duration_kernel_total_seconds(value)
 }
 
 extern "C" fn jet_jit_duration_difference(a: i64, b: i64) -> i64 {
-    a.saturating_sub(b)
+    duration_kernel::jet_duration_kernel_difference(a, b)
 }
 
 extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {

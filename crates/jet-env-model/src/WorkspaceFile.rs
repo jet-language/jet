@@ -14,7 +14,7 @@
 //! clean break: when `workspace.jet` is present, it is the sole index).
 //!
 //! Diagnostics:
-//!   E0995 — the file has no `module workspace { … }` declaration
+//!   E0995 — the file has no `module workspace { … }` body
 //!   E0996 — `members:` evaluated to something other than a list of strings
 //!   E0997 — `find("…")` in `members:` points at a missing directory
 
@@ -515,7 +515,7 @@ fn extract_string_list(v: crate::Comptime::CtValue, span: Span) -> Result<Vec<St
         _ => Err(Diagnostic::error(
             "E0996",
             "`members:` must evaluate to a list of package paths".to_string(),
-            "`members:` describes the packages in this workspace; it must be a `[String]` list of relative paths or a `find(\"…\")` call".to_string(),
+            "The `members:` value must evaluate to a `[String]` — a list of relative package directory paths".to_string(),
             "example: `members: find(\"./packages\")` or `members: [\"./pkg/hello\"]`".to_string(),
             Some(span),
         )),
@@ -555,7 +555,7 @@ fn validate_find_scan_dir(
             Some(span),
         )
     })?;
-    let candidate = workspace_root.join(path);
+    let candidate = workspace_root.join(path.strip_prefix("./").unwrap_or(path));
     let canonical = candidate
         .canonicalize()
         .map_err(|_| e0997_find_dir_missing(&candidate, span))?;
@@ -703,7 +703,7 @@ fn has_package_file(dir: &Path) -> bool {
 // Diagnostics
 // ──────────────────────────────────────────────
 
-/// E0995: workspace.jet has no `module workspace { … }` declaration.
+/// E0995: workspace.jet has no `module workspace { … }` body.
 fn e0995_no_workspace_module() -> Diagnostic {
     Diagnostic::error(
         "E0995",
@@ -714,7 +714,7 @@ fn e0995_no_workspace_module() -> Diagnostic {
         ),
         format!(
             "`{}` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one \
-             `module workspace {{ members: … }}` declaration",
+            `module workspace {{ members: … }}` body",
             Syntax::WORKSPACE_FILE
         ),
         format!(
@@ -730,8 +730,8 @@ fn e0997_find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0997",
         format!("`find` can't read the directory `{}`", dir.display()),
-        "`members: find(\"<dir>\")` scans that directory for package subdirectories; \
-         it must exist relative to this file"
+        "`find` scans that directory for subdirectories containing `package.jet`; \
+         the directory must exist relative to `workspace.jet`"
             .to_string(),
         "create the directory, or fix the path so it points at your packages folder".to_string(),
         Some(span),

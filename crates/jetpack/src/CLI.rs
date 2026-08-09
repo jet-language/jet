@@ -34,10 +34,15 @@ pub(crate) use realize::report_provider_error;
 #[cfg(test)]
 pub(crate) use trust_env_build::compose_refs_for_test;
 
-fn cmd_doctor(_theme: &Theme, parsed: &Parsed) -> i32 {
+fn cmd_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
     if !parsed.positional.is_empty() || parsed.command.is_some() {
-        eprintln!("jetpack doctor takes no positional arguments");
-        return 2;
+        theme.error_coded(
+            "E2102",
+            "jetpack doctor takes no positional arguments",
+            "the doctor command checks the current machine and does not inspect a named target",
+            "run `jetpack doctor` without a positional argument",
+        );
+        return jet_foundation::ExitCodes::USAGE;
     }
     let report = Doctor::run(
         &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),

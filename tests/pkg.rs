@@ -82,7 +82,7 @@ fn shape6_registry_routes_and_retired_bare_snapshots() {
     assert!(!key.status.success());
     assert_eq!(
         String::from_utf8(key.stderr).unwrap(),
-        "error: `jet registry key` needs a subcommand — try `jet registry key backup`.\n"
+        "Error [E2104]: `jet registry key` needs a subcommand — try `jet registry key backup`.\n Why: Jet needs valid command input before it can run this command\n Fix: correct the named argument or input, then run the command again\n"
     );
 
     for verb in ["publish", "keygen", "key", "yank"] {
@@ -1183,7 +1183,7 @@ fn manifest_parse_e1206_missing_required_field() {
 fn manifest_parse_e1206_unknown_field() {
     // The retired `payload:` wrapper is now a normal unknown-field error
     // (D-CONF-PLANE1/D-CONF-NAME1).
-    let raw = "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n}\n";
+    let raw = include_str!("ui/manifest_unknown_field/package.jet");
     let err = jet::Manifest::parse(&PathBuf::from("package.jet"), raw)
         .expect_err("payload: wrapper should fail");
     assert_eq!(err.code, "E1206");

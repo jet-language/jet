@@ -24,6 +24,7 @@ pub use dispatch::{
     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch,
     is_tier2_core_call, vault_comptime_denied,
 };
+pub use repl_process::apply_repl_authorized_core_call;
 pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
 
 pub(super) fn apply_pool(

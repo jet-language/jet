@@ -1,3 +1,5 @@
+    include!("Mime.rs");
+
     impl JetURL {
         pub fn parse(input: &String) -> Result<Self, String> {
             let raw = input.trim();
@@ -307,33 +309,8 @@
 
     impl JetMIME {
         pub fn parse(input: &String) -> Result<Self, String> {
-            let mut parts = input.split(';');
-            let essence = parts.next().unwrap_or("").trim();
-            let Some((top, sub)) = essence.split_once('/') else {
-                return Err("MIME type needs `type/subtype`".to_string());
-            };
-            let top = top.trim().to_ascii_lowercase();
-            let sub = sub.trim().to_ascii_lowercase();
-            if top.is_empty() || sub.is_empty() || !jet_mime_token(&top) || !jet_mime_token(&sub) {
-                return Err(format!("invalid MIME type `{}`", essence));
-            }
-            let mut params = Vec::new();
-            for p in parts {
-                let p = p.trim();
-                if p.is_empty() {
-                    continue;
-                }
-                let Some((k, v)) = p.split_once('=') else {
-                    return Err(format!("invalid MIME parameter `{}`", p));
-                };
-                let key = k.trim().to_ascii_lowercase();
-                let val = v.trim().trim_matches('"').to_string();
-                if key.is_empty() || !jet_mime_token(&key) {
-                    return Err(format!("invalid MIME parameter `{}`", k.trim()));
-                }
-                params.push((key, val));
-            }
-            Ok(JetMIME { top, sub, params })
+            let parts = jet_mime_parse_parts(input)?;
+            Ok(JetMIME { top: parts.top, sub: parts.sub, params: parts.params })
         }
         pub fn media_type(&self) -> String {
             self.top.clone()
@@ -342,14 +319,10 @@
             self.sub.clone()
         }
         pub fn essence(&self) -> String {
-            format!("{}/{}", self.top, self.sub)
+            jet_mime_essence(&self.top, &self.sub)
         }
         pub fn param(&self, name: &String) -> JetOutcome<String, JetAbsent> {
-            let needle = name.to_ascii_lowercase();
-            jet_outcome_of(self.params
-                .iter()
-                .find(|(k, _)| k == &needle)
-                .map(|(_, v)| v.clone()))
+            jet_outcome_of(jet_mime_param(&self.params, name).map(str::to_string))
         }
         pub fn params(&self) -> Vec<Vec<String>> {
             self.params
@@ -358,14 +331,7 @@
                 .collect()
         }
         pub fn to_string_value(&self) -> String {
-            let mut out = self.essence();
-            for (k, v) in &self.params {
-                out.push_str("; ");
-                out.push_str(k);
-                out.push('=');
-                out.push_str(v);
-            }
-            out
+            jet_mime_to_string(&self.top, &self.sub, &self.params)
         }
     }
 
@@ -635,76 +601,3 @@
             out
         }
     }
-
-    fn jet_mime_token(s: &str) -> bool {
-        !s.is_empty()
-            && s.bytes().all(|b| {
-                b.is_ascii_alphanumeric()
-                    || matches!(
-                        b,
-                        b'!' | b'#'
-                            | b'$'
-                            | b'&'
-                            | b'-'
-                            | b'^'
-                            | b'_'
-                            | b'.'
-                            | b'+'
-                    )
-            })
-    }
-
-    pub fn jet_mime_from_extension(ext: &str) -> Option<&'static str> {
-        match ext.trim_start_matches('.').to_ascii_lowercase().as_str() {
-            "html" | "htm" => Some("text/html"),
-            "css" => Some("text/css"),
-            "csv" => Some("text/csv"),
-            "txt" | "text" => Some("text/plain"),
-            "md" => Some("text/markdown"),
-            "json" => Some("application/json"),
-            "js" | "mjs" => Some("text/javascript"),
-            "wasm" => Some("application/wasm"),
-            "pdf" => Some("application/pdf"),
-            "png" => Some("image/png"),
-            "jpg" | "jpeg" => Some("image/jpeg"),
-            "gif" => Some("image/gif"),
-            "svg" => Some("image/svg+xml"),
-            "webp" => Some("image/webp"),
-            "ico" => Some("image/x-icon"),
-            "mp3" => Some("audio/mpeg"),
-            "mp4" => Some("video/mp4"),
-            "xml" => Some("application/xml"),
-            "zip" => Some("application/zip"),
-            "gz" => Some("application/gzip"),
-            "tar" => Some("application/x-tar"),
-            _ => None,
-        }
-    }
-
-    pub fn jet_extension_from_mime(mime: &str) -> Option<&'static str> {
-        match mime.to_ascii_lowercase().split(';').next().unwrap_or("").trim() {
-            "text/html" => Some("html"),
-            "text/css" => Some("css"),
-            "text/csv" => Some("csv"),
-            "text/plain" => Some("txt"),
-            "text/markdown" => Some("md"),
-            "application/json" => Some("json"),
-            "text/javascript" | "application/javascript" => Some("js"),
-            "application/wasm" => Some("wasm"),
-            "application/pdf" => Some("pdf"),
-            "image/png" => Some("png"),
-            "image/jpeg" => Some("jpg"),
-            "image/gif" => Some("gif"),
-            "image/svg+xml" => Some("svg"),
-            "image/webp" => Some("webp"),
-            "image/x-icon" => Some("ico"),
-            "audio/mpeg" => Some("mp3"),
-            "video/mp4" => Some("mp4"),
-            "application/xml" | "text/xml" => Some("xml"),
-            "application/zip" => Some("zip"),
-            "application/gzip" => Some("gz"),
-            "application/x-tar" => Some("tar"),
-            _ => None,
-        }
-    }
-

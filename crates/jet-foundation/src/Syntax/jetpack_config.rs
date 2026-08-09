@@ -203,6 +203,8 @@ pub const OUTPUT_KINDS: &[&str] = &[
 ];
 pub const OUTPUT_FIELD_NAME: &str = "name";
 pub const OUTPUT_FIELD_ENTRY: &str = "entry";
+/// D-LIB-NAME1=A: a Library may declare a `.jetlib` loadable artifact.
+pub const OUTPUT_FIELD_LOADABLE: &str = "loadable";
 pub const OUTPUT_DEFAULTS: &str = "defaults"; // D-ECO-OUTPUT-DEFAULT1=A
 pub const OUTPUT_DEFAULT_RUN: &str = "run"; // D-ECO-OUTPUT-DEFAULT1=A
 pub const OUTPUT_DEFAULT_CHECK: &str = "check"; // D-ECO-OUTPUT-DEFAULT1=A

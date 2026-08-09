@@ -69,13 +69,16 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                 None => {
                     if json {
                         print_json_cli_error(
+                            "E2104",
                             "`--facts` needs a lens name",
                             "the expand command must know which registered lens to project",
                             "pass `--facts inline`, `--facts memory`, `--facts web`, or `--facts layout`",
                         );
                     }
-                    eprintln!("error: `--facts` needs a lens name");
-                    print_available_lenses();
+                    if !json {
+                        crate::cli_error!("E2104", "`--facts` needs a lens name");
+                        print_available_lenses();
+                    }
                     exit(ExitCodes::USER_ERROR);
                 }
             }
@@ -87,15 +90,15 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     let Some(path) = positional.first().copied() else {
         if json {
             print_json_cli_error(
+                "E2104",
                 "`jet inspect expand` needs an entry file",
                 "expand facts come from one checked Jet entry file",
                 "run `jet inspect expand --facts inline examples/features/basics/hello.jet`",
             );
         }
-        eprintln!("error: `jet inspect expand` needs an entry file");
-        eprintln!(" Fix: jet inspect expand examples/features/basics/hello.jet");
-        eprintln!(" Fix: jet inspect expand --facts inline examples/features/basics/hello.jet");
-        eprintln!(" Fix: jet inspect expand --facts layout examples/features/basics/hello.jet");
+        if !json {
+            crate::cli_error!("E2104", "`jet inspect expand` needs an entry file");
+        }
         exit(ExitCodes::USER_ERROR);
     };
 
@@ -105,13 +108,16 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
             None => {
                 if json {
                     print_json_cli_error(
+                        "E2941",
                         &format!("unknown expand lens `{name}`"),
                         "only registered lenses have checked semantic facts",
                         "use `inline`, `memory`, `web`, or `layout`",
                     );
                 }
-                eprintln!("error: unknown lens `{}`", name);
-                print_available_lenses();
+                if !json {
+                    crate::cli_error!("E2941", "unknown expand lens `{}`", name);
+                    print_available_lenses();
+                }
                 exit(ExitCodes::USER_ERROR);
             }
         },
@@ -195,23 +201,13 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     exit(ExitCodes::OK);
 }
 
-fn print_json_cli_error(what: &str, why: &str, fix: &str) -> ! {
-    println!(
-        "{{\"schema_version\":1,\"error\":{{\"kind\":\"usage\",\"message\":{},\"why\":{},\"fix\":{}}}}}",
-        json_string(what),
-        json_string(why),
-        json_string(fix)
-    );
+fn print_json_cli_error(code: &str, what: &str, why: &str, fix: &str) -> ! {
+    crate::emit_cli_report(code, what.to_string(), why.to_string(), fix.to_string(), true);
     exit(ExitCodes::USER_ERROR);
 }
 
 fn print_json_frontend_diagnostics(file: &str, source: &str, diags: &[jet::Diagnostics::Diagnostic]) -> ! {
-    let entries = diags
-        .iter()
-        .map(|diagnostic| diagnostic.to_json(file, source))
-        .collect::<Vec<_>>()
-        .join(",");
-    println!("{{\"schema_version\":1,\"diagnostics\":[{}]}}", entries);
+    print!("{}", jet::render_all_json(file, source, diags));
     exit(ExitCodes::USER_ERROR);
 }
 

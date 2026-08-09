@@ -1055,7 +1055,7 @@ fn repl_core_math_sqrt_inline() {
 
 #[test]
 fn repl_core_math_multiple_calls() {
-    // Confirm several whitelisted math calls work sequentially in one session.
+    // Confirm several effect-approved math calls work sequentially in one session.
     let inputs = &[
         "use core.math as math",
         "math.floor(3.7)",
@@ -1068,14 +1068,14 @@ fn repl_core_math_multiple_calls() {
     assert!(out.contains("5"), "abs(-5) should be 5, got: {:?}", out);
     assert!(
         !out.contains("E0956"),
-        "no E0956 for whitelisted calls, got: {:?}",
+        "no E0956 for effect-approved calls, got: {:?}",
         out
     );
 }
 
 #[test]
 fn repl_core_math_pow_inline() {
-    // Another whitelisted math function: math.pow(2.0, 10.0) = 1024.
+    // Another effect-approved math function: math.pow(2.0, 10.0) = 1024.
     let inputs = &["use core.math as math", "math.pow(2.0, 10.0)"];
     let out = run_transcript(inputs, None);
     assert!(
@@ -1087,7 +1087,7 @@ fn repl_core_math_pow_inline() {
 
 #[test]
 fn repl_core_result_stored_in_binding() {
-    // The result of a whitelisted core call can be stored and used.
+    // The result of an effect-approved core call can be stored and used.
     let inputs = &["use core.math as math", "r :: math.sqrt(9.0)", "r"];
     let out = run_transcript(inputs, None);
     assert!(

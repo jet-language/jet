@@ -1242,7 +1242,7 @@ mod net_tls_close_tests {
         for _ in 0..2 {
             let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::Success);
             let mut config = smtp_config(address.port(), false);
-            config.dkim = Some(email::DkimConfig {
+            config.dkim = Ok(email::DkimConfig {
                 domain: "example.com".to_string(), selector: "login-2026".to_string(),
                 private_key: seed.to_vec(),
                 signed_headers: ["from", "to", "subject", "mime-version", "content-type",
@@ -1270,7 +1270,7 @@ mod net_tls_close_tests {
         use smtp_adapter::jet_email as email;
         SMTP_WIPES.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut config = smtp_config(465, false);
-        config.dkim = Some(email::DkimConfig {
+        config.dkim = Ok(email::DkimConfig {
             domain: "example.com".to_string(), selector: "login-2026".to_string(),
             private_key: vec![0x5a; 31], signed_headers: vec!["from".to_string()],
         });
@@ -2795,7 +2795,7 @@ fn emit_wrapper_lib(
     needs_secrets: bool,
 ) -> String {
     let mut out = String::from(
-        "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
+        "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\nfn ffi_panic() -> ! {\n    const RUNTIME_PANIC: i32 = 70;\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); } else { eprintln!(\"{MESSAGE}\"); }\n    std::process::exit(RUNTIME_PANIC);\n}\n\n",
     );
     if needs_archive {
         // D-CORE-COMPRESS1=A: archive runtime touches only zip/tar containers.
@@ -3611,6 +3611,16 @@ mod tests {
     use super::*;
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
+
+    #[test]
+    fn generated_bridge_reports_through_host_callback() {
+        let source = emit_wrapper_lib(&[], false, false, false, false, false, false, false, false, false, false);
+        assert!(source.contains("pub extern \"C\" fn jet_ffi_set_reporter"));
+        assert!(source.contains("reporter(MESSAGE.as_ptr(), MESSAGE.len())"));
+        assert!(source.contains("const RUNTIME_PANIC: i32 = 70"));
+        assert!(source.contains("std::process::exit(RUNTIME_PANIC)"));
+        assert!(!source.contains("eprintln!(\"panic: a foreign function panicked\")"));
+    }
 
     #[test]
     fn generated_wrapper_excerpt_is_width_independent() {

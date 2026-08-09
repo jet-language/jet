@@ -1044,9 +1044,12 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
         Ok(Some(entry)) => return entry,
         Ok(None) => {}
         Err(error) => {
-            eprintln!("error: {error}");
-            eprintln!(" fix: repair the typed Package output or point at a `.jet` file directly");
-            std::process::exit(2);
+            Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
+                "the project entry could not be selected",
+                &error,
+                "repair the typed Package output or point at a `.jet` file directly",
+            );
+            std::process::exit(jet_foundation::ExitCodes::USER_ERROR);
         }
     }
     let default = project_dir.join(Syntax::DEFAULT_ENTRY_FILE);

@@ -32,7 +32,7 @@ pub struct WorkspacePlan {
 /// One workspace member package.
 #[derive(Debug, Clone)]
 pub struct WorkspaceMember {
-    /// Package name read from the member's `pkg.jet` (or derived from path).
+    /// Package name read from the member's `package.jet` (or derived from path).
     pub name: String,
     /// Path to the package directory, relative to the workspace root.
     pub path: String,

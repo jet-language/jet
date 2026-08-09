@@ -26,7 +26,7 @@
 //! by default even with a matching declared bound absent — see
 //! `check_secret_grants`.
 //!
-//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the ten flat names below
+//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the 29 declared names below
 //! become tree **roots**. A user-written effect name may now be a dotted path
 //! rooted at one of them (`FS.Read`, `Net.HTTP.Get`) — the root is validated
 //! against the closed vocabulary (E0119 otherwise); further segments are an
@@ -37,153 +37,17 @@
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
 //! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
-//! twelve-root enum (U13 added `Secret`), used for root validation/
+//! 29-root enum, used for root validation/
 //! classification and by the small set of call sites (D-TXN2, D-TAINT1,
 //! D-WASM1) that only ever care about a whole root regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
+/// D-META-EFFECT1: the effect facts live in `jet-foundation` so both stages
+/// read one table. Sema keeps the solver, the diagnostics, and the checks.
+pub use jet_foundation::Effects::{
+    builtin_effect, core_effect, is_irreversible_effect, Effect, EffectSet,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-
-/// A primitive effect. Closed, compiler-known set; each Core operation
-/// contributes exactly one. Ordered for deterministic diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Effect {
-    Net,
-    FS,
-    IO,
-    DB,
-    Time,
-    Rand,
-    Env,
-    Exec,
-    Log,
-    GPU,
-    /// D-FFI-GO1=A: an in-process Go runtime call may block in Go code.
-    Go,
-    /// D-FFI-JVM1=A: an embedded JVM invocation.
-    Java,
-    /// D-FFI-DOTNET1=A: an embedded CoreCLR invocation.
-    DotNet,
-    /// D-FFI-FORTRAN1=A: an in-process ISO_C_BINDING call.
-    Fortran,
-    /// D-FFI-COBOL1=A: an in-process GnuCOBOL C-ABI call.
-    Cobol,
-    /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
-    Tcl,
-    /// D-FFI-LUA1=A: synchronous evaluation in a session-owned Lua VM.
-    Lua,
-    /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
-    Ada,
-    /// D-FFI-PASCAL1=A: call into a FreePascal cdecl library.
-    Pascal,
-    /// D-FFI-DART1=A: synchronous callback into a Dart-owned isolate.
-    Dart,
-    /// D-FFI-PWSH1=A: request through a supervised PowerShell worker.
-    PowerShell,
-    /// D-FFI-PERL1=A: request through a supervised Perl worker.
-    Perl,
-    /// D-FFI-RUBY1=A: request through a supervised Ruby worker.
-    Ruby,
-    /// D-FFI-PHP1=A: request through a supervised PHP worker pool.
-    Php,
-    /// D-FFI-R1=A: request through a supervised R worker.
-    R,
-    /// D-FFI-COM1=A: Windows COM apartment automation call.
-    Com,
-    /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
-    Browser,
-    /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
-    /// (`core.vault.get`). Denied by default even with no declared bound at
-    /// all — see `check_secret_grants` — and always denied in a comptime
-    /// build-tier context (E1265), with no `#Impure` escape hatch.
-    Secret,
-}
-
-impl Effect {
-    /// The PascalCase surface spelling (D-CASING1).
-    pub fn name(self) -> &'static str {
-        match self {
-            Effect::Net => "Net",
-            Effect::FS => "FS",
-            Effect::IO => "IO",
-            Effect::DB => "DB",
-            Effect::Time => "Time",
-            Effect::Rand => "Rand",
-            Effect::Env => "Env",
-            Effect::Exec => "Exec",
-            Effect::Log => "Log",
-            Effect::GPU => "GPU",
-            Effect::Go => "Go",
-            Effect::Java => "Java",
-            Effect::DotNet => "DotNet",
-            Effect::Fortran => "Fortran",
-            Effect::Cobol => "Cobol",
-            Effect::Tcl => "Tcl",
-            Effect::Lua => "Lua",
-            Effect::Ada => "Ada",
-            Effect::Pascal => "Pascal",
-            Effect::Dart => "Dart",
-            Effect::PowerShell => "PowerShell",
-            Effect::Perl => "Perl",
-            Effect::Ruby => "Ruby",
-            Effect::Php => "Php",
-            Effect::R => "R",
-            Effect::Com => "Com",
-            Effect::Browser => "Browser",
-            Effect::Secret => "Secret",
-        }
-    }
-
-    /// Parse a user-written effect name; `None` if it is not a known effect.
-    pub fn parse(s: &str) -> Option<Effect> {
-        Some(match s {
-            "Net" => Effect::Net,
-            "FS" => Effect::FS,
-            "IO" => Effect::IO,
-            "DB" => Effect::DB,
-            "Time" => Effect::Time,
-            "Rand" => Effect::Rand,
-            "Env" => Effect::Env,
-            "Exec" => Effect::Exec,
-            "Log" => Effect::Log,
-            "GPU" => Effect::GPU,
-            "Go" => Effect::Go,
-            "Java" => Effect::Java,
-            "DotNet" => Effect::DotNet,
-            "Fortran" => Effect::Fortran,
-            "Cobol" => Effect::Cobol,
-            "Tcl" => Effect::Tcl,
-            "Lua" => Effect::Lua,
-            "Ada" => Effect::Ada,
-            "Pascal" => Effect::Pascal,
-            "Dart" => Effect::Dart,
-            "PowerShell" => Effect::PowerShell,
-            "Perl" => Effect::Perl,
-            "Ruby" => Effect::Ruby,
-            "Php" => Effect::Php,
-            "R" => Effect::R,
-            "Com" => Effect::Com,
-            "Browser" => Effect::Browser,
-            "Secret" => Effect::Secret,
-            _ => return None,
-        })
-    }
-
-    /// Every effect — the maximal set, used for foreign (`extern`) calls whose
-    /// body the compiler cannot inspect and for escaping function values. Each
-    /// entry is a bare root, which (D-EFFTREE1 ancestor subsumption) covers
-    /// its whole subtree — so this is still the true maximal set.
-    pub fn all() -> EffectSet {
-        jet_foundation::Facts::EFFECT_ROOTS
-            .iter()
-            .map(|effect| (*effect).to_string())
-            .collect()
-    }
-}
-
-/// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
-/// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
-pub type EffectSet = BTreeSet<String>;
 
 /// D-SHAPE8 open-row entry (`..E`). The parser stores row variables beside
 /// concrete effects so every consumer can preserve the exact source spelling.
@@ -200,7 +64,7 @@ pub fn effect_root(name: &str) -> &str {
 }
 
 /// D-EFFTREE1: validate a user-written effect path — bare (`FS`) or dotted
-/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed ten
+/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed 29
 /// D-EFF4/5 names (the caller reports E0119 on `None`); further segments are
 /// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
 /// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
@@ -490,106 +354,6 @@ impl<'a> super::Checker<'a> {
 pub fn show_set(set: &EffectSet) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
-
-/// The effect carried by a Core call `module.method`, or `None` if pure.
-/// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
-/// fully-resolved name (`core.files`, `core.http`, …).
-pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
-    // D-DET1: the deterministic capability constructors carry NO ambient effect —
-    // `Clock.new(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
-    // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
-    // the resulting handle (`clock.now()` / `rng.int(…)`) is a method call on a
-    // value, not a module call, so it never reaches `core_effect`. This lets a
-    // `#Pure fn` take and use an injected `Clock`/`Rng` while ambient `time.now()`
-    // / `random.int(…)` stay rejected (E3403).
-    // Civil constructors mint deterministic values, so (like `time.clock`) they
-    // carry no effect.
-    if matches!(
-        (module, method),
-        (
-            "core.time",
-            "clock"
-                | "time"
-                | "parse_time"
-                | "period"
-                | "period_days"
-                | "period_months"
-                | "period_years"
-                | "utc"
-                | "zoned"
-                | "zoned_local"
-        ) | ("core.random", "rng")
-    ) {
-        return None;
-    }
-    if module == "core.watcher" {
-        return match method {
-            "files" => Some(Effect::FS),
-            "process_pid" => Some(Effect::Exec),
-            "port" => Some(Effect::Net),
-            "set" => None,
-            _ => None,
-        };
-    }
-    // D-BROWSER-AUTO1=A: profile/timeout validate pure values; locked reads the
-    // project lock (FS). Connecting and handle I/O remain Net effects.
-    if module == "core.browser" {
-        return match method {
-            "profile" | "timeout" => None,
-            "locked" => Some(Effect::FS),
-            _ => Some(Effect::Net),
-        };
-    }
-    Some(match module {
-        // D-COMPUTE-PLACE1=D: `.Auto` is the beginner placement default and
-        // may select an accelerator, so compute operations carry GPU until an
-        // explicit CPU placement narrows the call site. The CPU oracle remains
-        // the deterministic implementation when no accelerator is installed.
-        "core.compute" if method != "device_cpu" => Effect::GPU,
-        "core.files" => Effect::FS,
-        // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
-        "core.net" | "core.tls" | "core.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
-        // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
-        "core.raylib" => Effect::GPU,
-        "core.time" => Effect::Time,
-        "core.random" | "core.crypto.random" => Effect::Rand,
-        "core.env" => Effect::Env,
-        "core.process" => Effect::Exec,
-        "core.io" => Effect::IO,
-        "core.db" | "jet.sql" => Effect::DB,
-        // D-DEP-WASM1=A (c81): loading a sandboxed plugin executes foreign
-        // code, even though the sandbox makes it memory-safe — same bucket as
-        // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
-        "core.plugin" => Effect::Exec,
-        "core.log" => Effect::Log,
-        "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
-            Effect::Browser
-        }
-        // U13 (D-JPK-SECRETCRYPTO1): only `core.vault.get` reads the encrypted
-        // store. D-CORE-SECRETS1=A also places pure in-memory lifecycle helpers
-        // in this module; those do not acquire the ambient Secret effect.
-        "core.vault" if matches!(method,
-            "get" | "current" | "versions" | "load" | "status"
-            | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
-            | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
-            | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
-            | "authorize_wrapped_import" | "commit_import_wrapped"
-        ) => Effect::Secret,
-        "core.vault.expert" => Effect::Secret,
-        _ => return None,
-    })
-}
-
-/// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
-/// effect that, once performed, cannot be rolled back. These are rejected when
-/// reached directly inside a `#Transact { … }` block (E0746). The remaining
-/// effects (IO/Time/Rand/Env/DB/Log/GPU) are reversible-or-benign for this
-/// purpose: reads, clock/RNG reads, and logging leave no committed external
-/// state a rollback must undo, and DB rollback is the transaction's own job.
-pub fn is_irreversible_effect(e: Effect) -> bool {
-    matches!(e, Effect::Net | Effect::FS | Effect::Exec)
-}
-
 /// E0746 (D-TXN2): an irreversible effect (Net/FS/Exec) used directly inside a
 /// `#Transact { … }` block. Points at the offending call; the fix is to move it
 /// after the block or register it via `name.on_commit(() => { … })`.
@@ -612,14 +376,6 @@ pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
     )
 }
 
-/// The effect carried by an ambient builtin call (`print`, `input`, …).
-pub fn builtin_effect(name: &str) -> Option<Effect> {
-    if crate::Syntax::IMPURE_BUILTINS.contains(&name) {
-        Some(Effect::IO)
-    } else {
-        None
-    }
-}
 
 /// Per-function summary the checker accumulates during its walk: the effects the
 /// body reaches directly, the user functions it calls (edges for transitivity),

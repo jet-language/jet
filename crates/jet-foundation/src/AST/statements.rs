@@ -172,7 +172,9 @@ pub enum Stmt {
     /// `#Impure` itself (lint L3102 fires when it is `None`). Both this gate
     /// AND `--allow-impure` at build time are required to execute ambient
     /// comptime I/O (FS/Env/Exec/IO). Erases to a plain block at codegen;
-    /// the gate is enforced entirely in the comptime interpreter (I3).
+    /// the gate is enforced entirely in the comptime interpreter (I3). The
+    /// retained reason is the sema recording point for the shared gate ledger
+    /// planned by D-FACT-GATE1 / card #1571.
     Impure {
         reason: Option<String>,
         /// Raw source argument retained until sema validates and constant-folds it.
@@ -317,9 +319,9 @@ pub enum Stmt {
     /// splice-only spelling): `$ { … }` — a build-time execution block. Runs
     /// at compile time via the tree-walking comptime interpreter; erases
     /// entirely (no runtime Rust emitted, I3).
-    /// Pure-only in Stage A (D-CTCORE1 whitelist + E3401/E0958/E0953/E0956);
-    /// effect tiers (D-CTEFFECT1) wire in c157. Bindings inside do not leak to
-    /// the enclosing scope. `$name` splice (piece 1) deferred to c155.
+    /// Purity-checked (E3401, D-META-EFFECT1 c3) then tree-walked
+    /// (E0953/E0956); effect tiers per D-CTEFFECT1. Bindings inside do not
+    /// leak to the enclosing scope. `$name` splice (piece 1) deferred to c155.
     ComptimeBlock {
         body: Vec<Stmt>,
         span: Span,

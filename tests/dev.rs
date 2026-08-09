@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 mod common;
-use common::{have_rustc, panic_message, test_worker_count, FfiBridgeLock};
+use common::{add_generated_rust, have_rustc, panic_message, test_worker_count, FfiBridgeLock};
 use jet::Interpreter::{dev_iteration, dev_run_bundle, run_named_task, RunOutcome};
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
@@ -130,16 +130,17 @@ fn compiled_binary_output_with_stdin(
     let rs = dir.join(format!("jet_{tag}_{}.rs", i));
     let bin = dir.join(format!("jet_{tag}_{}", i));
     fs::create_dir_all(dir).unwrap();
-    fs::write(&rs, &compiled.rust).unwrap();
     let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd
-        .args(["--edition", "2021"])
-        // Match default `jet run` optimization. Parity tests compare product
-        // behavior, including cfg(debug_assertions)-gated stderr.
-        .arg("-O")
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin);
+    // Match default optimized AOT behavior. Cache only the runtime dependency;
+    // every oracle still compiles and links its generated user program.
+    add_generated_rust(
+        &mut rustc_cmd,
+        &rs,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        &["-O"],
+    );
+    rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &compiled.ffi {
         rustc_cmd
             .arg("--extern")
@@ -207,14 +208,15 @@ fn try_compiled_binary_output(
     let rs = dir.join(format!("jet_{tag}_{i}.rs"));
     let bin = dir.join(format!("jet_{tag}_{i}"));
     fs::create_dir_all(dir).ok()?;
-    fs::write(&rs, &compiled.rust).ok()?;
     let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd
-        .args(["--edition", "2021"])
-        .arg("-O")
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin);
+    add_generated_rust(
+        &mut rustc_cmd,
+        &rs,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        &["-O"],
+    );
+    rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &compiled.ffi {
         rustc_cmd
             .arg("--extern")
@@ -2647,14 +2649,15 @@ fn cranelift_backend_matches_hello() {
     let compiled = jet::compile_with_path(&src, file).expect("hello should compile");
     let rs = std::env::temp_dir().join("jet_dev_cranelift_hello.rs");
     let bin = std::env::temp_dir().join("jet_dev_cranelift_hello");
-    fs::write(&rs, &compiled.rust).expect("write compiled rust");
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021"])
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin)
-        .output()
-        .expect("run rustc");
+    let mut command = Command::new("rustc");
+    add_generated_rust(
+        &mut command,
+        &rs,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        &[],
+    );
+    let rustc = command.arg("-o").arg(&bin).output().expect("run rustc");
     assert!(
         rustc.status.success(),
         "rustc failed compiling hello fixture: {}",
@@ -2850,14 +2853,15 @@ fn run() {{
     fs::write(&jet_path, &source).unwrap();
     let compiled = jet::compile_with_path(&source, &jet_path.to_string_lossy())
         .expect("Unicode-16 String fixture should compile");
-    fs::write(&rust_path, compiled.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021"])
-        .arg(&rust_path)
-        .arg("-o")
-        .arg(&binary)
-        .output()
-        .unwrap();
+    let mut command = Command::new("rustc");
+    add_generated_rust(
+        &mut command,
+        &rust_path,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        &[],
+    );
+    let rustc = command.arg("-o").arg(&binary).output().unwrap();
     assert!(
         rustc.status.success(),
         "Unicode-16 AOT fixture rejected:\n{}",
@@ -4009,14 +4013,15 @@ fn solver_state_transitions_match_aot_in_resident_jit() {
     fs::create_dir_all(&dir).unwrap();
     let rs = dir.join("solve_puzzle.rs");
     let bin = dir.join("solve_puzzle");
-    fs::write(&rs, compiled.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021"])
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin)
-        .output()
-        .expect("run rustc");
+    let mut command = Command::new("rustc");
+    add_generated_rust(
+        &mut command,
+        &rs,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        &[],
+    );
+    let rustc = command.arg("-o").arg(&bin).output().expect("run rustc");
     assert!(
         rustc.status.success(),
         "rustc failed: {}",
@@ -5537,18 +5542,16 @@ fn raw_no_color_is_present_even_when_its_value_is_not_unicode() {
     assert!(!jet_style_env_enabled());
 }
 "#;
-            fs::write(&rust, format!("{}{}", compiled.rust, probe)).unwrap();
-            let built = Command::new("rustc")
-                .args([
-                    "--edition",
-                    "2021",
-                    "--test",
-                    rust.to_str().unwrap(),
-                    "-o",
-                    bin.to_str().unwrap(),
-                ])
-                .output()
-                .unwrap();
+            let generated = format!("{}{}", compiled.rust, probe);
+            let mut command = Command::new("rustc");
+            add_generated_rust(
+                &mut command,
+                &rust,
+                &generated,
+                compiled.ffi.is_some(),
+                &["--test"],
+            );
+            let built = command.arg("-o").arg(&bin).output().unwrap();
             assert!(
                 built.status.success(),
                 "rustc rejected raw NO_COLOR probe:\n{}",
@@ -7765,7 +7768,7 @@ fn ledger_cross_check_holds() {
     // Shrink-only ratchet (D-LENS-RUN2). Every row is a real I9 parity failure,
     // so the count may fall and never rise: fix a row, delete it, lower this
     // number in the same diff. Adding a row without lowering it fails here.
-    const RUN_GAPS_CEILING: usize = 12;
+    const RUN_GAPS_CEILING: usize = 0;
     assert!(
         run_gaps.len() <= RUN_GAPS_CEILING,
         "tests/jit_gaps.txt `run_gaps:` grew to {} rows (ceiling {RUN_GAPS_CEILING}); run-tier \

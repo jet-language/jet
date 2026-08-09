@@ -1744,7 +1744,7 @@ fn render_index_error(entry: &Path, e: SemIndexError) -> ! {
     }
 }
 pub(super) fn fail(msg: &str) -> ! {
-    eprintln!("error: {msg}");
+    crate::cli_error!("E2105", "{msg}");
     exit(ExitCodes::USER_ERROR)
 }
 pub(super) fn hash_bytes(b: &[u8]) -> String {

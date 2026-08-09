@@ -13,7 +13,7 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     for a in args {
         if let Some(n) = a.strip_prefix("--depth=") {
             depth = n.parse().unwrap_or_else(|_| {
-                eprintln!("error: `--depth` must be a positive integer");
+                crate::cli_error!("E2104", "`--depth` must be a positive integer");
                 exit(ExitCodes::USER_ERROR);
             });
         } else if !a.starts_with('-') {
@@ -24,14 +24,13 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     let (path, symbol) = match positional.as_slice() {
         [path, symbol] => (*path, *symbol),
         _ => {
-            eprintln!("error: `jet inspect impact` needs an entry file and a symbol name");
-            eprintln!(" Fix: jet inspect impact examples/features/effects/effects.jet report");
+            crate::cli_error!(@fix "E2104", "`jet inspect impact` needs an entry file and a symbol name", "jet inspect impact examples/features/effects/effects.jet report");
             exit(ExitCodes::USER_ERROR);
         }
     };
 
     if depth == 0 {
-        eprintln!("error: `--depth` must be at least 1");
+        crate::cli_error!("E2104", "`--depth` must be at least 1");
         exit(ExitCodes::USER_ERROR);
     }
 

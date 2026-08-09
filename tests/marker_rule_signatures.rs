@@ -209,7 +209,7 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
 fn task_metadata_binds_typed_platform_skip_limits_and_formats_stably() {
     for (platform, spelling) in [("Linux", ".Linux"), ("MacOS", ".MacOS")] {
         let source = format!(
-            "#Job(skip: .Unless(.Platform({spelling})), limits: .{{ cpu: 2 }}) fn build() {{}}\nfn run() {{}}\n"
+            "#Job(skip: .Unless(.Platform({spelling})), limits: [\"cpu\": 2]) fn build() {{}}\nfn run() {{}}\n"
         );
         let (tokens, lexer_diagnostics) = jet::Lexer::lex(&source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");

@@ -74,6 +74,23 @@ pub struct OutputFact {
     pub payload: OutputPayload,
 }
 
+impl OutputFact {
+    /// D-LIB-NAME1=A: `Library.{ loadable: true }` requests a `.jetlib`
+    /// artifact. The manifest parser owns the field shape; callers read the
+    /// checked boolean instead of re-parsing the payload.
+    pub fn is_loadable(&self) -> bool {
+        self.kind == PackageOutputKind::Library
+            && matches!(
+                &self.payload,
+                OutputPayload::Object(fields)
+                    if matches!(
+                        fields.get(crate::Syntax::OUTPUT_FIELD_LOADABLE),
+                        Some(OutputPayload::Bool(true))
+                    )
+            )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputPayload {
     Null,
@@ -387,28 +404,31 @@ impl PackageFacts {
         Ok(facts)
     }
 
-    /// Load `package.jet`, falling back only when the migration-era `pkg.jet`
-    /// is the sole role file. Both names together are ambiguous and fail
-    /// closed before any composition or member discovery occurs.
+    /// Load the one canonical Package root. A retired manifest beside it is
+    /// rejected as an ambiguous migration input; it is never parsed as a
+    /// fallback Package root.
     pub fn load(dir: &std::path::Path) -> Option<Result<Self, PackageParseError>> {
-        let canonical = dir.join("package.jet");
-        let legacy = dir.join("pkg.jet");
+        let canonical = dir.join(crate::Syntax::PACKAGE_FILE);
+        let legacy = dir.join(crate::Syntax::PAYLOAD_FILE);
         if canonical.is_file() && legacy.is_file() {
-            return Some(Err(PackageParseError::Composition(
-                "both `package.jet` and migration-era `pkg.jet` exist; keep one Package root"
-                    .to_string(),
-            )));
+            return Some(Err(PackageParseError::Composition(format!(
+                "both `{}` and migration-era `{}` exist; keep one Package root",
+                crate::Syntax::PACKAGE_FILE,
+                crate::Syntax::PAYLOAD_FILE,
+            ))));
         }
-        let path = if canonical.is_file() { canonical } else { legacy };
+        let path = canonical;
+        if !path.is_file() {
+            return None;
+        }
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(error) if path.is_file() => {
+            Err(error) => {
                 return Some(Err(PackageParseError::Composition(format!(
                     "couldn't read Package `{}`: {error}",
                     path.display()
                 ))))
             }
-            Err(_) => return None,
         };
         let parsed = Self::parse_uncomposed(&text, path.display().to_string());
         Some(parsed.and_then(|mut facts| {
@@ -697,7 +717,9 @@ impl PackageFacts {
             let reserved = path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "package.jet" || name == "pkg.jet");
+                .is_some_and(|name| {
+                    name == crate::Syntax::PACKAGE_FILE || name == crate::Syntax::PAYLOAD_FILE
+                });
             let config = self
                 .resolved_config_paths
                 .iter()
@@ -825,9 +847,13 @@ impl PackageFacts {
                         "member reference `{relative}` resolves outside its Package root"
                     )));
                 }
-                if candidate.join("package.jet").is_file() && candidate.join("pkg.jet").is_file() {
+                if candidate.join(crate::Syntax::PACKAGE_FILE).is_file()
+                    && candidate.join(crate::Syntax::PAYLOAD_FILE).is_file()
+                {
                     return Err(PackageParseError::Composition(format!(
-                        "member Package `{relative}` contains both `package.jet` and migration-era `pkg.jet`"
+                        "member Package `{relative}` contains both `{}` and migration-era `{}`",
+                        crate::Syntax::PACKAGE_FILE,
+                        crate::Syntax::PAYLOAD_FILE,
                     )));
                 }
                 if physical.iter().any(|existing| existing == &candidate) {
@@ -1153,13 +1179,8 @@ fn package_record_bounds(value: &str) -> Option<(usize, usize)> {
 }
 
 fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let canonical = dir.join("package.jet");
-    if canonical.is_file() {
-        Some(canonical)
-    } else {
-        let legacy = dir.join("pkg.jet");
-        legacy.is_file().then_some(legacy)
-    }
+    let canonical = dir.join(crate::Syntax::PACKAGE_FILE);
+    canonical.is_file().then_some(canonical)
 }
 
 fn package_member_identity(
@@ -1991,6 +2012,17 @@ fn parse_output_value(key: &str, raw: &str) -> Result<OutputFact, PackageParseEr
                     value,
                 });
             }
+            let loadable_is_bool = matches!(
+                &payload,
+                OutputPayload::Object(fields)
+                    if matches!(fields.get(&field), Some(OutputPayload::Bool(_)))
+            );
+            if field == crate::Syntax::OUTPUT_FIELD_LOADABLE && !loadable_is_bool {
+                return Err(PackageParseError::InvalidValue {
+                    field: format!("outputs.{key}.{field}"),
+                    value,
+                });
+            }
             Ok((field, scalar(&value)))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -2175,7 +2207,10 @@ fn parse_members(value: &str) -> Result<Vec<MemberRef>, PackageParseError> {
 
 fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
     match kind {
-        PackageOutputKind::Library => matches!(field, "name" | "modules"),
+        PackageOutputKind::Library => matches!(
+            field,
+            "name" | "modules" | "entry" | crate::Syntax::OUTPUT_FIELD_LOADABLE
+        ),
         PackageOutputKind::Executable | PackageOutputKind::Service | PackageOutputKind::Check => {
             matches!(field, "name" | "entry")
         }
@@ -2433,7 +2468,10 @@ fn top_level_entries(value: &str) -> Vec<String> {
     let mut depth = 0i32;
     let mut quoted = false;
     let mut escaped = false;
-    for ch in value.chars() {
+    let chars = value.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
         if quoted {
             current.push(ch);
             if escaped {
@@ -2443,6 +2481,7 @@ fn top_level_entries(value: &str) -> Vec<String> {
             } else if ch == '"' {
                 quoted = false;
             }
+            index += 1;
             continue;
         }
         match ch {
@@ -2463,13 +2502,63 @@ fn top_level_entries(value: &str) -> Vec<String> {
                     entries.push(std::mem::take(&mut current));
                 }
             }
+            ch if depth == 0
+                && ch.is_whitespace()
+                && implicit_field_start(&chars, index, &current) =>
+            {
+                if !current.trim().is_empty() {
+                    entries.push(std::mem::take(&mut current));
+                }
+                index += 1;
+                while index < chars.len() && chars[index].is_whitespace() {
+                    index += 1;
+                }
+                continue;
+            }
             _ => current.push(ch),
         }
+        index += 1;
     }
     if !current.trim().is_empty() {
         entries.push(current);
     }
     entries
+}
+
+/// Jet record fields may be adjacent without a comma. Recognize the same
+/// boundary in the typed package/config reader after a complete value.
+fn implicit_field_start(chars: &[char], index: usize, current: &str) -> bool {
+    if split_field(current).is_none() {
+        return false;
+    }
+    let Some(last) = current.trim_end().chars().next_back() else {
+        return false;
+    };
+    if !(last.is_ascii_alphanumeric() || matches!(last, '}' | ']' | ')' | '"')) {
+        return false;
+    }
+
+    let mut next = index;
+    while chars.get(next).is_some_and(|ch| ch.is_whitespace()) {
+        next += 1;
+    }
+    if !chars
+        .get(next)
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || *ch == '_')
+    {
+        return false;
+    }
+    next += 1;
+    while chars
+        .get(next)
+        .is_some_and(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+    {
+        next += 1;
+    }
+    while chars.get(next).is_some_and(|ch| ch.is_whitespace()) {
+        next += 1;
+    }
+    matches!(chars.get(next), Some(&':'))
 }
 
 fn is_identifier(value: &str) -> bool {
@@ -2748,6 +2837,32 @@ defaults: .{ run: app, test: check }
         assert_eq!(facts.outputs["app"].kind, PackageOutputKind::Executable);
         assert_eq!(facts.select_output("run", None, None).unwrap().name, "app");
         assert_eq!(facts.select_output("test", None, None).unwrap().name, "check");
+    }
+
+    #[test]
+    fn loadable_library_uses_ratified_field_and_formats_round_trip() {
+        let source = r#"name: "skyhawk"
+outputs: .{ mod: .Library.{ entry: Skyhawk, loadable: true } }"#;
+        let facts = PackageFacts::parse(source, "package.jet").unwrap();
+        let output = &facts.outputs["mod"];
+        assert_eq!(output.entry.as_deref(), Some("Skyhawk"));
+        assert!(output.is_loadable());
+
+        let formatted = format_source(source, "package.jet").unwrap();
+        assert!(formatted.contains("loadable: true"), "{formatted}");
+        let reparsed = PackageFacts::parse(&formatted, "package.jet").unwrap();
+        assert_eq!(&reparsed.outputs["mod"], output);
+    }
+
+    #[test]
+    fn loadable_library_requires_a_boolean() {
+        let error = PackageFacts::parse(
+            r#"name: "skyhawk"
+outputs: .{ mod: .Library.{ loadable: "yes" } }"#,
+            "package.jet",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("outputs.mod.loadable"), "{error}");
     }
 
     #[test]

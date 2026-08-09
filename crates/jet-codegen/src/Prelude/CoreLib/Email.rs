@@ -29,28 +29,28 @@ pub mod jet_email {
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct Address {
-        display: Option<String>,
-        mailbox: String,
+        pub(crate) display: Option<String>,
+        pub(crate) mailbox: String,
     }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct Attachment {
-        filename: String,
-        mime: String,
-        bytes: Vec<u8>,
+        pub(crate) filename: String,
+        pub(crate) mime: String,
+        pub(crate) bytes: Vec<u8>,
     }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct Message {
-        from: Address,
-        to: Vec<Address>,
-        bcc: Vec<Address>,
-        subject: String,
-        text: String,
-        html: String,
-        attachments: Vec<Attachment>,
-        envelope: Envelope,
-        wire_upper: usize,
+        pub(crate) from: Address,
+        pub(crate) to: Vec<Address>,
+        pub(crate) bcc: Vec<Address>,
+        pub(crate) subject: String,
+        pub(crate) text: String,
+        pub(crate) html: String,
+        pub(crate) attachments: Vec<Attachment>,
+        pub(crate) envelope: Envelope,
+        pub(crate) wire_upper: usize,
     }
 
     #[derive(Clone, Debug, PartialEq)]

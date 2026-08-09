@@ -1334,7 +1334,7 @@ pub(crate) struct Checker<'a> {
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
     /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
-    /// Disables ambient `print`/`input` resolution for this body.
+    /// Disables readable Core prelude resolution for this body.
     no_prelude: bool,
     /// D-PREPOST1: true while type-checking a `#Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
@@ -1907,6 +1907,7 @@ pub mod Schema;
 mod SchemaMigration;
 mod ScopeMembers;
 mod PolicyFacts;
+mod Prelude;
 mod BudgetSpecs;
 pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec, LocatedBudgetSpec};
 mod CheckerReferences;

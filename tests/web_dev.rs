@@ -1324,8 +1324,8 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(proof.contains("\"proof\":{\"state\":\"current\",\"stale\":false"), "{proof}");
 
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: {\n    name: \"canvas_app\",\n    version: \"0.1.0\",\n}\n",
+        dir.join("package.jet"),
+        "name: \"canvas_app\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(dir.join("helper.jet"), "fn run() {\n    print(\"helper\")\n}\n").unwrap();
@@ -1379,10 +1379,10 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(catalog.contains("\"source\":\"docs/reference/core-library.md\""), "{catalog}");
 
     let project_revision = json_field(&project, "project_revision");
-    let manifest_src = fs::read_to_string(dir.join("pkg.jet")).unwrap();
+    let manifest_src = fs::read_to_string(dir.join("package.jet")).unwrap();
     let manifest_revision = jet::Canvas::source_revision(&manifest_src);
     let project_req = format!(
-        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"pkg.jet\",\"name\":\"logging\",\"spec\":\"0.1.0\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"package.jet\",\"name\":\"logging\",\"spec\":\"0.1.0\"}}",
         project_revision, manifest_revision
     );
     let (status, body) =
@@ -1392,7 +1392,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(body.contains("\"protocol\":\"jet.canvas.project.edit\""), "{body}");
     assert!(body.contains("\"writes\":\"preview_only\""), "{body}");
     assert!(body.contains("+    logging: \\\"0.1.0\\\","), "{body}");
-    assert!(!fs::read_to_string(dir.join("pkg.jet")).unwrap().contains("logging"));
+    assert!(!fs::read_to_string(dir.join("package.jet")).unwrap().contains("logging"));
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);

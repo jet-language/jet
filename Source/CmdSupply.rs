@@ -99,7 +99,7 @@ fn render_signing_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) {
     } else {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", std::slice::from_ref(diagnostic))
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", std::slice::from_ref(diagnostic))
         );
     }
 }
@@ -145,7 +145,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -222,11 +222,11 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // no pre-existing key has nothing to pin.
     if let Some(registry_public) = jet::Publish::Sign::read_public_key(&registry.name) {
         if let Err(error) = jet::Publish::ensure_registry_root_key(&registry.name, &registry_public) {
-            eprintln!("error: registry root-key pin failed: {error}");
+            crate::cli_error!("E2105", "registry root-key pin failed: {error}");
             exit(ExitCodes::USER_ERROR);
         }
     } else if !no_sign {
-        eprintln!("error: registry signing key has no public-key file");
+        crate::cli_error!("E2105", "registry signing key has no public-key file");
         exit(ExitCodes::USER_ERROR);
     }
 
@@ -248,7 +248,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                     diags.len()
                 );
             } else {
-                eprintln!("error: `jet build` must pass before publishing (D-PKGS4)");
+                crate::cli_error!("E2104", "`jet build` must pass before publishing (D-PKGS4)");
                 report_problems(
                     mode,
                     &entry_str,
@@ -344,7 +344,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 let raw = String::new();
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
                 );
                 eprintln!(
                     "\nerror: breaking public API change since {} requires a major version bump.",
@@ -407,7 +407,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         Err(d) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -421,7 +421,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             eprint!(
                 "{}",
                 jet::render_diagnostics(
-                    jet::Syntax::PAYLOAD_FILE,
+                    jet::Syntax::PACKAGE_FILE,
                     "",
                     &[jet::Publish::e1234(name, version)]
                 )
@@ -432,7 +432,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -445,7 +445,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -465,7 +465,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         let diagnostic = jet::Publish::e2607("registry source artifact", &error.to_string());
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
         );
         exit(ExitCodes::USER_ERROR);
     }
@@ -493,7 +493,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             Err(d) => {
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -505,7 +505,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -530,16 +530,16 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         signature,
     };
     if let Err(e) = jet::Publish::Index::write_index_entry(repo, &entry) {
-        eprintln!("error: couldn't write the registry index entry: {}", e);
+        crate::cli_error!("E2105", "couldn't write the registry index entry: {}", e);
         exit(ExitCodes::USER_ERROR);
     }
     let artifact = jet::Publish::artifact_path(repo, name, version)
         .unwrap_or_else(|error| {
-            eprintln!("error: invalid registry artifact path: {error}");
+            crate::cli_error!("E2105", "invalid registry artifact path: {error}");
             exit(ExitCodes::USER_ERROR);
         });
     let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
-        eprintln!("error: invalid registry index path: {error}");
+        crate::cli_error!("E2105", "invalid registry index path: {error}");
         exit(ExitCodes::USER_ERROR);
     });
     let mut publish_paths = vec![artifact, index];
@@ -552,7 +552,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             Err(diagnostic) => {
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -568,7 +568,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     ) {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
         );
         exit(ExitCodes::USER_ERROR);
     }
@@ -633,10 +633,7 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
     let reg = registry.unwrap_or(jet::Publish::Sign::DEFAULT_REGISTRY);
     let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
     if !seed_path.is_file() {
-        eprintln!(
-            "error: no signing key for registry `{}` — run `jet registry keygen` first.",
-            reg
-        );
+        crate::cli_error!("E2105", "no signing key for registry `{}` — run `jet registry keygen` first", reg);
         exit(ExitCodes::USER_ERROR);
     }
     let dest = dest
@@ -650,11 +647,7 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
             );
         }
         Err(e) => {
-            eprintln!(
-                "error: couldn't copy the signing key to {}: {}",
-                dest.display(),
-                e
-            );
+            crate::cli_error!("E2105", "couldn't copy the signing key to {}: {}", dest.display(), e);
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -673,7 +666,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -695,7 +688,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         .unwrap_or_else(|diags| {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
             );
             exit(ExitCodes::USER_ERROR);
         });
@@ -737,7 +730,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         Err(d) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &[d])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &[d])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -774,7 +767,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         match fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("error: couldn't read advisory database `{}`: {}", path.display(), e);
+                crate::cli_error!("E2105", "couldn't read advisory database `{}`: {}", path.display(), e);
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -825,7 +818,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     let diags: Vec<_> = matches.iter().map(|m| m.diagnostic.clone()).collect();
     eprint!(
         "{}",
-        jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+        jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
     );
 
     let critical = matches
@@ -859,7 +852,7 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -873,7 +866,7 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
         None => {
-            eprintln!("error: no lockfile found — run `jet fetch` first");
+            crate::cli_error!("E1202", "no lockfile found — run `jet fetch` first");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -905,11 +898,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
 
     // Validate the version is parseable as SemVer.
     if jet::Publish::SemVer::SemVer::parse(version).is_none() {
-        eprintln!(
-            "error: `{}` is not a valid SemVer version (expected major.minor.patch)",
-            version
-        );
-        eprintln!(" Fix: use a version like `1.2.3`.");
+        crate::cli_error!(@fix "E2104", format!("`{}` is not a valid SemVer version (expected major.minor.patch)", version), "use a version like `1.2.3`");
         exit(ExitCodes::USER_ERROR);
     }
 
@@ -921,7 +910,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
 
     let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
+        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -939,7 +928,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     // stays taken (immutable) but drops out of new resolution.
     let registry = jet::Publish::resolve_publish_registry();
     if let Err(error) = jet::Publish::read_registry_root_key(&registry.name) {
-        eprintln!("error: registry root-key pin is unavailable: {error}");
+        crate::cli_error!("E2105", "registry root-key pin is unavailable: {error}");
         exit(ExitCodes::USER_ERROR);
     }
     let checkout = match jet::Publish::prepare_publish_checkout(&registry) {
@@ -947,7 +936,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -956,17 +945,11 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     match jet::Publish::Index::mark_yanked(repo, name, version) {
         Ok(true) => {}
         Ok(false) => {
-            eprintln!(
-                "error: `{}` v{} is not published in the registry index — nothing to yank.",
-                name, version
-            );
-            eprintln!(
-                " Fix: run `jet registry publish` for the version first, or check the version number."
-            );
+            crate::cli_error!(@fix "E2105", format!("`{}` v{} is not published in the registry index — nothing to yank", name, version), "run `jet registry publish` for the version first, or check the version number");
             exit(ExitCodes::USER_ERROR);
         }
         Err(e) => {
-            eprintln!("error: couldn't update the registry index: {}", e);
+            crate::cli_error!("E1235", "couldn't update the registry index: {}", e);
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -974,16 +957,16 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let entry = match jet::Publish::Index::find_entry(repo, name, version) {
         Ok(Some(entry)) => entry,
         Ok(None) => {
-            eprintln!("error: yanked registry entry disappeared during publication");
+            crate::cli_error!("E2105", "yanked registry entry disappeared during publication");
             exit(ExitCodes::USER_ERROR);
         }
         Err(error) => {
-            eprintln!("error: couldn't read the yanked registry entry: {error}");
+            crate::cli_error!("E2105", "couldn't read the yanked registry entry: {error}");
             exit(ExitCodes::USER_ERROR);
         }
     };
     let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
-        eprintln!("error: invalid registry index path: {error}");
+        crate::cli_error!("E2105", "invalid registry index path: {error}");
         exit(ExitCodes::USER_ERROR);
     });
     let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
@@ -991,7 +974,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -1007,7 +990,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     ) {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
         );
         exit(ExitCodes::USER_ERROR);
     }
