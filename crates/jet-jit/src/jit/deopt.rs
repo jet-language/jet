@@ -283,7 +283,12 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
     let outcome = jet_codegen::Comptime::with_ambient(
         Some(crate::ambient_interp::ambient_core_call),
         Some(crate::ambient_interp::ambient_handle),
-        || match Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
+        || match Comptime::TirBridge::run_bundle_at_stage(
+            bundle,
+            &mut sink,
+            true,
+            Comptime::PurityStage::RunTime,
+        ) {
             Ok(CtValue::Failed(CtReport::Told(error))) => {
                 sink.stderr.push_str(&error.jet_show());
                 sink.stderr.push('\n');

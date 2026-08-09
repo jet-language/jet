@@ -122,11 +122,10 @@ impl<V: user_Encode> user_Encode for std::collections::BTreeMap<String, V> {
 }
 impl<V: user_Encode> user_Encode for JetMap<String, V> {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Object(
-            self.iter()
-                .map(|(k, v)| (k.clone(), v.jet_encode()))
-                .collect(),
-        )
+        // Keep the JetMap surface as a transparent BTreeMap codec. Calling
+        // `self.jet_encode()` (or relying on method lookup through Deref)
+        // re-enters this impl for JetMap and recurses forever.
+        <std::collections::BTreeMap<String, V> as user_Encode>::jet_encode(&**self)
     }
 }
 // D-ENC-CBOR-SURFACE1: DataTree itself is Codable. Whole-value codec
