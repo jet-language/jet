@@ -26,14 +26,13 @@ static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug)]
 pub enum Error {
     Tool(String),
-    Rejected(String),
     Cache(String),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Tool(message) | Error::Rejected(message) | Error::Cache(message) => {
+            Error::Tool(message) | Error::Cache(message) => {
                 formatter.write_str(message)
             }
         }
@@ -111,7 +110,13 @@ fn prepare_at(
     rustc_flags: &[OsString],
     rustc_env: &[(OsString, OsString)],
 ) -> Result<PreparedRuntime, Error> {
-    let Some((runtime, program)) = split_generated(generated)? else {
+    // Cache is an optimization; malformed boundaries must keep original Rust.
+    let split = match split_generated(generated) {
+        Ok(split) => split,
+        Err(Error::Cache(_)) => return Ok(PreparedRuntime::inline(generated)),
+        Err(error) => return Err(error),
+    };
+    let Some((runtime, program)) = split else {
         return Ok(PreparedRuntime::inline(generated));
     };
     let exported = export_runtime_source(&runtime);
@@ -176,10 +181,8 @@ fn prepare_at(
     let _ = fs::remove_file(&source);
     if !output.status.success() {
         let _ = fs::remove_file(&staged_rlib);
-        return Err(Error::Rejected(format!(
-            "rustc rejected the generated cached runtime\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
+        // A cache-only rustc rejection must never replace a valid inline build.
+        return Ok(PreparedRuntime::inline(generated));
     }
 
     let bytes = fs::read(&staged_rlib).map_err(|error| {
@@ -205,21 +208,17 @@ fn split_generated(generated: &str) -> Result<Option<(String, String)>, Error> {
     let Some(begin) = generated.find(BEGIN) else {
         return Ok(None);
     };
+    if generated.matches(BEGIN).count() != 1 || generated.matches(END).count() != 1 {
+        return Err(Error::Cache(
+            "generated Rust has an invalid runtime marker pair".to_string(),
+        ));
+    }
     let runtime_start = begin + BEGIN.len();
     let relative_end = generated[runtime_start..]
         .find(END)
         .ok_or_else(|| Error::Cache("generated Rust has an unterminated runtime block".to_string()))?;
     let runtime_end = runtime_start + relative_end;
     let after = runtime_end + END.len();
-    if generated[..begin].contains(END)
-        || generated[runtime_start..runtime_end].contains(BEGIN)
-        || generated[after..].contains(BEGIN)
-        || generated[after..].contains(END)
-    {
-        return Err(Error::Cache(
-            "generated Rust has more than one runtime block".to_string(),
-        ));
-    }
     let runtime = generated[runtime_start..runtime_end].to_string();
     let mut program = String::with_capacity(generated.len() - runtime.len() + 64);
     program.push_str(&generated[..begin]);
@@ -620,6 +619,9 @@ fn looks_like_struct_field(code: &str) -> bool {
     let Some(colon) = code.find(':') else {
         return false;
     };
+    if code[..colon].ends_with(':') || code.as_bytes().get(colon + 1) == Some(&b':') {
+        return false;
+    }
     let name = code[..colon].trim();
     !name.is_empty()
         && !name.chars().any(char::is_whitespace)
@@ -903,6 +905,35 @@ mod tests {
     }
 
     #[test]
+    fn split_keeps_header_before_cached_runtime_import() {
+        let generated = format!(
+            "#![allow(warnings)]\nconst __JET_PACKAGE_EDITION: u16 = 2027;\nextern crate helper;\n{BEGIN}pub trait user_Display {{}}\n{END}use user_Display;\n"
+        );
+        let (_, program) = split_generated(&generated).unwrap().unwrap();
+        let edition = program.find("__JET_PACKAGE_EDITION").unwrap();
+        let helper = program.find("extern crate helper;").unwrap();
+        let runtime = program.find("extern crate jet_runtime;").unwrap();
+        let import = program.find("use jet_runtime::*;").unwrap();
+        let tail = program.find("use user_Display;").unwrap();
+        assert!(edition < helper && helper < runtime && runtime < import && import < tail);
+    }
+
+    #[test]
+    fn malformed_runtime_markers_fall_back_to_inline() {
+        let generated = format!("{BEGIN}fn runtime() {{}}\n");
+        let prepared = prepare_at(
+            Path::new("unused-cache-root"),
+            OsStr::new("rustc-not-called"),
+            &generated,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(prepared.rust(), generated);
+        assert!(!prepared.cache_hit());
+    }
+
+    #[test]
     fn export_changes_visibility_without_touching_literals_or_trait_impls() {
         let source = r#"struct Tuple(i64);
 struct Value {
@@ -924,6 +955,20 @@ fn braces() -> &'static str { "{private}" }
         assert!(exported.contains("impl Clone for Value {\n    fn clone"));
         assert!(exported.contains("pub fn braces()"));
         assert!(exported.contains("\"{private}\""));
+    }
+
+    #[test]
+    fn export_does_not_promote_multiline_generic_type_continuations() {
+        let source = r#"struct Protocol {
+    waiters: std::sync::Mutex<
+        std::collections::VecDeque<u8>,
+    >,
+}
+"#;
+        let exported = export_runtime_source(source);
+        assert!(exported.contains("    pub waiters: std::sync::Mutex<"));
+        assert!(exported.contains("\n        std::collections::VecDeque<u8>,"));
+        assert!(!exported.contains("\n        pub std::collections::VecDeque"));
     }
 
     #[cfg(unix)]
@@ -963,6 +1008,35 @@ fn braces() -> &'static str { "{private}" }
         let two = format!("{BEGIN}fn runtime_changed() {{}}\n{END}fn main() {{}}\n");
         prepare_at(&root.join("cache"), rustc.as_os_str(), &two, &[], &[]).unwrap();
         assert_eq!(fs::read(&count).unwrap(), b"xxx");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejected_cached_runtime_falls_back_to_inline_program() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-rejected-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let rustc = root.join("rustc-rejecting");
+        fs::write(
+            &rustc,
+            "#!/bin/sh\nif [ \"$1\" = \"-vV\" ]; then exit 0; fi\nexit 1\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&rustc).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&rustc, permissions).unwrap();
+
+        let generated = format!("prefix\n{BEGIN}fn runtime() {{}}\n{END}suffix\n");
+        let prepared = prepare_at(&root.join("cache"), rustc.as_os_str(), &generated, &[], &[])
+            .unwrap();
+        assert_eq!(prepared.rust(), generated);
+        assert!(!prepared.cache_hit());
         let _ = fs::remove_dir_all(root);
     }
 }

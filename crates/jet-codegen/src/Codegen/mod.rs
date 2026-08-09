@@ -139,8 +139,16 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push('\n');
 }
 
-fn push_cached_runtime(out: &mut String) {
+fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
+    if link.is_some() {
+        push_ffi_reporter(out, link);
+    }
     out.push_str(CACHED_RUNTIME_BEGIN);
+    if link.is_none() {
+        // EnvInit is part of cached runtime and calls this hook. Keep no-FFI
+        // stub inside marker block so split rlib has symbol too.
+        push_ffi_reporter(out, None);
+    }
     push_cached_runtime_traits(out);
     push_prelude(out);
     out.push_str(ENV_INIT_PRELUDE);
@@ -167,7 +175,7 @@ fn is_in_cached_runtime(source: &str, position: usize) -> bool {
 /// as the rlib cache. A Prelude edit must invalidate both layers.
 pub fn cached_runtime_fingerprint() -> String {
     let mut source = String::new();
-    push_cached_runtime(&mut source);
+    push_cached_runtime(&mut source, None);
     crate::SHA256::sha256_hex(source.as_bytes())
 }
 
@@ -2102,6 +2110,15 @@ mod tests {
         push_ffi_reporter(&mut source, Some(&link));
         assert!(source.contains("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)"));
         assert!(source.contains("panic: a foreign function panicked"));
+
+        let mut cached = String::new();
+        push_cached_runtime(&mut cached, Some(&link));
+        let reporter = cached
+            .find("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)")
+            .unwrap();
+        let marker = cached.find(CACHED_RUNTIME_BEGIN).unwrap();
+        assert!(reporter < marker);
+        assert!(!cached[marker..].contains("jet_ffi_fixture::jet_ffi_set_reporter"));
     }
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
@@ -2449,11 +2466,12 @@ mod tests {
     #[test]
     fn cached_runtime_block_covers_every_fixed_runtime_source_part() {
         let mut emitted = String::new();
-        push_cached_runtime(&mut emitted);
+        push_cached_runtime(&mut emitted, None);
         let body = emitted
             .strip_prefix(CACHED_RUNTIME_BEGIN)
             .and_then(|source| source.strip_suffix(CACHED_RUNTIME_END))
             .expect("cached runtime markers must enclose one exact block");
+        assert!(body.contains("fn jet_ffi_install_reporter() {}"));
         for part in PRELUDE_PARTS {
             assert!(
                 body.contains(part),
@@ -3093,8 +3111,7 @@ pub fn emit_bundle_dbg(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_ffi_reporter(&mut out, link);
-    push_cached_runtime(&mut out);
+    push_cached_runtime(&mut out, link);
     if needs_embedded_runtime(bundle) {
         push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
@@ -3270,8 +3287,7 @@ pub fn emit_bundle_tests_cov(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_ffi_reporter(&mut out, link);
-    push_cached_runtime(&mut out);
+    push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
@@ -3475,8 +3491,7 @@ pub fn emit_bundle_fuzz(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_ffi_reporter(&mut out, link);
-    push_cached_runtime(&mut out);
+    push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
@@ -3734,8 +3749,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_ffi_reporter(&mut out, link);
-    push_cached_runtime(&mut out);
+    push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
