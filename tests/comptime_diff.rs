@@ -89,6 +89,7 @@ const CASES: &[&str] = &[
     // D-BIGINT1 (card #392): arbitrary-precision arithmetic — no overflow,
     // no auto-promotion. comptime must match AOT's limb-based `JetBigInt`
     // byte-for-byte (R12 parity).
+    // parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
     "(BigInt(9223372036854775807) + BigInt(1)).to_string()",
     "(BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")).to_string()",
     "(BigInt(100) - BigInt(1)).to_string()",
@@ -169,6 +170,7 @@ const MODULE_CASES: &[&str] = &[
     // out-of-scope gap, so there's no printable way to compare their
     // contents byte-for-byte here; those are covered by
     // `tests/repl.rs::repl_core_url_dispatch` instead).
+    // parity: guard tests/repl.rs::repl_core_url_dispatch
     "use core.url as url\n$comptime_value :: url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.url as url\n$comptime_value :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.url as url\n$comptime_value :: url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",

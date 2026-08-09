@@ -1,6 +1,7 @@
 //! `core.io` stdout/stderr/stdin + terminal hosts (#1219). Writes go to the
 //! resident `JitRuntime` capture buffers so ProgramOutput matches AOT under
 //! the process harness (real stdio would bypass capture).
+//! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs
 
 use super::Concurrency;
 use super::CoreHost::{jit_env_key_eq, jit_env_snapshot_raw};
@@ -1375,7 +1376,6 @@ host_fns! {
     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
     term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
 }
-
 
 
 

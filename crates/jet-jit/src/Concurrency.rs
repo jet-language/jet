@@ -395,6 +395,7 @@ extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
 
 /// Blocks until a message arrives or the channel closes — matches AOT
 /// `Channel.receive()` + `??` on `Result` (not `try_receive`).
+/// parity: guard tests/dev.rs::scheduler_spawn_runs_via_jit
 extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
     let chan = with_runtime_mut(|rt| {
         Some(
@@ -983,7 +984,6 @@ host_fns! {
     deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
     deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;
 }
-
 
 
 

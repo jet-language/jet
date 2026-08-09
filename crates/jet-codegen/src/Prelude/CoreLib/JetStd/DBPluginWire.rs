@@ -531,6 +531,7 @@
     // a list is a decimal item count + `:` + that many back-to-back items. Every
     // length is a byte count, so arbitrary text — including an "injection-looking"
     // literal — round-trips exactly with no escaping.
+    // parity: guard tests/corelib.rs::core_db_implements_driver_trait
     fn db_encode_tagged(tag: char, payload: &str) -> String {
         format!("{tag}{}:{payload}", payload.len())
     }

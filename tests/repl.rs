@@ -2614,6 +2614,7 @@ fn repl_core_url_dispatch() {
 // — they're verified instead by `DataLite.rs`'s own `#[cfg(test)]` module
 // against AOT's exact expected output, and will get a real transcript once
 // `group_*` closes that gap.
+// parity: guard tests/repl.rs::repl_core_data_dispatch
 #[test]
 fn repl_core_data_dispatch() {
     let inputs = &[

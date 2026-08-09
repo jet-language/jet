@@ -2608,6 +2608,7 @@ pub fn run_named_func(
         allow_impure: true,
         // Runtime deopt is not comptime: open Tier-2 ambient I/O so `jet run`
         // matches AOT for env/fs/process (D-LENS-RUN2 / #778).
+        // parity: guard tests/dev.rs::dev_default_matches_compiled_binary
         impure_depth: 1,
         runtime_execution: true,
         prefer_tir_calls: program.canonical_calls.contains(name),

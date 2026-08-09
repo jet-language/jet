@@ -959,6 +959,7 @@ extern "C" fn jet_jit_clock_tick(handle: i64, delta: i64) {
 
 extern "C" fn jet_jit_clock_advance(handle: i64, to_ms: i64) -> i64 {
     // D-DET-CAPAPI: absolute set — matches AOT `jet_clock_advance`.
+    // parity: guard tests/dev.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
     Concurrency::with_runtime_mut(|rt| {
         if let Some(now) = rt.clocks.get_mut((handle as usize).wrapping_sub(1)) {
             *now = to_ms;

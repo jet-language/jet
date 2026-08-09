@@ -431,6 +431,7 @@ impl CtBigInt {
 // ── CtDecimal: comptime/REPL tier-0 exact base-10 decimal ───────────────────
 // Mirrors AOT `JetDecimal` (CommonTypes.rs) limb-for-limb so `to_string` and
 // arithmetic match across tiers (D-DECIMAL1 / R12).
+// parity: guard tests/repl.rs::repl_decimal_exact_transcript
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CtDecimal {

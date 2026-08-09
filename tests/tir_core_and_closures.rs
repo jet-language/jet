@@ -14,6 +14,7 @@ use tir_support::{
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms
 /// (`jet_std_math_*`, `jet_std_path_join`, `jet_ring_crypto_sha256`) reproduce
 /// `emit_core_call` byte-for-byte; here we prove they compile (I2) and run.
+/// parity: guard tests/tir_core_and_closures.rs::core_math_path_crypto_calls
 #[test]
 fn core_math_path_crypto_calls() {
     if !have_rustc() {

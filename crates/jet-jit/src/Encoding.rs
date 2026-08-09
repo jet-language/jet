@@ -667,6 +667,7 @@ extern "C" fn jet_jit_csv_to_string(rows: i64) -> i64 {
 /// Typed `csv.to_string([T])` where `T` is `#Codable`: the encoded `DataTree` is
 /// an array of flat objects. Header comes from the first row's keys, then one
 /// record per element. Mirrors AOT `jet_enc_csv_to_string` cell for cell.
+/// parity: guard tests/encoding_parity.rs::typed_csv_encode_matches_aot_and_default_dev
 fn csv_render_datatree(tree: &json_rt::DataTree) -> Result<String, &'static str> {
     let json_rt::DataTree::Array(trees) = tree else {
         return Err("csv.to_string needs rows or records");

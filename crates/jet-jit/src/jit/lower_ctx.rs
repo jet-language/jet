@@ -6837,6 +6837,7 @@ impl LowerCtx<'_, '_> {
     /// part through a `str_push_*` host call keyed on the interpolated expr's
     /// `Type`, matching the AOT emitter's `format!`-based concatenation
     /// byte-for-byte (R12 parity — same runtime string, not just same shape).
+    /// parity: guard tests/dev.rs::fixed_interpolation_matches_interpreter_and_resident_jit_rounding
     fn lower_string_lit(&mut self, parts: &[TStrPart]) -> Result<Value, String> {
         if let Some(text) = flatten_string(parts) {
             let id = self.runtime.heap.alloc_string(text);
@@ -6858,6 +6859,7 @@ impl LowerCtx<'_, '_> {
                         .unwrap_or_else(|| {
                             // CORE struct fields (Stat.kind / is_file, …): TIR may
                             // leave Int; recover String/Bool so str_push_* matches AOT.
+                            // parity: guard tests/dev.rs::fixed_interpolation_matches_interpreter_and_resident_jit_rounding
                             if let TExprKind::Field { recv, field, .. } = &e.kind {
                                 if let Some(name) = record_type_key(&recv.ty) {
                                     if let Some(ty) = self
@@ -19429,6 +19431,7 @@ impl LowerCtx<'_, '_> {
             }
             // D-PARCAPTURE1: order-preserving parallel adapters — serial Cranelift
             // inlining matches AOT results for the covered examples.
+            // parity: guard tests/dev.rs::unified_loop_jit_tiers_are_explicit_and_match_aot
             TClosureOp::ParaMap => self.lower_iter_map_filter(recv, args, false),
             TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
             TClosureOp::ParaFilter => self.lower_iter_map_filter(recv, args, true),

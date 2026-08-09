@@ -1,4 +1,5 @@
 //! Interpreter `core.event` — mirrors AOT `ReactiveEventWatch.rs` for TIR deopt.
+//! parity: guard tests/event_hooks.rs::decision_hook_outcomes_transform_and_short_circuit
 //!
 //! Handles are `CtValue` structs with an `id` field. Handler callables stay as
 //! `CtValue` (eval `__JetTirCallable`); the evaluator invokes them during

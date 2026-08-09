@@ -2900,6 +2900,7 @@ pub enum TExprKind {
     /// (no module alias) lowering to `{root}jet_std_io_input(None|Some(&(prompt)))`,
     /// byte-for-byte the ambient-input call branch. `prompt` is `Some` when a String
     /// prompt arg is given, else `None`.
+    /// parity: guard tests/tir_language_features.rs::ambient_input
     AmbientInput {
         prompt: Option<Box<TExpr>>,
     },
@@ -3066,6 +3067,7 @@ pub enum TExprKind {
     /// total) — `true` → `(…).clone()`, reproducing `emit_core_json_lit` (Expression.rs)
     /// byte-for-byte. `JSON.Null` has no arg (`None`). The `{root}jet_std::JSON` prefix
     /// is rendered at emit (`cx.root_prefix` is program-level, read there).
+    /// parity: guard tests/tir_language_features.rs::json_value_construct_match_render
     JSONLit {
         variant: String,
         arg: Option<Box<(TExpr, bool)>>,

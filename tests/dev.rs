@@ -5,6 +5,7 @@
 //! identical to the compiled native binary. Any divergence is a P0 miscompile-class
 //! bug — the interpreter is a dev convenience that must never lie about what
 //! the real build does. This mirrors `tests/comptime_diff.rs`.
+//! parity: guard tests/dev.rs::interpreter_matches_compiled_binary
 //!
 //! Also tested:
 //!   - the E2201 honest-boundary note (tasks/FFI/`#Unsafe`/native std),
@@ -8065,6 +8066,7 @@ fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
 /// stdout/stderr/exit byte-for-byte (D-ONECORE1=A). AOT-green examples that
 /// fail default tiered run land in shrink-only `run_tier_broken`
 /// (D-VERDICT-1254-1 / D-LENS-RUN1).
+/// parity: guard tests/dev.rs::example_corpus_strict_jit_aot_differential_gate
 ///
 /// c730: CI runs this via `tools/ci/jit-aot-parity.sh` on every supported
 /// native x86_64 host (Linux/macOS/Windows). Set `JET_CORPUS_GATE_REPORT_DIR`

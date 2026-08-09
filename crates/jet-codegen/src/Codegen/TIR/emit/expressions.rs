@@ -801,6 +801,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 25: ambient prelude `input(...)`, byte-for-byte the `emit_call`
         // ambient-input branch: a bare call with NO arg
         // emits `{root}jet_std_io_input(None)`; with a prompt arg `{root}jet_std_io_input(Some(&(arg)))`.
+        // parity: guard tests/tir_language_features.rs::ambient_input
         TExprKind::AmbientInput { prompt } => {
             let helper = format!("{}jet_std_io_input", cx.root_prefix);
             match prompt {

@@ -94,6 +94,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // a separate `Expr::Call` node → `AmbientInput`). Emits the same fixed-string CoreCall
     // `{root}jet_std_io_input(None|Some(&(prompt)))` (reproduced in `emit_tir_core_call`),
     // byte-for-byte the TIR core-call encoding. Composes with the Phase-8 `?? return`.
+    // parity: guard tests/tir_language_features.rs::ambient_input
     if module == "core.io" && method == "input" {
         return true;
     }

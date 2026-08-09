@@ -298,6 +298,7 @@ pub(super) fn json_error_value(e: JSONError) -> CtValue {
 /// on line `idx` of the JSONL document at `idx + e.line` — mirrors AOT's
 /// `jet_std_jsonl_parse` (`MathRandomTime.rs`), which adds the 0-based JSONL
 /// line index to the per-line JSON parser's own line number.
+/// parity: guard tests/encoding_parity.rs::jsonl_csv_xml_cbor_streams_match_aot_and_default_dev
 pub(super) fn json_error_value_at_line(e: JSONError, line_offset: i64) -> CtValue {
     json_error_value(JSONError {
         line: line_offset + e.line,

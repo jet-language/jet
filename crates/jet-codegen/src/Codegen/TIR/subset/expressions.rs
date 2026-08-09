@@ -138,6 +138,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // 0 args → `(None)`, 1 arg (a String prompt) → `(Some(&(arg)))`. Reproduced
             // byte-for-byte in `emit_tir_ambient_input`. Disjoint from a plain fn (those
             // ARE in `cx.sigs`) and the local-call branch (shadowing local handled above).
+            // parity: guard tests/tir_language_features.rs::ambient_input
             let is_ambient_input = c.name == Syntax::BUILTIN_INPUT
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)

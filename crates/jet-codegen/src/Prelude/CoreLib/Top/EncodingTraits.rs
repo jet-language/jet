@@ -17,6 +17,7 @@ pub trait user_Decode: Sized {
     /// for a `#PublishedSchema` type that has `migration { }` blocks and a
     /// runtime decode path — every other type keeps this default, so no
     /// per-type code is emitted and the decode path is byte-for-byte unchanged.
+    /// parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
     fn jet_decode_traced(
         tree: &jet_std::DataTree,
     ) -> Result<(Self, jet_std::MigrationStatus), Vec<jet_std::FieldError>> {
