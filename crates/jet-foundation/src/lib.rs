@@ -18,6 +18,7 @@ pub mod Generics;
 pub mod generated;
 pub mod JitBackend;
 pub mod JSON;
+pub mod LintPolicy;
 pub mod Numeric;
 pub mod OSTarget;
 pub mod Outcome;

@@ -11,6 +11,7 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Package::PackageFacts;
+use jet_foundation::LintPolicy as FoundationLintPolicy;
 
 /// Whole-program enforcement: for every emitted lint whose code is listed in
 /// `package.jet`'s `policy.lints.deny`, fail the build with E1293 instead of only
@@ -18,10 +19,10 @@ use crate::Package::PackageFacts;
 /// all) is the default — the returned list is always empty and every lint
 /// stays a warning (I1/D-LINTPOLICY1: warn-never-block by default).
 pub fn enforce(lints: &[Diagnostic], manifest: &PackageFacts) -> Vec<Diagnostic> {
-    lints
-        .iter()
-        .filter(|d| is_denied(&d.code, manifest))
-        .map(e1293)
+    let deny = manifest.policy.lints_deny.as_deref().unwrap_or_default();
+    FoundationLintPolicy::apply(deny, lints.to_vec())
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "E1293")
         .collect()
 }
 
@@ -29,39 +30,12 @@ pub fn enforce(lints: &[Diagnostic], manifest: &PackageFacts) -> Vec<Diagnostic>
 /// Denied findings are rendered by `enforce` as E1293 instead; keeping them
 /// out of the warning stream makes the policy wall a single, truthful report.
 pub fn non_denied(lints: &[Diagnostic], manifest: &PackageFacts) -> Vec<Diagnostic> {
+    let deny = manifest.policy.lints_deny.as_deref().unwrap_or_default();
     lints
         .iter()
-        .filter(|lint| !is_denied(&lint.code, manifest))
+        .filter(|lint| !FoundationLintPolicy::is_denied(deny, &lint.code))
         .cloned()
         .collect()
-}
-
-fn is_denied(code: &str, manifest: &PackageFacts) -> bool {
-    manifest
-        .policy
-        .lints_deny
-        .as_ref()
-        .is_some_and(|deny| deny.iter().any(|denied| denied == code))
-}
-
-/// E1293: a lint policy.lints denies fired. Carries the original lint's
-/// site, `what`, and `why` forward so the build failure still teaches what
-/// the code needs to fix — only the severity and the `policy.lints` framing
-/// are new.
-fn e1293(original: &Diagnostic) -> Diagnostic {
-    Diagnostic::error(
-        "E1293",
-        format!(
-            "lint `{}` is denied by policy: {}",
-            original.code, original.what
-        ),
-        format!(
-            "{} This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in.",
-            original.why.trim_end_matches('.').to_string() + "."
-        ),
-        original.fix.clone(),
-        original.span,
-    )
 }
 
 #[cfg(test)]
