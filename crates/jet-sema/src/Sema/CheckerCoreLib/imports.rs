@@ -562,17 +562,15 @@ impl<'a> Checker<'a> {
                                 self.diags.push(Diagnostic::error(
                                     "E0202",
                                     format!(
-                                        "parameter `{}` requires `{}` at the call site",
-                                        n,
-                                        Syntax::SIGIL_WRITE
+                                        "parameter `{}` requires the write-capability marker `&` at the call site",
+                                        n
                                     ),
                                     format!(
-                                        "`{}` needs to edit (`&`) this value; passing it without `{}` grants only read access",
-                                        name,
-                                        Syntax::SIGIL_WRITE
+                                        "`{}` needs to edit this value with the write-capability marker `&`; passing it without that marker grants only read access",
+                                        name
                                     ),
                                     format!(
-                                        "write `{}{}` when calling `{}`",
+                                        "write the write-capability marker `&` (`{}{}`) when calling `{}`",
                                         Syntax::SIGIL_WRITE,
                                         n,
                                         name

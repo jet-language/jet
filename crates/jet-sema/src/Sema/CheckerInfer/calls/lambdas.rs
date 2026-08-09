@@ -230,10 +230,10 @@ use std::collections::HashSet;
                                 "`{}` was not moved here, so it cannot be captured by {}",
                                 name, destination
                             ),
-                            "this function can access the parameter, but it does not own the value"
+                            "this function can access the parameter, but it does not own the value; capture requires the move-capability marker `^`"
                                 .to_string(),
                             format!(
-                                "make the parameter owned: `{}: {}{}`",
+                                "make the parameter owned with the move-capability marker `^`: `{}: {}{}`",
                                 name,
                                 Syntax::SIGIL_MOVE,
                                 cap_ty.name()
@@ -599,13 +599,13 @@ use std::collections::HashSet;
                                 self.diags.push(Diagnostic::error(
                                     "E0120",
                                     format!(
-                                        "`{}` was not moved here, so the lambda cannot take it (`^`)",
+                                        "`{}` was not moved here, so the lambda cannot take it with the move-capability marker `^`",
                                         name
                                     ),
-                                    "this function has read access only and does not own the value"
+                                    "this function has read access only and does not own the value; the move-capability marker `^` is required"
                                         .to_string(),
                                     format!(
-                                        "take ownership in this function with `{}: {}{}`",
+                                        "take ownership in this function with the move-capability marker `^`: `{}: {}{}`",
                                         name,
                                         Syntax::SIGIL_MOVE,
                                         info.ty.name()

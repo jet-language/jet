@@ -234,13 +234,10 @@ impl<'a> Checker<'a> {
                     if arg.convention == AccessConvention::Move {
                         self.diags.push(Diagnostic::error(
                             "E0203",
-                            format!(
-                                "`{}` passed to a parameter that does not consume",
-                                Syntax::SIGIL_MOVE
-                            ),
+                            "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
                             "function-value parameters have plain read access; they do not take ownership"
                                 .to_string(),
-                            format!("remove `{}`", Syntax::SIGIL_MOVE),
+                            "remove the move-capability marker `^`".to_string(),
                             Some(arg.span),
                         ));
                     }
@@ -249,8 +246,8 @@ impl<'a> Checker<'a> {
                     {
                         self.diags.push(Diagnostic::error(
                             "E0202",
-                            format!("`{}` needs a plain named binding after it", Syntax::SIGIL_WRITE),
-                            "write access (`&`) can only be granted to a named binding, not an expression"
+                            "the write-capability marker `&` needs a plain named binding after it".to_string(),
+                            "write access from the write-capability marker `&` can only be granted to a named binding, not an expression"
                                 .to_string(),
                             self.non_name_write_argument_fix(&arg.expr),
                             Some(arg.span),

@@ -166,11 +166,11 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             format!(
-                                "cannot draw from `{}` — it does not have edit access (`&`); required before calling `.{}()`",
+                                "cannot draw from `{}` — it does not have the write-capability marker `&`; required before calling `.{}()`",
                                 root, method
                             ),
-                            "every `Rng` draw advances the stream, so the receiver needs write access (`&`)".to_string(),
-                            format!("declare `{} {} ...` (or pass the rng as `&{}`)", root, Syntax::SIGIL_BIND_MUT, root),
+                            "every `Rng` draw advances the stream, so the receiver needs the write-capability marker `&`".to_string(),
+                            format!("declare `{} {} ...`, or pass the rng with the write-capability marker `&`: `&{}`", root, Syntax::SIGIL_BIND_MUT, root),
                             Some(receiver.span()),
                         ));
                     }
@@ -211,8 +211,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0202",
                     "`shuffle` edits its list in place".to_string(),
-                    "write access (`&`) is required; the list must be passed with `&`".to_string(),
-                    "write `rng.shuffle(&items)`".to_string(),
+                    "the write-capability marker `&` is required; pass the list with that marker".to_string(),
+                    "write `rng.shuffle(&items)` with the write-capability marker `&`".to_string(),
                     Some(args[0].span),
                 ));
             }

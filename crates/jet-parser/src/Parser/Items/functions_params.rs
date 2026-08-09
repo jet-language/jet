@@ -562,10 +562,12 @@ impl<'a> Parser<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0029",
                                 format!("`{}` has two capability markers", name),
-                                "a parameter's access capability is written once — on the type \
-                             (`name: &Type`), or on `self` for a receiver"
-                                    .to_string(),
-                                "keep the sigil on the type and remove the other".to_string(),
+                                format!(
+                                    "the {} before the parameter name conflicts with the {} on its type; a parameter can declare only one capability",
+                                    Syntax::capability_label(convention.sigil()),
+                                    Syntax::capability_label(type_cap.sigil()),
+                                ),
+                                "keep one capability marker on the type or receiver and remove the other".to_string(),
                                 Some(name_span),
                             ));
                         }
@@ -698,7 +700,12 @@ impl<'a> Parser<'a> {
                         format!("`#{}` must mark a bare-read parameter", Syntax::MARKER_ROOT),
                         "dot-call syntax never hides a write or move capability behind the receiver"
                             .to_string(),
-                        format!("remove `&` or `^` from the `#{}` parameter", Syntax::MARKER_ROOT),
+                        format!(
+                            "remove the {} or {} from the `#{}` parameter",
+                            Syntax::WRITE_CAPABILITY_LABEL,
+                            Syntax::MOVE_CAPABILITY_LABEL,
+                            Syntax::MARKER_ROOT
+                        ),
                         Some(p.name_span),
                     ));
                 }

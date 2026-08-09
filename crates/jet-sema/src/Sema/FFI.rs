@@ -72,7 +72,7 @@ pub(crate) fn check_extern_fn(
                     p.name,
                     access_keyword(p.convention)
                 ),
-                "foreign functions take owned copies — `&` and `^` aren't allowed here",
+                "foreign functions take owned copies — the write-capability marker `&` and move-capability marker `^` aren't allowed here",
                 "remove the capability sigil and pass by value",
                 p.name_span,
             ));
@@ -322,7 +322,7 @@ pub(crate) fn check_c_module(
                         p.name,
                         access_keyword(p.convention)
                     ),
-                    "C functions take values by copy — `&` and `^` aren't allowed here",
+                    "C functions take values by copy — the write-capability marker `&` and move-capability marker `^` aren't allowed here",
                     "remove the capability sigil and pass by value",
                     p.name_span,
                 ));

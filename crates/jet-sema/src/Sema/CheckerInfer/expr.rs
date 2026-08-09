@@ -451,7 +451,7 @@ impl<'a> Checker<'a> {
                                 "E0120",
                                 format!("`{path}` is borrowed, so it cannot escape as an owned value"),
                                 format!("`{root}` is a parameter with read access; its fields are borrowed with it"),
-                                format!("copy it explicitly with `{}{path}`, or take `{root}` with `^`", Syntax::SIGIL_COPY),
+                                format!("copy it explicitly with `{}{path}`, or take `{root}` with the move-capability marker `^` (`^{root}`)", Syntax::SIGIL_COPY),
                                 Some(e.span()),
                             ));
                             return ty;
@@ -1261,8 +1261,8 @@ impl<'a> Checker<'a> {
                         .find(|(_, (convention, _))| *convention != AccessConvention::Read)
                     {
                         let capability = match convention {
-                            AccessConvention::Write => "write access (`&`)",
-                            AccessConvention::Move => "ownership (`^`)",
+                            AccessConvention::Write => "the write-capability marker `&`",
+                            AccessConvention::Move => "the move-capability marker `^`",
                             AccessConvention::Read => unreachable!(),
                         };
                         self.diags.push(Diagnostic::error(
@@ -1624,20 +1624,20 @@ impl<'a> Checker<'a> {
                         (
                             "a Cell guard owns one live dynamic loan; copying it would create two handles for the same loan".to_string(),
                             format!(
-                                "move it instead with `{}guard`, or create a new guard after this one is dropped",
+                                "move it instead with the move-capability marker `^` (`{}guard`), or create a new guard after this one is dropped",
                                 Syntax::SIGIL_MOVE
                             ),
                         )
                     } else if resource {
                         (
                             "a resource owns one cleanup duty; copying it would create two owners that could close the same handle".to_string(),
-                            format!("move it instead with `{}name`, or acquire a second resource", Syntax::SIGIL_MOVE),
+                            format!("move it instead with the move-capability marker `^` (`{}name`), or acquire a second resource", Syntax::SIGIL_MOVE),
                         )
                     } else {
                         (
                             "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet".to_string(),
                             format!(
-                                "move it instead (`{}name` if this is its last use), or change the type so every part can be copied",
+                                "move it instead with the move-capability marker `^` (`{}name` if this is its last use), or change the type so every part can be copied",
                                 Syntax::SIGIL_MOVE
                             ),
                         )

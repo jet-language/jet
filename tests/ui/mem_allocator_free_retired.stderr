@@ -3,8 +3,8 @@ Error [E0102]: `Arena` has no method `free`
     |
   5 |     arena.free()
     |           ^^^^
- Why: allocator terminal release uses the same nominal `Close` protocol as every resource
- Fix: write `close(^allocator)`; use `allocator.reset()` only when reusing its backing storage
+ Why: allocator terminal release uses the same nominal `Close` protocol as every resource; it consumes through the move-capability marker `^`
+ Fix: write `close(^allocator)` with the move-capability marker `^`; use `allocator.reset()` only when reusing its backing storage
 
 Error [E0102]: `Arena` has no method `free`
   --> tests/ui/mem_allocator_free_retired.jet:5:11

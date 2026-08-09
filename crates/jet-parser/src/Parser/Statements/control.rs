@@ -1690,8 +1690,8 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         "`defer` only schedules a consuming resource close".to_string(),
-                        "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked".to_string(),
-                        "write `defer close(^resource)`".to_string(),
+                        "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through the move-capability marker `^`".to_string(),
+                        "write `defer close(^resource)` with the move-capability marker `^`".to_string(),
                         Some(Span::new(defer_span.start, close.span().end)),
                     ));
                 }

@@ -12,4 +12,4 @@ Error [E0140]: `db` still owes `consume`
  15 |     db :: acquire("db")
     |     ^^
  Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: consume it exactly once: move it to a `^` parameter, or `return` it — or write `#Unsafe("reason") { consume(db) }` to discard it deliberately
+ Fix: consume it exactly once: move it to a parameter with the move-capability marker `^`, or `return` it — or write `#Unsafe("reason") { consume(db) }` to discard it deliberately

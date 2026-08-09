@@ -398,7 +398,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0214",
                     "`.view(a..b)` is now a bare range place".to_string(),
-                    "Jet uses one place-access rule: bare reads, `&` edits, and `~` copies"
+                    "place access follows the sigil reading rule"
                         .to_string(),
                     "replace `value.view(a..b)` with `value[a..b]`".to_string(),
                     Some(span),
@@ -3130,7 +3130,7 @@ impl<'a> Checker<'a> {
                             if method == "new" {
                                 "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
                             } else {
-                                "write `fixed :: mem.Fixed.over(&bytes)`".to_string()
+                                "write `fixed :: mem.Fixed.over(&bytes)` with the write-capability marker `&`".to_string()
                             },
                             Some(span),
                         ));
@@ -3198,7 +3198,7 @@ impl<'a> Checker<'a> {
                                 "E0103",
                                 "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
                                 "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
-                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)`".to_string(),
+                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-capability marker `&`".to_string(),
                                 Some(args[0].expr.span()),
                             ));
                         }
@@ -4351,12 +4351,12 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0120",
                                 format!(
-                                    "`{}` was not moved here, so `.{}()` cannot take it (`^`)",
+                                    "`{}` was not moved here, so `.{}()` cannot take it with the move-capability marker `^`",
                                     n, method
                                 ),
-                                "this function has read access only and does not own the value".to_string(),
+                                "this function has read access only and does not own the value; the move-capability marker `^` is required".to_string(),
                                 format!(
-                                    "call it on a copy: `({}{}).{}(...)` — or take ownership with `{}: {}{}`",
+                                    "call it on a copy: `({}{}).{}(...)` — or take ownership with the move-capability marker `^`: `{}: {}{}`",
                                     Syntax::SIGIL_COPY,
                                     n,
                                     method,
