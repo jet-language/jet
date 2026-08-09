@@ -39,9 +39,9 @@ impl Scratch {
 
     fn write_project(&self, edition: &str, body: &str) -> PathBuf {
         fs::write(
-            self.dir.join("pkg.jet"),
+            self.dir.join("package.jet"),
             format!(
-                "payload: {{ name: \"enc\", version: \"0.1.0\", edition: \"{edition}\" }}\n"
+                "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"
             ),
         )
         .unwrap();

@@ -574,8 +574,8 @@ pub fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
     fs::create_dir_all(&proj).unwrap();
     fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
     fs::write(
-        repo.join("pkg.jet"),
-        "payload: { name: \"fixture\", version: \"0.1.0\" }\npackages: { hello: executable }\n",
+        repo.join("package.jet"),
+        "name: \"fixture\"\nversion: \"0.1.0\"\npackages: { hello: executable }\n",
     )
     .unwrap();
     let greet = hello_bin.join("hello");

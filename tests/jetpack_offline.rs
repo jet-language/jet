@@ -153,8 +153,8 @@ fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
     )
     .unwrap();
     fs::write(
-        member.join("pkg.jet"),
-        "payload: { name: \"hello\", version: \"0.1.0\" }\n",
+        member.join("package.jet"),
+        "name: \"hello\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(

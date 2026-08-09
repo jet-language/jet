@@ -1263,7 +1263,7 @@ fn lsp_budget_reports_projects_canonical_report_without_measuring() {
     let root = std::env::temp_dir().join(format!("lsp_budget_projection_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    std::fs::write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     let source = r#"module perf.package {
     budgets: [Budget.{ name: "api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }]
 }

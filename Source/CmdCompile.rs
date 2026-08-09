@@ -219,7 +219,7 @@ pub(crate) fn run_compile_cmd(
 ) {
     // D-BUILDPROFILE1: profile selection. Precedence: --freestanding > --small >
     // --release/--profile=<name> > default. Named profiles are resolved against
-    // pkg.jet's `build {}` block; unknown names emit E1219 and exit.
+    // package.jet's `build {}` block; unknown names emit E1219 and exit.
     let profile = if freestanding {
         BuildProfile::Freestanding
     } else if small {
@@ -418,7 +418,7 @@ pub(crate) fn run_compile_cmd(
     // cache. A hit means this program was type-checked, codegen'd, compiled and
     // run once before under this toolchain + profile + manifest — replaying its
     // binary replays a validated result, it never bypasses a check (I2/I3). The
-    // toolchain-version + `pkg.jet` salts guarantee a compiler or policy change
+    // toolchain-version + `package.jet` salts guarantee a compiler or policy change
     // invalidates the entry, so effect-budget enforcement can't be masked.
     // `jet build` deliberately stays on the full path below so its effect +
     // capability summaries always print; it still skips rustc via `native_key`.
@@ -447,7 +447,7 @@ pub(crate) fn run_compile_cmd(
     // D-LINTPOLICY1=A (the override law): visible lints from this compile,
     // captured here (out of the `match` arm's scope) so the `policy.lints`
     // deny-path enforcement below can see them alongside the already-loaded
-    // `pkg.jet` manifest.
+    // `package.jet` manifest.
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
 
@@ -561,7 +561,7 @@ pub(crate) fn run_compile_cmd(
     }
 
     // D-EFFBUDGET1: zero-config, always-on effect summary on every build/run,
-    // plus opt-in whole-graph enforcement when `pkg.jet` declares `effects:`.
+    // plus opt-in whole-graph enforcement when `package.jet` declares `effects:`.
     // The front-end compile above already succeeded; this reruns the
     // check-only pass to pull the whole-program effect fixpoint
     // (`Sema::solve`) that ordinary compilation doesn't need to return.
@@ -1889,7 +1889,7 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS
-/// and the retired payload manifest. Canonical Package and Config files use
+/// and the canonical or retired package manifest. Canonical Package and Config files use
 /// the typed package formatter in the preflight path below.
 /// Entries are sorted deterministically.
 fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -1904,6 +1904,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 walk_jet_files(&path, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
+            && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PACKAGE_FILE)
             && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PAYLOAD_FILE)
         {
             out.push(path);
@@ -1911,7 +1912,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Discover the project/workspace root via `pkg.jet` and collect all `.jet`
+/// Discover the project/workspace root via `package.jet` and collect all `.jet`
 /// files under it. Falls back to cwd when no manifest is found above.
 fn discover_project_files() -> Vec<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -2581,7 +2582,7 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 ///
 /// `mode_tag` keeps binaries built from the same AST under different pipelines in
 /// separate key spaces (a `jet test` harness binary can never be served for a
-/// `jet run`). The toolchain version and `pkg.jet` fingerprint ride the salt.
+/// `jet run`). The toolchain version and `package.jet` fingerprint ride the salt.
 fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
     native_cache_key_with_toolchain(file, profile_tag, mode_tag, native_toolchain_identity())
 }
@@ -3642,10 +3643,10 @@ mod missing_c_lib_tests {
         let project = ScratchProject::new();
         let main = "use defs.box\nmodule defs\n\nmodule selected = box<Int, 3>\nfn run() { print(selected.value()) }\n";
         let dependency = "pub module box<T, n: Int> { pub fn value() => Int { return n } }\n";
-        let manifest_v1 = "payload: { name: \"cache-proof\", version: \"1.0.0\" }\n";
+        let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
         project.write("main.jet", main);
         project.write("defs.jet", dependency);
-        project.write("pkg.jet", manifest_v1);
+        project.write("package.jet", manifest_v1);
 
         let base = native_cache_key(&project.main(), "default", "run").expect("base cache key");
         let toolchain_a = native_cache_key_with_toolchain(&project.main(), "default", "run", "compiler-build-a/rustc-a/linker-a/backend-a").expect("toolchain A cache key");
@@ -3677,13 +3678,13 @@ mod missing_c_lib_tests {
 
         project.write("main.jet", main);
         project.write(
-            "pkg.jet",
-            "payload: { name: \"cache-proof\", version: \"2.0.0\" }\n",
+            "package.jet",
+            "name: \"cache-proof\"\nversion: \"2.0.0\"\n",
         );
         let package = native_cache_key(&project.main(), "default", "run").expect("package cache key");
         assert_ne!(base, package, "package manifest edit must invalidate native cache");
 
-        project.write("pkg.jet", manifest_v1);
+        project.write("package.jet", manifest_v1);
         let profile = native_cache_key(&project.main(), "small", "run").expect("profile cache key");
         assert_ne!(base, profile, "build-profile edit must invalidate native cache");
     }

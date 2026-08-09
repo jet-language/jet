@@ -1183,7 +1183,7 @@ fn manifest_parse_e1206_missing_required_field() {
 fn manifest_parse_e1206_unknown_field() {
     // The retired `payload:` wrapper is now a normal unknown-field error
     // (D-CONF-PLANE1/D-CONF-NAME1).
-    let raw = "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n}\n";
+    let raw = include_str!("ui/manifest_unknown_field/package.jet");
     let err = jet::Manifest::parse(&PathBuf::from("package.jet"), raw)
         .expect_err("payload: wrapper should fail");
     assert_eq!(err.code, "E1206");

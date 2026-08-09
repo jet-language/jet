@@ -2,7 +2,7 @@
 
 Canvas v1 proves source-backed graph editing for one `.jet` file. The next
 architecture makes Canvas a package/workspace manager without changing the
-source-of-truth rule: Jet source files, `pkg.jet`, `workspace.jet`, env source,
+source-of-truth rule: Jet source files, `package.jet`, `workspace.jet`, env source,
 and `.jet/lock` remain the only semantic state. Canvas projects them, edits
 them through checked source transactions, and reprojects after `jet fmt` plus
 front-end validation.
@@ -20,7 +20,7 @@ file belongs to a package/workspace, or selected explicitly from Canvas.
 - `docs/reference/canvas-protocol.md` names the right law: Canvas has no parser,
   checker, runtime, graph asset, or semantic sidecar.
 - Existing Jetpack substrate already owns package/workspace truth:
-  `pkg.jet`, `workspace.jet`, `.jet/lock`, strict package graph, env/dev,
+  `package.jet`, `workspace.jet`, `.jet/lock`, strict package graph, env/dev,
   services, trust grants, catalogs, overlays, provenance, and locks.
 
 ## Target Shape
@@ -110,7 +110,7 @@ lock reasons, and diff.
   targets, envs, services, lock/provenance, diagnostics, dirty state.
 - Package Pane: `payload`, package kind, version, edition, runtime, exports,
   targets, effects, grants, public API, package visibility.
-- Dependency Pane: add/remove/update deps through `pkg.jet` edits, with lock
+- Dependency Pane: add/remove/update deps through `package.jet` edits, with lock
   preview, strict-visibility errors, source channel, hash, and overlay facts.
 - Targets/Tasks Pane: build/test/run/dev/doc/package/publish actions from the
   package/build graph. Runs through existing CLI/driver surfaces.
@@ -167,7 +167,7 @@ lock reasons, and diff.
   manifest/workspace edit ops, cross-file source spans, and no sidecar state.
 - `tests/web_dev.rs` covers `/canvas/project`, `/canvas/graph?source_id=...`,
   project transactions, and source-control workspace payload.
-- Jetpack tests cover projection helpers for `pkg.jet`, `workspace.jet`,
+- Jetpack tests cover projection helpers for `package.jet`, `workspace.jet`,
   `.jet/lock`, env/services, and package graph diagnostics.
 - Any new diagnostic has a registry entry and UI snapshot.
 - No external compiler dependency, no graph asset store, no Canvas-only
@@ -178,7 +178,7 @@ lock reasons, and diff.
 Ratified 2026-07-08:
 
 - `D-CANVAS-WORKSPACE1=B`: package/workspace graph over source truth. Canvas
-  opens a project graph built from `workspace.jet`, `pkg.jet`, source files, env
+  opens a project graph built from `workspace.jet`, `package.jet`, source files, env
   source, and `.jet/lock`; file graphs remain child views.
 - `D-CANVAS-WORKSPACE-STATE1=A`: semantic facts persist in source; private
   viewport/tabs/selection/debug watches stay local; shared visual intent uses
@@ -196,14 +196,14 @@ Ratified 2026-07-08:
 - Added read-only `jet.canvas.project` projection and `/canvas/project`.
 - Project mode reports `single_file`, `package`, or `workspace`.
 - Workspace projection reads `workspace.jet` via Jetpack's evaluator and parses
-  member `pkg.jet` manifests through the existing manifest parser.
+  member `package.jet` manifests through the existing manifest parser.
 - Project documents include per-file revisions, package facts, dependency facts,
   target facts, lock facts, and the ratified state policy.
 - Tests cover single-file fallback, workspace member/package projection, protocol
   docs, and the web dev route.
 - Added `jet.canvas.project.edit` and `/canvas/project/transaction` for
   previewed project source transactions.
-- First project transaction op: `add_dependency`, editing `pkg.jet` through the
+- First project transaction op: `add_dependency`, editing `package.jet` through the
   existing manifest helper, validating the Jetpack manifest parser before write,
   checking `project_revision` plus touched-file revisions, and returning
   authority/audit/diff payloads. Preview mode writes nothing.
@@ -216,7 +216,7 @@ Ratified 2026-07-08:
 - `/canvas/source-control` now reports package/workspace Git text truth:
   `project_revision`, dirty file count, per-file status/diff, and entry history.
 - Project transactions now include `create_package`, which creates real
-  `pkg.jet` + entry `.jet` files from a touched-file envelope using `missing`
+  `package.jet` + entry `.jet` files from a touched-file envelope using `missing`
   revisions, validates manifest syntax, and reprojects from source after write.
 - Project transactions now include `add_workspace_member`, editing or creating
   `workspace.jet` through a touched-file envelope and validating Jetpack's

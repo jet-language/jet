@@ -28,8 +28,10 @@ use jet::Syntax::{law_violations, Retirement, RetirementKind, REF_PROVIDERS, RET
 /// number when a migration lands; never raise one.
 const CEILINGS: &[(&str, usize)] = &[
     ("entry-file", 94),
-    ("manifest-file", 45),
-    ("manifest-identity", 29),
+    // The two corelib archives and the seven out-of-scope engine fixtures
+    // remain until their owning migration slices land.
+    ("manifest-file", 2),
+    ("manifest-identity", 7),
     ("package-ref-order", 0),
 ];
 

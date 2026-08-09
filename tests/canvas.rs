@@ -600,7 +600,7 @@ fn canvas_rejects_ambiguous_package_facts_before_projection() {
     )
     .unwrap();
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join(jet::Syntax::PAYLOAD_FILE),
         "name: \"legacy\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -624,7 +624,7 @@ fn canvas_project_uses_shared_package_diagnostic() {
     )
     .unwrap();
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join(jet::Syntax::PAYLOAD_FILE),
         "name: \"legacy\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -1748,7 +1748,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
 
     let dir = temp_dir("actions_package");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"canvas_actions\"\nversion: \"0.7.0\"\n",
     )
     .unwrap();
@@ -2139,14 +2139,14 @@ fn canvas_source_control_reports_project_file_set() {
         .output()
         .expect("git config name");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"canvas_scm\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let entry = dir.join("main.jet");
     fs::write(&entry, "fn run() {\n    print(\"old\")\n}\n").unwrap();
     Command::new("git")
-        .args(["add", "pkg.jet", "main.jet"])
+        .args(["add", "package.jet", "main.jet"])
         .current_dir(&dir)
         .output()
         .expect("git add");
@@ -2248,7 +2248,7 @@ fn canvas_proof_lens_reports_revision_check_git_and_missing_receipts() {
 fn canvas_proof_projects_canonical_budget_report_read_only() {
     let dir = temp_dir("proof_budget_projection");
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("pkg.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     let entry = dir.join("src/main.jet");
     fs::write(&entry, r#"module perf.package {
     budgets: [Budget.{
@@ -2421,14 +2421,14 @@ fn canvas_project_discovery_requires_declared_workspace_membership() {
     .unwrap();
     fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
     fs::write(
-        member.join("pkg.jet"),
+        member.join("package.jet"),
         "name: \"member\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let member_entry = member.join("main.jet");
     fs::write(&member_entry, "fn run() {\n    print(\"member\")\n}\n").unwrap();
     fs::write(
-        unlisted.join("pkg.jet"),
+        unlisted.join("package.jet"),
         "name: \"scratch\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -2512,7 +2512,7 @@ fn canvas_project_discovery_keeps_malformed_root_workspace_visible() {
     )
     .unwrap();
     fs::write(
-        with_pkg.join("pkg.jet"),
+        with_pkg.join("package.jet"),
         "name: \"rootpkg\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -2528,7 +2528,7 @@ fn canvas_project_discovery_keeps_malformed_root_workspace_visible() {
     assert!(with_pkg_json.contains("\"code\":\"E0996\""), "{with_pkg_json}");
     assert!(with_pkg_json.contains("\"name\":\"rootpkg\""), "{with_pkg_json}");
     assert!(
-        with_pkg_json.contains("\"manifest\":\"pkg.jet\""),
+        with_pkg_json.contains("\"manifest\":\"package.jet\""),
         "{with_pkg_json}"
     );
 }
@@ -2549,7 +2549,7 @@ fn canvas_project_discovery_preserves_malformed_ancestor_workspace() {
     )
     .unwrap();
     fs::write(
-        nested.join("pkg.jet"),
+        nested.join("package.jet"),
         "name: \"scratch\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -2581,7 +2581,7 @@ fn canvas_project_discovery_does_not_promote_lock_only_roots() {
     )
     .unwrap();
     fs::write(
-        member.join("pkg.jet"),
+        member.join("package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -2597,7 +2597,7 @@ fn canvas_project_discovery_does_not_promote_lock_only_roots() {
     assert!(populated_json.contains("\"workspace\":null"), "{populated_json}");
     assert!(populated_json.contains("\"envs\":[]"), "{populated_json}");
     assert!(populated_json.contains("\"locks\":[]"), "{populated_json}");
-    assert!(populated_json.contains("\"manifest\":\"pkg.jet\""), "{populated_json}");
+    assert!(populated_json.contains("\"manifest\":\"package.jet\""), "{populated_json}");
     assert!(!populated_json.contains("workspace.jet"), "{populated_json}");
 
     let empty = temp_dir("project_lock_only_empty");
@@ -2621,7 +2621,7 @@ fn canvas_project_discovery_accepts_workspace_root_member() {
     )
     .unwrap();
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"rootpkg\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -2630,7 +2630,7 @@ fn canvas_project_discovery_accepts_workspace_root_member() {
     let json = jet::Canvas::project_json_for_entry(&entry);
     assert!(json.contains("\"mode\":\"workspace\""), "{json}");
     assert!(json.contains("\"path\":\".\""), "{json}");
-    assert!(json.contains("\"manifest\":\"pkg.jet\""), "{json}");
+    assert!(json.contains("\"manifest\":\"package.jet\""), "{json}");
 }
 
 #[test]
@@ -2646,12 +2646,12 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     )
     .unwrap();
     fs::write(
-        hello.join("pkg.jet"),
+        hello.join("package.jet"),
         "name: \"hello\",\nversion: \"0.1.0\",\ntarget: \"web\"\ndeps: {\n    ranker: ranker#0.1.0,\n}\npackages: {\n    hello: executable,\n}\n",
     )
     .unwrap();
     fs::write(
-        ranker.join("pkg.jet"),
+        ranker.join("package.jet"),
         "name: \"ranker\",\nversion: \"0.1.0\"\npackages: {\n    ranker: library,\n}\n",
     )
     .unwrap();
@@ -2665,12 +2665,12 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     assert!(json.contains("\"workspace\":{\"path\":\"workspace.jet\""), "{json}");
     assert!(json.contains("\"name\":\"hello\""), "{json}");
     assert!(json.contains("\"path\":\"packages/hello\""), "{json}");
-    assert!(json.contains("\"manifest\":\"packages/hello/pkg.jet\""), "{json}");
+    assert!(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}");
     assert!(json.contains("\"target\":\"web\""), "{json}");
     assert!(json.contains("\"name\":\"ranker\""), "{json}");
     assert!(json.contains("\"targets\":[{\"package\":\"hello\""), "{json}");
     assert!(json.contains("\"package_path\":\"packages/hello\""), "{json}");
-    assert!(json.contains("\"manifest\":\"packages/hello/pkg.jet\""), "{json}");
+    assert!(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}");
     assert!(json.contains("\"target\":\"executable\""), "{json}");
     assert!(json.contains("\"target\":\"library\""), "{json}");
     assert!(json.contains("\"source\":\"version:0.1.0\""), "{json}");
@@ -2723,7 +2723,7 @@ fn canvas_projects_typed_member_after_package_transition() {
 fn canvas_project_json_projects_env_services_and_diagnostics() {
     let dir = temp_dir("project_env_services");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"svcapp\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -2762,12 +2762,12 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     )
     .unwrap();
     fs::write(
-        app.join("pkg.jet"),
+        app.join("package.jet"),
         "name: \"app\",\nversion: \"0.1.0\"\npackages: {\n    app: executable,\n}\n",
     )
     .unwrap();
     fs::write(
-        logging.join("pkg.jet"),
+        logging.join("package.jet"),
         "name: \"logging\"\nversion: \"0.1.0\"\npackages: { logging: library }\n",
     )
     .unwrap();
@@ -2777,9 +2777,9 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
 
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
-    let manifest_revision = jet::Canvas::source_revision(&fs::read_to_string(app.join("pkg.jet")).unwrap());
+    let manifest_revision = jet::Canvas::source_revision(&fs::read_to_string(app.join("package.jet")).unwrap());
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/pkg.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}",
         project_revision, manifest_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
@@ -2789,7 +2789,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
     assert!(preview.contains("+deps: .{"), "{preview}");
     assert!(preview.contains("+    logging: ../logging,"), "{preview}");
-    let before_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
+    let before_apply = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(!before_apply.contains("logging"), "{before_apply}");
 
     fs::write(app.join("helper.jet"), "fn helper() => Int {\n    return 2\n}\n").unwrap();
@@ -2798,7 +2798,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
         .expect("unrelated project change should not block touched-file-safe apply");
     assert!(applied.contains("\"preview\":false"), "{applied}");
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
-    let after_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
+    let after_apply = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(after_apply.contains("logging: ../logging,"), "{after_apply}");
     assert!(
         jetpack::Package::PackageFacts::parse(&after_apply, "test").is_ok(),
@@ -2808,13 +2808,13 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let current_project = jet::Canvas::project_json_for_entry(&entry);
     let current_project_revision = json_field(&current_project, "project_revision");
     let stale_touched = format!(
-        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/pkg.jet\",\"name\":\"extra\",\"spec\":\"0.2.0\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"extra\",\"spec\":\"0.2.0\"}}",
         current_project_revision, manifest_revision
     );
     let err = jet::Canvas::apply_project_transaction_json(&entry, &stale_touched)
         .expect_err("stale touched file should conflict");
     assert!(err.contains("\"kind\":\"conflict\""), "{err}");
-    assert!(!fs::read_to_string(app.join("pkg.jet")).unwrap().contains("extra"));
+    assert!(!fs::read_to_string(app.join("package.jet")).unwrap().contains("extra"));
 }
 
 #[test]
@@ -2827,7 +2827,7 @@ fn canvas_project_transactions_reject_reserved_create_package_path() {
     )
     .unwrap();
     fs::write(
-        dir.join("packages/app/pkg.jet"),
+        dir.join("packages/app/package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
     )
     .unwrap();
@@ -2837,14 +2837,14 @@ fn canvas_project_transactions_reject_reserved_create_package_path() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{}\",\"package_path\":\".git/hooks\",\"files\":[{{\"path\":\".git/hooks/pkg.jet\",\"revision\":\"missing\"}},{{\"path\":\".git/hooks/main.jet\",\"revision\":\"missing\"}}],\"name\":\"hooks\",\"target\":\"executable\"}}",
+        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{}\",\"package_path\":\".git/hooks\",\"files\":[{{\"path\":\".git/hooks/package.jet\",\"revision\":\"missing\"}},{{\"path\":\".git/hooks/main.jet\",\"revision\":\"missing\"}}],\"name\":\"hooks\",\"target\":\"executable\"}}",
         project_revision
     );
     let err = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect_err("reserved path should be rejected");
     assert!(err.contains("\"kind\":\"bad_request\""), "{err}");
     assert!(
-        !dir.join(".git/hooks/pkg.jet").exists(),
+        !dir.join(".git/hooks/package.jet").exists(),
         "reserved path write escaped source truth"
     );
 }
@@ -2859,7 +2859,7 @@ fn canvas_project_transactions_roll_back_when_later_write_fails() {
     )
     .unwrap();
     fs::write(
-        dir.join("packages/app/pkg.jet"),
+        dir.join("packages/app/package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
     )
     .unwrap();
@@ -2891,7 +2891,7 @@ fn canvas_project_transactions_roll_back_when_later_write_fails() {
 fn canvas_project_transactions_remove_dependency() {
     let dir = temp_dir("project_remove_dep");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\ndeps: {\n    logging: logging#0.1.0,\n    tools: ../tools,\n}\n",
     )
     .unwrap();
@@ -2900,22 +2900,22 @@ fn canvas_project_transactions_remove_dependency() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let manifest_revision =
-        jet::Canvas::source_revision(&fs::read_to_string(dir.join("pkg.jet")).unwrap());
+        jet::Canvas::source_revision(&fs::read_to_string(dir.join("package.jet")).unwrap());
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"remove_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"pkg.jet\",\"name\":\"logging\"}}",
+        "{{\"schema_version\":1,\"op\":\"remove_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"package.jet\",\"name\":\"logging\"}}",
         project_revision, manifest_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("remove dependency preview");
     assert!(preview.contains("\"op\":\"remove_dependency\""), "{preview}");
     assert!(preview.contains("-    logging: logging#0.1.0,"), "{preview}");
-    assert!(fs::read_to_string(dir.join("pkg.jet")).unwrap().contains("logging"));
+    assert!(fs::read_to_string(dir.join("package.jet")).unwrap().contains("logging"));
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
     let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect("remove dependency apply");
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
-    let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
+    let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(!manifest.contains("logging"), "{manifest}");
     assert!(manifest.contains("tools: ../tools"), "{manifest}");
     assert!(
@@ -2928,7 +2928,7 @@ fn canvas_project_transactions_remove_dependency() {
 fn canvas_project_transactions_edit_pkg_field_and_add_target() {
     let dir = temp_dir("project_pkg_fields");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"app\",\nversion: \"0.1.0\"\npackages: {\n}\n",
     )
     .unwrap();
@@ -2938,28 +2938,28 @@ fn canvas_project_transactions_edit_pkg_field_and_add_target() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let manifest_revision =
-        jet::Canvas::source_revision(&fs::read_to_string(dir.join("pkg.jet")).unwrap());
+        jet::Canvas::source_revision(&fs::read_to_string(dir.join("package.jet")).unwrap());
     let edit_req = format!(
-        "{{\"schema_version\":1,\"op\":\"edit_pkg_field\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"pkg.jet\",\"field\":\"version\",\"value\":\"0.2.0\"}}",
+        "{{\"schema_version\":1,\"op\":\"edit_pkg_field\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"package.jet\",\"field\":\"version\",\"value\":\"0.2.0\"}}",
         project_revision, manifest_revision
     );
     let edited = jet::Canvas::apply_project_transaction_json(&entry, &edit_req)
         .expect("edit pkg field apply");
     assert!(edited.contains("\"op\":\"edit_pkg_field\""), "{edited}");
-    let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
+    let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(manifest.contains("version: \"0.2.0\""), "{manifest}");
 
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let manifest_revision = jet::Canvas::source_revision(&manifest);
     let target_req = format!(
-        "{{\"schema_version\":1,\"op\":\"add_target\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"pkg.jet\",\"name\":\"app\",\"target\":\"executable\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_target\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"package.jet\",\"name\":\"app\",\"target\":\"executable\"}}",
         project_revision, manifest_revision
     );
     let targeted = jet::Canvas::apply_project_transaction_json(&entry, &target_req)
         .expect("add target apply");
     assert!(targeted.contains("\"op\":\"add_target\""), "{targeted}");
-    let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
+    let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(
         manifest.contains("app: Output :: .Executable.{ name: \"app\", entry: run }"),
         "{manifest}"
@@ -2974,7 +2974,7 @@ fn canvas_project_transactions_edit_pkg_field_and_add_target() {
 fn canvas_project_transactions_add_env_service() {
     let dir = temp_dir("project_add_env_service");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"svcapp\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -3020,7 +3020,7 @@ fn canvas_project_transactions_create_package_from_workspace() {
     )
     .unwrap();
     fs::write(
-        dir.join("packages/app/pkg.jet"),
+        dir.join("packages/app/package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
     )
     .unwrap();
@@ -3073,12 +3073,12 @@ fn canvas_project_transactions_add_workspace_member() {
     )
     .unwrap();
     fs::write(
-        dir.join("packages/app/pkg.jet"),
+        dir.join("packages/app/package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
     )
     .unwrap();
     fs::write(
-        dir.join("packages/tools/pkg.jet"),
+        dir.join("packages/tools/package.jet"),
         "name: \"tools\"\nversion: \"0.1.0\"\npackages: { tools: library }\n",
     )
     .unwrap();
@@ -3121,7 +3121,7 @@ fn canvas_project_transactions_add_workspace_member() {
 fn canvas_project_source_id_selects_file_graph_and_query() {
     let dir = temp_dir("project_source_id");
     fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         "name: \"source_id\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -3169,7 +3169,7 @@ fn canvas_project_source_id_rejects_existing_unprojected_file() {
     )
     .unwrap();
     fs::write(
-        dir.join("packages/app/pkg.jet"),
+        dir.join("packages/app/package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
     )
     .unwrap();

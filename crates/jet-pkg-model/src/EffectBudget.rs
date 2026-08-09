@@ -2,7 +2,7 @@
 //!
 //! Zero-config: every `jet build` prints a one-line summary of the effects the
 //! dependency graph uses, and per-dependency effect provenance is recorded in
-//! the lockfile. An `effects: { allow: […], deny: […] }` block in `pkg.jet`
+//! the lockfile. An `effects: { allow: […], deny: […] }` block in `package.jet`
 //! turns on whole-graph enforcement — the build fails naming the exact
 //! dependency and offending function when a transitive dependency needs an
 //! effect outside the budget. `grants: { "dep": [Effect] }` is the audited
@@ -137,7 +137,7 @@ pub fn provenance_for(entries: &[PackageEffects], name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// D-EFFBUDGET1 whole-graph enforcement: when `pkg.jet` declares an `effects:`
+/// D-EFFBUDGET1 whole-graph enforcement: when `package.jet` declares an `effects:`
 /// block, fail the build for any *dependency* (not root — the budget names the
 /// supply chain) whose effect set has something outside `allow` or inside
 /// `deny`, unless `grants:` covers it for that dependency. Returns E1220 per

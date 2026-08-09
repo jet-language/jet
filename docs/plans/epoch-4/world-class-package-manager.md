@@ -29,7 +29,7 @@ Current Jetpack grade against the Nix package-manager bar: **C-**.
 
 Strong foundations already exist:
 
-- typed `pkg.jet`, `env.jet`, and `workspace.jet` surfaces;
+- typed `package.jet` plus declaration-discovered Config surfaces;
 - strict direct-dependency visibility and workspace catalogs;
 - provider refs, channel intent, overlays, patches, semantic lock rationale;
 - source-build recipes, toolchain records, offline mode, vendoring;

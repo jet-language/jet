@@ -1981,9 +1981,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         if !metadata.is_dir() {
             return Err(format!("proof target `{raw}` is not a file or directory"));
         }
-        let kind = if has_proof_manifest(path, jet::Syntax::PACKAGE_FILE)?
-            || has_proof_manifest(path, jet::Syntax::PAYLOAD_FILE)?
-        {
+        let kind = if has_proof_manifest(path, jet::Syntax::PACKAGE_FILE)? {
             "package"
         } else {
             "workspace"
@@ -2202,7 +2200,7 @@ fn is_lock_identity_path(path: &str) -> bool {
 fn is_build_identity_path(path: &str) -> bool {
     matches!(
         path.rsplit('/').next(),
-        Some("package.jet" | "pkg.jet" | "build.jet")
+        Some("package.jet" | "build.jet")
     )
 }
 
@@ -2377,7 +2375,10 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
             && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
         {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            if !matches!(name, "package.jet" | "pkg.jet" | "build.jet") {
+            if name != jet::Syntax::PACKAGE_FILE
+                && name != jet::Syntax::PAYLOAD_FILE
+                && name != "build.jet"
+            {
                 out.push(path);
             }
         }
@@ -2421,7 +2422,7 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
             .and_then(|parent| parent.file_name())
             .and_then(|name| name.to_str())
             == Some(".jet");
-        if matches!(name, "package.jet" | "pkg.jet" | "jet.lock" | "jet.lock.json" | "build.jet")
+        if matches!(name, "package.jet" | "jet.lock" | "jet.lock.json" | "build.jet")
             || (parent_is_jet && name == "lock")
         {
             out.push(path);

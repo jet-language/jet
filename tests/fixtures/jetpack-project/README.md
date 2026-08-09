@@ -10,7 +10,7 @@ fixtures so the commands run without Nix or a network.
   sources `stable`, `unstable`, and a first-party `core` repo `mine`.
 - `jetpack.toml` — repo metadata and source defaults. Package member indexes
   live in `workspace.jet` in monorepos, not here.
-- `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `pkg.jet`
+- `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `package.jet`
   `packages:` block declares the `hello` package (an `executable`) that
   `hello@mine` resolves to; the package is the `module hello` discovered by name
   in its source tree (U10).

@@ -523,7 +523,7 @@ const char *jetc_greeting(void) { return "hi from C"; }
 
 fn declare_local_c_dep(root: &Path, lib: &str) {
     fs::write(
-        root.join("pkg.jet"),
+        root.join("package.jet"),
         format!(
             "name: \"cffi_{lib}\"\nversion: \"0.1.0\"\ndeps: .{{ {lib}: c@\"{}\" }}\n",
             root.display()
@@ -1035,7 +1035,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     assert!(Command::new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success());
     assert!(Command::new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success());
     fs::write(
-        root.join("pkg.jet"),
+        root.join("package.jet"),
         format!(
             "name: \"cffi_cb\"\nversion: \"0.1.0\"\ndeps: .{{ cb: c@\"{}\" }}\n",
             root.display()
@@ -1744,7 +1744,7 @@ deps: .{
 
 #[test]
 fn resolve_link_unknown_lib_is_e3201() {
-    // No pkg.jet dep and (in CI) no pkg-config → E3201.
+    // No package.jet dep and (in CI) no pkg-config → E3201.
     let root = std::env::temp_dir().join(format!("jet_cffi_e3201_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
@@ -1757,7 +1757,7 @@ fn resolve_link_unknown_lib_is_e3201() {
     let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
     let expected = "\
 Error [E3201]: C library `nolib` was not found.
- Why: Jet looked for a `nolib: c@…` dep in `pkg.jet`, then tried `pkg-config nolib` on the system; neither provided include/link paths.
+ Why: Jet looked for a `nolib: c@…` dep in `package.jet`, then tried `pkg-config nolib` on the system; neither provided include/link paths.
  Fix: Install the system package (e.g. `pacman -S nolib`), or declare it as `nolib: c@system` in `deps:`.
 ";
     assert_eq!(rendered, expected);
@@ -1921,7 +1921,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     ));
     fs::create_dir_all(&root).unwrap();
     fs::write(
-        root.join("pkg.jet"),
+        root.join("package.jet"),
         "name: \"ffi_app\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
@@ -1935,7 +1935,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     let _ffi_lock = FfiBridgeLock::acquire();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
         panic!(
-            "inline FFI pin should work even when pkg.jet exists:\n{}",
+            "inline FFI pin should work even when package.jet exists:\n{}",
             jet::render_diagnostics(&shown, src, &diags)
         );
     });

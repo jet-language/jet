@@ -47,7 +47,8 @@ pub(crate) fn run_schema(args: &[String]) {
     }
 }
 
-/// Locate the project root (dir containing package.jet or migration-era pkg.jet)
+/// Locate the project root (dir containing the canonical `package.jet`; a
+/// retired `pkg.jet` is handled only by the explicit migration path)
 /// or exit with a clear error.
 fn project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

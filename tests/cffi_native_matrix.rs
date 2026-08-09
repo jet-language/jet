@@ -106,9 +106,9 @@ int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
     archive.arg("rcs").arg(&library).arg(&object);
     run_ok(&mut archive, "C archiver");
     fs::write(
-        root.join("pkg.jet"),
+        root.join("package.jet"),
         format!(
-            "payload: {{ name: \"jet-cffi-matrix\", version: \"0.1.0\" }}\ndeps: {{ jetmatrix: c@\"{}\" }}\n",
+            "name: \"jet-cffi-matrix\"\nversion: \"0.1.0\"\ndeps: {{ jetmatrix: c@\"{}\" }}\n",
             root.display()
         ),
     )

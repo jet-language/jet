@@ -494,7 +494,7 @@ fn unix_ms() -> u64 {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[{\"source\":\"src/main.jet\",\"span_start\":4,\"span_end\":8,\"scope\":\"fn run\",\"policy_provenance\":\"pkg.jet:4\",\"reason\":\"cycle\",\"type_name\":\"Node\",\"allocations\":2,\"retained\":1,\"identities\":[{\"identity\":1,\"retained\":true},{\"identity\":2,\"retained\":false}]}]}";
+    const SAMPLE: &str = "{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[{\"source\":\"src/main.jet\",\"span_start\":4,\"span_end\":8,\"scope\":\"fn run\",\"policy_provenance\":\"package.jet:4\",\"reason\":\"cycle\",\"type_name\":\"Node\",\"allocations\":2,\"retained\":1,\"identities\":[{\"identity\":1,\"retained\":true},{\"identity\":2,\"retained\":false}]}]}";
 
     #[test]
     fn projections_derive_counts_from_identity_evidence() {

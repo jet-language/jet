@@ -4,7 +4,7 @@
 //! for programs Jet cannot compile safely or unambiguously (I1 memory/type
 //! safety is never in scope here; it has no override). A team opts into a
 //! wall through the one policy surface: `policy: { lints: { deny: […] } }`
-//! in `pkg.jet` (joining `policy.trust` under D-JPK-POLICYSURFACE1). When a
+//! in `package.jet` (joining `policy.trust` under D-JPK-POLICYSURFACE1). When a
 //! denied lint fires, the build fails naming the exact lint and site instead
 //! of only printing a warning — the bypass a solo run would have taken is
 //! recorded as a build failure instead, never a silent downgrade.
@@ -13,7 +13,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::Package::PackageFacts;
 
 /// Whole-program enforcement: for every emitted lint whose code is listed in
-/// `pkg.jet`'s `policy.lints.deny`, fail the build with E1293 instead of only
+/// `package.jet`'s `policy.lints.deny`, fail the build with E1293 instead of only
 /// warning. `manifest.lints_deny` being `None` (no `policy.lints` block at
 /// all) is the default — the returned list is always empty and every lint
 /// stays a warning (I1/D-LINTPOLICY1: warn-never-block by default).
@@ -56,7 +56,7 @@ fn e1293(original: &Diagnostic) -> Diagnostic {
             original.code, original.what
         ),
         format!(
-            "{} This team's `policy.lints.deny` in `pkg.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `pkg.jet` doesn't opt in.",
+            "{} This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in.",
             original.why.trim_end_matches('.').to_string() + "."
         ),
         original.fix.clone(),

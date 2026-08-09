@@ -1558,8 +1558,8 @@ The concrete terminal view uses the ratified existing route:
 **D-PACKAGE-POLICY-SCOPE1=A — package `policy:` holds a typed field value**
 *(ratified 2026-07-16, card #657)*: the package-echelon `policy:` field
 settled by D-POLICY-WORD1 holds a typed `.{ ... }` value whose governance
-keys are ordinary fields, written like every other Package role field
-(`identity:`, `sources:`, D-SHAPE5a) — not the `#Policy(...)` marker
+keys are ordinary fields, written like every other Package role field, with
+bare top-level `name:`/`version:` identity — not the `#Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
 `#Policy(...)` marker uses, so `no_alloc: true` in `policy:` and
 `#Policy(no_alloc)` on a block/function/module are the same key in two
@@ -1572,9 +1572,9 @@ which extracts a shared `policy:` value into a named `Config` when needed;
 `policy:` itself does not compose a `use:` list of named profiles.
 
 ```jet
-# package.jet — policy: reads like every other typed Package field
-identity: .{ name: "meter", version: "1.0.0" }
-sources:  .{ roots: ["Source"] }
+# package.jet — policy: reads beside bare Package identity
+name:     "meter"
+version:  "1.0.0"
 policy:   .{
     no_alloc: true
     zero_rc: true
@@ -2026,7 +2026,7 @@ tier-1); not inside one JIT module. *(rides JIT hot-reload runtime)*
 
 **D-EFFBUDGET1 — Package effect budget**: every build prints a one-line
 effect summary and records per-dependency provenance in the lock.
-`effects: { allow: […], deny: […] }` in `pkg.jet` enforces the whole graph
+`effects: { allow: […], deny: […] }` in `package.jet` enforces the whole graph
 (E1220 names the dependency); `grants: { "dep": [Effect] }` per-dep escape;
 malformed block E1221.
 
@@ -2389,7 +2389,7 @@ in Jet code matches the C header and the library's documentation. Ordinary
 Jet modules stay fully enforced; the exemption boundary is a module kind sema
 already tracks, so no new syntax exists.
 
-Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
+Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `package.jet`
 `deps:` → pkg-config fallback → E3201. C deps are link deps, never packages.
 `jet inspect bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
 binds scalars and `char*`↔String; `#define` constants only. Old
@@ -2528,7 +2528,7 @@ the D-FFI-PY1 precedent):**
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
 tier (`use "xxhash.h" as xx` — bind on first compile), project tier
-(`use py.h5instrument as h5`, dep pinned in `pkg.jet` as
+(`use py.h5instrument as h5`, dep pinned in `package.jet` as
 `<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
 overlay wins). `jet inspect bind <lang>` is a per-language binder emitting
 inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
@@ -3464,7 +3464,7 @@ generated JS loader; DOM work goes through a tiny first-party `JetDom` shim
 (no vdom); hybrid: view emits JS, compute may compile to WASM. `#Target(…)`
 takes `Web`/`Browser`/`Wasm`/`JS` and `OS.Linux`/`OS.MacOS`/`OS.Windows`
 (mixing web+OS on one item rejected). Default target: CLI `--target` >
-`pkg.jet` `target:` > file marker. `#HTML("path.html")` names a companion
+`package.jet` `target:` > file marker. `#HTML("path.html")` names a companion
 page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `OS.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
@@ -3553,7 +3553,8 @@ the same typed value:
 
 ```jet
 greeter: Package :: .{
-    identity: .{ name: "greeter", version: "1.0.0" }
+    name: "greeter"
+    version: "1.0.0"
     sources: .{ roots: ["Source"] }
 }
 ```
@@ -3562,13 +3563,14 @@ The exact view may pin those same role types without changing meaning:
 
 ```jet
 greeter: Package :: .{
-    identity: Package.Identity.{ name: "greeter", version: "1.0.0" }
+    name: "greeter"
+    version: "1.0.0"
     sources: Package.Sources.{ roots: ["Source"] }
 }
 ```
 
-There is no package-only `identity { ... }` block and no untyped, dotless
-`identity: { ... }` record. This decision reuses ordinary `.{ ... }` and
+There is no package-only identity wrapper and no untyped, dotless identity
+record. This decision reuses ordinary `.{ ... }` and
 `Type.{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
 production, formatter form, editor grammar, snapshot, or executable example.
 
@@ -3734,9 +3736,9 @@ parser or runtime behavior, diagnostic, grammar, snapshot, or executable
 example.
 
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
-is **`pkg.jet`** (`payload: { name, version }` identity + `packages:` +
-`deps:` + `targets:` + `effects:`); dev shell is **`env.jet`**; monorepo
-index is **`module workspace` in `workspace.jet`** (`members:` may run
+is **`package.jet`** (bare `name:`/`version:` identity + `packages:` +
+`deps:` + `targets:` + `effects:`); other `.jet` files contribute Configs;
+`module workspace` is discovered by declaration (`members:` may run
 comptime — inline lists, `find("./dir")`, or an expression referencing a
 sibling `comptime`/`fn`; D-WORKSPACE1/2 — the root `jetpack.toml` index is
 retired). A member is addressed three ways (D-MONOREF1=A, implemented):
@@ -3766,10 +3768,10 @@ composition, receipts, or lifecycle behavior. It adds no token, `Syntax.rs`
 entry, parser or runtime behavior, grammar rule, diagnostic, snapshot, or
 executable example by itself.
 
-**U10 — payload → packages → modules**: a payload (one `pkg.jet`) lists its
+**U10 — Package → packages → modules**: a Package (one `package.jet`) lists its
 packages in `packages: { name: … }`; a package **is** a top-level `module` —
 its module name is its identity, its file is discovered by walking the tree
-(exactly-one-match required). `env.jet` is never a package index.
+(exactly-one-match required). No other filename is a Package root.
 
 **U7 — Zero-ceremony single files**: `jet run file.jet` never needs a
 manifest, `.jet/`, or any ecosystem file — forever.
@@ -3802,13 +3804,14 @@ deps: {
 the pinned toolchain into the hangar (prebuilt objects via D-JPK-CACHE1,
 offline thereafter per D-JPK-OFFLINE1, GC per D-JPK-GC1, no Nix required per
 D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
-(D-JPK-DISPATCH1). Frozen-forward identity block: the top-level identity fields
-and migration-era `payload:` wrapper stay parseable by every future jet, so an
-old jet can always read enough of any manifest to fetch the right toolchain. `jet self toolchain`
+(D-JPK-DISPATCH1). Frozen-forward identity block: the bare top-level identity
+fields stay parseable by every future jet, so an old jet can always read enough
+of any manifest to fetch the right toolchain. The retired `payload:` wrapper is
+an ordinary E1206 unknown-field error. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is `name: target@provider`, or a bare
-local path. Core vs nix is inferred by probing the target for `pkg.jet`
+local path. Core vs nix is inferred by probing the target for `package.jet`
 (cheap manifest-only probe; `…@nixpkgs` is never probed). No `via:` marker.
 
 **D-TGT1–4 — Targets**: packages declare `targets:` (no `kind:`); shipped:
@@ -3829,7 +3832,7 @@ machinery survives, re-grounded as unconditional pub-fn semver diffing
 (E1218/E2601) — same intent (breaking-change detection at publish), no
 capability-tier freeze.
 
-**Publishing & supply chain**: `jet registry publish` (version from `pkg.jet`;
+**Publishing & supply chain**: `jet registry publish` (version from `package.jet`;
 refuses dirty tree/failing tests, `--allow-dirty`; errors E1219+)
 (D-PUBLISH1A). Published versions permanent; `jet registry yank --undo` hides from new
 resolution only (D-VERSION1). Ranges `textkit#^1.2` freeze in `.jet/lock`
@@ -3865,7 +3868,7 @@ D-BUILDTOOLCHAIN1, D-BUILDPROBE1, D-BUILDCACHE1, D-BUILDREMOTE1,
 D-BUILDSCHED1, D-BUILDQUERY1, D-BUILDLEGACY1, D-BUILDPLUGIN1,
 D-FRONTENDAPI1, D-DSLBLOCK1, D-METAMUTATE1)*: compile-time build entry is
 `fn build(b: BuildContext)`, living in the unit's own definition file (beside
-`fn run` / in `pkg.jet` / in `workspace.jet`); `jet build` runs it when
+`fn run` / in `package.jet` / in a discovered Config); `jet build` runs it when
 defined, else the batteries pipeline. Build code is tiered: Tier 1
 pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
 permission + provenance; deps never get Tier 2 implicitly. Generated source
@@ -4085,7 +4088,7 @@ implementation.
   Older `jetpack config trust` remains a storage-management compatibility path;
   the product concept is `jet trust`.
 - **D-JPK-GRANTSCHEMA1 (=A, ratified 2026-07-06, #229)**: reviewed source
-  policy lives under `policy.trust` in `pkg.jet`, e.g.
+  policy lives under `policy.trust` in `package.jet`, e.g.
   `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
   Trust policy feeds the same grant graph used by prompts, CLI, locks, and
   audit.
@@ -4196,12 +4199,12 @@ sha256:)`, `.exec(tool:, args:)`, `.install(src:, dest:)`, and
 invalid paths, cycles, and partial outputs remain errors; the recipe does not
 add ambient authority or a second build mechanism.
 
-**U1 — manifest history**: superseded — see D-JPK-FILES above (`pkg.jet`).
+**U1 — manifest history**: superseded — see D-ECO-FILEROOT1 above (`package.jet`).
 
 ### Jetpack Images
 
 **D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates)**: active `image.*`
-syntax is OCI-only: `from: packages.<name>` (a package this project's `pkg.jet`
+syntax is OCI-only: `from: packages.<name>` (a package this project's `package.jet`
 declares `executable`) + optional `kind: .Oci`, `expose: [Int]`, `env_vars:
 [KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar),
 `files: [String]`, and `base: oci("<ref>")`. A local `file://` OCI layout is
