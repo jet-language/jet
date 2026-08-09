@@ -5732,6 +5732,186 @@ because the comptime evaluator folds a divisor it can see and stops the build.
 The example is about sibling cancellation, so it says so directly. Spelling is unchanged
 (`OP_SLASH`). Flagship: `examples/features/math/int_div.jet`. Card #1433.
 
+**2026-08-06 — D-TYPE2-FOUND1 = A — Adopt the carrier plus knowledge foundation**
+*(card #1497, implementation card #1546)*. Every compile-time fact joins one
+substrate with one registry. Ranges, units, lengths, states, and obligations
+share registration, checking, and reflection. Type equality becomes transitive
+again. Shipped programs keep their exact behavior; this changes how the
+compiler holds what it already knows.
+
+Type carries a knowledge vector. Identity is carrier plus identity-bearing facts,
+declared per plane. Obligations compare by subsumption, which restores transitive
+equality. All knowledge erases before the typed IR, so codegen and every
+execution tier are untouched.
+
+Amends: none.
+
+**2026-08-06 — D-TYPE2-NUM1 = A — The number tower: one grid, and BigInt folds into Int**
+*(card #1497, implementation card #1550)*. Every number type becomes one cell
+of the grid. A sized width like U8 becomes Int plus a proven range and a one-byte
+layout; its spelling and behavior do not change. BigInt retires, because the
+arbitrary-precision Int already holds every value it held. The four errors that
+police mixing Int with BigInt retire with it.
+
+Axis one is the value world: whole, ratio, real, complex. Axis two is the
+knowledge grade: exact unbounded, exact bounded, approximate, measured. The
+ratified widening law, value-set containment, becomes the theorem that a subset
+needs no conversion. One interval prover replaces the width table, the range-type
+checks, and the fixed-list index proof.
+
+Amends: D-INTBIG1. E0130–E0133 retire with BigInt.
+
+The existing `BigInt` Syntax and editor-highlight rows remain as migration
+anchors until #1550 removes the implementation; retirement snapshots are owed
+to #1550.
+
+**2026-08-06 — D-TYPE2-REFINE1 = A — One spelling for value-range rules**
+*(card #1497, implementation card #1548)*. `distinct Int(1..6)` becomes the
+one spelling. The `#Invariant` marker retires, and the index prover reads range
+facts directly. The same range facts describe the sized widths, so U8 and Die
+fail with the same error shape.
+
+The range becomes an interval fact on the plane registry. The prover for
+fixed-list indexing consumes interval facts instead of parsed strings. The marker
+row retires under law zero with a replacement note.
+
+The `#Invariant` row remains only as a migration anchor until implementation
+card #1548 removes its parser and sema references. Its removal and any UI or
+formatter snapshot updates are owed to #1548.
+
+Amends: D-RANGETYPE1, D-REFINE1, and D-VERDICT-1455-1. Replacement: use
+`distinct Int(lo..hi)` for a named range and `Int(lo..hi)` inline.
+
+**2026-08-06 — D-TYPE2-TIME1 = A — Time joins the unit plane**
+*(card #1497, implementation card #1552)*. Duration becomes the delta quantity
+of a canonical Time unit family, stored as a 64-bit nanosecond count per the
+ratified resolution decision. Instant becomes the matching point quantity.
+Every 500ms resolves through the one unit plane, in user code, timeouts, and
+schedules alike. Both hidden suffix tables are deleted.
+
+The Time family is the one unit family with a fixed integer carrier, per the
+ratified nanosecond decision. Point and delta reuse the affine machinery
+temperatures already use. Timeout and schedule sites accept the Time delta type
+instead of reading raw suffix tables.
+
+The `Instant` Syntax row is registered now for I7 and editor-grammar coverage;
+its parser/sema behavior and UI or formatter snapshots are owed to #1552.
+
+Amends: D-TIMERES1 and D-QUANTITY-POINT1. Replacement: resolve Duration and
+Instant through the canonical Time quantity family.
+
+**2026-08-06 — D-TYPE2-MEASURE1 = A — One home for compile-time numbers in types**
+*(card #1497, implementation card #1553)*. Lengths, shapes, lanes, and exponents
+become measures: compile-time numbers attached to types through the plane
+registry. Each use declares its combination rules. Joining two lists adds
+lengths. Matrix multiply matches inner sides and composes outer sides.
+Multiplying quantities adds exponents. Surfaces do not change; the encodings
+underneath become one.
+
+Measures are declared literals or module value parameters, never computed by user
+code, so the ratified wall that compile-time evaluation cannot create types
+stands. Symbolic lengths from generic modules resolve at specialization exactly
+as today, without the placeholder-zero sentinel.
+
+Amends: D-COMPUTE-TYPE1's stored encoding; its semantics stay unchanged.
+
+**2026-08-06 — D-TYPE2-EXACT1 = A — The conservation law for precision**
+*(card #1497, implementation card #1554)*. The law enters the spec: knowledge
+grows silently, is lost only at a spelled step, and erases at runtime. The two
+existing spellings stay, because each names its own operation well. Approx marks
+accepting a representation's precision; rounded conversions name a mode because
+rounding direction matters there.
+
+The law binds every future surface: any operation that discards range, exactness,
+unit, state, or classification must require a spelled step, checked in sema.
+Existing spellings are grandfathered as the law's two instances.
+
+Amends: none.
+
+**2026-08-06 — D-TYPE2-UNCERT1 = A — Uncertainty as a knowledge grade**
+*(card #1497, implementation card #1555)*. Measurement becomes the measured
+grade of numeric knowledge. Arithmetic and the math functions propagate
+uncertainty by the standard first-order rules. Exact values are
+zero-uncertainty, so mixing works without ceremony. Nothing changes for any
+program until a measurement enters it, and printing shows the value with its
+uncertainty.
+
+Propagation uses first-order linear approximation with uncorrelated inputs,
+stated plainly in the docs. Correlated errors are out of scope and documented as
+such. Measured unit scales produce measured conversion results, connecting the
+two existing homes of uncertainty. A companion literal spelling, value ±
+uncertainty, is proposed in the surface section of the proposal; the plain
+measurement call is the canonical form either way. The spelling is not ratified.
+
+Amends: D-UNCERTAIN1.
+
+**2026-08-06 — D-TYPE2-PLANE1 = A — The plane law: registered, nameable, reflectable, readable**
+*(card #1497, implementation card #1547)*. Every fact plane lives in one
+registry. A plane exists exactly when registered, its facts are nameable,
+reflection reports them as typed values, and the compiler's planes ship as
+readable prelude source. Reflection gains dimensions, and marker arguments
+become typed records on fields, methods, and variants, matching the type level.
+
+This extends the marker registration law to dimensions, measures, exactness, and
+classifications. Reflection's remaining string fallbacks are removed. Drift
+guards walk every registered plane end to end, the same pattern the marker
+rebuild uses.
+
+Amends: D-VERDICT-1455-1.
+
+**2026-08-06 — D-TYPE2-DEFAULT1 = A — Precise by default: the exact numeric world**
+*(card #1497, implementation card #1551)*. Decimal literals are exact Decimal
+values. Division of exact values lands in exact rational territory: a result with
+a finite decimal prints as a decimal, otherwise it prints as a fraction and
+stays exact. Functions that truly leave the rationals, like square root and sine,
+answer approximate and say so. Experts opt into Float or F32 at the declaration,
+and hot code gets today's machine arithmetic unchanged.
+
+This amends three ratified rules by name. D-INTDIV1: division still maps whole to
+rational, but the landing default is exact instead of Float. D-EXPSEM1 and
+D-EXPNEG1: a written negative exponent gets the same exact landing. D-NUMTYPE1:
+its Fraction-is-opt-in-by-name clause relaxes, because plain division can now
+answer an exact ratio. Exact values use machine-word fast paths with spill, the
+bigint Int playbook. Sized widths and Float keep every ratified behavior once
+named, mixing with an approximate operand answers approximate under the one
+widening law, and narrowing still requires approx.
+
+Amends: D-INTDIV1, D-EXPSEM1, D-EXPNEG1, and D-NUMTYPE1.
+
+**2026-08-06 — D-TYPE2-SPELL1 = A — Inline refinements in type position**
+*(card #1497, implementation card #1549)*. `Int(0..100)` is legal in any type
+position: parameters, returns, fields, bindings. Literals check at compile time;
+unproven values convert fallibly, exactly as U8 works today. Naming stays
+available through distinct when identity matters. Two inline types with the same
+base and range are the same type.
+
+The inline form is structural: identity is carrier plus interval fact. distinct
+stays the nominal wrapper. The same checking already ratified for range types
+applies unchanged, including the literal-only bounds rule from D-RANGE-VALUE1;
+only the requirement to pre-declare a name is removed.
+
+`Int(0..100)` is registered now, but is not parseable in every type position
+until #1549. Its UI and formatter snapshots are owed to #1549.
+
+Amends: D-RANGE-VALUE1.
+
+**2026-08-06 — D-TYPE2-IMAG1 = A — Imaginary literals ride the unit-literal path**
+*(card #1497, implementation card #1556)*. A numeric literal with the suffix i
+is an imaginary number. Real plus imaginary reads exactly like the textbook:
+0.5 + 0.8i. The lexer path is the shipped unit-literal path, so no new grammar
+exists, and the identifier i alone remains an ordinary variable name.
+
+The suffix resolves through the same table-free literal machinery as unit suffixes,
+minting the imaginary component of the ratified Complex type. Only the suffix form
+is special: bare i is untouched, and shadowing risks are the same as any unit
+suffix in scope.
+
+The `Complex` and `i` Syntax rows are registered now; imaginary semantics and
+their UI or formatter snapshots are owed to #1556. No standalone `i` keyword row
+is added because it remains an ordinary identifier.
+
+Amends: none.
+
 **D-VERDICT-1455-1 — Mandatory registration (law zero)** *(ratified
 2026-08-05, card #1455)*: a marker exists if and only if it is a row in
 `Policy::APPLIED_RULES`. No marker may be parsed, checked, formatted,
