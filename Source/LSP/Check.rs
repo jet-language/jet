@@ -60,7 +60,17 @@ pub struct Fix {
 /// Collect every machine-applicable fix for a document, in diagnostic order.
 /// Both the CLI and the LSP go through here.
 pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
-    fixes_from_diagnostics(check_document(path, text))
+    let mut fixes = fixes_from_diagnostics(check_document(path, text));
+    fixes.extend(
+        crate::Formatter::retired_interpolation_selector_edits(text)
+            .into_iter()
+            .map(|edit| Fix {
+                title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)"
+                    .to_string(),
+                edit,
+            }),
+    );
+    fixes
 }
 
 pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {

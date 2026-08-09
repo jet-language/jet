@@ -109,6 +109,30 @@ mod tests {
     }
 
     #[test]
+    fn retired_interpolation_selector_has_one_shared_quick_fix() {
+        let project = TestProject::new();
+        let source = format!(
+            "fn run() {{\n    value :: 1\n    print(\"{{value{}Debug}}\")\n}}\n",
+            crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL
+        );
+        let fixes = collect_fixes(project.entry(), &source);
+        assert_eq!(
+            fixes
+                .iter()
+                .filter(|fix| fix.title.contains("D-ONCE-HASH1"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            apply_all(&source, &fixes),
+            format!(
+                "fn run() {{\n    value :: 1\n    print(\"{{value{}Debug}}\")\n}}\n",
+                crate::Syntax::INTERPOLATION_SELECTOR_RAIL
+            )
+        );
+    }
+
+    #[test]
     fn test_document_context_does_not_discover_the_workspace() {
         let (project, diagnostics, bundle, _) = check_test_document("fn run() {}\n");
         assert!(diagnostics.is_empty(), "{diagnostics:#?}");

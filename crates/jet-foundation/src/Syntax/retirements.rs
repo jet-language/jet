@@ -24,7 +24,10 @@
 //! The spellings are read from the constants that already own them. This table
 //! pairs them; it never restates them.
 
-use super::{DEFAULT_ENTRY_FILE, LEGACY_ENTRY_FILE, PACKAGE_FILE, PAYLOAD_FILE};
+use super::{
+    DEFAULT_ENTRY_FILE, LEGACY_ENTRY_FILE, PACKAGE_FILE, PAYLOAD_FILE,
+    INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_INTERPOLATION_SELECTOR_EXAMPLE,
+};
 
 /// How the compiler answers a file still written in the retired form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +96,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         decision: "D-JPK-REF1",
         since: "2026-06-18",
         code: Some("E1317"),
+    },
+    Retirement {
+        id: "interpolation-selector-rail",
+        retired: RETIRED_INTERPOLATION_SELECTOR_EXAMPLE,
+        canonical: INTERPOLATION_SELECTOR_EXAMPLE,
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-HASH1",
+        since: "2026-08-07",
+        code: None,
     },
 ];
 
@@ -191,6 +203,10 @@ mod tests {
     fn a_rename_rewrites_and_a_semantic_change_does_not() {
         assert_eq!(rename_target(LEGACY_ENTRY_FILE), Some(DEFAULT_ENTRY_FILE));
         assert_eq!(rename_target(PAYLOAD_FILE), Some(PACKAGE_FILE));
+        assert_eq!(
+            rename_target(RETIRED_INTERPOLATION_SELECTOR_EXAMPLE),
+            Some(INTERPOLATION_SELECTOR_EXAMPLE)
+        );
         assert_eq!(rename_target("payload: {"), None);
         assert_eq!(rename_target("provider@target"), None);
     }

@@ -2513,7 +2513,7 @@ fn run() {
     lower_tie :: 1.125
     upper_tie :: 1.375
     grouped :: 1234.5678
-    print("{lower_tie#Fixed(2)}|{upper_tie#Fixed(2)}|{grouped#Fixed(2)}")
+    print("{lower_tie:Fixed(2)}|{upper_tie:Fixed(2)}|{grouped:Fixed(2)}")
 }
 "#;
     let expected = ProgramOutput::ran("1.12|1.38|1,234.57\n".into(), String::new(), 0);
@@ -3267,7 +3267,7 @@ fn run() {
     print(copied.contains(4))
     print(copied == band)
     bands :: [1..3, 8..<10]
-    print("{bands[1]#Debug}")
+    print("{bands[1]:Debug}")
     print(bands[0].start)
     print(bands[0].contains(3))
     total := 0
@@ -3303,11 +3303,11 @@ fn run() {
     print(copied == band)
     bands :: [1..3, 8..<10]
     print(bands[0])
-    print("{bands[1]#Debug}")
+    print("{bands[1]:Debug}")
     print(bands[0].contains(3))
     print(band)
     print("{band}")
-    print("{band#Debug}")
+    print("{band:Debug}")
     print(band == (2..<5))
     print(band == (2..5))
     print(band.start)
@@ -6461,7 +6461,7 @@ fn run() {
     print(maximum)
     print("{maximum}")
     print(maximum.to_string())
-    print("{maximum#Debug}")
+    print("{maximum:Debug}")
     print([maximum, U64.{1}])
     print([U64#2].{maximum, U64.{1}})
     print(-i8_id(I8.{8}))

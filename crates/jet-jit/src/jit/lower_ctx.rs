@@ -7076,7 +7076,7 @@ impl LowerCtx<'_, '_> {
         Ok(buf_id)
     }
 
-    /// `{named}` / `{named#Debug}` — Display prefers `Type::display` when compiled;
+    /// `{named}` / `{named:Debug}` — Display prefers `Type::display` when compiled;
     /// otherwise JetShow-style mangled Debug (`user_Type { user_field: … }`).
     /// Debug format uses unmangled JetDebug shape (`Type { field: … }`) and
     /// `#[Redact]` → `[redacted]` when bundle metadata is installed.

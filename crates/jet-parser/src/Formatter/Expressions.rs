@@ -1999,26 +1999,44 @@ impl<'a> Fmt<'a> {
         match fmt {
             crate::AST::StrFormat::Display => {}
             crate::AST::StrFormat::Debug => {
-                self.write("#");
-                self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Debug,
+                    )
+                    .name,
+                );
             }
             crate::AST::StrFormat::Fixed(precision) => {
-                self.write("#");
-                self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Fixed,
+                    )
+                    .name,
+                );
                 self.write("(");
                 self.write(&precision.to_string());
                 self.write(")");
             }
             crate::AST::StrFormat::Unit(style) => {
-                self.write("#");
-                self.write(crate::Syntax::INTERP_SELECTOR_UNIT);
+                let selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Unit,
+                );
+                let crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) =
+                    selector.arguments
+                else {
+                    unreachable!("the Unit selector declares unit styles")
+                };
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(selector.name);
                 self.write("(");
                 self.write(match style {
                     crate::AST::UnitFormat::Symbol => {
                         unreachable!("symbol is bare interpolation")
                     }
-                    crate::AST::UnitFormat::Name => crate::Syntax::INTERP_UNIT_STYLE_NAME,
-                    crate::AST::UnitFormat::Bare => crate::Syntax::INTERP_UNIT_STYLE_BARE,
+                    crate::AST::UnitFormat::Name => styles[0],
+                    crate::AST::UnitFormat::Bare => styles[1],
                 });
                 self.write(")");
             }

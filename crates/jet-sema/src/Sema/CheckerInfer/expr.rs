@@ -956,6 +956,18 @@ impl<'a> Checker<'a> {
                         "string interpolation allocates a new `String`",
                     ));
                 }
+                let debug_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Debug,
+                )
+                .name;
+                let fixed_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Fixed,
+                )
+                .name;
+                let unit_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Unit,
+                )
+                .name;
                 for p in parts.iter_mut() {
                     if let StrPart::Interp(inner, fmt) = p {
                         // Interpolation borrows; never moves.
@@ -1043,8 +1055,9 @@ impl<'a> Checker<'a> {
                                                     format!(
                                                         "`{n}` has no `Display` impl — bare `{{}}` will require one soon"
                                                     ),
-                                                    "Display is the user-facing interpolation hook; Debug is for `{value#Debug}`"
-                                                        .to_string(),
+                                                    format!(
+                                                        "Display is the user-facing interpolation hook; Debug is for `{{value:{debug_selector}}}`"
+                                                    ),
                                                     format!(
                                                         "add `impl {n}.Display {{ fn display(self) => String {{ … }} }}`"
                                                     ),
@@ -1069,7 +1082,10 @@ impl<'a> Checker<'a> {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0112",
-                                                format!("secret-bearing `{}` cannot use `#Debug`", t.name()),
+                                                format!(
+                                                    "secret-bearing `{}` cannot use `:{debug_selector}`",
+                                                    t.name()
+                                                ),
                                                 "Debug output could copy cryptographic secret material into logs or diagnostics".to_string(),
                                                 "remove the interpolation; log a public operation label or key identifier instead".to_string(),
                                                 Some(inner.span()),
@@ -1078,7 +1094,10 @@ impl<'a> Checker<'a> {
                                         }
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
-                                            format!("{} can't be shown with #Debug yet", t.show()),
+                                            format!(
+                                                "{} can't be shown with :{debug_selector} yet",
+                                                t.show()
+                                            ),
                                             "debug interpolation needs a debuggable value"
                                                 .to_string(),
                                             "implement `Debug` or use a debuggable part"
@@ -1092,7 +1111,7 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
-                                                "{} can't use `#Fixed(n)`",
+                                                "{} can't use `:{fixed_selector}(n)`",
                                                 t.show()
                                             ),
                                             "fixed interpolation uses `core.fmt.decimal`, which formats `Float` values"
@@ -1108,7 +1127,7 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
-                                                "{} can't use `#Unit(…)`",
+                                                "{} can't use `:{unit_selector}(…)`",
                                                 t.show()
                                             ),
                                             "unit formatting needs a quantity or a `#UnitFamily` value"

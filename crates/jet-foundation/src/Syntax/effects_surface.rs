@@ -232,7 +232,7 @@ pub const TRAIT_ROLLBACK: &str = "Rollback";
 
 /// D-DISPLAYDBG1 / D-DISPLAY-SHAPE: user-facing string rendering for `{}` interpolation.
 pub const TRAIT_DISPLAY: &str = "Display";
-/// D-DISPLAYDBG1: developer-facing debug rendering for `{value#Debug}` interpolation.
+/// D-DISPLAYDBG1: developer-facing debug rendering for `{value:Debug}` interpolation.
 pub const TRAIT_DEBUG: &str = "Debug";
 /// D-ITER-HOOK: expert opt-in hook enabling zero-copy `for x in mytype`.
 pub const TRAIT_ITERABLE: &str = "Iterable";
@@ -256,14 +256,95 @@ pub const TRAIT_IO_READER: &str = "Reader";
 pub const TRAIT_IO_WRITER: &str = "Writer";
 /// D-DBDRIVER1=A: backend-neutral parameterized SQL driver contract in `core.db`.
 pub const TRAIT_DRIVER: &str = "Driver";
-/// D-ATTR4=A: closed interpolation selector spelling after `#`.
-pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
-/// D-FMT-INTERP1=A: fixed-decimal interpolation reuses the `#` selector rail.
-pub const INTERP_SELECTOR_FIXED: &str = "Fixed";
-/// D-QUANTITY-PRINT1=A+D: quantity style selection on the interpolation rail.
-pub const INTERP_SELECTOR_UNIT: &str = "Unit";
-pub const INTERP_UNIT_STYLE_NAME: &str = "name";
-pub const INTERP_UNIT_STYLE_BARE: &str = "bare";
+/// D-ONCE-HASH1=B: interpolation selectors are a format-choice surface, not
+/// applied rules. This table is their one vocabulary home; the parser and
+/// formatter must not grow selector-specific name copies beside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterpolationSelectorKind {
+    Debug,
+    Fixed,
+    Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterpolationSelectorArguments {
+    None,
+    Precision,
+    UnitStyle(&'static [&'static str]),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterpolationSelector {
+    pub name: &'static str,
+    pub kind: InterpolationSelectorKind,
+    pub arguments: InterpolationSelectorArguments,
+}
+
+const INTERPOLATION_UNIT_STYLES: &[&str] = &["name", "bare"];
+
+/// D-ONCE-HASH1=B: the sole interpolation-selector registry.
+pub const INTERPOLATION_SELECTORS: &[InterpolationSelector] = &[
+    InterpolationSelector {
+        name: "Debug",
+        kind: InterpolationSelectorKind::Debug,
+        arguments: InterpolationSelectorArguments::None,
+    },
+    InterpolationSelector {
+        name: "Fixed",
+        kind: InterpolationSelectorKind::Fixed,
+        arguments: InterpolationSelectorArguments::Precision,
+    },
+    InterpolationSelector {
+        name: "Unit",
+        kind: InterpolationSelectorKind::Unit,
+        arguments: InterpolationSelectorArguments::UnitStyle(INTERPOLATION_UNIT_STYLES),
+    },
+];
+
+/// D-ONCE-HASH1=B: canonical interpolation selector rail.
+pub const INTERPOLATION_SELECTOR_RAIL: &str = ":";
+/// D-ONCE-RETIRE1=C: the pure-rename input accepted only so fmt/fix can
+/// rewrite it and print a notice before the zero-adoption ratchet closes.
+pub const RETIRED_INTERPOLATION_SELECTOR_RAIL: &str = "#";
+pub const RETIRED_INTERPOLATION_SELECTOR_EXAMPLE: &str = "{value#Selector}";
+pub const INTERPOLATION_SELECTOR_EXAMPLE: &str = "{value:Selector}";
+
+pub fn interpolation_selector(name: &str) -> Option<&'static InterpolationSelector> {
+    INTERPOLATION_SELECTORS
+        .iter()
+        .find(|selector| selector.name == name)
+}
+
+pub fn interpolation_selector_for_kind(
+    kind: InterpolationSelectorKind,
+) -> &'static InterpolationSelector {
+    INTERPOLATION_SELECTORS
+        .iter()
+        .find(|selector| selector.kind == kind)
+        .expect("every interpolation selector kind has one registry row")
+}
+
+#[cfg(test)]
+mod interpolation_selector_tests {
+    use super::*;
+
+    #[test]
+    fn the_registry_is_the_closed_selector_vocabulary() {
+        assert_eq!(
+            INTERPOLATION_SELECTORS
+                .iter()
+                .map(|selector| selector.name)
+                .collect::<Vec<_>>(),
+            vec!["Debug", "Fixed", "Unit"]
+        );
+        assert!(matches!(
+            interpolation_selector("Unit").map(|selector| selector.arguments),
+            Some(InterpolationSelectorArguments::UnitStyle(styles))
+                if styles.len() == 2 && styles[0] == "name" && styles[1] == "bare"
+        ));
+        assert!(interpolation_selector("Repr").is_none());
+    }
+}
 /// D-DEBUG-REDACT / D-VERDICT-732-1 (formerly D-MARKERMOVE1, `#Redact`): hide a field
 /// from auto-derived Debug output.
 pub const MARKER_REDACT: &str = "Redact";

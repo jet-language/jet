@@ -1128,6 +1128,8 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
             println!("{file}: edition 2027 migration: {note}");
         }
     }
+    let retired_selector_count =
+        jet::Formatter::retired_interpolation_selector_edits(&migrated).len();
     let fixes = jet::LSP::collect_fixes(file, &migrated);
     let fixed = if fixes.is_empty() {
         migrated
@@ -1154,6 +1156,14 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
                 if n == 1 { "" } else { "es" }
             );
         }
+        if retired_selector_count > 0 {
+            println!(
+                "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
+                file,
+                retired_selector_count,
+                if retired_selector_count == 1 { "" } else { "s" }
+            );
+        }
         return;
     }
     fs::write(file, &fixed).unwrap_or_else(|e| {
@@ -1168,6 +1178,14 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
             file,
             n,
             if n == 1 { "" } else { "es" }
+        );
+    }
+    if retired_selector_count > 0 {
+        println!(
+            "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
+            file,
+            retired_selector_count,
+            if retired_selector_count == 1 { "" } else { "s" }
         );
     }
 }
@@ -2015,9 +2033,19 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
         exit(ExitCodes::USAGE);
     }
     let label = stdin_path.unwrap_or("<stdin>");
+    let retired_selector_count =
+        jet::Formatter::retired_interpolation_selector_edits(&src).len();
     match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>")) {
         Ok(formatted) => {
             print!("{}", formatted);
+            if retired_selector_count > 0 {
+                eprintln!(
+                    "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
+                    label,
+                    retired_selector_count,
+                    if retired_selector_count == 1 { "" } else { "s" }
+                );
+            }
         }
         Err(diags) => {
             if mode.json {
@@ -2113,6 +2141,7 @@ pub(crate) fn run_fmt(
         original: String,
         formatted: String,
         changed: bool,
+        retired_interpolation_selectors: usize,
         io_error: Option<String>,
         parse_diags: Vec<jet::Diagnostics::Diagnostic>,
     }
@@ -2127,6 +2156,7 @@ pub(crate) fn run_fmt(
                     original: String::new(),
                     formatted: String::new(),
                     changed: false,
+                    retired_interpolation_selectors: 0,
                     io_error: Some(format!("can't read `{}`: {}", path.display(), e)),
                     parse_diags: Vec::new(),
                 });
@@ -2136,11 +2166,14 @@ pub(crate) fn run_fmt(
         match format_source_for_fmt(&src, &path.display().to_string()) {
             Ok(formatted) => {
                 let changed = formatted != src;
+                let retired_interpolation_selectors =
+                    jet::Formatter::retired_interpolation_selector_edits(&src).len();
                 results.push(FileResult {
                     path: path.clone(),
                     original: src,
                     formatted,
                     changed,
+                    retired_interpolation_selectors,
                     io_error: None,
                     parse_diags: Vec::new(),
                 });
@@ -2151,6 +2184,7 @@ pub(crate) fn run_fmt(
                     original: src,
                     formatted: String::new(),
                     changed: false,
+                    retired_interpolation_selectors: 0,
                     io_error: None,
                     parse_diags: diags,
                 });
@@ -2254,6 +2288,18 @@ pub(crate) fn run_fmt(
         if let Err(e) = fs::write(&r.path, &r.formatted) {
             crate::cli_error!("E2105", "couldn't write `{}`: {}", r.path.display(), e);
             exit(ExitCodes::USAGE);
+        }
+        if r.retired_interpolation_selectors > 0 && !mode.json {
+            println!(
+                "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
+                r.path.display(),
+                r.retired_interpolation_selectors,
+                if r.retired_interpolation_selectors == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            );
         }
     }
     // exit 0 implicitly

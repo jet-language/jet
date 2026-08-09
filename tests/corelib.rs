@@ -5080,11 +5080,11 @@ fn fail_other() => Int ? IOError {
 fn run() {
     if fail() == {
         .Ok(_) -> panic("failure succeeded")
-        .Err(error) -> print("{error#Debug}")
+        .Err(error) -> print("{error:Debug}")
     }
     if fail_other() == {
         .Ok(_) -> panic("other failure succeeded")
-        .Err(error) -> print("{error#Debug}")
+        .Err(error) -> print("{error:Debug}")
     }
 }
 "#;

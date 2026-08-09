@@ -831,7 +831,7 @@ impl<'a> Interp<'a> {
                 let text = match args.first() {
                     // D-DISPLAYDBG1/2: same Display-impl-aware rendering as
                     // `{value}` string interpolation (`show_value`) — `print`
-                    // is bare-Display too, never the `#Debug` form.
+                    // is bare-Display too, never the `:Debug` form.
                     Some(a) => {
                         let v = self.eval(&a.expr, scope)?;
                         self.show_value(&v, a.expr.span())?

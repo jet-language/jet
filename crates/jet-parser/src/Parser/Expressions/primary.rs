@@ -655,77 +655,136 @@ impl<'a> Parser<'a> {
                             debug_label = Some(label);
                         }
                         let mut format = crate::AST::StrFormat::Display;
-                        if matches!(sub.peek().kind, TokKind::Hash) {
-                            sub.bump();
-                            let (sel, sel_span) = sub.expect_ident("after `#` in interpolation")?;
-                            if sel == crate::Syntax::INTERP_SELECTOR_DEBUG {
-                                format = crate::AST::StrFormat::Debug;
-                            } else if sel == crate::Syntax::INTERP_SELECTOR_FIXED {
-                                sub.expect(
-                                    TokKind::LParen,
-                                    "after `#Fixed` in interpolation",
-                                )?;
-                                let precision = match sub.bump() {
-                                    crate::Lexer::Token {
-                                        kind: TokKind::Int(value, _),
-                                        ..
-                                    } => value,
-                                    token => {
-                                        return Err(Diagnostic::error(
-                                            "E0003",
-                                            "expected decimal places inside `#Fixed( )`"
-                                                .to_string(),
-                                            "`#Fixed(n)` takes one nonnegative integer literal"
-                                                .to_string(),
-                                            "write a precision such as `#Fixed(2)`".to_string(),
-                                            Some(token.span),
-                                        ));
+                        let selector_rail = match sub.peek().kind {
+                            TokKind::Colon => {
+                                sub.bump();
+                                Some(crate::Syntax::INTERPOLATION_SELECTOR_RAIL)
+                            }
+                            TokKind::Hash => {
+                                // D-ONCE-RETIRE1=C: pure renames remain parseable
+                                // only as input to the shared fmt/fix rewrite.
+                                sub.bump();
+                                Some(crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL)
+                            }
+                            _ => None,
+                        };
+                        if let Some(_selector_rail) = selector_rail {
+                            let (sel, sel_span) = sub.expect_ident("after `:` in interpolation")?;
+                            if let Some(selector) = crate::Syntax::interpolation_selector(&sel) {
+                                let selector_head = format!(
+                                    "{}{}",
+                                    crate::Syntax::INTERPOLATION_SELECTOR_RAIL,
+                                    selector.name
+                                );
+                                match selector.kind {
+                                    crate::Syntax::InterpolationSelectorKind::Debug => {
+                                        format = crate::AST::StrFormat::Debug;
                                     }
-                                };
-                                sub.expect(
-                                    TokKind::RParen,
-                                    "after the decimal places in `#Fixed(n)`",
-                                )?;
-                                format = crate::AST::StrFormat::Fixed(precision);
-                            } else if sel == crate::Syntax::INTERP_SELECTOR_UNIT {
-                                sub.expect(
-                                    TokKind::LParen,
-                                    "after `#Unit` in interpolation",
-                                )?;
-                                let (style, style_span) =
-                                    sub.expect_ident("inside `#Unit( )`")?;
-                                format = match style.as_str() {
-                                    crate::Syntax::INTERP_UNIT_STYLE_NAME => {
-                                        crate::AST::StrFormat::Unit(
-                                            crate::AST::UnitFormat::Name,
-                                        )
+                                    crate::Syntax::InterpolationSelectorKind::Fixed => {
+                                        let after_selector =
+                                            format!("after `{selector_head}` in interpolation");
+                                        sub.expect(
+                                            TokKind::LParen,
+                                            &after_selector,
+                                        )?;
+                                        let precision = match sub.bump() {
+                                            crate::Lexer::Token {
+                                                kind: TokKind::Int(value, _),
+                                                ..
+                                            } => value,
+                                            token => {
+                                                return Err(Diagnostic::error(
+                                                    "E0003",
+                                                    format!(
+                                                        "expected decimal places inside `{selector_head}( )`"
+                                                    ),
+                                                    format!(
+                                                        "`{selector_head}(n)` takes one nonnegative integer literal"
+                                                    ),
+                                                    format!(
+                                                        "write a precision such as `{selector_head}(2)`"
+                                                    ),
+                                                    Some(token.span),
+                                                ));
+                                            }
+                                        };
+                                        let after_precision = format!(
+                                            "after the decimal places in `{selector_head}(n)`"
+                                        );
+                                        sub.expect(
+                                            TokKind::RParen,
+                                            &after_precision,
+                                        )?;
+                                        format = crate::AST::StrFormat::Fixed(precision);
                                     }
-                                    crate::Syntax::INTERP_UNIT_STYLE_BARE => {
-                                        crate::AST::StrFormat::Unit(
-                                            crate::AST::UnitFormat::Bare,
-                                        )
+                                    crate::Syntax::InterpolationSelectorKind::Unit => {
+                                        let after_selector =
+                                            format!("after `{selector_head}` in interpolation");
+                                        sub.expect(
+                                            TokKind::LParen,
+                                            &after_selector,
+                                        )?;
+                                        let (style, style_span) =
+                                            sub.expect_ident(&format!("inside `{selector_head}( )`"))?;
+                                        let crate::Syntax::InterpolationSelectorArguments::UnitStyle(
+                                            styles,
+                                        ) = selector.arguments
+                                        else {
+                                            unreachable!("the Unit selector declares unit styles")
+                                        };
+                                        let style_index = styles
+                                            .iter()
+                                            .position(|candidate| *candidate == style.as_str());
+                                        format = match style_index {
+                                            Some(0) => crate::AST::StrFormat::Unit(
+                                                crate::AST::UnitFormat::Name,
+                                            ),
+                                            Some(1) => crate::AST::StrFormat::Unit(
+                                                crate::AST::UnitFormat::Bare,
+                                            ),
+                                            _ => {
+                                                let accepted = styles
+                                                    .iter()
+                                                    .map(|style| format!("`{style}`"))
+                                                    .collect::<Vec<_>>()
+                                                    .join(" or ");
+                                                return Err(Diagnostic::error(
+                                                    "E0003",
+                                                    format!("unknown unit style `{style}`"),
+                                                    format!("`{selector_head}` accepts {accepted}"),
+                                                    format!(
+                                                        "write {}",
+                                                        styles
+                                                            .iter()
+                                                            .map(|style| {
+                                                                format!(
+                                                                    "`{selector_head}({style})`"
+                                                                )
+                                                            })
+                                                            .collect::<Vec<_>>()
+                                                            .join(" or ")
+                                                    ),
+                                                    Some(style_span),
+                                                ));
+                                            }
+                                        };
+                                        let after_style =
+                                            format!("after the style in `{selector_head}( )`");
+                                        sub.expect(
+                                            TokKind::RParen,
+                                            &after_style,
+                                        )?;
                                     }
-                                    _ => {
-                                        return Err(Diagnostic::error(
-                                            "E0003",
-                                            format!("unknown unit style `{style}`"),
-                                            "`#Unit` accepts `name` or `bare`"
-                                                .to_string(),
-                                            "write `#Unit(name)` or `#Unit(bare)`"
-                                                .to_string(),
-                                            Some(style_span),
-                                        ));
-                                    }
-                                };
-                                sub.expect(
-                                    TokKind::RParen,
-                                    "after the style in `#Unit( )`",
-                                )?;
+                                }
                             } else {
                                 self.diags.push(crate::Generics::e0914(&sel, sel_span));
                             }
                         }
                         if !matches!(sub.peek().kind, TokKind::Eof) {
+                            let unit_selector = crate::Syntax::interpolation_selector_for_kind(
+                                crate::Syntax::InterpolationSelectorKind::Unit,
+                            )
+                            .name;
                             return Err(Diagnostic::error(
                                 "E0003",
                                 format!(
@@ -734,7 +793,9 @@ impl<'a> Parser<'a> {
                                 ),
                                 "the braces hold exactly one value, optional trailing `=`, and one optional format selector"
                                     .to_string(),
-                                "keep one value per `{ }`, for example \"{a}\", \"{a=}\", or \"{a#Unit(bare)}\"".to_string(),
+                                format!(
+                                    "keep one value per `{{ }}`, for example \"{{a}}\", \"{{a=}}\", or \"{{a:{unit_selector}(bare)}}\""
+                                ),
                                 Some(sub.peek().span),
                             ));
                         }
