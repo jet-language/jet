@@ -522,7 +522,7 @@ fn identity(band: ^Range) => Range {
 fn run() {
     bands :: [1..3, 8..<10]
     print(bands[0])
-    print(\"{bands[1]#Debug}\")
+    print(\"{bands[1]:Debug}\")
     print(bands[0] == (1..3))
     print(bands[0] == (1..<3))
     print(bands[0].contains(3))

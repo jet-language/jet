@@ -149,10 +149,10 @@
 // value. Range carries end inclusivity; arm heads and distinct constraints
 // keep their literal-only grammar.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
-// `{value#Fixed(n)}` reuses `#` and ordinary integer-call parentheses.
+// `{value:Fixed(n)}` uses the colon rail and ordinary integer-call parentheses.
 // D-FMT-INTERP2=A: trailing `=` in a hole reprints the expression source,
 // then " = ", then the value — `{count=}` → `count = 3`. Composes with
-// selectors: `{count=#Debug}`.
+// selectors: `{count=:Debug}`.
 // D-QUANTITY-PRINT1 adds `Unit(name)` and `Unit(bare)` to that same selector
 // rail. Bare interpolation keeps the declared symbol as the default.
 // D-FACTMODEL1=A: tag, state, taint-kind, and effect leaves are one erased

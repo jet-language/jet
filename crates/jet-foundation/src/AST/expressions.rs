@@ -199,11 +199,11 @@ pub enum StrFormat {
     /// Bare `{value}` — calls `Display` (D-DISPLAY-SHAPE).
     #[default]
     Display,
-    /// `{value#Debug}` — calls auto-derived or explicit `Debug`.
+    /// `{value:Debug}` — calls auto-derived or explicit `Debug`.
     Debug,
-    /// `{value#Fixed(n)}` — uses `core.fmt.decimal(value, n)`.
+    /// `{value:Fixed(n)}` — uses `core.fmt.decimal(value, n)`.
     Fixed(i64),
-    /// `{value#Unit(name)}` / `{value#Unit(bare)}`.
+    /// `{value:Unit(name)}` / `{value:Unit(bare)}`.
     Unit(UnitFormat),
 }
 

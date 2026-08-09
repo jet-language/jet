@@ -1007,7 +1007,8 @@ are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 ### Strings & literals
 
 **S8 — Interpolation**: `"hi {name}"`; no `+` concatenation.
-`{value#Debug}` selects the Debug rendering (D-DISPLAYDBG1).
+`{value:Debug}` selects the Debug rendering (D-DISPLAYDBG1, amended by
+D-ONCE-HASH1=B).
 
 **S20 — Escapes**: `\n` `\t` `\"` `\\`; literal braces `{{` `}}`.
 
@@ -1452,7 +1453,7 @@ the `#` plane (see Serde under Core library).
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
 user-facing — a single explicit method `fn display(self) => String`, no
 default (E0915, L0520); interpolation `{}` calls it. `Debug` is dev-facing and
-auto-derived; `{value#Debug}` selects it; `#Redact` on a field renders
+auto-derived; `{value:Debug}` selects it; `#Redact` on a field renders
 `"[redacted]"` (D-DEBUG-REDACT).
 
 **D-ITER-HOOK / D-INDEX-HOOK — Extensibility hooks**: beginners use
@@ -1584,17 +1585,24 @@ New fields require a future ballot.
 debug interpolation is `{value#Debug}`. The retired `{value@Debug}` spelling
 teaches `{value#Debug}` because `@` belongs to the location/address/source plane.
 
+**Current spelling amendment (D-ONCE-HASH1=B, ratified 2026-08-07):** the
+selector is now `{value:Debug}`; the old `#` selector rail is a pure-rename
+input for the D-ONCE-RETIRE1=C formatter/fix rewrite.
+
 **D-FMT-INTERP1=A — Fixed-decimal interpolation selector** *(ratified
 2026-07-29, card #1278)*: `{value#Fixed(n)}` formats a `Float` with `n` decimal
 places through `core.fmt.decimal`. It uses the existing `#` selector rail.
 Unknown selectors report E0914 with the valid set. No `#Percent` sibling is
 defined.
 
+**Current spelling amendment (D-ONCE-HASH1=B):** write `{value:Fixed(n)}`.
+
 **D-FMT-INTERP2=A — Interpolation debug-label shorthand** *(ratified
 2026-07-31, card #1351)*: trailing `=` in an interpolation hole prints the
 expression's own source text, then ` = `, then the value. Example:
 `print("{count=}")` → `count = 3`. The label cannot drift from the expression.
-Composes with the `#` selector rail: `{count=#Debug}`. Empty `{=}` is an error.
+Composes with the current `:` selector rail: `{count=:Debug}`. Empty `{=}` is
+an error.
 
 **D-QUANTITY-PRINT1=A+D — Quantity and unit display** *(ratified 2026-07-29,
 card #1268)*: `print` and bare interpolation show a quantity's magnitude and
@@ -1602,8 +1610,8 @@ declared unit symbol by default. Derived dimensions use a normalized product
 or quotient, such as `4 meter/second`. An explicit `Display` implementation
 replaces this default for its concrete unit type.
 
-`{value#Unit(name)}` uses the generated unit type name.
-`{value#Unit(bare)}` shows only the magnitude. The default symbol form uses
+`{value:Unit(name)}` uses the generated unit type name.
+`{value:Unit(bare)}` shows only the magnitude. The default symbol form uses
 bare interpolation, so there is no second symbol selector. All three styles
 use the same Display path. `.raw()` still extracts the unchanged numeric value.
 
@@ -6511,6 +6519,17 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
 - **D-ONCE-HASH1=B** — interpolation format selectors respell to colon (`{x:Fixed(2)}`, `{user:Debug}`); `#` keeps its three non-colliding jobs: applied rules, fixed-size lists (`[T#4]`), and package version pins.
+
+## Implementation note — interpolation selector registry
+
+`crates/jet-foundation/src/Syntax/effects_surface.rs` owns one
+`INTERPOLATION_SELECTORS` table for the selector names and their argument
+shapes. Law: each selector vocabulary name appears in that table exactly once,
+and parser/formatter code reads the row rather than copying the name. Adding a
+selector of an existing shape adds one row there. This surface is separate from
+the applied-rule registry because a selector chooses how a value is rendered
+inside one string hole; it does not attach a rule, inherit policy, or select a
+target.
 
 ## Implementation note — marker rows are Prelude declarations
 

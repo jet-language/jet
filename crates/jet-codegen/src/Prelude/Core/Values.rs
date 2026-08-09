@@ -21,7 +21,7 @@ trait JetDisplay {
         false
     }
 }
-/// D-ATTR4=A: developer interpolation (`{value#Debug}`).
+/// D-ATTR4=A: developer interpolation (`{value:Debug}`).
 trait JetDebug {
     fn jet_debug(&self) -> String;
     /// D-FAIL-CARRIER1=A: see `JetShow::jet_report_is_clean`.

@@ -9,8 +9,8 @@ mod Expressions;
 mod Items;
 mod Statements;
 
-use crate::Diagnostics::Span;
-use crate::Lexer::{TokKind, Token};
+use crate::Diagnostics::{Span, TextEdit};
+use crate::Lexer::{StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{BinOp, Func, Item, LValue, Program, Stmt};
 
@@ -43,6 +43,49 @@ fn is_simple_stmt(stmt: &Stmt) -> bool {
 pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> String {
     let (source_toks, _) = crate::Lexer::lex(src);
     format_program_with_tokens(prog, src, comment_toks, &source_toks)
+}
+
+/// D-ONCE-RETIRE1=C: collect mechanical edits for the retired interpolation
+/// selector rail. The lexer already owns interpolation boundaries, so this
+/// never rewrites a `#` inside an ordinary string or a marker in an embedded
+/// expression. `jet fmt` and `jet fix` consume this same edit list.
+pub fn retired_interpolation_selector_edits(src: &str) -> Vec<TextEdit> {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    let mut edits = Vec::new();
+    collect_retired_selector_edits(&tokens, &mut edits);
+    edits
+}
+
+fn collect_retired_selector_edits(tokens: &[Token], edits: &mut Vec<TextEdit>) {
+    for token in tokens {
+        let TokKind::Str(parts) = &token.kind else {
+            continue;
+        };
+        for part in parts {
+            let StrTokPart::Interp(inner) = part else {
+                continue;
+            };
+            for pair in inner.windows(2) {
+                if !matches!(pair[0].kind, TokKind::Hash) {
+                    continue;
+                }
+                let TokKind::Ident(name) = &pair[1].kind else {
+                    continue;
+                };
+                if crate::Syntax::interpolation_selector(name).is_none() {
+                    continue;
+                }
+                edits.push(TextEdit {
+                    span: pair[0].span,
+                    new_text: crate::Syntax::INTERPOLATION_SELECTOR_RAIL.to_string(),
+                });
+            }
+            collect_retired_selector_edits(inner, edits);
+        }
+    }
 }
 
 fn format_program_with_tokens(
@@ -1160,7 +1203,46 @@ pub fn unified_diff(path: &str, old: &str, new: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_source;
+    use super::{format_source, retired_interpolation_selector_edits};
+
+    #[test]
+    fn retired_selector_rewrites_through_the_parser_and_formatter() {
+        for (kind, arguments) in [
+            (crate::Syntax::InterpolationSelectorKind::Debug, ""),
+            (crate::Syntax::InterpolationSelectorKind::Fixed, "(2)"),
+            (crate::Syntax::InterpolationSelectorKind::Unit, "(name)"),
+            (crate::Syntax::InterpolationSelectorKind::Unit, "(bare)"),
+        ] {
+            let selector = crate::Syntax::interpolation_selector_for_kind(kind);
+            let mut source = String::from("fn run() {\n    print(\"{x");
+            source.push_str(crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL);
+            source.push_str(selector.name);
+            source.push_str(arguments);
+            source.push_str("}\")\n}\n");
+            let edits = retired_interpolation_selector_edits(&source);
+            assert_eq!(edits.len(), 1);
+            assert_eq!(
+                &source[edits[0].span.start..edits[0].span.end],
+                crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL
+            );
+            let formatted = format_source(&source).expect("retired selector should be rewritable");
+            let expected_fragment = [
+                "    print(\"{x",
+                crate::Syntax::INTERPOLATION_SELECTOR_RAIL,
+                selector.name,
+                arguments,
+                "}\")",
+            ]
+            .concat();
+            assert!(formatted.contains(&expected_fragment), "{formatted}");
+            assert!(retired_interpolation_selector_edits(&formatted).is_empty());
+        }
+        let ordinary_hash = format!(
+            "fn run() {{ print(\"{}Debug\") }}\n",
+            crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL
+        );
+        assert!(retired_interpolation_selector_edits(&ordinary_hash).is_empty());
+    }
 
     #[test]
     fn trailing_call_comment_stays_outside_lambda_block() {

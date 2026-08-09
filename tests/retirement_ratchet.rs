@@ -22,7 +22,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jet::Syntax::{law_violations, Retirement, RetirementKind, REF_PROVIDERS, RETIREMENTS};
+use jet::Syntax::{
+    law_violations, Retirement, RetirementKind, REF_PROVIDERS,
+    RETIREMENTS,
+};
 
 /// Files still written in the retired form, per row, as counted today. Lower a
 /// number when a migration lands; never raise one.
@@ -33,6 +36,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("manifest-file", 2),
     ("manifest-identity", 7),
     ("package-ref-order", 0),
+    ("interpolation-selector-rail", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -154,6 +158,45 @@ fn writes_canonical_ref(text: &str) -> bool {
         .any(|(_, right)| REF_PROVIDERS.contains(&right.as_str()))
 }
 
+fn writes_interpolation_selector(text: &str, retired: bool) -> bool {
+    let (tokens, lex_diags) = jet::Lexer::lex(text);
+    if !lex_diags.is_empty() {
+        return false;
+    }
+    fn scan(tokens: &[jet::Lexer::Token], retired: bool) -> bool {
+        for token in tokens {
+            let jet::Lexer::TokKind::Str(parts) = &token.kind else {
+                continue;
+            };
+            for part in parts {
+                let jet::Lexer::StrTokPart::Interp(inner) = part else {
+                    continue;
+                };
+                for pair in inner.windows(2) {
+                    let rail = if retired {
+                        matches!(pair[0].kind, jet::Lexer::TokKind::Hash)
+                    } else {
+                        matches!(pair[0].kind, jet::Lexer::TokKind::Colon)
+                    };
+                    let selector = matches!(
+                        &pair[1].kind,
+                        jet::Lexer::TokKind::Ident(name)
+                            if jet::Syntax::interpolation_selector(name).is_some()
+                    );
+                    if rail && selector {
+                        return true;
+                    }
+                }
+                if scan(inner, retired) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    scan(&tokens, retired)
+}
+
 /// Files on the retired form and files on the canonical form, for one row.
 fn tally(row: &Retirement) -> (usize, usize) {
     match row.id {
@@ -191,6 +234,23 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if writes_provider_first(&text) {
                     retired += 1;
                 } else if writes_canonical_ref(&text) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "interpolation-selector-rail" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                let has_retired = writes_interpolation_selector(&text, true);
+                if has_retired {
+                    retired += 1;
+                } else if writes_interpolation_selector(&text, false) {
                     canonical += 1;
                 }
             }

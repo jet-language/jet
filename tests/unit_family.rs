@@ -1194,8 +1194,8 @@ fn run() {
     print("{speed}")
     print(pixels)
     print(price)
-    print("{distance#Unit(name)}")
-    print("{distance#Unit(bare)}")
+    print("{distance:Unit(name)}")
+    print("{distance:Unit(bare)}")
     print(distance.raw())
 }
 "#;
@@ -1237,7 +1237,7 @@ fn run() {
     distance :: 12meter
     print(distance)
     print("{distance}")
-    print("{distance#Unit(bare)}")
+    print("{distance:Unit(bare)}")
 }
 "#;
     let (code, stdout) = tir_support::build_and_run("quantity_display_override", explicit);
@@ -1402,8 +1402,8 @@ fn run() {
     distance :: units.distance()
     print(distance)
     print("{distance}")
-    print("{distance#Unit(name)}")
-    print("{distance#Unit(bare)}")
+    print("{distance:Unit(name)}")
+    print("{distance:Unit(bare)}")
 }
 "#;
     let expected = "defined in units\ndefined in units\n12 Meter\n12\n";

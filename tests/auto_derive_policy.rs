@@ -162,9 +162,9 @@ impl Manual.Debug {
 fn run() {
     a := Enabled.{ value: 3 }
     print(a)
-    print("{a#Debug}")
+    print("{a:Debug}")
     print(a == Enabled.{ value: 3 })
-    print("{Manual.{ value: 9 }#Debug}")
+    print("{Manual.{ value: 9 }:Debug}")
 }
 "#,
     );
@@ -238,7 +238,7 @@ struct OuterHidden { value: Hidden<Int> }
 
 fn reject_opaque_core(reader: FileReader) {
     print(reader)
-    print("{reader#Debug}")
+    print("{reader:Debug}")
 }
 
 fn reject_outer_reader(value: OuterReader) {
@@ -247,7 +247,7 @@ fn reject_outer_reader(value: OuterReader) {
 
 fn run() {
     print(OuterNoPrint.{ inner: NoPrint.{ value: 1 } })
-    print("{OuterNoDebug.{ inner: NoDebug.{ value: 2 } }#Debug}")
+    print("{OuterNoDebug.{ inner: NoDebug.{ value: 2 } }:Debug}")
     print(OuterNoEquality.{ inner: NoEquality.{ value: 3 } } == OuterNoEquality.{ inner: NoEquality.{ value: 3 } })
     print(OuterHidden.{ value: Hidden.{ value: 4 } })
 }
@@ -477,21 +477,21 @@ struct UnionEnvelope { value: Int | String }
 fn run() {
     token :: Token.{ value: 7 }
     print(token)
-    print("{token#Debug}")
+    print("{token:Debug}")
     print(token == Token.{ value: 7 })
 
     badge :: library.Badge.{ value: 9 }
     print(badge)
-    print("{badge#Debug}")
+    print("{badge:Debug}")
     print(badge == library.Badge.{ value: 9 })
 
     map :: MapEnvelope.{ values: [String: Int].{ "one": 1 } }
     print(map)
-    print("{map#Debug}")
+    print("{map:Debug}")
 
     union :: UnionEnvelope.{ value: 3 }
     print(union)
-    print("{union#Debug}")
+    print("{union:Debug}")
     print(union == UnionEnvelope.{ value: 3 })
 }
 "#,

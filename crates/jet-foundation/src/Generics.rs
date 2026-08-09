@@ -441,23 +441,30 @@ pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
 }
 
 /// D-ATTR4=A/D-FMT-INTERP1=A/D-QUANTITY-PRINT1=A+D:
-/// unknown interpolation selector after `#`.
+/// unknown interpolation selector after `:`.
 pub fn e0914(selector: &str, span: Span) -> Diagnostic {
+    let debug = crate::Syntax::interpolation_selector_for_kind(
+        crate::Syntax::InterpolationSelectorKind::Debug,
+    )
+    .name;
+    let fixed = crate::Syntax::interpolation_selector_for_kind(
+        crate::Syntax::InterpolationSelectorKind::Fixed,
+    )
+    .name;
+    let unit = crate::Syntax::interpolation_selector_for_kind(
+        crate::Syntax::InterpolationSelectorKind::Unit,
+    )
+    .name;
     Diagnostic::error(
         "E0914",
-        format!("unknown interpolation selector `#{}`", selector),
+        format!("unknown interpolation selector `:{}`", selector),
         format!(
-            "string interpolation supports a closed selector set — use `#{}`, `#{}(n)`, or `#{}(name|bare)`",
-            crate::Syntax::INTERP_SELECTOR_DEBUG,
-            crate::Syntax::INTERP_SELECTOR_FIXED,
-            crate::Syntax::INTERP_SELECTOR_UNIT
+            "string interpolation supports a closed selector set — use `:{}`, `:{}(n)`, or `:{}(name|bare)`",
+            debug, fixed, unit
         ),
         format!(
-            "write `{{value#{}}}`, `{{value#{}(2)}}`, `{{value#{}(name)}}`, `{{value#{}(bare)}}`, or `{{value}}`",
-            crate::Syntax::INTERP_SELECTOR_DEBUG,
-            crate::Syntax::INTERP_SELECTOR_FIXED,
-            crate::Syntax::INTERP_SELECTOR_UNIT,
-            crate::Syntax::INTERP_SELECTOR_UNIT
+            "write `{{value:{}}}`, `{{value:{}(2)}}`, `{{value:{}(name)}}`, `{{value:{}(bare)}}`, or `{{value}}`",
+            debug, fixed, unit, unit
         ),
         Some(span),
     )
@@ -471,8 +478,11 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
         "bare `{value}` interpolation calls `Display` — there is no default for user types"
             .to_string(),
         format!(
-            "add `impl {type_show}.Display {{ fn display(self) => String {{ … }} }}`, or use `{{value#{}}}` for debug output",
-            crate::Syntax::INTERP_SELECTOR_DEBUG
+            "add `impl {type_show}.Display {{ fn display(self) => String {{ … }} }}`, or use `{{value:{}}}` for debug output",
+            crate::Syntax::interpolation_selector_for_kind(
+                crate::Syntax::InterpolationSelectorKind::Debug,
+            )
+            .name
         ),
         Some(span),
     )

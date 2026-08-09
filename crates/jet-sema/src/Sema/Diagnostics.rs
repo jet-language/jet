@@ -996,7 +996,7 @@ pub(crate) fn e0139(clause_kw: &str, span: Option<Span>) -> Diagnostic {
     )
 }
 
-/// D-ATTR4=A: `{value#Debug}` uses auto-derived or explicit `Debug`.
+/// D-ATTR4=A: `{value:Debug}` uses auto-derived or explicit `Debug`.
 pub(crate) fn is_debuggable(
     ty: &Type,
     type_reg: &TypeRegistry,

@@ -40,11 +40,11 @@ fn package_formatter_fails_closed_on_comments() {
 
 #[test]
 fn fixed_interpolation_selector_is_stable() {
-    let src = "fn run(){price::1234.5\nprint(\"{price#Fixed(2)}\")}\n";
+    let src = "fn run(){price::1234.5\nprint(\"{price:Fixed(2)}\")}\n";
     let once = jet::format_source(src).expect("fixed interpolation should format");
     assert_eq!(
         once,
-        "fn run() {\n    price :: 1234.5\n    print(\"{price#Fixed(2)}\")\n}\n"
+        "fn run() {\n    price :: 1234.5\n    print(\"{price:Fixed(2)}\")\n}\n"
     );
     let twice = jet::format_source(&once).expect("fixed interpolation should re-format");
     assert_eq!(twice, once);

@@ -20,8 +20,9 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   nest (an unbalanced `/*` is E0002), so any region can be commented out (S5).
 - String literals: `"..."` on a single line. Escapes (S20): `\n` `\t` `\"`
   `\\` only; anything else after `\` is E0001. Interpolation (S8): `{expr}`
-  embeds any printable expression; `{{` and `}}` write literal braces; a
-  lone `{` or `}` is E0001.
+  embeds any printable expression; format selectors use the closed `:` rail
+  (`{value:Debug}`, `{value:Fixed(2)}`, `{value:Unit(name|bare)}`); `{{` and
+  `}}` write literal braces; a lone `{` or `}` is E0001.
 - Multi-line strings (S70): `"""…"""` span multiple lines with the same escapes
   and interpolation. The newline right after the opening `"""` and the one right
   before the closing `"""` are dropped, and the closing `"""`'s indentation is

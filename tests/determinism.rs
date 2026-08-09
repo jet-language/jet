@@ -245,7 +245,7 @@ fn copy_box(value: BoxedClock) =[]=> BoxedClock {
     return ~value
 }
 fn show_box(value: BoxedClock) =[]=> String {
-    return "{value#Debug}"
+    return "{value:Debug}"
 }
 fn run() {}
 "#;
@@ -261,7 +261,7 @@ struct Holder {
     clock: Clock
 }
 fn show(holder: Holder) =[]=> String {
-    return "{holder.clock} {holder.clock#Debug}"
+    return "{holder.clock} {holder.clock:Debug}"
 }
 fn run() {
     holder := Holder.{ clock: Clock.system() }
@@ -280,7 +280,7 @@ struct Holder {
     clock: Clock
 }
 fn show(holder: Holder) =[]=> String {
-    return "{holder#Debug}"
+    return "{holder:Debug}"
 }
 fn run() {
     holder := Holder.{ clock: Clock.system() }
@@ -307,7 +307,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     let main = dir.join("main.jet");
     std::fs::write(
         &main,
-        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) =[]=> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) =[]=> String {\n    return \"{value#Debug}\"\n}\nfn run() {}\n",
+        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) =[]=> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) =[]=> String {\n    return \"{value:Debug}\"\n}\nfn run() {}\n",
     )
     .unwrap();
 

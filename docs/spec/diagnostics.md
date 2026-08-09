@@ -570,7 +570,7 @@ renumbered, and no new `W` code may be allocated.
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public capability signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and capability freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
-| E0914 | parse | unknown interpolation selector after `#` (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1) |
+| E0914 | parse | unknown interpolation selector after `:` (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
 | E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
 | E0917 | sema  | `#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
@@ -1106,7 +1106,7 @@ block reserved for M6.
 | E2414 | A field's `=` default must be a compile-time constant. | A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, D-FIELDDEF1=C). An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). | Use a literal or a `comptime`-evaluable expression, e.g. `port: Int = 8080`, `env: String = "prod"`, or `ports: [Int] = [80, 443]`. |
 | E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
-| L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value#Debug}` for debug output. |
+| L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value:Debug}` for debug output. |
 
 ## Streaming I/O diagnostics (E2-M7, D-IO1..3)
 
@@ -1911,13 +1911,13 @@ diagnostic.
 
 | What | Why | Fix |
 |------|-----|-----|
-| Unknown interpolation selector `#…`. | String interpolation supports a closed selector set: `#Debug`, `#Fixed(n)`, `#Unit(name)`, and `#Unit(bare)`. | Write `{value#Debug}`, `{value#Fixed(2)}`, `{value#Unit(name)}`, `{value#Unit(bare)}`, or `{value}`. |
+| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Fixed(n)`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Fixed(2)}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
 
 ### E0915 — No Display implementation (D-DISPLAY-SHAPE)
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{type}` has no `Display` implementation ``. | Bare `{value}` interpolation calls `Display` — there is no default for user types. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value#Debug}` for debug output. |
+| `` `{type}` has no `Display` implementation ``. | Bare `{value}` interpolation calls `Display` — there is no default for user types. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value:Debug}` for debug output. |
 
 ### E0916 — Debug auto-derive blocked (D-DEBUG-REDACT)
 
