@@ -805,6 +805,7 @@ fn check_bundle_opts_for_output_inner(
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
     diags.extend(inject_units_prelude(bundle));
+    super::Prelude::inject(bundle);
     diags.extend(super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `$if build.os == {
@@ -1053,7 +1054,7 @@ fn check_bundle_opts_for_output_inner(
                 _ => {}
             }
             match item {
-                Item::Func(f) => register_func_item(f, st, &mut diags),
+                Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                 Item::Struct(s) => {
                     register_struct(
                         s,
@@ -1201,6 +1202,7 @@ fn check_bundle_opts_for_output_inner(
                                 &st.consts,
                                 &mut diags,
                                 false,
+                                !module.no_prelude,
                             );
                         }
                     }
@@ -1233,6 +1235,7 @@ fn check_bundle_opts_for_output_inner(
                                 &st.consts,
                                 &mut diags,
                                 true,
+                                !module.no_prelude,
                             );
                             // C FFI functions are callable across the `use c.<lib>`
                             // alias — expose them like any pub item.
@@ -1442,7 +1445,7 @@ fn check_bundle_opts_for_output_inner(
                 // the normal sema pipeline.
                 for item in &new_items {
                     match item {
-                        Item::Func(f) => register_func_item(f, st, &mut diags),
+                        Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                         Item::Struct(s) => {
                             register_struct(
                                 s,

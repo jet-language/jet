@@ -21,6 +21,7 @@ pub mod JSON;
 pub mod Numeric;
 pub mod OSTarget;
 pub mod Outcome;
+pub mod Prelude;
 pub mod JetTrace;
 pub mod PerformanceBudget;
 pub mod Persist;

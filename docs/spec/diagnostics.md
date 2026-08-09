@@ -390,7 +390,7 @@ renumbered, and no new `W` code may be allocated.
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type.{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0428 | parse | *retired by D-MARK-REPEAT1=A* (was: duplicate `#NoPrelude` marker in one file) |
-| E0429 | sema  | ambient `print`/`input` used under `#NoPrelude` (D-PRELUDEX1) |
+| E0429 | sema  | readable Core prelude name used under `#NoPrelude` (D-PRELUDEX1) |
 | E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
 | E0431 | parse | retired `Void` result type; use `()` (D-VOID1) |
 | E0501 | sema  | empty `[]` needs a context type           |
@@ -409,6 +409,7 @@ renumbered, and no new `W` code may be allocated.
 | L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
 | L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
 | L0507 | parse | prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68, D-BRANCH-LINT1=A) |
+| L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
 | E0601 | sema  | `#Test` block in wrong position / none found |
@@ -1337,7 +1338,7 @@ parse error (E0426) pointing at the new spelling —
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
 | E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type.{ uninit }` ``. | Write `` `{name} := <Type>.{ uninit }` ``. |
-| E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables the curated prelude auto-imports (`print` / `input`) ``. | Write `use core.io as io` and call `io.{name}(…)`, or remove `#NoPrelude`. |
+| E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables every readable Core prelude name ``. | Write a qualified Core call, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
 | E0431 | `` `Void` is retired ``. | `()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1. | Replace `Void` with `()`. |
 
@@ -1416,6 +1417,7 @@ already-freed arena), these track the views themselves.
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
 | L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | L0507 | prefer an ordered arm table for this branch | one ordered arm table is Jet's normal form for multi-line and chained choices | write `if { condition -> body else -> body }` |
+| L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
