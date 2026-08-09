@@ -324,7 +324,7 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
-        text: TYPE_ERROR,
+        text: TYPE_ERR,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -979,7 +979,7 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
         "Bench"
             | "Bool"
             | "Char"
-            | "Error"
+            | "Err"
             | "F32"
             | "F64"
             | "Float"
@@ -1096,7 +1096,7 @@ use super::{
     TYPE_BUDGET, TYPE_BUDGET_APPLIES,
     TYPE_BYTE_BUFFER, TYPE_CHAR, TYPE_COMPLEX, TYPE_COMPUTED, TYPE_DATA, TYPE_DATA_CSV,
     TYPE_DATA_TOML, TYPE_DATA_YAML, TYPE_DB_VALUE, TYPE_DECIMAL, TYPE_DEQUE, TYPE_DERIVED,
-    TYPE_EFFECT, TYPE_ERROR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE, TYPE_EVENT_TRACE,
+    TYPE_EFFECT, TYPE_ERR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE, TYPE_EVENT_TRACE,
     TYPE_F32, TYPE_F64, TYPE_FIXED_SIZE_SEP, TYPE_FLOAT, TYPE_HASH_MAP, TYPE_HOOK, TYPE_I16,
     TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INT, TYPE_INSTANT, TYPE_IO_ERROR, TYPE_JSON, TYPE_JSON_ERROR, TYPE_KEY,
     TYPE_LRU, TYPE_MEASUREMENT, TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_SELECT_BUILDER, TYPE_SET,

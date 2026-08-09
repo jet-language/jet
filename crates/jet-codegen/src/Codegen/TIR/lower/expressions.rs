@@ -1718,6 +1718,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
             // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
             // extra field (unlike HTTPRequest's `params`).
+            if type_name == Syntax::TYPE_ERR {
+                let tfields = fields
+                    .iter()
+                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(Syntax::TYPE_ERR.to_string()),
+                    kind: TExprKind::StructLit {
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             if matches!(
                 type_name.as_str(),
                 "TextWidth" | "TerminalSize" | "TerminalPolicy"
@@ -2718,7 +2732,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty: Type::Result {
                     ok: Box::new(t.ty.clone()),
-                    err: Box::new(Type::Named("Error".to_string())),
+                    err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
                 },
                 kind: TExprKind::Ok(Box::new(t)),
             }
@@ -2754,6 +2768,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             };
             let tconvert = match convert {
                 TryConvert::None => TTryConvert::None,
+                TryConvert::DefaultErr => TTryConvert::DefaultErr,
                 TryConvert::Fallible => TTryConvert::Fallible,
                 TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
                 TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {

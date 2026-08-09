@@ -2130,6 +2130,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .as_ref()
                 .map(|(_, concrete)| Type::Named(concrete.clone()))
                 .unwrap_or_else(|| e.ty.clone());
+            if matches!(&literal_ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
+                let value = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, ..)| field == name)
+                        .map(|(_, value, _)| emit_tir_expr(value, cx))
+                        .unwrap_or_else(|| "Err(JetAbsent)".to_string())
+                };
+                return format!(
+                    "{}jet_err({}, {}, {})",
+                    cx.root_prefix,
+                    value("message"),
+                    value("code"),
+                    value("cause")
+                );
+            }
             // Value-position generic heads need turbofish (`Foo::<T> {…}`);
             // `cx.rust_type` spells type-position `Foo<T>` and rustc rejects it.
             let rust_type = match &literal_ty {
@@ -2245,6 +2261,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             {
                 return format!("({}).grads_or_panic()", emit_tir_expr(recv, cx));
+            }
+            if matches!(&recv.ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
+                let helper = match field.as_str() {
+                    "message" => "jet_err_message",
+                    "code" => "jet_err_code",
+                    "cause" => "jet_err_cause",
+                    _ => unreachable!("sema approved Err field"),
+                };
+                return format!(
+                    "{}{}(&({}))",
+                    cx.root_prefix,
+                    helper,
+                    emit_tir_expr(recv, cx)
+                );
             }
             let field_rust = emit_field_rust(cx, &recv.ty, field);
             let read = format!("({}).{field_rust}", emit_tir_expr(recv, cx));
@@ -2791,6 +2821,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let v = emit_tir_expr(inner, cx);
             match convert {
+                TTryConvert::DefaultErr => format!(
+                    "jet_trace_err({}.map_err(jet_err_from_message), {}, {}, {})?",
+                    v, file, line, fn_name
+                ),
                 // S80/D-LIB3: error implements Fallible → `.map_err(|e| e.to_error())`.
                 TTryConvert::Fallible => format!(
                     "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",

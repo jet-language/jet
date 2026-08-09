@@ -561,6 +561,17 @@ impl<'a> Parser<'a> {
                         Type::String
                     }
                     Syntax::TYPE_CHAR => Type::Char,
+                    Syntax::RETIRED_TYPE_ERROR => {
+                        self.diags.push(Diagnostic::error(
+                            "E0432",
+                            "`Error` is retired".to_string(),
+                            "the default error type and its constructor now use the same name"
+                                .to_string(),
+                            "replace `Error` with `Err`".to_string(),
+                            Some(start),
+                        ));
+                        Type::Named(Syntax::TYPE_ERR.to_string())
+                    }
                     Syntax::RETIRED_TYPE_VOID => {
                         self.diags.push(Diagnostic::error(
                             "E0431",
@@ -656,7 +667,7 @@ impl<'a> Parser<'a> {
                             "E0406",
                             "`Result<T, E>` is old Jet error syntax".to_string(),
                             "fallible Jet types are written as `T ? E`".to_string(),
-                            "write the return type as `T ? E`, or `T ?` for the default Error type"
+                            "write the return type as `T ? E`, or `T ?` for the default Err type"
                                 .to_string(),
                             Some(start),
                         ));
@@ -741,7 +752,7 @@ impl<'a> Parser<'a> {
             } else {
                 Type::Result {
                     ok: Box::new(base),
-                    err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+                    err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
                 }
             }
         } else {

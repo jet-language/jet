@@ -10,6 +10,17 @@ use super::runtime_host::{jit_result, new_jit_module, ResidentModule};
 use super::tiers::TierPlan;
 use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
 
+fn main_returns_default_err(program: &JitProgram) -> bool {
+    program.funcs.iter().any(|func| {
+        func.name == program.entry
+            && matches!(
+                &func.ret,
+                Some(Type::Result { err, .. })
+                    if matches!(err.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR)
+            )
+    })
+}
+
 pub(crate) fn fresh_runtime() -> JitRuntime {
     JitRuntime {
         source_file: String::new(),
@@ -30,6 +41,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         task_groups: Vec::new(),
         cells: crate::Cell::CellState::new(),
         results: Vec::new(),
+        errors: Vec::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),
         clocks: Vec::new(),
@@ -120,6 +132,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.task_controls.clear();
     rt.task_groups.clear();
     rt.results.clear();
+    rt.errors.clear();
     rt.solvers.clear();
     rt.rngs.clear();
     rt.clocks.clear();
@@ -181,6 +194,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
     let main_returns_result = program.funcs.iter().any(|func| {
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
+    let main_returns_default_err = main_returns_default_err(program);
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
         let (mut module, host) = new_jit_module()?;
@@ -196,6 +210,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
                 host,
                 main_id,
                 main_returns_result,
+                main_returns_default_err,
             });
         });
         return Ok(());
@@ -216,13 +231,14 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
             )?;
             runtime.snapshot_compile_strings();
             resident.main_returns_result = main_returns_result;
+            resident.main_returns_default_err = main_returns_default_err;
             Ok(())
         })
     })
 }
 
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    let (code, main_returns_result) = RESIDENT_MODULE
+    let (code, main_returns_result, main_returns_default_err) = RESIDENT_MODULE
         .with(|slot| {
             slot.borrow()
                 .as_ref()
@@ -230,6 +246,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                     (
                         r.module.get_finalized_function(r.main_id),
                         r.main_returns_result,
+                        r.main_returns_default_err,
                     )
                 })
         })
@@ -242,6 +259,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         runtime.stdout.clear();
         runtime.stderr.clear();
         runtime.results.clear();
+        runtime.errors.clear();
         let ptr: *mut JitRuntime = runtime;
         Concurrency::set_active_runtime(Some(ptr));
         let entry_result = if main_returns_result {
@@ -309,10 +327,18 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             let result = jit_result(runtime, handle)
                 .ok_or_else(|| "jit fallible entry returned invalid Result handle".to_string())?;
             if !result.ok {
-                let message = runtime
-                    .heap
-                    .clone_string(result.bits as i64)
-                    .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?;
+                let message = if main_returns_default_err {
+                    let error = runtime
+                        .errors
+                        .get((result.bits as i64).saturating_sub(1) as usize)
+                        .ok_or_else(|| "jit fallible entry returned invalid Err handle".to_string())?;
+                    jet_foundation::Outcome::jet_render_err(error)
+                } else {
+                    runtime
+                        .heap
+                        .clone_string(result.bits as i64)
+                        .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?
+                };
                 runtime.stderr.push_str(&message);
                 runtime.stderr.push('\n');
                 return Ok(RunOutcome::Ran {
@@ -371,6 +397,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
     let main_returns_result = program.funcs.iter().any(|func| {
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
+    let main_returns_default_err = main_returns_default_err(program);
     let (mut module, host) = new_jit_module()?;
     let mut runtime = RESIDENT_RUNTIME
         .with(|slot| slot.borrow_mut().take())
@@ -408,6 +435,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
             host,
             main_id,
             main_returns_result,
+            main_returns_default_err,
         });
     });
     resident_invoke()
@@ -426,6 +454,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
     let main_returns_result = program.funcs.iter().any(|func| {
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
+    let main_returns_default_err = main_returns_default_err(program);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
     RESIDENT_MODULE.with(|slot| {
         *slot.borrow_mut() = Some(ResidentModule {
@@ -433,6 +462,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
             host,
             main_id,
             main_returns_result,
+            main_returns_default_err,
         });
     });
     resident_invoke()

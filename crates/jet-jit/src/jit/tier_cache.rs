@@ -490,6 +490,7 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
             host,
             main_id,
             main_returns_result: false,
+            main_returns_default_err: false,
         });
     });
     resident_invoke()

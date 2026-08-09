@@ -74,7 +74,7 @@ fn lookup(id: Int) => Int? {
     return None
 }
 
-fn parse(raw: String) => Int ? Error {
+fn parse(raw: String) => Int ? Err {
     if raw == "" { return Err("empty") }
     return Ok(7)
 }
@@ -93,7 +93,7 @@ fn run() {
         "`T?` must lower onto the carrier:\n{lookup}"
     );
     assert!(
-        parse.contains("JetOutcome<i64, String>"),
+        parse.contains("JetOutcome<i64, JetErr>"),
         "`T ? E` must lower onto the same carrier:\n{parse}"
     );
     assert!(
@@ -121,7 +121,7 @@ fn or_err_lifts_a_clean_absence_into_a_failure() {
     let rust = compile(
         "or_err",
         r#"
-fn birth_year(book: [String: String], name: String) => String ? Error {
+fn birth_year(book: [String: String], name: String) => String ? Err {
     return book.get(name).or_err("nobody in the book is called that")
 }
 
@@ -274,6 +274,85 @@ fn run() {
         !emitter.contains("format!(\"Option<{}>\""),
         "no second representation may survive on the web tier"
     );
+}
+
+/// D-FAIL-ERROR1=A / I9: a web-side default error is the Prelude value, and
+/// field reads marshal through the same helpers as native code.
+#[test]
+fn the_web_tier_marshals_default_err_values() {
+    let src = r#"
+#Target(Wasm)
+fn run() {
+    error :: Err("bad", code: "E_BAD", cause: Err("root"))
+    print(error.message)
+}
+"#;
+    let out = jet::compile_web_with_path(src, "default_err.jet")
+        .unwrap_or_else(|diags| panic!("web Err fixture rejected: {diags:?}"));
+    let web = out.web.expect("web target must produce artifacts");
+
+    assert!(web.wasm_rust.contains("pub struct JetErr {"));
+    assert!(web.wasm_rust.contains("jet_err("));
+    assert!(web.wasm_rust.contains("jet_err_message"));
+
+    let js_src = r#"
+#Target(Web)
+#Target(JS)
+fn run() {
+    error :: Err("bad", code: "E_BAD", cause: Err("root"))
+    print(error.message)
+}
+"#;
+    let js_out = jet::compile_web_with_path(js_src, "default_err.js.jet")
+        .unwrap_or_else(|diags| panic!("web JS Err fixture rejected: {diags:?}"));
+    let js = js_out.web.expect("JS web target must produce artifacts");
+    assert!(
+        js.js_app.contains("message: \"bad\"")
+            && js.js_app.contains("code: \"E_BAD\"")
+            && js.js_app.contains("cause:"),
+        "the JS tier must carry the same Err fields:\n{}",
+        js.js_app
+    );
+}
+
+/// D-FAIL-ERROR1=A / I9: the standalone interpreter reports the same Prelude
+/// value as the compiled edge when `fn run` returns an unhandled `Err`.
+#[test]
+fn the_interpreter_edge_renders_default_err_through_the_prelude() {
+    let src = r#"
+fn run() => () ? Err {
+    return Err("unhandled", code: "E_RUN", cause: Err("root"))
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_default_err_interpreter_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    fs::write(&file, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
+        .expect("interpreter Err fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "interpreter Err fixture should type-check: {diagnostics:?}"
+    );
+
+    match jet::Interpreter::run_checked(&bundle, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(stdout, "");
+            assert_eq!(exit_code, 1);
+            assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
+        }
+        other => panic!("interpreter Err fixture did not run: {other:?}"),
+    }
 }
 
 /// The verdict erases from the happy path: reading a `T?` costs no allocation

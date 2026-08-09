@@ -49,11 +49,31 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_err(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
-        let payload = self.infer(inner)?;
+        let mut payload = self.infer(inner)?;
         if let Some(expected) = self.expected_type.clone() {
             if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
+                if is_default_error(err_ty) && payload == Type::String {
+                    let message = std::mem::replace(inner.as_mut(), Expr::Absent(span));
+                    let call = Call {
+                        name: Syntax::LIT_ERR.to_string(),
+                        name_span: span,
+                        type_args: Vec::new(),
+                        args: vec![crate::AST::CallArg {
+                            convention: crate::AST::AccessConvention::Read,
+                            span,
+                            expr: message,
+                            flags: Default::default(),
+                            label: None,
+                            spread: false,
+                        }],
+                        resolved_ret: None,
+                        range_checked: false,
+                        widen_approx: false,
+                    };
+                    *inner = Box::new(self.default_err_value(call, false));
+                    payload = Type::Named(Syntax::TYPE_ERR.to_string());
+                }
                 let ok_payload = payload == *err_ty
-                    || (is_default_error(err_ty) && payload == Type::String)
                     || matches!(err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
                 if !ok_payload {
                     self.diags.push(Diagnostic::error(
@@ -109,11 +129,16 @@ impl<'a> Checker<'a> {
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
                     // only propagates the error; the unwrapped Ok value may have any
                     // type (it is bound by the caller, not returned unchanged).
+                    Type::Result { err: ret_err, .. } if *ret_err == err => {
+                        Some((*ok).clone())
+                    }
+                    // D-FAIL-ERROR1=A: older String-returning callees cross into
+                    // the default family through one explicit Prelude conversion.
                     Type::Result { err: ret_err, .. }
-                        if *ret_err == err
-                            || (is_default_error(ret_err)
-                                && matches!(err.as_ref(), Type::String)) =>
+                        if is_default_error(ret_err)
+                            && matches!(err.as_ref(), Type::String) =>
                     {
+                        *convert = TryConvert::DefaultErr;
                         Some((*ok).clone())
                     }
                     // D-UNIONTYPE1=A: member error widens into the return's union.
@@ -141,7 +166,7 @@ impl<'a> Checker<'a> {
                         }
 
                         // S80/D-LIB3: check if the error type implements `Fallible`
-                        // and the return error is the default `Error`.
+                        // and the return error is the default `Err`.
                         if is_default_error(ret_err) {
                             if self
                                 .trait_reg
@@ -151,19 +176,19 @@ impl<'a> Checker<'a> {
                                 *convert = TryConvert::Fallible;
                                 return Some((*ok).clone());
                             }
-                            // E2402: return is `Error` but the error type has no Fallible impl.
+                            // E2402: return is `Err` but the error type has no Fallible impl.
                             let err_name = err.name();
                             self.diags.push(Diagnostic::error(
                                 "E2402",
                                 format!(
                                     "`?` can't convert `{}` into `{}`",
                                     err_name,
-                                    Syntax::TYPE_ERROR
+                                    Syntax::TYPE_ERR
                                 ),
                                 format!(
                                     "`{}` has no path to `{}`; implement `impl {}: {}` to enable conversion",
                                     err_name,
-                                    Syntax::TYPE_ERROR,
+                                    Syntax::TYPE_ERR,
                                     err_name,
                                     Syntax::TRAIT_FALLIBLE
                                 ),
@@ -171,7 +196,7 @@ impl<'a> Checker<'a> {
                                     "add `impl {}: {} {{ fn to_error(self) => {} {{ … }} }}`, or change the return type",
                                     err_name,
                                     Syntax::TRAIT_FALLIBLE,
-                                    Syntax::TYPE_ERROR
+                                    Syntax::TYPE_ERR
                                 ),
                                 Some(span),
                             ));

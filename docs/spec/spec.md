@@ -952,12 +952,12 @@ impl Circle {
 ## M4 — errors as values (done)
 
 Fallible functions return **`T ? E`** (S34): `T` is the success payload,
-`E` is any enum, struct, `String`, or the default **`Error`** type. Omitting
-the error side in a function return — **`T ?`** — means **`T ? Error`**.
+`E` is any enum, struct, `String`, or the default **`Err`** type. Omitting
+the error side in a function return — **`T ?`** — means **`T ? Err`**.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion supports two forms:
-- **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) => Error { Error.from(self) } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
+- **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) => Err { Err(str(self)) } }` — converts a typed error to the default `Err`. Prelude types implement `Fallible` by default.
 - **Declared typed conversion** (D-ERR-CONV): `impl Source => Target { Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The

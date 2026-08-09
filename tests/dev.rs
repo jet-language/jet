@@ -2938,6 +2938,59 @@ fn run() {
 }
 
 #[test]
+fn default_err_matches_interpreter_resident_jit_default_dev_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let file = "examples/features/errors/default_err_value.jet";
+    let expected_stderr = fs::read_to_string(
+        "examples/features/expected/errors/default_err_value.err.out",
+    )
+    .expect("default_err_value.err.out");
+    let expected = ProgramOutput::ran(
+        "parse failed\nCFG404\nunexpected token at line 3\n".to_string(),
+        expected_stderr,
+        1,
+    );
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default Err example must execute in interpreter tier: {diags:?}")
+        }
+    };
+
+    let source = fs::read_to_string(file).unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(&source, "default_err");
+    assert!(jet_jit::jit_executed_for_test(), "default Err must execute as native JIT");
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "default Err must not use interpreter deopt or fallback"
+    );
+    let default = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => panic!("default dev failed default Err: {diags:?}"),
+    };
+
+    let dir = std::env::temp_dir().join(format!("jet_default_err_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "default_err", 0, "default_err", file);
+
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

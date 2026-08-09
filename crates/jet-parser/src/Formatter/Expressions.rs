@@ -577,7 +577,7 @@ impl<'a> Fmt<'a> {
         if let Type::Result { ok, err } = ty {
             self.fmt_type(ok);
             self.write(" ?");
-            if !matches!(**err, Type::Named(ref n) if n == Syntax::TYPE_ERROR) {
+            if !matches!(**err, Type::Named(ref n) if n == Syntax::TYPE_ERR) {
                 self.write(" ");
                 self.fmt_type(err);
             }
@@ -1020,6 +1020,27 @@ impl<'a> Fmt<'a> {
                 span,
                 ..
             } => {
+                // D-FAIL-ERROR1=A: sema stores the constructor as a private
+                // three-field value, but source has one canonical call shape.
+                if type_name == Syntax::TYPE_ERR {
+                    self.write(Syntax::LIT_ERR);
+                    self.write("(");
+                    if let Some((_, _, message)) = fields.iter().find(|(name, ..)| name == "message") {
+                        self.fmt_expr(message, Prec::OrFallback);
+                    }
+                    for label in ["code", "cause"] {
+                        if let Some((_, _, Expr::Present(value, _))) =
+                            fields.iter().find(|(name, ..)| name == label)
+                        {
+                            self.write(", ");
+                            self.write(label);
+                            self.write(": ");
+                            self.fmt_expr(value, Prec::OrFallback);
+                        }
+                    }
+                    self.write(")");
+                    return;
+                }
                 // D-DOTCTOR1: emit `Type.{ … }` (named) or `.{ … }` (inferred).
                 // The formatter is also the auto-fixer for E0320: any old `Type { … }`
                 // (recovered with `inferred: false`) is re-emitted in the new form.

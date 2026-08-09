@@ -734,7 +734,7 @@ pub(crate) fn lower_method_call(
         return TExpr {
             ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                 ok: Box::new(recv.ty.clone()),
-                err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+                err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
             }),
             kind: TExprKind::MethodCall {
                 recv: Box::new(recv),
@@ -1302,7 +1302,8 @@ pub(crate) fn lower_method_call(
     }
     // D-ERRCTX1=D: `<fallible>.context("…")` — lazily-evaluated (only formatted
     // if the error actually propagates): wrap the message in a zero-arg closure
-    // and let `jet_context` call it only on the `Err` branch.
+    // and let the Outcome Prelude's `jet_err_context` call it only on the
+    // `Err` branch.
     if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
         let recv = lower_expr(receiver, cx, env);
         let msg = lower_expr(&args[0].expr, cx, env);

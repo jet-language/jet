@@ -471,7 +471,7 @@ fn or_fallback_return_form() {
         return;
     }
     let src = "\
-fn checked(x: Int) => Int ? Error {
+fn checked(x: Int) => Int ? Err {
     if x == 0 {
         return Err(\"zero\")
     }

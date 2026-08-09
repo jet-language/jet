@@ -199,7 +199,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | Syntax::TYPE_ERR | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
@@ -392,6 +392,14 @@ pub(crate) fn core_lang_variants(
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_ERR {
+        return match field {
+            "message" => Some(Type::String),
+            "code" => Some(Type::Option(Box::new(Type::String))),
+            "cause" => Some(Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string())))),
+            _ => None,
+        };
+    }
     if type_name == Syntax::TYPE_RANGE {
         return match field {
             "start" | "end" => Some(Type::Int),
@@ -1709,6 +1717,15 @@ pub fn encoding_handle_method_return(
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
     match type_name {
+        // D-FAIL-ERROR1=A: constructor calls normalize to this private shape.
+        name if name == Syntax::TYPE_ERR => Some(vec![
+            ("message".to_string(), Type::String),
+            ("code".to_string(), Type::Option(Box::new(Type::String))),
+            (
+                "cause".to_string(),
+                Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
+            ),
+        ]),
         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: explicit terminal
         // controls use named fields so misspellings fail in sema.
         "TerminalSize" => Some(vec![

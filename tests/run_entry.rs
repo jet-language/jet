@@ -12,8 +12,8 @@ fn run() => () ? {
 "#;
     let out = jet::compile(src).expect("fallible unit run should compile");
     assert!(
-        out.rust.contains("pub fn user_run() -> Result<(), String>"),
-        "() ? run should lower to Result<(), String>:\n{}",
+        out.rust.contains("pub fn user_run() -> Result<(), JetErr>"),
+        "() ? run should lower to Result<(), JetErr>:\n{}",
         out.rust
     );
     assert!(

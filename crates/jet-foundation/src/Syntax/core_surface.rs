@@ -183,7 +183,10 @@ pub const TYPE_INT: &str = "Int";
 pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
-pub const TYPE_ERROR: &str = "Error";
+/// D-FAIL-ERROR1=A: default error type and constructor share `Err`.
+pub const TYPE_ERR: &str = "Err";
+/// Retired S80 type spelling. Parser keeps it only for E0432 teaching.
+pub const RETIRED_TYPE_ERROR: &str = "Error";
 /// D-VOID1: the public no-information result spelling is `()`.
 pub const TYPE_UNIT: &str = "()";
 /// Compiler-only name carried by the existing zero-sized runtime value.

@@ -403,6 +403,9 @@ pub struct LoadedModule {
 pub enum TryConvert {
     /// Error types match exactly — no conversion needed.
     None,
+    /// D-FAIL-ERROR1=A: a legacy string-shaped failure becomes the default
+    /// `Err` value at the propagation seam.
+    DefaultErr,
     /// The source error implements `Fallible`; call `.to_error()` (D-ERR2).
     Fallible,
     /// Declared `impl Source => Target { … }` conversion (D-ERR-CONV).

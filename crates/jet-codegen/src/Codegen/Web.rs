@@ -2312,6 +2312,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
             wasm_storage_ty(key)?,
             wasm_storage_ty(value)?
         ),
+        Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
         Type::Named(name) => user_type_rust(name.rsplit('.').next().unwrap_or(name)),
         Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
         _ => return None,
@@ -2330,6 +2331,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
             wasm_internal_ty(err, bundle)?
         ),
         Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
+        Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
         Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
             user_type_rust(name.rsplit('.').next().unwrap_or(name))
         }
@@ -3218,16 +3220,35 @@ fn wasm_emit_expr(
         ),
         TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Field { recv, field, boxed: false } => {
-            format!(
-                "({}).{}",
-                wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
-                mangle(field)
-            )
+            let recv_expr = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
+                match field.as_str() {
+                    "message" => format!("jet_err_message(&({recv_expr}))"),
+                    "code" => format!("jet_err_code(&({recv_expr}))"),
+                    "cause" => format!("jet_err_cause(&({recv_expr}))"),
+                    _ => return Err(()),
+                }
+            } else {
+                format!("({}).{}", recv_expr, mangle(field))
+            }
         }
         TIR::TExprKind::StructLit { fields, .. } => {
             let Type::Named(name) = &expr.ty else {
                 return Err(());
             };
+            if name == jet_foundation::Syntax::TYPE_ERR {
+                let value = |wanted: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _, _)| field == wanted)
+                        .map(|(_, value, _)| value)
+                        .ok_or(())
+                };
+                let message = wasm_emit_expr(value("message")?, funcs, file_prefix, reconstructions)?;
+                let code = wasm_emit_expr(value("code")?, funcs, file_prefix, reconstructions)?;
+                let cause = wasm_emit_expr(value("cause")?, funcs, file_prefix, reconstructions)?;
+                return Ok(format!("jet_err({message}, {code}, {cause})"));
+            }
             format!(
                 "{} {{ {} }}",
                 user_type_rust(name),

@@ -2101,10 +2101,10 @@ impl<'a> Checker<'a> {
             // paths (no new diagnostic code), per the ratified text.
             if method == "context" {
                 if let Type::Result { err, .. } = &recv_ty {
-                    // A custom error type (`T ? MyError`) isn't the string-erased
-                    // `Error` surface `.context()` targets — fall through so the
+                    // A custom error type (`T ? MyError`) is not the default
+                    // `Err` surface `.context()` targets — fall through so the
                     // normal "unknown method" path teaches the actual shape.
-                    if matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR) {
+                    if matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERR) {
                         if args.len() != 1 {
                             self.diags
                                 .push(wrong_core_arity("context", 1, args.len(), span));
@@ -2120,7 +2120,7 @@ impl<'a> Checker<'a> {
                         if let Some(t) = msg_ty {
                             self.check_type_assignable(&Type::String, &t, args[0].expr.span());
                         }
-                        // D-ERRCTX1=D: cheap "receiver is `Result<_, Error>`" signal for
+                        // D-ERRCTX1=D: cheap "receiver is `Result<_, Err>`" signal for
                         // the TIR subset gate (mirrors how a named type's method sets
                         // `recv_type_out`) — codegen/subset re-derive the shape from this
                         // rather than re-inferring the receiver's full type.

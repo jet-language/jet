@@ -634,16 +634,6 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
     }
     r
 }
-// D-ERRCTX1=D: `.context(msg)` — a lazily-evaluated human boundary message
-// prepended to the error chain (errors are plain `String`s in Jet, so the
-// chain is just accumulated text: origin, then each `.context()` crossed on
-// the way out). `msg` runs only on the `Err` branch.
-fn jet_context<T, F: FnOnce() -> String>(r: Result<T, String>, msg: F) -> Result<T, String> {
-    match r {
-        Ok(v) => Ok(v),
-        Err(e) => Err(format!("{}: {}", msg(), e)),
-    }
-}
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {

@@ -1096,15 +1096,18 @@ user type of the same name shadows the core surface entirely.
 
 **S7 — Propagation**: postfix `?` on a fallible call.
 
-**S34 — Fallible return**: `T ? E`; bare `T ?` means `T ? Error`. Lowers to
+**S34 — Fallible return**: `T ? E`; bare `T ?` means `T ? Err`. Lowers to
 Rust `Result` (not surface syntax).
 
-**S80 — Error carrier & fallible `run`** *(D-ERR2, D-S80-RUN1)*: default `Error` carries
-message + optional code + optional source (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)`). `fn run() => () ?` allowed;
-returned errors print in the diagnostic voice, exit non-zero. Cross-type `?`
-conversion is opt-in via the `Fallible` trait (`fn to_error(self) => Error`);
-prelude types implement it, unrelated enums never convert silently.
+**S80 — Default error value** *(D-ERR2 and D-FAIL-ERROR1=A, amended
+2026-08-06, card #1528)*: `Err` is both the default error type and its
+constructor. `Err("msg")`, `Err("msg", code: "CFG404")`, and
+`Err("msg", cause: e)` build one Prelude-owned value with readable `message`,
+`code`, and `cause` fields. `Error` is deleted, not aliased. Bare `T ?` means
+`T ? Err`; `T ? Err` is the explicit form. An `Err(e)` in a result-arm context
+still wraps the typed error value `e`. Argument shape distinguishes the two
+readings. Returned default errors print one report frame and exit non-zero.
+Cross-type conversion remains governed by the failure-family conversion rail.
 
 **D-ERRCTX1 — Error context**: automatic `?`-propagation trace in dev builds;
 stdlib `.context("msg {var}")` (lazy) for human wording. No new grammar.

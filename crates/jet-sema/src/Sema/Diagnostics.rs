@@ -44,7 +44,7 @@ pub(crate) fn option_used_where_plain_expected(want: &Type, got: &Type) -> bool 
 }
 
 pub(crate) fn is_default_error(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == Syntax::TYPE_ERROR)
+    matches!(ty, Type::Named(n) if n == Syntax::TYPE_ERR)
 }
 
 pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {

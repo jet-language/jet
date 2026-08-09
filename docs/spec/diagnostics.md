@@ -394,6 +394,7 @@ renumbered, and no new `W` code may be allocated.
 | E0429 | sema  | readable Core prelude name used under `#NoPrelude` (D-PRELUDEX1) |
 | E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
 | E0431 | parse | retired `Void` result type; use `()` (D-VOID1) |
+| E0432 | parse | retired `Error` type name; use `Err` (D-FAIL-ERROR1) |
 | E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -1089,7 +1090,7 @@ block reserved for M6.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
-| E2402 | `?` can't convert `{err}` into `Error` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Error` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Error`. | Add `impl {err}: Fallible { fn to_error(self) => Error { Error(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
+| E2402 | `?` can't convert `{err}` into `Err` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Err` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Err`. | Add `impl {err}: Fallible { fn to_error(self) => Err { Err(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source => Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} => {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} => {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … => …` blocks. |
@@ -1347,6 +1348,7 @@ parse error (E0426) pointing at the new spelling —
 | E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables every readable Core prelude name ``. | Write a qualified Core call, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
 | E0431 | `` `Void` is retired ``. | `()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1. | Replace `Void` with `()`. |
+| E0432 | `` `Error` is retired ``. | The default error type and its constructor now use the same name. | Replace `Error` with `Err`. |
 
 ## Low-level tier diagnostics (E2-M13, S58)
 

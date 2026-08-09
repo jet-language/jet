@@ -3,7 +3,44 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, build_and_run_full, compile, have_rustc};
+use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
+
+/// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;
+/// one positional typed value in a result arm still wraps that value.
+#[test]
+fn default_err_value_and_typed_err_arm_have_distinct_shapes() {
+    let src = r#"
+fn make() => Err {
+    return Err("bad input", code: "E_BAD", cause: Err("root cause"))
+}
+
+fn typed(value: Err) => () ? Err {
+    return Err(value)
+}
+
+fn run() => () ? Err {
+    return typed(make())
+}
+"#;
+    let rust = compile("tir_default_err_value", src);
+    assert!(rust.contains("jet_err("), "default Err must call the Prelude constructor");
+    assert!(rust.contains("return Err("), "typed Err arm must remain a Result wrapper");
+}
+
+/// D-FAIL-ERROR1=A / I9: the default `jet run` edge renders the same Prelude
+/// value and cause chain as the AOT and standalone interpreter edges.
+#[test]
+fn default_err_value_runs_on_the_default_jit_edge() {
+    let src = r#"
+fn run() => () ? Err {
+    return Err("unhandled", code: "E_RUN", cause: Err("root"))
+}
+"#;
+    let (code, stdout, stderr) = jit_run("tir_default_err_run", src);
+    assert_eq!(stdout, "");
+    assert_eq!(code, 1, "default `jet run` should return an unhandled Err");
+    assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
+}
 
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.

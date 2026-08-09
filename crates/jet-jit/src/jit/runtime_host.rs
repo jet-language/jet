@@ -110,6 +110,9 @@ pub(crate) struct JitRuntime {
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,
+    /// D-FAIL-ERROR1=A: Prelude-owned default error values. JIT code sees only
+    /// one-based handles and marshals fields through the helpers below.
+    pub(crate) errors: Vec<jet_foundation::Outcome::JetErr>,
     pub(crate) solvers: Vec<Solver::SolverState>,
     pub(crate) rngs: Vec<crate::Random::RngState>,
     /// Manual `Clock.new(ms)` handles — 1-based indices into this vec (#729 uuid).
@@ -232,6 +235,7 @@ pub(crate) struct ResidentModule {
     pub(crate) host: HostFns,
     pub(crate) main_id: FuncId,
     pub(crate) main_returns_result: bool,
+    pub(crate) main_returns_default_err: bool,
 }
 
 fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
@@ -1041,13 +1045,18 @@ extern "C" fn jet_jit_result_context(handle: i64, msg: i64) -> i64 {
         if result.ok {
             return handle;
         }
-        let err = rt
-            .heap
-            .clone_string(result.bits as i64)
-            .unwrap_or_default();
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
-        let combined = rt.heap.alloc_string(format!("{msg}: {err}"));
-        alloc_jit_result(rt, false, combined as u64)
+        let Some(error) = rt
+            .errors
+            .get((result.bits as i64).saturating_sub(1) as usize)
+            .cloned()
+        else {
+            return 0;
+        };
+        rt.errors
+            .push(jet_foundation::Outcome::jet_err_context(error, msg));
+        let handle = rt.errors.len() as u64;
+        alloc_jit_result(rt, false, handle)
     })
 }
 
@@ -1269,6 +1278,69 @@ extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
     with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_string(h, idx, v);
     });
+}
+
+extern "C" fn jet_jit_err_new(message: i64, code: i64, cause: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        use jet_foundation::Outcome::{jet_err, JetAbsent};
+
+        let message = rt.heap.clone_string(message).unwrap_or_default();
+        let code = if code == 0 {
+            Err(JetAbsent)
+        } else {
+            rt.heap
+                .clone_string(code - 1)
+                .ok_or(JetAbsent)
+        };
+        let cause = if cause == 0 {
+            Err(JetAbsent)
+        } else {
+            let handle = cause - 1;
+            rt.errors
+                .get(handle.saturating_sub(1) as usize)
+                .cloned()
+                .ok_or(JetAbsent)
+        };
+        rt.errors.push(jet_err(message, code, cause));
+        rt.errors.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_err_message(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
+            return 0;
+        };
+        rt.heap
+            .alloc_string(jet_foundation::Outcome::jet_err_message(error))
+    })
+}
+
+extern "C" fn jet_jit_err_code(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
+            return 0;
+        };
+        match jet_foundation::Outcome::jet_err_code(error) {
+            Ok(code) => rt.heap.alloc_string(code) + 1,
+            Err(_) => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_err_cause(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
+            return 0;
+        };
+        match jet_foundation::Outcome::jet_err_cause(error) {
+            Ok(cause) => {
+                rt.errors.push(cause);
+                rt.errors.len() as i64 + 1
+            }
+            Err(_) => 0,
+        }
+    })
 }
 
 fn alloc_measurement(rt: &mut JitRuntime, value: (f64, f64)) -> i64 {
@@ -2175,6 +2247,10 @@ host_fns! {
     struct_set_bool: "jet_jit_struct_set_bool" => jet_jit_struct_set_bool: sig_struct_set_i8;
     struct_set_char: "jet_jit_struct_set_char" => jet_jit_struct_set_char: sig_struct_set_i32;
     struct_set_str: "jet_jit_struct_set_str" => jet_jit_struct_set_str: sig_struct_set_i64;
+    err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
+    err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
+    err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
+    err_cause: "jet_jit_err_cause" => jet_jit_err_cause: sig_str_unary_i64;
     measurement_new: "jet_jit_measurement_new" => jet_jit_measurement_new: sig_measurement_new;
     measurement_arithmetic: "jet_jit_measurement_arithmetic" => jet_jit_measurement_arithmetic: sig_measurement_arithmetic;
     measurement_get: "jet_jit_measurement_get" => jet_jit_measurement_get: sig_measurement_get;

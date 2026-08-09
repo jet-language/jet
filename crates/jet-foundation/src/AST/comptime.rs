@@ -572,6 +572,67 @@ impl CtValue {
             _ => None,
         }
     }
+
+    /// Interpreter/deopt adapter for D-FAIL-ERROR1=A. This only marshals the
+    /// checked TIR shape; construction, field meaning, and rendering stay in
+    /// the shared Prelude's `JetErr` implementation.
+    pub fn to_jet_err(&self) -> Option<crate::Outcome::JetErr> {
+        use crate::Outcome::{jet_err, JetAbsent};
+
+        let CtValue::Struct { type_name, fields } = self else {
+            return None;
+        };
+        if type_name != crate::Syntax::TYPE_ERR {
+            return None;
+        }
+        let field = |name: &str| {
+            fields
+                .iter()
+                .find(|(field, _)| field == name)
+                .map(|(_, value)| value)
+        };
+        let CtValue::Str(message) = field("message")? else {
+            return None;
+        };
+        let code = match field("code") {
+            Some(CtValue::Present(value)) => match value.as_ref() {
+                CtValue::Str(code) => Ok(code.clone()),
+                _ => return None,
+            },
+            Some(CtValue::Failed(CtReport::Clean(_))) => Err(JetAbsent),
+            _ => return None,
+        };
+        let cause = match field("cause") {
+            Some(CtValue::Present(value)) => value.to_jet_err().ok_or(JetAbsent),
+            Some(CtValue::Failed(CtReport::Clean(_))) => Err(JetAbsent),
+            _ => return None,
+        };
+        Some(jet_err(message.clone(), code, cause))
+    }
+
+    /// Interpreter/deopt adapter from the Prelude-owned error shape. This is
+    /// the inverse of `to_jet_err`; it does not recreate error semantics.
+    pub fn from_jet_err(error: &crate::Outcome::JetErr) -> CtValue {
+        let code = match crate::Outcome::jet_err_code(error) {
+            Ok(code) => CtValue::Present(Box::new(CtValue::Str(code))),
+            Err(_) => CtValue::absent(Type::String),
+        };
+        let cause = match crate::Outcome::jet_err_cause(error) {
+            Ok(cause) => CtValue::Present(Box::new(CtValue::from_jet_err(&cause))),
+            Err(_) => CtValue::absent(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+        };
+        CtValue::Struct {
+            type_name: crate::Syntax::TYPE_ERR.to_string(),
+            fields: vec![
+                (
+                    "message".to_string(),
+                    CtValue::Str(crate::Outcome::jet_err_message(error)),
+                ),
+                ("code".to_string(), code),
+                ("cause".to_string(), cause),
+            ],
+        }
+    }
 }
 
 /// A compiler-private opaque value that can cross the `CtValue` boundary while
@@ -748,6 +809,11 @@ impl CtValue {
             CtValue::Failed(CtReport::Clean(_)) => "null".to_string(),
             CtValue::Failed(CtReport::Told(_)) => "err".to_string(),
             CtValue::Struct { type_name, fields } => {
+                if type_name == crate::Syntax::TYPE_ERR {
+                    if let Some(error) = self.to_jet_err() {
+                        return crate::Outcome::jet_render_err(&error);
+                    }
+                }
                 // AOT `JetShow` for user structs is `format!("{:?}", self)`
                 // (`Codegen::Items`) → `user_Name { user_field: … }`. Match that
                 // here (I2 / #777 corpus differential). Table/Series/LazyFrame
@@ -1292,5 +1358,36 @@ mod tests {
             );
             assert_eq!(error.fix, "use a simpler form, or run via `jet build` / `jet run`");
         }
+    }
+
+    #[test]
+    fn default_err_ct_value_uses_the_prelude_shape_and_renderer() {
+        let cause = CtValue::Struct {
+            type_name: crate::Syntax::TYPE_ERR.to_string(),
+            fields: vec![
+                ("message".to_string(), CtValue::Str("bad input".to_string())),
+                ("code".to_string(), CtValue::absent(Type::String)),
+                (
+                    "cause".to_string(),
+                    CtValue::absent(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+                ),
+            ],
+        };
+        let value = CtValue::Struct {
+            type_name: crate::Syntax::TYPE_ERR.to_string(),
+            fields: vec![
+                ("message".to_string(), CtValue::Str("config failed".to_string())),
+                (
+                    "code".to_string(),
+                    CtValue::Present(Box::new(CtValue::Str("CFG404".to_string()))),
+                ),
+                ("cause".to_string(), CtValue::Present(Box::new(cause))),
+            ],
+        };
+
+        let error = value.to_jet_err().expect("checked Err shape must marshal");
+        assert_eq!(crate::Outcome::jet_err_message(&error), "config failed");
+        assert_eq!(value.jet_show(), "Error [CFG404]: config failed\n  cause: bad input");
+        assert_eq!(CtValue::from_jet_err(&error), value);
     }
 }

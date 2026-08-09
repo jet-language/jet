@@ -1380,8 +1380,13 @@ impl<'a> Checker<'a> {
                 if let Some(et) = expected_ty.as_ref() {
                     self.expected_type = Some(et.clone());
                 }
-                self.infer(fexpr);
+                let got = self.infer(fexpr);
                 self.expected_type = saved;
+                if type_name == Syntax::TYPE_ERR {
+                    if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
+                        self.check_type_assignable(expected, got, fexpr.span());
+                    }
+                }
                 let _ = (&str_map_ty, &expected_ty);
             }
             // Report missing fields.

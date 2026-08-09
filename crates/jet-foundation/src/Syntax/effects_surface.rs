@@ -346,7 +346,7 @@ pub const FOREIGN_AT_ATTR: &str = "@";
 /// S80 (ratified 2026-06-16): cross-type `?` conversion trait (D-ERR2).
 pub const TRAIT_FALLIBLE: &str = "Fallible";
 
-/// S80 (ratified 2026-06-16): `Fallible` method returning default `Error`.
+/// D-FAIL-ERROR1=A: `Fallible` method returning default `Err`.
 pub const FN_TO_ERROR: &str = "to_error";
 
 // S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the

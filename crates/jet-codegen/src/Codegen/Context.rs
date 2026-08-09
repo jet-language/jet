@@ -1344,7 +1344,9 @@ impl Cx {
             {
                 format!("{}jet_std::JetCondition", self.root_prefix)
             }
-            Type::Named(name) if name == "Error" => "String".to_string(),
+            Type::Named(name) if name == Syntax::TYPE_ERR => {
+                format!("{}JetErr", self.root_prefix)
+            }
             Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
                 format!("{}JetAuthClaims", self.root_prefix)
             }
