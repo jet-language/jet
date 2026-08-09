@@ -1589,8 +1589,9 @@ fn consume(ch: Receiver<Int>) => Int {
 
     #[test]
     fn covers_named_args_at_call_site() {
-        // c109 Phase 23: a call-site label is allowed (sema binds by name; codegen
-        // ignores them). The callee `area` is a plain fn; the labeled call is in-subset.
+        // D-APILABEL1=A: sema binds the label by name and lowering preserves any
+        // observable source-order change before the declaration-order call. The
+        // callee `area` is a plain fn; the labeled call is in-subset.
         let src = "fn area(width: Int, height: Int) => Int {\n return (width * height)\n}\nfn use_it() => Int {\n return area(width: 4, height: 3)\n}\n";
         assert!(covers(src, "use_it"));
     }

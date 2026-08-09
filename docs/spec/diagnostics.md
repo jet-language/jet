@@ -481,6 +481,7 @@ renumbered, and no new `W` code may be allocated.
 | E0768 | sema   | a bare argument follows a labelled one, so it names no parameter (D-APILABEL1) |
 | E0769 | sema   | a label-only parameter, declared after `*`, was passed by position (D-APILABEL1) |
 | E0770 | parser | two parameters publish the same call label, so the second could never be called (D-APILABEL1) |
+| E0771 | sema   | a function value's public call labels or parameter zones do not satisfy the expected function type (D-APILABEL1) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |

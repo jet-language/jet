@@ -161,8 +161,9 @@ impl Measure {
     }
 }
 
-/// Function obligations are facts about how a callable may be used. They are
-/// deliberately absent from type identity; sema checks them by subsumption.
+/// Function obligations are facts about how a callable may be used. The
+/// D-APILABEL1 call contract is also part of callable identity; effects and
+/// returned-view provenance remain sema-checked by subsumption.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FunctionObligations {
     pub effect_bound: Option<Vec<String>>,
@@ -345,11 +346,34 @@ impl KnowledgeVector {
             entries: self
                 .entries
                 .iter()
-                .filter(|entry| {
-                    crate::Registry::row(entry.plane)
+                .filter_map(|entry| {
+                    if crate::Registry::row(entry.plane)
                         .is_some_and(|row| row.is_identity_bearing())
+                    {
+                        return Some(entry.clone());
+                    }
+                    if entry.plane != crate::Registry::TYPE_PLANE_OBLIGATION {
+                        return None;
+                    }
+                    // D-APILABEL1: this mixed plane contributes only its call
+                    // contract to identity; effects and return provenance
+                    // remain directional obligations.
+                    let KnowledgeFact::Obligation(obligations) = &entry.fact else {
+                        return None;
+                    };
+                    let Some(param_contract) = &obligations.param_contract else {
+                        return None;
+                    };
+                    Some(KnowledgeEntry {
+                        path: entry.path.clone(),
+                        plane: entry.plane,
+                        fact: KnowledgeFact::Obligation(FunctionObligations {
+                            effect_bound: None,
+                            param_contract: Some(param_contract.clone()),
+                            return_view_provenance: None,
+                        }),
+                    })
                 })
-                .cloned()
                 .collect(),
         }
     }
@@ -411,7 +435,8 @@ impl KnowledgeVector {
 }
 
 /// Stable type identity: runtime carrier plus the identity-bearing projection
-/// of the knowledge vector. Function obligations are intentionally absent.
+/// of the knowledge vector. Call contracts are identity-bearing; other
+/// function obligations remain outside identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeIdentity {
     pub carrier: String,
@@ -558,9 +583,9 @@ pub enum Type {
         ret: Option<Box<Type>>,
         effect_bound: Option<Vec<(String, Span)>>,
         /// D-APILABEL1=A: the declared call contract — public label and zone
-        /// per parameter, parallel to `params`. It is a callable obligation,
-        /// so sema checks it by subsumption instead of making equality depend
-        /// on it. `None` means the callable has no declared call contract.
+        /// per parameter, parallel to `params`. Labels and zones are callable
+        /// identity; sema also checks directional compatibility. `None` means
+        /// the callable has no declared call contract.
         param_contract: Option<Vec<(String, super::ParamZone)>>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
@@ -646,9 +671,8 @@ fn is_core_crypto(marker: &TagMarker) -> bool {
 }
 
 /// Type equality is the carrier plus identity-bearing knowledge projection
-/// (D-TYPE2-FOUND1). Callable obligations remain in the vector for reflection,
-/// but the registry marks that plane non-identity-bearing; sema checks it by
-/// subsumption at use sites.
+/// (D-TYPE2-FOUND1). Call contracts are identity-bearing; other callable
+/// obligations remain in the vector for reflection and sema subsumption.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         self.identity() == other.identity()
@@ -766,6 +790,32 @@ pub fn union_enum_name(members: &[Type]) -> String {
 
 fn effect_names(row: &[(String, Span)]) -> String {
     row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
+}
+
+fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)]>) -> String {
+    let contract = contract.unwrap_or(&[]);
+    let mut parts = Vec::with_capacity(params.len() + 2);
+    let mut star_done = false;
+    for (index, param) in params.iter().enumerate() {
+        let zone = contract.get(index).map(|(_, zone)| *zone);
+        if zone == Some(super::ParamZone::LabelOnly) && !star_done {
+            parts.push(crate::Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+            star_done = true;
+        }
+        let label = contract
+            .get(index)
+            .map(|(label, _)| label.as_str())
+            .filter(|label| !label.is_empty());
+        parts.push(label.map_or_else(|| param.name(), |label| format!("{label}: {}", param.name())));
+        if zone == Some(super::ParamZone::PositionalOnly)
+            && contract
+                .get(index + 1)
+                .is_none_or(|(_, next)| *next != super::ParamZone::PositionalOnly)
+        {
+            parts.push(crate::Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+        }
+    }
+    parts.join(", ")
 }
 
 impl Type {
@@ -1306,12 +1356,8 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound, .. } => {
-                let ps = params
-                    .iter()
-                    .map(|p| p.name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            Type::Fn { params, ret, effect_bound, param_contract, .. } => {
+                let ps = fn_param_names(params, param_contract.as_deref());
                 match (effect_bound, ret) {
                     (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
                     (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
@@ -1385,12 +1431,8 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound, .. } => {
-                let ps = params
-                    .iter()
-                    .map(|p| p.name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            Type::Fn { params, ret, effect_bound, param_contract, .. } => {
+                let ps = fn_param_names(params, param_contract.as_deref());
                 match (effect_bound, ret) {
                     (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
                     (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
@@ -1637,6 +1679,29 @@ mod tests {
     }
 
     #[test]
+    fn function_contract_is_identity_and_renders_in_type_names() {
+        let bare = Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: None,
+            return_view_provenance: None,
+        };
+        let labelled = Type::Fn {
+            params: vec![Type::Bool],
+            ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
+            param_contract: Some(vec![("force".to_string(), ParamZone::LabelOnly)]),
+            return_view_provenance: None,
+        };
+
+        assert_ne!(bare, labelled);
+        assert_eq!(bare.name(), "fn(Bool) => Int");
+        assert_eq!(labelled.name(), "fn(*, force: Bool) => Int");
+        assert_eq!(labelled.show(), "fn(*, force: Bool) => Int");
+    }
+
+    #[test]
     fn physical_dimensions_normalize_and_serialize_stably() {
         let mass = Dimension::base("pkg::Mass");
         let length = Dimension::base("pkg::Length");
@@ -1771,9 +1836,9 @@ mod tests {
             return_view_provenance: None,
         };
 
-        assert_eq!(positional, bare);
-        assert_eq!(labelled, bare);
-        assert_eq!(positional, labelled);
+        assert_ne!(positional, bare);
+        assert_ne!(labelled, bare);
+        assert_ne!(positional, labelled);
         assert!(!Type::obligations_satisfy(&positional, &labelled));
         assert!(Type::obligations_satisfy(&positional, &flexible));
         assert!(!Type::obligations_satisfy(
@@ -1784,7 +1849,7 @@ mod tests {
             &Type::List(Box::new(positional.clone())),
             &Type::List(Box::new(bare.clone()))
         ));
-        assert_eq!(positional.identity(), bare.identity());
+        assert_ne!(positional.identity(), bare.identity());
     }
 
     #[test]

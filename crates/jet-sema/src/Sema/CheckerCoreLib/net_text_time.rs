@@ -459,8 +459,8 @@ pub fn require_net_method_labels(
     require_exact_labels(&format!("{type_name}.{method}"), args, required, span, diags);
 }
 
-/// Ratified named forms are syntax, not arity-only overloads. S61 labels remain
-/// positional, but these positions require their documented spelling.
+/// Ratified named forms are syntax, not arity-only overloads. These parameters
+/// are label-only and use the same D-APILABEL1 diagnostics as user calls.
 pub fn require_exact_labels(
     api: &str,
     args: &[crate::AST::CallArg],

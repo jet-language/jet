@@ -202,9 +202,8 @@ fn run() {
     assert_eq!(stdout, "4x4x4\n4x2x2\n4x2x1\n");
 }
 
-/// c109 Phase 23: call-site labels (D-NARG1) on a free function. Labels are checked
-/// documentation that never reorder (D-NARG-D4); codegen ignores them, so a labeled
-/// call routes through the TIR identically to an unlabeled one.
+/// D-APILABEL1=A: call-site labels bind by name. Sema hands TIR declaration-order
+/// arguments, and lowering pins observable reordered expressions to written order.
 #[test]
 fn named_args() {
     if !have_rustc() {

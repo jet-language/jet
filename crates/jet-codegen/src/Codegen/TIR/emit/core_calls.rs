@@ -2135,9 +2135,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "signing_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_signing_key_bytes_impl"), arg(0)),
         ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "shared_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_shared_secret_bytes_impl"), arg(0)),
-        // D-AUTH-TOKENPOLICY1=A: fixed HS256 with required audience. Optional
-        // controls are positional named arguments, so omitted suffixes lower to
-        // their safe defaults here.
+        // D-AUTH-TOKENPOLICY1=A: fixed HS256 with required labelled key and
+        // audience. Optional issuer and clock_skew remain suffix controls in this
+        // API; omitted suffixes lower to their safe defaults here.
         ("core.auth", "verify_jwt") => {
             let issuer = if args.len() >= 4 { format!("Some(&({}))", arg(3)) } else { "None".to_string() };
             let skew = if args.len() >= 5 { format!("{}jet_duration_ms_value(&({}))", cx.root_prefix, arg(4)) } else { "0".to_string() };

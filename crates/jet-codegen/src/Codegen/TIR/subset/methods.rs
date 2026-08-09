@@ -1135,9 +1135,9 @@ pub(crate) fn method_call_in_subset(
     // of `Read`/`Move`/`Mutate` with implicit/Arc clone — those are carried as total
     // flags and emitted verbatim (mirroring `emit_call_args`). c109 Phase 13: a Fn-typed
     // param routes through the `Box::new(…) as <fn-type>` coercion (`lower_one_call_arg`).
-    // c109 Phase 23: a call-site LABEL (`r.scale(factor: 0.5)`, D-NARG1) is allowed —
-    // labels are sema-validated documentation that never reorder (D-NARG-D4) and codegen
-    // never reads `CallArg.label`, so a labeled arg emits identically.
+    // D-APILABEL1=A: sema binds labels by name and rewrites arguments into
+    // declaration order. Lowering reads `source_index` to preserve the order
+    // in which the caller wrote their expressions.
     args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
@@ -1391,8 +1391,9 @@ pub(crate) fn static_method_call_in_subset(
         return false;
     }
     // c109 Phase 13: a Fn-typed static-method param routes through the Box-coercion
-    // (`lower_one_call_arg`). c109 Phase 23: a call-site LABEL (`Rect.new(width: 4.0)`,
-    // D-APILABEL1=A) is allowed — sema binds by name and hands TIR declaration order.
+    // (`lower_one_call_arg`). D-APILABEL1=A: sema binds a call-site label by
+    // name and hands TIR declaration-order arguments; lowering pins observable
+    // expressions to their written order before emission.
     args.iter()
         .zip(sig.iter())
         .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
