@@ -4,10 +4,15 @@ use std::path::PathBuf;
 use jet::Lexer::{StrTokPart, TokKind, Token};
 
 const UI_PARSE_INVALID: &[&str] = &[
+    "tests/ui/E0927_allow_marker_legal.jet",
+    "tests/ui/E0927_retired_marker.jet",
     "tests/ui/E0927_retired_pure_callable.jet",
     "tests/ui/E0927_retired_pure_trait_oneline.jet",
     "tests/ui/E0927_retired_pure_trait_twoline.jet",
+    "tests/ui/E0927_unknown_marker_contract.jet",
+    "tests/ui/E0927_unknown_marker_directive.jet",
     "tests/ui/E0927_unknown_marker_function.jet",
+    "tests/ui/E0927_unknown_marker_typo.jet",
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/auto_derive_invalid_sign.jet",
@@ -45,6 +50,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/empty_map_colon_retired.jet",
     "tests/ui/enum_group_payload.jet",
     "tests/ui/enum_multi_positional_payload.jet",
+    "tests/ui/enum_pattern_needs_dot.jet",
     "tests/ui/enum_pattern_needs_dot_or.jet",
     "tests/ui/enum_pattern_needs_dot_payload.jet",
     "tests/ui/external_method_retired_separator.jet",
@@ -253,6 +259,20 @@ fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
                     TokKind::RParen | TokKind::RBracket | TokKind::RBrace
                 )
             })
+        {
+            index += 1;
+            continue;
+        }
+        // D-FAIL-ERROR1=A: the formatter omits an explicit default `Err` in a
+        // fallible function return type (`T ? Err` -> `T ?`). Keep that
+        // canonical spelling rewrite out of the loss comparison without
+        // matching ordinary `Err(...)` constructor expressions.
+        if matches!(&tokens[index].kind, TokKind::Ident(name) if name == jet::Syntax::TYPE_ERR)
+            && matches!(canonical.last().map(|token| &token.kind), Some(TokKind::Question))
+            && matches!(
+                tokens.get(index + 1).map(|token| &token.kind),
+                Some(TokKind::LBrace | TokKind::Eq)
+            )
         {
             index += 1;
             continue;

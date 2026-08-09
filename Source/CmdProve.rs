@@ -213,15 +213,17 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(status);
         }
     }
-    if replay.is_some() {
-        if let Err(status) = preflight_replay_target(&target, json) {
-            exit(status);
-        }
-    }
     let mut replay_authority = if let Some(path) = replay {
         match crate::ProveReplay::prepare_replay(&identity, &path) {
             Ok(authority) => {
                 let mut authority = authority;
+                // Validate the artifact envelope and semantic identity before
+                // inspecting the executable target. A malformed or stale
+                // artifact is a typed replay refusal (exit 1), never a child
+                // build/producer failure or ICE.
+                if let Err(status) = preflight_replay_target(&target, json) {
+                    exit(status);
+                }
                 let time_sites = capture_sites_for_target(&target)
                     .into_iter()
                     .filter(|site| supported_time_capture_site(site))
@@ -346,6 +348,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
         ExitCodes::RUNTIME_PANIC
+    } else if producer_exit == ExitCodes::USER_ERROR {
+        ExitCodes::USER_ERROR
     } else if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
         ExitCodes::USER_ERROR
     } else {
@@ -711,15 +715,9 @@ fn preflight_capture_target(
             }
         }
     }
-    if time_sites == 0 {
-        return capture_preflight_error(
-            "E3625",
-            "core.time.now",
-            "safe replay needs exactly one statically identified Time call site; this target has none",
-            "capture a target with one `core.time.now` call, or use an injected deterministic capability",
-            json_mode,
-        );
-    }
+    // A target may have no Time request. Keep capture available so the
+    // artifact envelope can still be used for schema/identity validation;
+    // replay of that target remains refused after the artifact is parsed.
     Ok(())
 }
 
@@ -1615,6 +1613,10 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                     highest_exit = ExitCodes::ICE;
                 } else if code == ExitCodes::RUNTIME_PANIC && highest_exit != ExitCodes::ICE {
                     highest_exit = ExitCodes::RUNTIME_PANIC;
+                } else if code == ExitCodes::USER_ERROR
+                    && highest_exit == ExitCodes::OK
+                {
+                    highest_exit = ExitCodes::USER_ERROR;
                 }
                 match read_test_report(&report_path) {
                     Ok(records) => {
@@ -1645,6 +1647,11 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                                     seed: if record.kind == 3 { record.file } else { String::new() },
                                 });
                             }
+                        }
+                    }
+                    Err(_) if code == ExitCodes::USER_ERROR => {
+                        if highest_exit == ExitCodes::OK {
+                            highest_exit = ExitCodes::USER_ERROR;
                         }
                     }
                     Err(_) => highest_exit = ExitCodes::ICE,

@@ -12,7 +12,7 @@ use super::{
     progress_source_has_exact_total, store_view_mut_owner_list, unsupported, EvalCtx, Flow,
     ViewMutPathStep,
 };
-use crate::Codegen::TIR::{TExpr, TExprKind};
+use crate::Codegen::TIR::{TExpr, TExprKind, THandleOp};
 
 mod progress_semantics {
     include!("../../../Prelude/Core/Progress.rs");
@@ -910,6 +910,79 @@ impl<'a> EvalCtx<'a> {
                                     if label.as_deref() == Some(name.as_str()) => {}
                                 other => return Ok(other),
                             }
+                        }
+                        return Ok(Flow::Normal);
+                    }
+                }
+                if progress.is_none() {
+                    if let Some(TForInMethod::EncodingReader { reader_type }) = method_kind {
+                        let op = match reader_type.as_str() {
+                            "JSONReader" => THandleOp::JSONReaderNext,
+                            "JSONLReader" => THandleOp::JSONLReaderNext,
+                            "CSVReader" => THandleOp::CSVReaderNext,
+                            "XMLReader" => THandleOp::XMLReaderNext,
+                            "CBORReader" => THandleOp::CBORReaderNext,
+                            _ => {
+                                return Err(unsupported(
+                                    "unknown encoding reader",
+                                    self.span(),
+                                ))
+                            }
+                        };
+                        let stride = match step {
+                            Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
+                            None => 1,
+                        };
+                        if stride <= 0 {
+                            return Err(unsupported("for-in stride <= 0", self.span()));
+                        }
+                        let mut skipped = 0i64;
+                        loop {
+                            self.burn()?;
+                            let mut args = [];
+                            let next = super::handles::eval_handle(
+                                &op,
+                                &mut coll,
+                                &mut args,
+                                self.span(),
+                            )?;
+                            let item = match next {
+                                CtValue::Present(value) => match *value {
+                                    CtValue::Present(item) => *item,
+                                    CtValue::Failed(CtReport::Clean(_)) => break,
+                                    _ => {
+                                        return Err(unsupported(
+                                            "encoding reader next result",
+                                            self.span(),
+                                        ))
+                                    }
+                                },
+                                CtValue::Failed(CtReport::Clean(_)) => break,
+                                _ => {
+                                    return Err(unsupported(
+                                        "encoding reader next result",
+                                        self.span(),
+                                    ))
+                                }
+                            };
+                            if skipped != 0 {
+                                skipped -= 1;
+                                continue;
+                            }
+                            scope.insert(var.clone(), item);
+                            match self.exec_stmts(body, scope)? {
+                                Flow::Normal | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::BreakLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) =>
+                                {
+                                    break
+                                }
+                                Flow::ContinueLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => {}
+                                other => return Ok(other)
+                            }
+                            skipped = stride - 1;
                         }
                         return Ok(Flow::Normal);
                     }

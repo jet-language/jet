@@ -614,6 +614,21 @@ fn collect_serde_codec_demands(
                 walk_expr(segment, demands);
                 walk_expr(inner, demands);
             }
+            TExprKind::Try { inner, .. } => walk_expr(inner, demands),
+            TExprKind::OrFallback { value, fallback } => {
+                walk_expr(value, demands);
+                match fallback {
+                    TOrFallback::Value(inner) | TOrFallback::Return(Some(inner)) => {
+                        walk_expr(inner, demands)
+                    }
+                    TOrFallback::Panic { msg, .. } => walk_expr(msg, demands),
+                    TOrFallback::Return(None)
+                    | TOrFallback::Break
+                    | TOrFallback::Continue
+                    | TOrFallback::BreakLabel(_)
+                    | TOrFallback::ContinueLabel(_) => {}
+                }
+            }
             TExprKind::CoreCall {
                 module,
                 method,
