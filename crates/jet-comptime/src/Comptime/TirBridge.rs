@@ -7,8 +7,7 @@ use std::sync::OnceLock;
 
 use crate::AST::{ComptimeInput, Expr, Func, ProgramBundle, Stmt, StructDef, Type};
 use crate::Diagnostics::Diagnostic;
-use crate::Comptime::CtValue;
-use crate::Comptime::DevSink;
+use crate::Comptime::{CtValue, DevSink, ReplAuthorizer};
 
 fn reflected_struct_field<'a>(value: &'a CtValue, field: &str) -> Option<&'a CtValue> {
     let CtValue::Struct { fields, .. } = value else {
@@ -366,6 +365,8 @@ pub struct ExprEvalRequest<'a> {
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
+    pub repl_grants: &'a [String],
+    pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
     /// D-METADERIVE1: `emit(…)` fragments (usually unused for single exprs).
     pub emitted_fragments: Option<&'a mut Vec<String>>,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
@@ -391,6 +392,8 @@ pub struct BlockEvalRequest<'a> {
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
+    pub repl_grants: &'a [String],
+    pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
     pub allow_impure: bool,
     pub impure_depth: usize,
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,

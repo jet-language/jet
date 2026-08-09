@@ -727,6 +727,10 @@ pub(super) struct EvalCtx<'a> {
     /// Keep calls inside a codec-sensitive named deopt on canonical TIR.
     pub(super) prefer_tir_calls: bool,
     pub(super) repl_mode: bool,
+    /// Lexical REPL capabilities forwarded from the frontend. Authorization
+    /// decisions remain in the shared Comptime host seam.
+    pub(super) repl_grants: Vec<String>,
+    pub(super) repl_authorizer: Option<&'a mut dyn Comptime::ReplAuthorizer>,
     pub(super) pending_return: Option<CtValue>,
     /// `defer close(^…)` exprs scheduled in the current eval frame (LIFO).
     pub(super) deferred_closes: Vec<&'a TExpr>,
@@ -970,6 +974,7 @@ struct EvalTaskConfig<'a> {
     runtime_execution: bool,
     prefer_tir_calls: bool,
     repl_mode: bool,
+    repl_grants: Vec<String>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
@@ -1121,6 +1126,7 @@ impl<'a> EvalCtx<'a> {
             runtime_execution: self.runtime_execution,
             prefer_tir_calls: self.prefer_tir_calls,
             repl_mode: self.repl_mode,
+            repl_grants: self.repl_grants.clone(),
             struct_fields: self.struct_fields.clone(),
             struct_field_types: self.struct_field_types.clone(),
             codec_migrations: self.codec_migrations.clone(),
@@ -1180,6 +1186,8 @@ impl<'a> EvalCtx<'a> {
             runtime_execution: config.runtime_execution,
             prefer_tir_calls: config.prefer_tir_calls,
             repl_mode: config.repl_mode,
+            repl_grants: config.repl_grants,
+            repl_authorizer: None,
             pending_return: None,
             deferred_closes: Vec::new(),
             pending_flow: None,
@@ -2388,6 +2396,8 @@ fn run_program_with_structs_on_stack(
         runtime_execution: true,
         prefer_tir_calls: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,
@@ -2461,6 +2471,8 @@ pub fn run_named_func(
         runtime_execution: true,
         prefer_tir_calls: program.canonical_calls.contains(name),
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,
@@ -2634,6 +2646,8 @@ fn eval_expr_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.initial_impure_depth;
     let repl_mode = req.repl_mode;
+    let repl_grants = req.repl_grants.to_vec();
+    let repl_authorizer = req.repl_authorizer.take();
     let source_span = req.expr.span();
     let mut sink_target = req.sink.take();
     let mutated_out = req.mutated.take();
@@ -2654,6 +2668,8 @@ fn eval_expr_hook(
         runtime_execution: false,
         prefer_tir_calls: false,
         repl_mode,
+        repl_grants,
+        repl_authorizer,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,
@@ -2748,6 +2764,8 @@ fn eval_block_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.impure_depth;
     let repl_mode = req.repl_mode;
+    let repl_grants = req.repl_grants.to_vec();
+    let repl_authorizer = req.repl_authorizer.take();
     let source_span = req
         .stmts
         .first()
@@ -2771,6 +2789,8 @@ fn eval_block_hook(
         runtime_execution: false,
         prefer_tir_calls: false,
         repl_mode,
+        repl_grants,
+        repl_authorizer,
         pending_return: None,
         deferred_closes: Vec::new(),
         pending_flow: None,

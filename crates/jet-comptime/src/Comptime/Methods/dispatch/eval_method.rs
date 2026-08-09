@@ -649,72 +649,19 @@ impl<'a> Interp<'a> {
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
                 if is_tier2 {
-                    if self.repl_mode && matches!((module.as_str(), method), ("core.io", "eprint")) {
-                        return apply_impure_core_call(
+                    if self.repl_mode {
+                        return apply_repl_authorized_core_call(
                             &module,
                             method,
                             argv,
                             span,
                             self.base_dir,
                             self.sink.as_deref_mut(),
-                            true,
-                            None,
-                            None,
+                            &self.repl_grants,
+                            self.repl_authorizer.as_deref_mut(),
                         );
                     }
-                    let ambient_random = self.repl_mode
-                        && module == "core.random"
-                        && !matches!(method, "rng");
-                    if ambient_random {
-                        // Ambient draws and global seeding consume/mutate session RNG state.
-                        // Explicit `random.rng(seed)` is injected data and stays pure.
-                    }
-                    let mut repl_executable = None;
-                    let mut repl_root = None;
-                    if self.repl_mode {
-                        if matches!((module.as_str(), method), ("core.process", "run")) {
-                            repl_executable = Some(pin_repl_command(&mut argv, self.base_dir, span)?);
-                        }
-                        let request = repl_effect_request(&module, method, &argv);
-                        let Some(authorizer) = self.repl_authorizer.as_deref_mut() else {
-                            return Err(Diagnostic::error(
-                                "E1803",
-                                format!("{}.{} for `{}` was denied", request.root, request.operation, request.resource),
-                                "this REPL mode has no runtime authority provider, so the host operation did not run".to_string(),
-                                format!("restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation", request.root.to_ascii_lowercase()),
-                                Some(span),
-                            ));
-                        };
-                        authorizer.preflight(&request, span)?;
-                        let granted = self.repl_grants.iter().any(|cap| {
-                            cap == &request.root || cap.starts_with(&format!("{}.", request.root))
-                        });
-                        if !granted {
-                            return Err(Diagnostic::error(
-                                "E1803",
-                                format!("{}.{} for `{}` has no REPL runtime authority", request.root, request.operation, request.resource),
-                                "REPL host effects require both lexical `#Grant` authority and invocation policy; no host operation ran".to_string(),
-                                format!("wrap this operation in `#Grant({}) {{ caps -> ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`", request.root, request.root.to_ascii_lowercase()),
-                                Some(span),
-                            ));
-                        }
-                        authorizer.authorize(&request, span)?;
-                        if module == "core.files" {
-                            return apply_repl_fs_call(method, &argv, span, authorizer);
-                        }
-                        if ambient_random {
-                            return apply_core_call(&module, method, argv, span, true);
-                        }
-                        if module == "core.process" && method == "run" {
-                            repl_root = Some(authorizer.verified_root().map_err(|error| {
-                                unsupported(&format!("REPL project root handle is unavailable: {error}"), span)
-                            })?);
-                        }
-                    }
                     if self.impure_depth == 0 {
-                        if self.repl_mode {
-                            unreachable!("REPL lexical grant checked above");
-                        }
                         return Err(Diagnostic::error(
                             "E3410",
                             format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
@@ -742,11 +689,11 @@ impl<'a> Interp<'a> {
                         argv,
                         span,
                         self.base_dir,
-                            self.sink.as_deref_mut(),
-                            self.repl_mode,
-                            repl_executable.as_ref(),
-                            repl_root.as_ref(),
-                        );
+                        self.sink.as_deref_mut(),
+                        false,
+                        None,
+                        None,
+                    );
                 }
                 if matches!((module.as_str(), method), ("core.data", "pivot_sum")) {
                     return self.eval_pivot_sum(argv, span);

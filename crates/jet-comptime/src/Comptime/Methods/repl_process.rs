@@ -3,7 +3,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
 use crate::AST::CtValue;
-use super::core_calls::{as_string, io_error_value};
+use super::core_calls::{apply_core_call, apply_impure_core_call, as_string, io_error_value};
 
 pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {
     let shown = |i: usize, fallback: &str| {
@@ -86,6 +86,100 @@ pub(super) fn apply_repl_fs_call(
         }),
         _ => Err(unsupported(&format!("core.files.{method}"), span)),
     }
+}
+
+/// Authorize and execute one REPL Core effect through the shared host seam.
+/// TIR and AST evaluation both call this function, so invocation policy and
+/// secure filesystem dispatch stay in one place.
+pub fn apply_repl_authorized_core_call(
+    module: &str,
+    method: &str,
+    mut args: Vec<CtValue>,
+    span: Span,
+    base_dir: &std::path::Path,
+    sink: Option<&mut super::super::Interpreter::DevSink>,
+    grants: &[String],
+    authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
+) -> Result<CtValue, Diagnostic> {
+    // REPL eprint is the inline transcript sink. It does not need an effect
+    // prompt or a lexical grant; the existing REPL surface keeps it available.
+    if module == "core.io" && method == "eprint" {
+        return apply_impure_core_call(
+            module, method, args, span, base_dir, sink, true, None, None,
+        );
+    }
+
+    let pinned_executable = if matches!((module, method), ("core.process", "run")) {
+        Some(pin_repl_command(&mut args, base_dir, span)?)
+    } else {
+        None
+    };
+    let request = repl_effect_request(module, method, &args);
+    let Some(mut authorizer) = authorizer else {
+        return Err(Diagnostic::error(
+            "E1803",
+            format!(
+                "{}.{} for `{}` was denied",
+                request.root, request.operation, request.resource
+            ),
+            "this REPL mode has no runtime authority provider, so the host operation did not run"
+                .to_string(),
+            format!(
+                "restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation",
+                request.root.to_ascii_lowercase()
+            ),
+            Some(span),
+        ));
+    };
+    authorizer.preflight(&request, span)?;
+    let granted = grants.iter().any(|cap| {
+        cap == &request.root || cap.starts_with(&format!("{}.", request.root))
+    });
+    if !granted {
+        return Err(Diagnostic::error(
+            "E1803",
+            format!(
+                "{}.{} for `{}` has no REPL runtime authority",
+                request.root, request.operation, request.resource
+            ),
+            "REPL host effects require both lexical `#Grant` authority and invocation policy; no host operation ran"
+                .to_string(),
+            format!(
+                "wrap this operation in `#Grant({}) {{ caps -> ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
+                request.root,
+                request.root.to_ascii_lowercase()
+            ),
+            Some(span),
+        ));
+    }
+    authorizer.authorize(&request, span)?;
+    if module == "core.files" {
+        return apply_repl_fs_call(method, &args, span, authorizer);
+    }
+    if module == "core.random" {
+        return apply_core_call(module, method, args, span, true);
+    }
+    let verified_root = if matches!((module, method), ("core.process", "run")) {
+        Some(authorizer.verified_root().map_err(|error| {
+            unsupported(
+                &format!("REPL project root handle is unavailable: {error}"),
+                span,
+            )
+        })?)
+    } else {
+        None
+    };
+    apply_impure_core_call(
+        module,
+        method,
+        args,
+        span,
+        base_dir,
+        sink,
+        true,
+        pinned_executable.as_ref(),
+        verified_root.as_ref(),
+    )
 }
 
 pub(super) fn pin_repl_command(
