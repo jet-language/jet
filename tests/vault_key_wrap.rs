@@ -1,3 +1,5 @@
+mod common;
+
 #[test]
 fn actual_vault_key_wrap_bridge_fixture_compiles_and_runs() {
     let root = std::env::current_dir().unwrap();

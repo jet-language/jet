@@ -1,3 +1,5 @@
+mod common;
+
 #[test]
 fn bare_run_stays_valid() {
     jet::compile("fn run() {}\n").expect("bare beginner entrypoint must compile");

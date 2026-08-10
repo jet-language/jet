@@ -1,3 +1,5 @@
+mod common;
+
 fn error_codes(source: &str) -> Vec<String> {
     jet::compile(source)
         .expect_err("adversarial data-race source must not compile")

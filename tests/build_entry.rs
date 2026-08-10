@@ -1,5 +1,7 @@
 //! D-BUILDENTRY1/D-BUILDACTION1: real Jet `fn build` vertical.
 
+mod common;
+
 use jet::Comptime::Build::{ActionOutcome, BuildCapability, BuildPolicy, CacheHitReason};
 use jet::Driver::{BuildQueryExpression, BuildRunOptions, compile_bundle_path_build};
 use std::collections::BTreeSet;

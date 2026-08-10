@@ -8,6 +8,8 @@
 //! Dev-server diagnostics in a real browser remain in
 //! `web_dev::jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix`.
 
+mod common;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};

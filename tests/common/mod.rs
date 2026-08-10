@@ -8,8 +8,107 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::OnceLock;
+
+// --- runaway-test guard rails -----------------------------------------------
+//
+// A runaway test binary (unbounded allocation loop, or a hang) can eat all
+// RAM/swap and get the kernel to OOM-kill the whole agent session. Every
+// tests/*.rs binary installs this as its global allocator (via `mod
+// common;`), which caps live allocation and starts a wall-clock watchdog on
+// first use. Plain atomics only: no locks, no deps, nothing allocated on the
+// failure path beyond the one stderr line.
+
+struct GuardedAlloc;
+
+/// Cap in bytes; -1 means "not read from env yet". i64 (not u64) so the tiny,
+/// unavoidable unaccounted allocation from the lazy env read below (see
+/// `guard_on_alloc`) can dip `GUARD_LIVE_BYTES` negative without wrapping.
+static GUARD_CAP_BYTES: AtomicI64 = AtomicI64::new(-1);
+static GUARD_CAP_INIT_STARTED: AtomicBool = AtomicBool::new(false);
+static GUARD_LIVE_BYTES: AtomicI64 = AtomicI64::new(0);
+static GUARD_WATCHDOG_STARTED: AtomicBool = AtomicBool::new(false);
+
+unsafe impl std::alloc::GlobalAlloc for GuardedAlloc {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let ptr = std::alloc::System.alloc(layout);
+        if !ptr.is_null() {
+            guard_on_alloc(layout.size() as i64);
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        std::alloc::System.dealloc(ptr, layout);
+        GUARD_LIVE_BYTES.fetch_sub(layout.size() as i64, Ordering::Relaxed);
+    }
+}
+
+fn guard_on_alloc(size: i64) {
+    let cap = GUARD_CAP_BYTES.load(Ordering::Relaxed);
+    if cap < 0 {
+        // Cap not read yet. Claim the read exactly once; std::env::var itself
+        // allocates, so the nested alloc() call this triggers re-enters here,
+        // sees the flag already set, and just falls through uncounted — a
+        // one-time, few-byte startup blind spot the i64 counter absorbs.
+        if !GUARD_CAP_INIT_STARTED.swap(true, Ordering::AcqRel) {
+            let gb: i64 = std::env::var("JET_TEST_ALLOC_CAP_GB")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10);
+            GUARD_CAP_BYTES.store(gb.max(1) * (1 << 30), Ordering::Relaxed);
+        }
+        return;
+    }
+    let total = GUARD_LIVE_BYTES.fetch_add(size, Ordering::Relaxed) + size;
+    if total > cap {
+        eprintln!(
+            "jet test guard: allocation cap {} GB exceeded — aborting; raise JET_TEST_ALLOC_CAP_GB if legitimate",
+            cap / (1 << 30)
+        );
+        std::process::abort();
+    }
+    guard_start_watchdog();
+}
+
+/// Lazily spawned on first (accounted) allocation, guarded by a one-shot
+/// flag: a plain relaxed load short-circuits the common case (already
+/// started) before paying for the atomic swap.
+fn guard_start_watchdog() {
+    if GUARD_WATCHDOG_STARTED.load(Ordering::Relaxed) {
+        return;
+    }
+    if GUARD_WATCHDOG_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("jet-test-watchdog".into())
+        .spawn(guard_watchdog_main);
+    if spawned.is_err() {
+        // Too early in process startup to spawn a thread (rare) — let a
+        // later allocation retry.
+        GUARD_WATCHDOG_STARTED.store(false, Ordering::Release);
+    }
+}
+
+fn guard_watchdog_main() {
+    // Backstop, not an accommodation: no test suite should run past 15-20
+    // minutes. A suite that hits this is itself defective — split or speed
+    // it up, don't raise the cap.
+    let secs: u64 = std::env::var("JET_TEST_DEADLINE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(900);
+    std::thread::sleep(std::time::Duration::from_secs(secs));
+    eprintln!(
+        "jet test guard: exceeded the {secs}s suite budget — aborting; this suite must be split or sped up, not given a longer deadline"
+    );
+    std::process::abort();
+}
+
+#[global_allocator]
+static JET_TEST_GUARD: GuardedAlloc = GuardedAlloc;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 

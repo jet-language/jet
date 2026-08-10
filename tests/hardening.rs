@@ -3,6 +3,8 @@
 //! type-checked wrong programs before the fixes. Each test pins the new
 //! behavior: a clean front-end diagnostic, or generated Rust that compiles.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

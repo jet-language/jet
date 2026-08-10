@@ -7,6 +7,8 @@
 //! even though it is a deopt target: any program the JIT declines to lower
 //! resident falls through to it, and a whole family of these programs does.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

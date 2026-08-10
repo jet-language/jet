@@ -1,5 +1,7 @@
 //! M6 phase 1: `jet fmt` idempotence — fmt(fmt(x)) == fmt(x).
 
+mod common;
+
 use std::fs;
 
 #[test]

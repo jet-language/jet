@@ -12,6 +12,8 @@
 //! the hostile fixtures assert (2) by breaking one thing at a time and
 //! requiring the matching gate to fire.
 
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 

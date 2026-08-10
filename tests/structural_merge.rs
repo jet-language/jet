@@ -1,5 +1,7 @@
 //! D-MERGE-* (Tower #143): hostile structural diff/merge product proof.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

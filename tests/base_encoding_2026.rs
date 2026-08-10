@@ -1,3 +1,5 @@
+mod common;
+
 use jet_foundation::XmlPull::base_encoding_2026;
 
 const BASE64: &[u8; 64] =

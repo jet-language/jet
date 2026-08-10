@@ -1,5 +1,7 @@
 //! Focused failure-path checks for the production `core.services` Prelude.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

@@ -4,6 +4,8 @@
 //! and the unknown-state error E0151. State is a compile-time fact threaded by the
 //! checker and erased in codegen (I3).
 
+mod common;
+
 fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),

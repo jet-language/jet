@@ -3,6 +3,8 @@
 //! typed namespace contributions (`env.dev: Env.{ … }`). Contribution *values*
 //! reuse the existing struct-literal expression parser.
 
+mod common;
+
 use jet::AST::{Call, Contribution, Expr, Item, Namespace, StrPart};
 
 fn parse_items(src: &str) -> Vec<Item> {

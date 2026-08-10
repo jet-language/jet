@@ -1,5 +1,7 @@
 //! TIR operator and low-level runtime-language integration tests.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

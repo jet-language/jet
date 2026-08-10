@@ -5,6 +5,8 @@
 //! in its body. Proven claims run these via
 //! `check-capability-ledger.mjs --verify-focused`.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

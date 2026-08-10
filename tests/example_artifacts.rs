@@ -1,5 +1,7 @@
 //! Keep generated build output out of `examples/`.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

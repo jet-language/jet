@@ -21,6 +21,8 @@
 //!
 //! Run: `cargo test --test ban_bare_panic`
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

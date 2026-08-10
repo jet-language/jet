@@ -10,6 +10,8 @@
 //!
 //! Snapshots live in `tests/cli/*.txt`; bless with `UPDATE_EXPECT=1`.
 
+mod common;
+
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};

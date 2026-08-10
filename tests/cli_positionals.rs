@@ -1,6 +1,8 @@
 //! D-CLI-POS1=A: focused proof for derive positionals (owned by #748).
 //! Kept out of tests/cli.rs (foreign-dirty under another task).
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

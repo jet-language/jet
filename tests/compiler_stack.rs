@@ -1,3 +1,5 @@
+mod common;
+
 const SHARED_SOURCE: &str = r#"
 use core.tasks
 struct Counter { value: Int }

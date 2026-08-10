@@ -3,6 +3,8 @@
 //! Unlike the broad `cffi` suite, this lane never skips. CI supplies explicit
 //! C/Rust toolchains and a runner where cross execution is required.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

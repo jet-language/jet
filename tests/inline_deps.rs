@@ -10,6 +10,8 @@
 //! resolvable "provider" fixture, mirroring Jetpack's own committed-fixture
 //! test convention.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

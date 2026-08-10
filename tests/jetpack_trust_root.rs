@@ -1,5 +1,7 @@
 //! E4-JP6A / D-JPK-TRUSTROOT1 — trust primitives + root bootstrap acceptance.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::time::Duration;
 

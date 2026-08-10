@@ -1,5 +1,7 @@
 //! D-ONCE-LAW1=A: Core-call AOT rows have one home and one projection.
 
+mod common;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;

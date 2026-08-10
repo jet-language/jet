@@ -7,6 +7,8 @@
 //! process-global `JET_TOOLCHAIN_OBJECT` env it sets never races the parallel
 //! unit tests in other binaries.
 
+mod common;
+
 use jet::Loader::{self, RingResolution};
 use jet::Syntax;
 use std::path::PathBuf;

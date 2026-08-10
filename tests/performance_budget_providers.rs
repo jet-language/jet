@@ -1,3 +1,5 @@
+mod common;
+
 use jet::BudgetProviders::{evaluation_diagnostic, unavailable_if_too_few, FailureClass, ProviderCancellation, ProviderDiagnostic, ProviderEvidence, ProviderEvent, ProviderFailure, ProviderRegistry, ProviderRequest, ProviderSpec};
 use jet_foundation::PerformanceBudget::{CanonicalJson, Direction, Evaluation, Evidence, PolicyOutcome, Rational};
 use std::time::Duration;

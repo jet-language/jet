@@ -1,5 +1,7 @@
 //! D-ONCE-LAW1 guard for Core semantics shared with comptime.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;

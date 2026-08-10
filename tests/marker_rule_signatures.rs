@@ -1,3 +1,5 @@
+mod common;
+
 fn checked(
     source: &str,
     mode: jet::Sema::CompileMode,

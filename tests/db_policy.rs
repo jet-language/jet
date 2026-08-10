@@ -1,5 +1,7 @@
 //! Focused proof that one explicit DB scope enforces row policy on every row path.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

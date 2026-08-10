@@ -1,6 +1,8 @@
 //! D-BPE-* Canvas prototype tests: source-backed graph, formatter round-trip,
 //! and initial write transactions.
 
+mod common;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;

@@ -18,6 +18,8 @@
 //! the content rows: a fixture must keep the retired form to prove the error
 //! that refuses it.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

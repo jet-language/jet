@@ -2,6 +2,8 @@
 //! Float. `/%` is the whole-number path. Operands arrive through `score` so
 //! nothing folds away before the built program runs.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

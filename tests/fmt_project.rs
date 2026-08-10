@@ -13,6 +13,8 @@
 //!   - idempotence: formatting twice equals once
 //!   - exit-code table: 0 = clean/formatted, 1 = preview/check dirty, 2 = error
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

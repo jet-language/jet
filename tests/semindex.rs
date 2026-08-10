@@ -1,5 +1,7 @@
 //! D-SEMINDEX1 integration tests for the stable semantic-index API.
 
+mod common;
+
 use jet_semindex::{
     open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SymbolKind, ViewProjectionFact, ViewSourceFact, SCHEMA_VERSION,

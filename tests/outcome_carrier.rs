@@ -2,6 +2,8 @@
 //! `T ? E`. An outcome has a payload, a verdict and reports. `T?` is the view
 //! whose report is the clean absence; `T ? E` is the view whose report matters.
 
+mod common;
+
 use std::fs;
 
 fn compile(name: &str, src: &str) -> String {

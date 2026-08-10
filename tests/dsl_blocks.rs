@@ -1,6 +1,8 @@
 //! D-DSLBLOCK1: fixed stdlib DSL blocks are syntax islands with ordinary Jet
 //! checking inside them.
 
+mod common;
+
 #[test]
 fn sql_and_html_blocks_compile_and_formatter_round_trip() {
     let source = r#"

@@ -1,3 +1,5 @@
+mod common;
+
 use jet::Policy::{self, PolicyKey, PolicyValue};
 
 fn fixture(path: &str) -> String {
