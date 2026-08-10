@@ -1295,7 +1295,7 @@ fn populate_name_ledger(
                 continue;
             };
             for (original, local_alias) in items {
-                let local = local_alias.as_deref().unwrap_or(original);
+                let local = crate::AST::import_item_alias(original, local_alias.as_deref());
                 let target = if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
                     Some((format!("{core_prefix}.{original}"), None))
                 } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
@@ -1850,13 +1850,31 @@ fn check_bundle_opts_for_output_inner(
         .modules
         .iter()
         .map(|module| {
-            module
-                .imports
-                .iter()
-                .filter_map(|import| {
-                    Some((import.import_alias(), import.core_module_path()?))
-                })
-                .collect()
+            let mut imports = HashMap::new();
+            for import in &module.imports {
+                if let Some(core_module) = import.core_module_path() {
+                    imports.insert(import.import_alias(), core_module);
+                }
+                let ImportKind::Unqualified {
+                    module_alias,
+                    items,
+                    ..
+                } = &import.kind
+                else {
+                    continue;
+                };
+                let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) else {
+                    continue;
+                };
+                for (original, alias) in items {
+                    let local = crate::AST::import_item_alias(original, alias.as_deref());
+                    let full = format!("{core_prefix}.{original}");
+                    if crate::Syntax::is_known_core_module(&full) {
+                        imports.insert(local.to_string(), full);
+                    }
+                }
+            }
+            imports
         })
         .collect();
     let mut top_level_embed_inputs = Vec::new();
@@ -2525,7 +2543,7 @@ fn check_bundle_opts_for_output_inner(
             if let Some(canonical) = st.code_modules.get(module_alias.as_str()) {
                 // Inline module: items are mangled as `{alias}__{item}`.
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     let mangled = jet_foundation::Names::member_name(canonical, orig);
                     if !st.funcs.contains_key(&mangled) {
                         diags.push(Diagnostic::error(
@@ -2559,7 +2577,7 @@ fn check_bundle_opts_for_output_inner(
                 // Each item `x` becomes `{prefix}.x` in the known-modules table.
                 let st = &mut states[idx];
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     let full = format!("{core_prefix}.{orig}");
                     if !crate::Syntax::is_known_core_module(&full) {
                         diags.push(Diagnostic::error(
@@ -2604,7 +2622,7 @@ fn check_bundle_opts_for_output_inner(
                 let target_idx = st.imports[module_alias.as_str()];
                 let is_reexport = imp.is_pub;
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
                     let exists = states[target_idx].funcs.contains_key(orig.as_str());
                     if !exists {
@@ -2676,7 +2694,7 @@ fn check_bundle_opts_for_output_inner(
                     continue;
                 };
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.unwrap_or_else(|| orig.clone());
+                    let local = crate::AST::import_item_alias(&orig, alias_opt.as_deref()).to_string();
                     enum Target {
                         Inline { alias: String, mangled: String },
                         File { name: String, module_idx: usize },

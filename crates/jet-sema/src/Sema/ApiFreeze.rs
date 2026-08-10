@@ -454,6 +454,7 @@ fn snapshot_from_items_with_context(
         solved,
         module_alias,
         None,
+        None,
         &dimensions,
         module_idx,
         ledger,
@@ -665,7 +666,8 @@ fn collect_pub_fns(
     items: &[Item],
     solved: Option<&std::collections::HashMap<String, EffectSet>>,
     module_alias: Option<&str>,
-    code_module: Option<&str>,
+    semantic_module: Option<&str>,
+    display_module: Option<&str>,
     dimensions: &ApiUnitDimensions,
     module_idx: usize,
     ledger: Option<&crate::AST::NameLedger>,
@@ -678,7 +680,7 @@ fn collect_pub_fns(
                 if crate::Syntax::classify_identifier(&f.name)
                     == crate::Syntax::IdentifierClass::Ordinary =>
             {
-                let ledger_name = code_module
+                let ledger_name = semantic_module
                     .map(|module| jet_foundation::Names::member_name(module, &f.name))
                     .unwrap_or_else(|| f.name.clone());
                 let is_public = ledger
@@ -688,9 +690,9 @@ fn collect_pub_fns(
                     continue;
                 }
                 out.push(FrozenFn {
-                    name: frozen_name(code_module, &f.name),
+                    name: frozen_name(display_module, &f.name),
                     signature: qualify_api_signature(
-                        code_module,
+                        display_module,
                         &canonical_fn_signature_with_effects(
                             f,
                             solved.map(|sets| {
@@ -705,7 +707,7 @@ fn collect_pub_fns(
                 });
             }
             Item::Trait(trait_def) => {
-                let ledger_name = code_module
+                let ledger_name = semantic_module
                     .map(|module| jet_foundation::Names::member_name(module, &trait_def.name))
                     .unwrap_or_else(|| trait_def.name.clone());
                 let is_public = ledger
@@ -720,11 +722,11 @@ fn collect_pub_fns(
                     {
                         out.push(FrozenFn {
                             name: frozen_name(
-                                code_module,
+                                display_module,
                                 &format!("{}.{}", trait_def.name, method.name),
                             ),
                             signature: qualify_api_signature(
-                                code_module,
+                                display_module,
                                 &trait_method_signature(&trait_def.name, method, dimensions),
                             ),
                         });
@@ -733,11 +735,18 @@ fn collect_pub_fns(
             }
             Item::CodeModule(m) => {
                 if let Some(body) = &m.body {
+                    let nested_semantic_module = semantic_module
+                        .map(|parent| jet_foundation::Names::member_name(parent, &m.name))
+                        .unwrap_or_else(|| m.name.clone());
+                    let nested_display_module = display_module
+                        .map(|parent| format!("{parent}.{}", m.name))
+                        .unwrap_or_else(|| m.name.clone());
                     collect_pub_fns(
                         body,
                         solved,
                         module_alias,
-                        Some(&m.name),
+                        Some(&nested_semantic_module),
+                        Some(&nested_display_module),
                         dimensions,
                         module_idx,
                         ledger,

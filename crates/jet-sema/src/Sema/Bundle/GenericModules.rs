@@ -2090,7 +2090,7 @@ pub(crate) fn expand_generic_module_aliases(
                     continue;
                 };
                 consumed.insert(original.clone());
-                let local = alias.as_deref().unwrap_or(original);
+                let local = crate::AST::import_item_alias(original, alias.as_deref());
                 if !source.def.is_pub && !source.def.is_package_pub {
                     denied_templates.insert(local.to_string());
                     diags.push(Diagnostic::error(

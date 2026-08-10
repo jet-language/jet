@@ -1229,7 +1229,7 @@ fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
 #[test]
 fn repl_core_json_parse_inline() {
     let inputs = &[
-        "use core.encoding.json as json",
+        "use core.[encoding.json]",
         "json.to_string(json.parse(\"[42]\") ?? panic(\"bad\"))",
     ];
     let out = run_transcript(inputs, None);

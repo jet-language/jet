@@ -442,7 +442,10 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                     ..
                 } => {
                     for (original, alias) in items {
-                        let local_name = alias.as_deref().unwrap_or(original);
+                        let local_name = jet_foundation::AST::import_item_alias(
+                            original,
+                            alias.as_deref(),
+                        );
                         let alias_fact = bundle.name_ledger.effective_alias(module_idx, local_name);
                         let target = alias_fact.and_then(|name| {
                             let target_module = name.target_module?;

@@ -1300,7 +1300,7 @@ pub(crate) fn update_core_imports_from_ledger(
     for import in &module.imports {
         if let ImportKind::Unqualified { items, .. } = &import.kind {
             for (original, alias) in items {
-                let local = alias.as_deref().unwrap_or(original.as_str());
+                let local = crate::AST::import_item_alias(original, alias.as_deref());
                 if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, local) {
                     if binding.target == "core" || binding.target.starts_with("core.") {
                         map.insert(local.to_string(), binding.target.clone());

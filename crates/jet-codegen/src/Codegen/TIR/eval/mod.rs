@@ -2889,17 +2889,22 @@ fn run_bundle_at_stage(
             }
         }
         for imp in &module.imports {
-            if bundle
-                .name_ledger
-                .effective_alias(module_idx, &imp.import_alias())
-                .is_none()
-            {
-                continue;
-            }
-            if let Some(core_module) = imp.core_module_path() {
-                core_imports
-                    .entry(imp.import_alias())
-                    .or_insert(core_module);
+            if let crate::AST::ImportKind::Unqualified { items, .. } = &imp.kind {
+                for (original, alias) in items {
+                    let local = crate::AST::import_item_alias(original, alias.as_deref());
+                    if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, local) {
+                        if binding.target == "core" || binding.target.starts_with("core.") {
+                            core_imports
+                                .entry(local.to_string())
+                                .or_insert_with(|| binding.target.clone());
+                        }
+                    }
+                }
+            } else if let Some(core_module) = imp.core_module_path() {
+                let alias = imp.import_alias();
+                if bundle.name_ledger.effective_alias(module_idx, &alias).is_some() {
+                    core_imports.entry(alias).or_insert(core_module);
+                }
             }
         }
     }

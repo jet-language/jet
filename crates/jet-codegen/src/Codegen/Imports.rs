@@ -217,7 +217,7 @@ pub(crate) fn reexport_call_map(
                 continue;
             };
             for (orig, alias_opt) in items {
-                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                 let Some(name) = bundle.name_ledger.effective_alias(target_idx, local) else {
                     continue;
                 };
@@ -265,7 +265,7 @@ pub(crate) fn reexport_call_map(
             };
             let real_mod = mangle(&bundle.modules[real_idx].alias);
             for (orig, alias_opt) in items {
-                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                 map.insert(
                     (cm.name.clone(), local.to_string()),
                     (real_mod.clone(), orig.clone()),
@@ -301,7 +301,7 @@ pub(crate) fn core_import_map(
         {
             if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     if bundle.name_ledger.effective_alias(module_idx, local).is_none() {
                         continue;
                     }
@@ -354,7 +354,7 @@ pub(crate) fn unqualified_import_maps(
             continue;
         }
         for (orig, alias_opt) in items {
-            let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+            let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
             let Some(name) = bundle.name_ledger.effective_alias(module_idx, local) else {
                 continue;
             };
@@ -426,7 +426,7 @@ pub(crate) fn inline_import_maps(
             };
             if code_module_names.contains(module_alias) {
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     inline_scope.insert(local.to_string(), format!("{module_alias}__{orig}"));
                     names.insert(local.to_string());
                     if imp.is_pub {
@@ -441,7 +441,7 @@ pub(crate) fn inline_import_maps(
                 if let Some(target) = target {
                     let rust_mod = mangle(&bundle.modules[target].alias);
                     for (orig, alias_opt) in items {
-                        let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                        let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                         file_scope.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
                         names.insert(local.to_string());
                     }
@@ -492,7 +492,7 @@ fn unqualified_file_function_entries(
             continue;
         };
         for (orig, alias_opt) in items {
-            let local = alias_opt.as_deref().unwrap_or(orig.as_str()).to_owned();
+            let local = crate::AST::import_item_alias(orig, alias_opt.as_deref()).to_owned();
             let Some(item) = bundle.modules[target].items.iter().find(|item| match item {
                 Item::Func(f) => f.name == *orig && f.is_pub,
                 _ => false,

@@ -114,6 +114,12 @@ pub fn core_list_prefix(module_alias: &str) -> Option<String> {
         .then(|| format!("{}{rest}", Syntax::CORE_SHORT))
 }
 
+/// Return the local name for one member in a grouped `use` list. An explicit
+/// alias wins; otherwise a dotted member path binds its final segment.
+pub fn import_item_alias<'a>(original: &'a str, alias: Option<&'a str>) -> &'a str {
+    alias.unwrap_or_else(|| original.rsplit('.').next().unwrap_or(original))
+}
+
 impl ImportDecl {
     /// The effective alias for this import: the user-given alias if present,
     /// otherwise the default derived from the import kind.
