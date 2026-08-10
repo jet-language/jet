@@ -3283,9 +3283,10 @@ pub fn emit_bundle_tests_cov(
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives =
         crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let tests: Vec<&TestDef> = entry
-        .items
+    let tests: Vec<&TestDef> = bundle
+        .modules
         .iter()
+        .flat_map(|module| module.items.iter())
         .filter_map(|i| match i {
             Item::Test(t) => Some(t),
             _ => None,

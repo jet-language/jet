@@ -821,7 +821,6 @@ fn registered_unimplemented_codes_are_expected() {
         "L2501", // reserved (path-normalisation issue noted in spec)
         "L2701", // E2-M9 — staged
         "L2801", // E2-M10 — staged
-        "L2901", // E2-M11 — staged
         "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
         "E0951", // retired by D-META-EFFECT1 c3: redirected to E3401
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed

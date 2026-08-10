@@ -33,7 +33,7 @@ fn shared_session_identical_stale_rules_across_clients() {
         .unwrap()
         .ok());
     let fx = kernel.execute_cell(ClientKind::JupyterAdapter, &b).unwrap();
-    assert!(fx.ok() || !fx.bundle.text_plain.is_empty() || fx.eval.text.contains("fx") || true);
+    assert!(fx.ok() || !fx.bundle.text_plain.is_empty() || fx.eval.text.contains("fx"));
 
     let plan = kernel.replay_plan(1, Some("x :: 2")).expect("plan");
     assert!(plan.steps.iter().any(|s| s.kind == jet::REPL::RerunPlan::StepKind::ConfirmEffect)
