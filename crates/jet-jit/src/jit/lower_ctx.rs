@@ -3389,7 +3389,31 @@ impl LowerCtx<'_, '_> {
                     // string in the AOT emitter (TIR/emit/statements.rs); the JIT has no
                     // pattern-test lowering, so each is named (not `_`) to keep this match
                     // exhaustive over `TIfCond`.
-                    TIfCond::And { .. } => {
+                    TIfCond::And { left, right } => {
+                        // A guarded variant arm is represented as
+                        // `if let Variant(payload) && guard`. Lower the
+                        // binding first, then the plain guard inside its
+                        // binding scope so the payload is available to both
+                        // the guard and the arm body.
+                        if let (
+                            TIfCond::IfLet { pattern, subj },
+                            TIfCond::Plain(guard),
+                        ) = (left.as_ref(), right.as_ref())
+                        {
+                            self.lower_enum_if_let_with_then(
+                                pattern,
+                                subj,
+                                |this| {
+                                    this.lower_plain_if_with_then(
+                                        guard,
+                                        |this| this.lower_stmts_scoped(then_body),
+                                        else_body.as_deref(),
+                                    )
+                                },
+                                else_body.as_deref(),
+                            )?;
+                            return Ok(());
+                        }
                         return Err("jit binding conjunction unsupported".to_string());
                     }
                     TIfCond::IsNone { subj } => {
@@ -21258,6 +21282,24 @@ impl LowerCtx<'_, '_> {
         then_body: &[TStmt],
         else_body: Option<&[TStmt]>,
     ) -> Result<(), String> {
+        self.lower_enum_if_let_with_then(
+            pattern,
+            subj,
+            |this| this.lower_stmts_scoped(then_body),
+            else_body,
+        )
+    }
+
+    fn lower_enum_if_let_with_then<F>(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_action: F,
+        else_body: Option<&[TStmt]>,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(&mut Self) -> Result<(), String>,
+    {
         let Pattern::Variant {
             variant, bindings, ..
         } = &pattern.pattern
@@ -21312,7 +21354,7 @@ impl LowerCtx<'_, '_> {
         } else {
             None
         };
-        self.lower_stmts_scoped(then_body)?;
+        then_action(self)?;
         if let Some((key, old_var, old_ty)) = bound {
             match old_var {
                 Some(var) => {
@@ -21353,6 +21395,52 @@ impl LowerCtx<'_, '_> {
             self.b.switch_to_block(merge_block);
             self.b.seal_block(merge_block);
             self.dead = false;
+        }
+        Ok(())
+    }
+
+    fn lower_plain_if_with_then<F>(
+        &mut self,
+        cond: &TExpr,
+        then_action: F,
+        else_body: Option<&[TStmt]>,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(&mut Self) -> Result<(), String>,
+    {
+        let cond_val = self.lower_expr(cond)?;
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        self.b
+            .ins()
+            .brif(cond_val, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+        then_action(self)?;
+        let then_reaches_merge = !self.dead;
+        if then_reaches_merge {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        if let Some(body) = else_body {
+            self.lower_stmts(body)?;
+        }
+        let else_reaches_merge = !self.dead;
+        if else_reaches_merge {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        if then_reaches_merge || else_reaches_merge {
+            self.b.switch_to_block(merge_block);
+            self.b.seal_block(merge_block);
+            self.dead = false;
+        } else {
+            self.dead = true;
         }
         Ok(())
     }

@@ -610,6 +610,23 @@ impl CtValue {
         Some(jet_err(message.clone(), code, cause))
     }
 
+    /// Interpreter/deopt adapter for the core crypto error shape. The native
+    /// bridge carries the same stable Display text in `JetCryptoError`; keep
+    /// the tier-0 carrier as a message-only view rather than exposing its
+    /// Rust-shaped struct rendering at an entry boundary.
+    pub fn crypto_error_message(&self) -> Option<String> {
+        let CtValue::Struct { type_name, fields } = self else {
+            return None;
+        };
+        if type_name != "CryptoError" {
+            return None;
+        }
+        match fields.iter().find(|(field, _)| field == "message") {
+            Some((_, CtValue::Str(message))) => Some(message.clone()),
+            _ => None,
+        }
+    }
+
     /// Interpreter/deopt adapter from the Prelude-owned error shape. This is
     /// the inverse of `to_jet_err`; it does not recreate error semantics.
     pub fn from_jet_err(error: &crate::Outcome::JetErr) -> CtValue {

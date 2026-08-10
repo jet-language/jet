@@ -31,6 +31,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_service_receipt = etype == Some("ServiceReceipt");
     let is_service_error = etype == Some("ServiceError");
     let is_hook_outcome = etype == Some("HookOutcome");
+    let is_data_event = etype == Some("DataEvent");
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
     let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
@@ -55,6 +56,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 mangle(t)
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
+            } else if t == "DataEvent" {
+                format!("{}jet_std::DataEvent", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_ERROR {
                 format!("{}jet_std::IOError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
@@ -92,7 +95,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON/Key/union tags keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
+        if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
             v.to_string()
         } else {
             mangle_variant(v)
@@ -266,6 +269,19 @@ pub(crate) fn variant_binding_types_for_enum(
             "Char" | "Ctrl" => Some(vec![Type::Char]),
             "F" => Some(vec![Type::Int]),
             _ => Some(Vec::new()),
+        };
+    }
+    if enum_name == "DataEvent" {
+        return match variant {
+            "Bool" => Some(vec![Type::Bool]),
+            "Int" => Some(vec![Type::Int]),
+            "Float" => Some(vec![Type::Float]),
+            "Text" | "Key" => Some(vec![Type::String]),
+            "Bytes" => Some(vec![Type::List(Box::new(Type::Int))]),
+            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => {
+                Some(Vec::new())
+            }
+            _ => None,
         };
     }
     let resolved = cx

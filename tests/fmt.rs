@@ -31,6 +31,17 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 }
 
 #[test]
+fn fmt_preserves_script_and_declaration_source_order() {
+    let source = "message :: \"script entry\"\nprint(message)\n\nfn helper() => Int {\n    return 42\n}\n";
+    let once = jet::format_source(source).expect("mixed script source should format");
+    let message = once.find("message ::").expect("script binding should remain");
+    let helper = once.find("fn helper").expect("declaration should remain");
+    assert!(message < helper, "formatter reordered source items:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted source should reformat");
+    assert_eq!(once, twice, "mixed script formatting must be idempotent");
+}
+
+#[test]
 fn package_formatter_fails_closed_on_comments() {
     let error = jet::Package::format_source(
         "name: \"demo\" // comment ownership is not typed yet\n",

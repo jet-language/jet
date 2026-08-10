@@ -3793,6 +3793,15 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         if let Item::Func(f) = item {
             if f.name == "run" {
                 f.name = "__jet_unused_run".to_string();
+                // `prepare_script_entries` gives the synthetic script entry
+                // a fallible unit return so ordinary `jet run` can report a
+                // default error. When `jet dev` selects another function,
+                // that parked function is not an entry and must not retain a
+                // fallthrough obligation (E0114).
+                if f.span == f.name_span {
+                    f.return_type = None;
+                    f.return_type_span = None;
+                }
             }
         }
     }

@@ -426,6 +426,9 @@ impl<'a> JitMeta<'a> {
         if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return Some(datatree_payload(variant));
         }
+        if enum_name == "DataEvent" {
+            return Some(data_event_payload(variant));
+        }
         if enum_name == "ServiceReceipt" {
             return Some(match variant {
                 "Retained" => SERVICE_RECEIPT_RETAINED_PAYLOAD.as_slice(),
@@ -1191,6 +1194,25 @@ fn key_payload(variant: &str) -> &'static [Type] {
     match variant {
         "Char" | "Ctrl" => CHAR.as_slice(),
         "F" => INT.as_slice(),
+        _ => &[],
+    }
+}
+
+fn data_event_payload(variant: &str) -> &'static [Type] {
+    use std::sync::LazyLock;
+    static BOOL: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Bool]);
+    static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
+    static FLOAT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Float]);
+    static STRING: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::String]);
+    static BYTES: LazyLock<[Type; 1]> = LazyLock::new(|| {
+        [Type::List(Box::new(Type::Int))]
+    });
+    match variant {
+        "Bool" => BOOL.as_slice(),
+        "Int" => INT.as_slice(),
+        "Float" => FLOAT.as_slice(),
+        "Text" | "Key" => STRING.as_slice(),
+        "Bytes" => BYTES.as_slice(),
         _ => &[],
     }
 }

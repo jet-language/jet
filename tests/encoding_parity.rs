@@ -1145,7 +1145,7 @@ fn json_stream_reader_writer_matches_aot_and_default_dev() {
         let expected = fs::read_to_string(&expected_path).expect("canonical encoding golden");
         let expected_json = "{\"a\":1,\"b\":2}";
         let expected_events =
-            "event:ObjectStart\nevent:Key:b\nevent:Int:2\nevent:Key:a\nevent:Int:1\nevent:ObjectEnd\n";
+            "event:ObjectStart\nevent:Key:a\nevent:Int:1\nevent:Key:b\nevent:Int:2\nevent:ObjectEnd\n";
         let expected_runtime = format!("{expected_events}read-count:6\neof\n{expected_json}\n");
         assert_eq!(
             expected, expected_runtime,
