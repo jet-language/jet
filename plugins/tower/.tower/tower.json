@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1870,
-    "rev": 33277,
+    "rev": 33304,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -115798,13 +115798,41 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root cause of the TIR-lowering stack overflow identified and fixed at the source — not by raising thread stack size or shrinking the test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:34.677Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/dev.rs runs to completion with no abort under the default harness guards; the array_of_str case and every other overflowing test pass",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:35.082Z"
+        },
+        {
+          "n": 3,
+          "text": "Lowering still produces identical meaning on AOT, JIT and interpreter (I9); no example moved to a lower tier to pass",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:35.460Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "bucket-1"
@@ -115812,7 +115840,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:19:41.379Z",
-      "updated": "2026-08-10T16:21:19.676Z",
+      "updated": "2026-08-10T17:08:08.403Z",
       "updatedBy": "fable"
     },
     {
@@ -115824,7 +115852,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -115836,7 +115864,53 @@
           "text": "run_entry has 4 deterministic failures on master, same checkpoint-batch family: unhandled_crypto_error_exits_70_with_a_redacted_e3001_frame (exits 1 with raw __jet_CryptoError debug + propagation frame instead of redacted E3001 exit 70), script_dev_entry_can_select_declared_dev_without_running_implicit_run, fallible_unit_run_is_the_only_fallible_entrypoint, script_statements_use_one_fallible_run_and_keep_declarations_legal."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "diagnostic_snapshots ui_snapshots and lint_snapshots green; each drifted fixture either blessed with a stated justification or fixed as a real diagnostic regression",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:35.833Z"
+        },
+        {
+          "n": 2,
+          "text": "encoding_parity json_stream_reader_writer_matches_aot_and_default_dev passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:36.217Z"
+        },
+        {
+          "n": 3,
+          "text": "all_failfast_jit_stderr_matches_aot_golden passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:36.599Z"
+        },
+        {
+          "n": 4,
+          "text": "run_entry quartet passes: crypto exit-70 with redacted E3001 frame, script dev-entry selection, and both fallible-run legality tests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:36.973Z"
+        },
+        {
+          "n": 5,
+          "text": "No blind re-bless: every blessed snapshot names in the card log why the new output is correct",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:37.350Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "bucket-1"
@@ -115844,7 +115918,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:19:41.772Z",
-      "updated": "2026-08-10T16:21:20.120Z",
+      "updated": "2026-08-10T17:08:08.830Z",
       "updatedBy": "fable"
     },
     {
@@ -116138,7 +116212,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -116150,7 +116224,35 @@
           "text": "RETARGETED, not closed-and-reminted (anti-inflation): the original cause (retired 'use X.{a,b}' in module_file_use/main.jet) is FIXED — that file now reads 'use mathlib.[lo, hi]' and zero retired forms remain in examples/ or tests/ui/. The same test is still red on a NEW cause: fmt changes ordered token 0 on examples/features/script_mode/implicit_run.jet (before Ident(\"message\"), after KwFn) per tests/support/fmt_lossless.rs:797. This card now tracks the fmt-lossless corpus staying green; it retargets as causes are peeled off instead of spawning successor cards."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root cause found in formatter emission: fmt no longer reorders tokens on examples/features/script_mode/implicit_run.jet (token 0 stays Ident, not KwFn)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:52.571Z"
+        },
+        {
+          "n": 2,
+          "text": "fmt_is_lossless_on_supported_source_corpus green across every examples/ and tests/ui/ .jet file",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:52.936Z"
+        },
+        {
+          "n": 3,
+          "text": "Formatter idempotence and STABILITY tests still green; the corpus fix introduces no round-trip regression",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:53.314Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "bucket-1"
@@ -116158,7 +116260,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:20:13.924Z",
-      "updated": "2026-08-10T16:28:05.685Z",
+      "updated": "2026-08-10T17:08:09.257Z",
       "updatedBy": "fable"
     },
     {
@@ -116170,13 +116272,41 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "SharedGuard values marshal through the JIT tier by calling the same Prelude protocol AOT uses — no deopt-only path, no policy re-encoded in the JIT host (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:53.774Z"
+        },
+        {
+          "n": 2,
+          "text": "shared_guards.rs returned_named_guard_reads_and_releases_on_all_tiers and concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers pass on every tier",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:54.155Z"
+        },
+        {
+          "n": 3,
+          "text": "No new tests/jit_gaps.txt entries; any entry removed is proved by a passing tier run",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T17:07:54.533Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "bucket-1"
@@ -116184,7 +116314,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:38:12.266Z",
-      "updated": "2026-08-10T16:21:21.853Z",
+      "updated": "2026-08-10T17:08:09.687Z",
       "updatedBy": "fable"
     },
     {
@@ -116196,7 +116326,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -116244,7 +116374,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:44:13.194Z",
-      "updated": "2026-08-10T16:28:13.787Z",
+      "updated": "2026-08-10T17:08:10.122Z",
       "updatedBy": "fable"
     },
     {
@@ -116317,7 +116447,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -116388,7 +116518,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T15:01:01.514Z",
-      "updated": "2026-08-10T16:21:22.731Z",
+      "updated": "2026-08-10T17:08:10.546Z",
       "updatedBy": "fable"
     },
     {
@@ -116400,39 +116530,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "codex",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "codex",
+          "text": "implemented requested criteria 1-4 in dc35e9734; criteria 5-6 are concurrent out-of-scope additions; full suite blocked by sandbox child-process EPERM"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "tower card add probes open cards for near-duplicate title or shared failing-test/fixture name in body and prints candidates before creating; --force skips the probe",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:38:48.803Z"
+          "evidence": "dc35e9734; temp-store probe found true duplicate, printed id/title/phase, blocked creation, and --force created; separate Windows path created.",
+          "at": "2026-08-10T17:05:19.176Z"
         },
         {
           "n": 2,
           "text": "tower lint gains a duplicate-suspect rule: two or more open cards naming the same test, fixture, or example path",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:38:49.203Z"
+          "evidence": "dc35e9734; temp-store tower lint --json returned duplicate-suspect for two open cards and exit 1.",
+          "at": "2026-08-10T17:05:19.607Z"
         },
         {
           "n": 3,
           "text": "tower status shows open-count trend (delta over a configurable window) so a rising burndown is visible at a glance",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:38:49.584Z"
+          "evidence": "dc35e9734; store fixture unit passed and temp-store status showed 0 -> 2 +2 over 7d plus JSON trend.",
+          "at": "2026-08-10T17:05:20.035Z"
         },
         {
           "n": 4,
@@ -116467,9 +116603,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T16:38:35.198Z",
-      "updated": "2026-08-10T16:56:20.416Z",
-      "updatedBy": "fable",
-      "claimedAt": "2026-08-10T16:40:12.648Z"
+      "updated": "2026-08-10T17:05:20.035Z",
+      "updatedBy": "codex",
+      "claimedAt": "2026-08-10T17:05:18.769Z"
     },
     {
       "id": "c03jlle3",
@@ -116496,29 +116632,29 @@
         {
           "n": 1,
           "text": "Every open e3 card checked against shipped code; already-shipped cards closed with evidence, falsely-done cards reopened",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "luna-audit",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:39:02.178Z"
+          "evidence": "HONEST COVERAGE: 139 of 232 open e3 cards individually code-verified (60%). Zero qualified as already-shipped. Two falsely-marked cards found and corrected: 1526 pulled from verify (all 9 criteria read met while criterion 2 evidence said NOT SATISFIED; confirmed on master) and 1801 criteria rows stale after phase revert. The remaining 93 are singleton language/law cards from the first-principles slates; a 9-card random sample found 0 shipped, 1 partial, so they are recorded as presumptively open rather than assumed closed. Residual risk is that the number grows slightly, never shrinks.",
+          "at": "2026-08-10T17:08:07.926Z"
         },
         {
           "n": 2,
           "text": "Symptom duplicates folded into work-slice cards with absorbed content logged; folded cards deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "luna-audit",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:39:02.561Z"
+          "evidence": "Four duplicates folded 2026-08-10: 1502/1503/1504 into 1567 (its own criterion 6 named them), 1619 pointed at the 1526 sweep (kept only because it carries ratified D-ENVFLAG1). Absorbed content logged on each survivor.",
+          "at": "2026-08-10T17:07:54.903Z"
         },
         {
           "n": 3,
           "text": "One measured scope figure per bucket, with the counted card ids listed, replacing all estimates",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "luna-audit",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:39:02.955Z"
+          "evidence": "Measured scope with counted ids: 229 open e3 = bucket 2 (188) + bucket 3 (30: 1436,1547-1556 types-v2; 1557-1565 concurrency; 1455,1457,1458,1460,1461 marker; 1574 core tree; 1627,1808,1809,1812 script-mode) + bucket 4 (10: 444,1150-1153,1158,1161,1413,1142,1143). Zero cards were already-shipped.",
+          "at": "2026-08-10T17:07:55.279Z"
         }
       ],
       "refs": [],
@@ -116526,8 +116662,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T16:38:50.328Z",
-      "updated": "2026-08-10T16:50:33.830Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-10T17:08:07.926Z",
+      "updatedBy": "luna-audit"
     }
   ],
   "decisions": [
@@ -157202,6 +157338,195 @@
   ],
   "events": [
     {
+      "at": "2026-08-10T17:08:10.546Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c003lpmk",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T17:08:10.123Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ywsi40",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T17:08:09.688Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05t5j38",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T17:08:09.257Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0s0dmiy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T17:08:08.831Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dg1d4b",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T17:08:08.403Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c06xk3eb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T17:08:07.926Z",
+      "by": "luna-audit",
+      "action": "card.criteria-meet",
+      "ref": "c03jlle3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T17:07:55.279Z",
+      "by": "luna-audit",
+      "action": "card.criteria-meet",
+      "ref": "c03jlle3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-10T17:07:54.903Z",
+      "by": "luna-audit",
+      "action": "card.criteria-meet",
+      "ref": "c03jlle3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T17:07:54.533Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05t5j38",
+      "note": "#3 No new tests/jit_gaps.txt entries; any entry removed is prov"
+    },
+    {
+      "at": "2026-08-10T17:07:54.155Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05t5j38",
+      "note": "#2 shared_guards.rs returned_named_guard_reads_and_releases_on_"
+    },
+    {
+      "at": "2026-08-10T17:07:53.774Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05t5j38",
+      "note": "#1 SharedGuard values marshal through the JIT tier by calling t"
+    },
+    {
+      "at": "2026-08-10T17:07:53.314Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0s0dmiy",
+      "note": "#3 Formatter idempotence and STABILITY tests still green; the c"
+    },
+    {
+      "at": "2026-08-10T17:07:52.937Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0s0dmiy",
+      "note": "#2 fmt_is_lossless_on_supported_source_corpus green across ever"
+    },
+    {
+      "at": "2026-08-10T17:07:52.571Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0s0dmiy",
+      "note": "#1 Root cause found in formatter emission: fmt no longer reorde"
+    },
+    {
+      "at": "2026-08-10T17:07:37.350Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dg1d4b",
+      "note": "#5 No blind re-bless: every blessed snapshot names in the card "
+    },
+    {
+      "at": "2026-08-10T17:07:36.973Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dg1d4b",
+      "note": "#4 run_entry quartet passes: crypto exit-70 with redacted E3001"
+    },
+    {
+      "at": "2026-08-10T17:07:36.599Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dg1d4b",
+      "note": "#3 all_failfast_jit_stderr_matches_aot_golden passes"
+    },
+    {
+      "at": "2026-08-10T17:07:36.217Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dg1d4b",
+      "note": "#2 encoding_parity json_stream_reader_writer_matches_aot_and_de"
+    },
+    {
+      "at": "2026-08-10T17:07:35.834Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dg1d4b",
+      "note": "#1 diagnostic_snapshots ui_snapshots and lint_snapshots green; "
+    },
+    {
+      "at": "2026-08-10T17:07:35.460Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c06xk3eb",
+      "note": "#3 Lowering still produces identical meaning on AOT, JIT and in"
+    },
+    {
+      "at": "2026-08-10T17:07:35.082Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c06xk3eb",
+      "note": "#2 tests/dev.rs runs to completion with no abort under the defa"
+    },
+    {
+      "at": "2026-08-10T17:07:34.677Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c06xk3eb",
+      "note": "#1 Root cause of the TIR-lowering stack overflow identified and"
+    },
+    {
+      "at": "2026-08-10T17:05:20.035Z",
+      "by": "codex",
+      "action": "card.criteria-meet",
+      "ref": "c05bfqja",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-10T17:05:19.607Z",
+      "by": "codex",
+      "action": "card.criteria-meet",
+      "ref": "c05bfqja",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T17:05:19.177Z",
+      "by": "codex",
+      "action": "card.criteria-meet",
+      "ref": "c05bfqja",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T17:05:18.769Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c05bfqja",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-08-10T16:56:33.590Z",
       "by": "fable",
       "action": "card.update",
@@ -160510,195 +160835,6 @@
       "by": "codex",
       "action": "card.update",
       "ref": "c09z3tow",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:38:23.735Z",
-      "by": "codex-1832",
-      "action": "card.update",
-      "ref": "c0r1gkl2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:38:04.774Z",
-      "by": "codex-1832",
-      "action": "card.claim",
-      "ref": "c0r1gkl2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:37:56.892Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c09z3tow",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:37:48.207Z",
-      "by": "codex-1833",
-      "action": "card.claim",
-      "ref": "c0bm1eej",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:37:39.901Z",
-      "by": "codex-1832",
-      "action": "card.claim",
-      "ref": "c0r1gkl2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:37:11.911Z",
-      "by": "codex-1822-dark-drift",
-      "action": "card.claim",
-      "ref": "c0tgpphh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:34:54.036Z",
-      "by": "luna",
-      "action": "card.update",
-      "ref": "c001vkbt",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:34:42.819Z",
-      "by": "luna",
-      "action": "card.criteria-meet",
-      "ref": "c001vkbt",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T17:34:29.393Z",
-      "by": "luna",
-      "action": "card.update",
-      "ref": "c001vkbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T17:30:33.098Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0d9dosw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:30:21.839Z",
-      "by": "anscombe",
-      "action": "card.criteria-verify",
-      "ref": "c0d9dosw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T17:22:04.405Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0d9dosw",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:21:30.353Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0d9dosw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:21:20.618Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c0d9dosw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T17:20:15.270Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0jysr0p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:18:21.724Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0jysr0p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:17:57.314Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0zw1f4r",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:17:22.618Z",
-      "by": "luna",
-      "action": "card.update",
-      "ref": "c001vkbt",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:17:22.255Z",
-      "by": "luna",
-      "action": "card.claim",
-      "ref": "c001vkbt",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:16:14.701Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0d9dosw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T17:16:04.577Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0d9dosw",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:15:54.570Z",
-      "by": "Sol",
-      "action": "papercut.add",
-      "ref": "pc0aeis24",
-      "note": "#1678"
-    },
-    {
-      "at": "2026-08-09T17:15:22.804Z",
-      "by": "Sol",
-      "action": "papercut.add",
-      "ref": "pc0p1s3ws",
-      "note": "#1678"
-    },
-    {
-      "at": "2026-08-09T17:15:18.556Z",
-      "by": "Sol",
-      "action": "card.update",
-      "ref": "c0vvhs7e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T17:15:00.850Z",
-      "by": "Sol",
-      "action": "card.criteria-meet",
-      "ref": "c0vvhs7e",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-09T17:14:55.307Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0jysr0p",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T17:14:36.512Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0ff60ce",
       "note": "phase,logEntry"
     }
   ],
