@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1860,
-    "rev": 33163,
+    "nextNum": 1866,
+    "rev": 33201,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19,11 +19,10 @@
         "radar-remaining",
         "radar-frozen",
         "radar:e5",
-        "radar-sq",
-        "board-ideas"
+        "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-09T19:15:13.111Z"
+    "completionCursor": "2026-08-10T11:47:21.161Z"
   },
   "epochs": [
     {
@@ -115839,8 +115838,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T10:50:33.311Z",
-      "updated": "2026-08-10T10:51:56.357Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-10T11:48:46.754Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0inuw9a",
@@ -115851,12 +115850,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-10",
+          "by": "luna-p0",
+          "text": "Found + fixed a 3rd rustc-reject (I2) while proving the migration end to end: tests/shared_guards.rs::concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers (task.group spawning 2 tasks that both call an fn using #Transact) hit E0596 'cannot borrow __jet_stm as mutable' -- crates/jet-codegen/src/Codegen/TIR/emit/statements.rs emits '#Transact' STM handles via a hand-written 'let __jet_stm = jet_stm::begin();' (not routed through TIR::Let's is_file_handle mut-allowlist at all), but edit_txn(&mut __jet_stm, ...) always needs &mut. Unrelated to taskgroup specifically (any #Transact use would hit this), just never reached before since nothing exercised #Transact+concurrency together until this migration unparked the test. Fixed: forced 'let mut __jet_stm' unconditionally (compiler-internal local, always safe). Verified: tests/shared_guards.rs::concurrent_transaction_deltas_... no longer rustc-rejects; its remaining failure is an unrelated pre-existing 'SharedGuard must deopt until the JIT can marshal the full Prelude protocol' panic that also hits returned_named_guard_reads_and_releases_on_all_tiers (a fixture with zero taskgroup content) -- logged separately as card #1864, not in scope here. tests/shared_guards.rs now 8/10 (was 6/10 before this session, both remaining failures pre-existing/unrelated)."
+        },
+        {
+          "at": "2026-08-10",
+          "by": "luna-p0",
+          "text": "Root-caused + fixed both card-log items: (1) E0433 jet_std::JetTask unresolved on AOT -- collect_used_core (crates/jet-sema/src/Sema/Bundle/Validation/CoreUsage.rs) never marked any used_core usage for the task/task.group keyword surface (no 'use core.X' import touches it, unlike every other CORELIB_KERNEL_PARTS consumer), so core_needs_embedded_runtime() stayed false and the whole jet_std module (which carries TaskGroup.rs) never got embedded. Added note_core_usage('core.concurrency::task', ...) for Stmt::TaskGroup and for MethodCall{receiver: INTERNAL_TASK_RECEIVER} in CoreUsage.rs, mirroring the existing #Shield/Live/Reactive pattern. (2) Once E0433 was gone, task.all/task.race/task.any leaked a raw Rust Result as 'Ok([1, 2])' etc: jet_std::jet_task_all/race/any (Prelude/CoreLib/JetStd/MathTaskMem.rs) return JetOutcome<T,TaskFailure> but sema types task.all/race/any as plain [T]/T (no Result) -- a real type/codegen mismatch, present since these combinators were first implemented (same TIR node for old g.all/new task.all, not something the respell introduced). Added jet_task_outcome_unwrap() (success unwraps, failure panics fail-fast, mirrors JetTaskGroupRuntime::close_with + the interpreter's already-correct jet_task_select handling) and wired it into the 3 AOT emission sites in Codegen/TIR/emit/expressions.rs. task_control_tiers::task_control_plane_matches_under_aot now compiles and the Ok()-wrapping is gone. Remaining red in that test is unrelated pre-existing scheduler non-determinism, tracked as new card #1860 -- not part of this card's scope."
+        },
+        {
+          "at": "2026-08-10",
+          "by": "luna-p0",
+          "text": "Migration scope bigger than card body: retired 'taskgroup NAME { }' / 'NAME.task =>' / 'NAME.all|race|any([...])' spellings hit ~30 in-repo files (tests/concurrency_boundaries.rs, shared_guards.rs, tir_unsafe_and_runtime.rs, dev.rs, canvas.rs, corelib.rs, observe.rs, path_durability.rs, taskgroup_params.rs, tests/ui/*.jet, tests/fuzz/sema/**/*.jet, ~14 examples/features/concurrency/*.jet + memory/shared_guard_queue.jet, docs/spec/spec.md concurrency section, 2 docs/research files). Doing the full migration per greenfield law. Also found: sema's infer_taskgroup_method only supports .select() on a group handle -- g.all/g.race/g.any-on-a-handle from spec.md/effects_surface.rs comments is STALE pre-D-CONC-SPAWN1=D prose; ratified text only lists task.all/task.race/task.any as combinator spelling, so treating sema as authoritative and migrating docs to match. Also found: bare 'task' keyword binds to taskgroup_stack.last() -- a function with TWO simultaneous TaskGroup params (old spawn_both test) cannot target the non-last param; ratified text is silent on multi-group-per-fn, so restructuring that one test instead of guessing new syntax."
+        },
         {
           "at": "2026-08-10",
           "by": "fable",
@@ -115867,20 +115881,20 @@
         {
           "n": 1,
           "text": "Every in-repo consumer of the retired taskgroup/g.task spelling migrates to the ratified surface; the retired form is deleted",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:19:31.184Z"
+          "status": "verified",
+          "metBy": "luna-p0",
+          "verifiedBy": "fable",
+          "evidence": "Fresh-context review of e0f9fb913 (I9 tier parity of jet_task_outcome_unwrap, sentinel leakage, migration completeness, sema fixes): no issues. Retired spelling deleted repo-wide; worker baseline-proved residuals pre-existing",
+          "at": "2026-08-10T13:58:08.354Z"
         },
         {
           "n": 2,
           "text": "tests/taskgroup_params.rs and examples/features/concurrency/*.jet pass on every applicable tier (I9)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:19:31.570Z"
+          "status": "verified",
+          "metBy": "luna-p0",
+          "verifiedBy": "fable",
+          "evidence": "Proof run: taskgroup_params 11/14, task_control_tiers pass, path_durability 8/8, canvas task-specific 3/3; residual reds carded 1860-1865",
+          "at": "2026-08-10T13:58:08.766Z"
         }
       ],
       "refs": [],
@@ -115888,8 +115902,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:19:22.497Z",
-      "updated": "2026-08-10T11:23:26.854Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-10T13:58:09.215Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T13:58:09.215Z"
     },
     {
       "id": "c06xk3eb",
@@ -116030,7 +116045,7 @@
     {
       "id": "c0n8zb5c",
       "num": 1858,
-      "title": "Shared flags across subcommands (persistent-flag ergonomic)",
+      "title": "The CLI system: commands, shared flags, and the standard pack",
       "body": "",
       "kind": "feature",
       "track": "epoch",
@@ -116087,6 +116102,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-10T11:33:01.162Z"
+        },
+        {
+          "n": 6,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T12:43:58.295Z"
+        },
+        {
+          "n": 7,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T12:43:58.295Z"
+        },
+        {
+          "n": 8,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T12:43:58.295Z"
+        },
+        {
+          "n": 9,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T12:43:58.295Z"
         }
       ],
       "refs": [],
@@ -116097,8 +116148,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:32:41.653Z",
-      "updated": "2026-08-10T11:33:57.658Z",
-      "updatedBy": "fable-mine-video"
+      "updated": "2026-08-10T12:43:58.295Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c06xbujy",
@@ -116109,8 +116160,49 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "luna-p0",
+          "text": "Root cause: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs's is_file_handle allowlist (the set of types whose local binding forces Rust 'let mut' even when the Jet binding is immutable, because their methods take &mut self) never included Mailer. jet_email::Mailer::send (Prelude/CoreLib/Email.rs:987) takes &mut self, so 'mailer :: email.smtp(config)' emitted a bare 'let mailer = ...;' and rustc rejected '.send()' with E0596 (I2 violation). Fix: added \"Mailer\" to the allowlist (one line). This is the single shared TIR lowering both AOT emission and JIT read from, so no separate JIT-side fix needed (I9). scripts/agent/jet-env cargo test --test corelib core_email_mailer_surface_constructs_with_real_secret now passes (1 passed)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Generated AOT Rust compiles cleanly (no rustc rejection) for the email mailer surface test; root-caused in codegen mutability derivation, not hand-edited",
+          "status": "verified",
+          "metBy": "luna-p0",
+          "verifiedBy": "fable",
+          "evidence": "Mailer added to AOT local-mutability derivation (lower/statements.rs); corelib mailer test passes; reviewed in e0f9fb913 composed review, no issues",
+          "at": "2026-08-10T13:58:09.567Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T11:35:50.046Z",
+      "updated": "2026-08-10T13:58:10.020Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T13:58:10.019Z"
+    },
+    {
+      "id": "c0pwqnks",
+      "num": 1860,
+      "title": "task.race/task.any pick a non-deterministic winner on near-simultaneous branches",
+      "body": "task_control_tiers::task_control_plane_matches_under_aot and task_control_plane_matches_on_default_run flake: `task.race { 3, 4 }` and `task.any { 5, 6 }` sometimes return the second branch (4/6) instead of the first (3/5), on both AOT and tier0 interp. Root cause is in the shared scheduler policy (jet_task_select / JetTaskSelectPolicy in crates/jet-codegen/src/Prelude/TaskGroup.rs + Scheduler.rs), not in the D-CONC-SPAWN1=D surface migration (card #1854) — confirmed pre-existing on master before that work (stashed repro flaked 2/5 runs on unmodified tree). Two near-instant literal branches race the OS thread scheduler with no deterministic tie-break, so 'first successful/completed wins' isn't reproducible. Needs either a real tie-break rule (documented) or the test needs branches with a real ordering guarantee. Blocks a clean task_control_tiers proof run.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
@@ -116120,9 +116212,151 @@
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
-      "created": "2026-08-10T11:35:50.046Z",
-      "updated": "2026-08-10T11:35:50.047Z",
-      "updatedBy": "fable"
+      "created": "2026-08-10T11:54:56.182Z",
+      "updated": "2026-08-10T11:54:56.182Z",
+      "updatedBy": "luna-p0"
+    },
+    {
+      "id": "c01d132r",
+      "num": 1861,
+      "title": "'task' reserved keyword collides with existing local-variable name 'task' repo-wide",
+      "body": "D-CONC-SPAWN1=D reserves 'task' as a hard keyword: the parser's primary-expression dispatch (crates/jet-parser/src/Parser/Expressions/primary.rs, task_surface_expr) treats ANY bare identifier 'task' in expression position as the task-spawn keyword, unconditionally -- so a local variable literally named 'task' (legal as a binding target, since looks_like_sigil_binding() matches Ident before the keyword-dispatch arm) can never be REFERENCED again: 'task.join()', 'task.cancel()', and even a bare '[task]' list literal all fail E0003 ('unknown task selector' or 'expected a value, found ]'). Repro: 'use core.tasks as tasks\\nfn run() { task :: tasks.spawn(() => 10)\\n  tasks.join_all([task]) }' -> E0003 at the ']'. This is unrelated to the retired taskgroup/g.task spelling (card #1854) -- it hits the still-valid core.tasks/tasks.spawn() mechanism whenever the local handle happens to be named 'task', which was a completely ordinary identifier before this ratification. Found and fixed within files already touched for #1854 (tests/taskgroup_params.rs, concurrency_boundaries.rs, tir_unsafe_and_runtime.rs, shared_guards.rs, tests/ui/cffi_callback_runtime_handle.jet -- renamed 'task' -> 'handle'/'child' locally). NOT swept repo-wide: a full audit needs a real scan (rg word-boundary 'task' is too noisy -- collides with #Job/#Task markers, jetpack's own unrelated 'task' domain, task_runner.jet, etc.) across every test/example that uses core.tasks with a variable named 'task'. Recommend either a rename sweep or (better) a dedicated E-code diagnostic when sema sees a binding named 'task' shadow-fail like this, so future authors get a clear message instead of a confusing E0003 selector error.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T12:14:30.160Z",
+      "updated": "2026-08-10T12:14:30.160Z",
+      "updatedBy": "luna-p0"
+    },
+    {
+      "id": "c0lsm8ov",
+      "num": 1862,
+      "title": "TIR interpreter ICEs on a panic inside a task combinator branch (SOFT_EXIT unregistered diagnostic code)",
+      "body": "examples/features/concurrency/all_failfast.jet (task.all with a panicking branch) ICEs under default 'jet run' (tier0 interpreter, forced by task-combinator deopt): 'internal compiler error: diagnostic SOFT_EXIT has no typed row' at crates/jet-foundation/src/Diagnostics.rs:213, then 'a scoped thread panicked' / 'evaluator worker panicked: Any' at crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:1256/2637. AOT (jet build) is CORRECT (verified byte-identical to examples/features/expected/concurrency/all_failfast.err.out, exit 70) -- this is interpreter-only, an I9 tier-parity gap plus a real I2 ICE. Root cause: crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs (~line 5032, the TRequireKind::Panic/Require handler) constructs Diagnostic::error(\"SOFT_EXIT\", ...) as a deliberate internal control-flow sentinel (caught later by 'Err(error) if error.code == \"SOFT_EXIT\"' at eval/mod.rs:2064 and by Source/Interpreter.rs:149 / jet-jit/src/jit/deopt.rs:310). But Diagnostic::error() (crates/jet-foundation/src/Diagnostics.rs:204) unconditionally looks up the code in the central Registry (crate::Registry::diagnostic, backed by Prelude/Diagnostics.jet) and panics via unwrap_or_else if not found -- and \"SOFT_EXIT\" is deliberately NOT a registered user-facing diagnostic code, so constructing it always panics. This path is apparently only reached when TIR-eval interprets a panic AND self.sink is set (which normal non-task panics under jet run don't hit, since simple programs run natively via the JIT and never touch this interpreter code at all) -- task combinators force an interp deopt (confirmed via '[tier0 interp (whole-program deopt)]' trace), so 'task.all{...}/task.race{...}/task.any{...} with a panicking branch under a forced interp deopt' was never reachable before the D-CONC-SPAWN1=D respell (retired taskgroup syntax didn't even parse, card #1854). Fix needs a raw/internal Diagnostic constructor that skips the registry lookup for this one deliberately-unregistered sentinel code (or register a real internal-only row), not a broad Registry change. NOT part of #1854/#1859 scope -- found while proving the migrated all_failfast.jet example; investigate whether native_cancellation/native_deadline/native_panicked_wait taskgroup_params.rs tests hit the same or a related failure (currently investigating, will follow up).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "luna-p0",
+          "text": "Found + fixed a sibling of the same bug: 'TASK_CANCELLED' (crates/jet-codegen/src/Codegen/TIR/eval/mod.rs + eval/exprs.rs, 3 sites) is a second deliberately-unregistered internal sentinel diagnostic code (task-wait-point-observed-cancel), hit by tests/shared_guards.rs::cancelling_condition_wait_unregisters_and_releases_guard (task.race with a Condition.wait() loser) -- construction itself panicked via the same Diagnostic::error() registry-lookup path, but since this one isn't caught by run_checked's SOFT_EXIT special case, the panic surfaced as a genuine HANG (a scoped worker thread panicked inside std::thread::scope, and the outer .join().expect(...) then blocked/aborted rather than returning promptly) instead of a clean ICE message. Generalized the fix: Diagnostics.rs now has a shared internal_sentinel(code, what, why, span) fn skipping the registry lookup, with soft_exit() and a new task_cancelled() both built on it. Verified: examples run clean (no ICE, no hang), tests/shared_guards.rs::cancelling_condition_wait_unregisters_and_releases_guard passes in 3.94s (was hanging past 120s before)."
+        },
+        {
+          "at": "2026-08-10",
+          "by": "luna-p0",
+          "text": "Fixed. Root cause confirmed: Diagnostic::error() (crates/jet-foundation/src/Diagnostics.rs) always looked up the code in the Registry and panicked on a miss; 'SOFT_EXIT' is a deliberately unregistered internal control-flow sentinel used by the TIR interpreter (4 sites in eval/mod.rs + eval/exprs.rs) and jet-comptime (1 site in Methods/core_calls.rs) to unwind cleanly after already writing to the shared DevSink. Added Diagnostic::soft_exit(what, why, span) -- a raw constructor that skips the registry lookup -- and switched all 5 construction sites to it. Also fixed a related I9 gap: AOT's task.all/race/any print two lines on a failing branch (the branch's own rendered panic, then a combinator-level 'panic: a task panicked' from card #1854's jet_task_outcome_unwrap), but the interpreter only printed the first line. Added task_select_failure() (crates/jet-codegen/src/Codegen/TIR/eval/mod.rs, task_select) to append the same trailing line when a branch failure already wrote to sink, leaving unrelated task_select errors (cancel/deadline propagation with no sink write yet) untouched. Verified: examples/features/concurrency/all_failfast.jet now produces byte-identical stderr on both AOT (jet build) and default jet run (tier0 interpreter, forced by the task.all deopt) matching examples/features/expected/concurrency/all_failfast.err.out exactly, exit 70 on both tiers. Previously-hanging/crashing tests unblocked: taskgroup_params::early_return_closes_group_before_caller_continues, native_cancellation/native_deadline/native_panicked_wait_closes_group_before_caller_continues (verifying in the combined proof run now)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "SOFT_EXIT / TASK_CANCELLED sentinel construction no longer panics; all_failfast ICE and shared_guards hang gone",
+          "status": "verified",
+          "metBy": "luna-p0",
+          "verifiedBy": "fable",
+          "evidence": "Covered by fresh-context review of e0f9fb913 incl. sentinel user-leakage check: no issues",
+          "at": "2026-08-10T13:58:33.687Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T12:53:35.790Z",
+      "updated": "2026-08-10T13:58:34.132Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T13:58:34.132Z"
+    },
+    {
+      "id": "c0s0dmiy",
+      "num": 1863,
+      "title": "examples/features/modules/module_file_use/main.jet uses retired 'use X.{a,b}' import-list syntax",
+      "body": "tests/support/fmt_lossless.rs::fmt_is_lossless_on_supported_source_corpus (which re-parses/formats every examples/ and tests/ui/ .jet file) fails: examples/features/modules/module_file_use/main.jet:3 writes 'use mathlib.{lo, hi}', which is retired -- current syntax is 'use alias.[item, other as local]' (D-CORE-USELIST1), error E0003. Unrelated to cards #1854/#1859/#1860/#1861/#1862 (found incidentally while proving #1854's migration via the formatter corpus check). Small, isolated fix: migrate the one example to the current selective-import syntax.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T13:20:13.924Z",
+      "updated": "2026-08-10T13:20:13.924Z",
+      "updatedBy": "luna-p0"
+    },
+    {
+      "id": "c05t5j38",
+      "num": 1864,
+      "title": "SharedGuard JIT/native tier panics: 'must deopt until the JIT can marshal the full Prelude protocol'",
+      "body": "tests/shared_guards.rs::returned_named_guard_reads_and_releases_on_all_tiers and concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers both panic with 'SharedGuard must deopt until the JIT can marshal the full Prelude protocol' (tests/shared_guards.rs:266) on the native/JIT tier -- unrelated to concurrency/taskgroup (returned_named_guard's fixture never uses task/task.group at all; the second one uses a task.group but the failure reproduces identically without it -- confirmed by isolating: fixing card #1859's #Transact STM E0596 mut bug removed a DIFFERENT rustc-reject on this same test but left this JIT-marshal panic). Pre-existing gap, not part of cards #1854/#1859. Needs its own investigation into why SharedGuard can't marshal through the resident JIT tier.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T13:38:12.266Z",
+      "updated": "2026-08-10T13:38:12.266Z",
+      "updatedBy": "luna-p0"
+    },
+    {
+      "id": "c0ywsi40",
+      "num": 1865,
+      "title": "Task panic doesn't reliably propagate as process exit through group auto-join / sibling cancellation",
+      "body": "3 tests newly reachable after card #1854's syntax migration (previously blocked by E0003 parse errors on the retired taskgroup spelling) expose runtime gaps in how a child task's panic surfaces through task.group's auto-join and Drop-based close:\n\n1. tests/taskgroup_params.rs::early_return_closes_group_before_caller_continues -- 'bad :: task panic(\"child\")' inside a task.group, never explicitly joined (relies on append_taskgroup_auto_joins' compiler-inserted cancel()+join() at group-scope-exit). Expected exit code 70 (panic), got 0 -- the auto-inserted plain '.join()' returns T ? TaskFailure and its Result is silently discarded (not checked, not re-raised), so the panic never surfaces as a process exit.\n\n2. tests/taskgroup_params.rs::native_panicked_wait_closes_group_before_caller_continues -- 'slow :: task slow_value(gate)' (tight 2M-iteration compute loop, no wait point) + 'ignored :: task.any { fail_after_start(gate) }' (panics almost immediately) + trailing 'slow.join()'. Expected stdout '' (process exits via panic before slow's loop finishes, ~instant). Got stdout 'settled\\n' after ~6.5s -- slow's loop actually completes. Hypothesis (not fully confirmed): jet_task_outcome_unwrap (card #1854/#1862, Prelude/CoreLib/JetStd/MathTaskMem.rs) takes the 'jet_scheduler_panic_should_unwind()' raw-panic branch instead of the immediate-process::exit(70) branch at this call site, so the panic unwinds through task.group's Drop (JetTaskGroupRuntime::close_with), which cancels+joins slow -- but slow has no wait point (D-CANCELMODEL1=C cancellation is only preemptive AT wait points), so join() blocks for the full 6.5s before the panic continues propagating. Needs verifying whether jet_scheduler_in_task()/jet_runtime_should_unwind() is misreporting 'in a task' for code running in the task.group's own (non-task) scope, or whether the real issue is that Drop-based close_with blocking on an uncancellable sibling is simply the correct-but-untested behavior and the test's EXPECTED stdout is now wrong given a tight-loop task can never be interrupted.\n\n3. tests/taskgroup_params.rs::native_cancellation_closes_group_before_caller_continues -- also fails (assert_native_wait_exit checks exit code + stderr contains 'cancel' + a native-tier trace line); root cause not yet isolated, same family (task.group + task cancellation via external tasks.spawn().cancel() on a function containing a task.group).\n\nNone of these are the SOFT_EXIT/TASK_CANCELLED/STM-mut bugs already fixed under #1854/#1862 (verified via direct repro: 'settled' prints identically on BOTH AOT and interp tiers, so it isn't a tier-specific interpreter gap either). This is deep task-cancellation/auto-join runtime semantics, out of scope for the #1854 syntax migration itself -- flagging for dedicated investigation rather than guessing a fix under time pressure. Repro scripts used: /tmp/claude-*/scratchpad/any_cancel_repro.jet (recreate from tests/taskgroup_params.rs::native_panicked_wait_closes_group_before_caller_continues source if needed).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T13:44:13.194Z",
+      "updated": "2026-08-10T13:44:13.195Z",
+      "updatedBy": "luna-p0"
     }
   ],
   "decisions": [
@@ -154875,100 +155109,120 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-10T10:51:56.357Z"
+      "status": "ratified",
+      "created": "2026-08-10T10:51:56.357Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-10"
     },
     {
       "id": "D-CLI-GLOBAL1",
       "cardId": "c0n8zb5c",
       "group": "syntax",
-      "title": "Shared flags across CLI subcommands",
-      "gist": "How one flag can work on every subcommand of a program.",
-      "lesson": "A program with subcommands often wants one flag, such as --verbose, to work everywhere. Today each subcommand owns its whole flag list. A flag wanted everywhere must be typed again in every subcommand struct. A flag placed before the subcommand word is an error. This choice decides where a shared flag is declared and where a user may type it.",
+      "title": "The CLI system: the program struct, shared flags, and the standard pack",
+      "gist": "How a program declares its commands and shared flags, and how much the common case gets for free.",
+      "lesson": "A program with subcommands wants three things: add a command with almost no ceremony, declare a shared flag once, and get standard behavior such as --verbose and --version for free. Today each subcommand needs its own struct, an enum variant, and a dispatch arm; nothing is shared and nothing is free. This choice picks the whole shape, so the most common cases carry the least friction.",
       "explainer": "",
-      "story": "Priya builds a deploy tool with subcommands: plan, apply, rollback. She wants --verbose and --config on all three. She types the two fields into three structs and they drift: rollback forgets --config. A teammate runs `deploy --verbose apply` and gets an unknown-subcommand error, because flags cannot appear before the subcommand word.",
-      "inWild": "#CLI\nstruct PlanArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    target: String\n}\n\n#CLI\nstruct ApplyArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    target: String\n}\n\n// RollbackArgs forgot verbose and config — nothing catches the drift.\n#CLI\nstruct RollbackArgs {\n    target: String\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n    Rollback(RollbackArgs)\n}\n\nfn run(cmd: Cmd) { ... }\n\n// $ deploy --verbose apply\n// error: unknown subcommand `--verbose`",
+      "story": "Priya builds a deploy tool: plan, apply, rollback. Today that is three structs, one enum, and a three-arm dispatch before any logic. She wants --verbose everywhere, so she types it three times and rollback drifts. A teammate runs `deploy --verbose apply` and gets an unknown-subcommand error. Adding a fourth command means touching four places.",
+      "inWild": "// Today, before any deploy logic exists:\n#CLI\nstruct PlanArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    target: String\n}\n\n#CLI\nstruct ApplyArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    target: String\n}\n\n// RollbackArgs forgot verbose — nothing catches the drift.\n#CLI\nstruct RollbackArgs {\n    target: String\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n    Rollback(RollbackArgs)\n}\n\nfn run(cmd: Cmd) {\n    if cmd == {\n        .Plan(a) -> plan(a)\n        .Apply(a) -> apply(a)\n        .Rollback(a) -> rollback(a)\n    }\n}\n\n// $ deploy --verbose apply\n// error: unknown subcommand `--verbose`",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Each subcommand declares its own",
-          "detail": "Keep today's law. Every subcommand struct lists every flag it accepts, including repeated ones. Nothing is shared, so nothing is hidden. The cost is real duplication: the same field, doc text, and short name typed in every struct, with silent drift when one struct forgets.",
-          "technical": "No change. D-CLIFLAG1 stands: the enum entry has no root flag namespace; argv before the subcommand token must be the subcommand name.",
-          "code": "#CLI\nstruct PlanArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    target: String\n}\n\n#CLI\nstruct ApplyArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    target: String\n}\n\n// $ deploy apply --verbose     works\n// $ deploy --verbose apply     error: unknown subcommand `--verbose`"
+          "name": "Each command declares its own",
+          "detail": "Keep today's law. Every subcommand struct lists every flag it accepts, including repeated ones. Nothing is shared, nothing is free, and nothing is hidden. The cost is the ceremony the story shows: struct plus variant plus dispatch arm per command, duplication of shared flags, and silent drift.",
+          "technical": "No change. D-CLIFLAG1 stands: no root flag namespace; argv before the subcommand token must be the subcommand name.",
+          "code": "// Exactly the inWild example above — that is the whole option.\n// $ deploy apply --verbose     works\n// $ deploy --verbose apply     error: unknown subcommand `--verbose`"
         },
         {
           "key": "B",
-          "name": "One app struct holds shared flags and the command",
-          "detail": "The entry takes one #CLI struct. Its scalar fields are the shared flags. One enum-typed field is the subcommand. The whole command surface reads top to bottom in one place. A shared flag may be typed before or after the subcommand word. Help prints shared flags once, at the root.",
-          "technical": "E1308 extends: the one entry parameter may be a #CLI struct containing exactly one enum-of-#CLI field. Shared scalars parse from anywhere in argv; variant fields parse after the token. A name collision between a shared flag and a variant flag is a compile-time error (new code). Precedence stays: command input beats env beats default.",
-          "code": "#CLI\nstruct Deploy {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    cmd: Cmd\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n    Rollback(RollbackArgs)\n}\n\nfn run(app: Deploy) {\n    if app.verbose { log.level(.Debug) }\n    if app.cmd == {\n        .Apply(a) -> apply(a, app.config)\n        ...\n    }\n}\n\n// $ deploy --verbose apply --target prod   works\n// $ deploy apply --verbose --target prod   also works"
+          "name": "App struct with a command enum field",
+          "detail": "The entry takes one #CLI struct. Its scalar fields are the shared flags; one enum-typed field is the subcommand. Shared flags parse before or after the subcommand word. Per-command ceremony stays: each new command is still a struct, a variant, and a dispatch arm.",
+          "technical": "E1308 extends: the entry parameter may be a #CLI struct containing exactly one enum-of-#CLI field. Shared scalars parse anywhere in argv; variant fields parse after the token. A shared-versus-variant name collision is a compile-time error.",
+          "code": "#CLI\nstruct Deploy {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    cmd: Cmd\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n    Rollback(RollbackArgs)\n}\n\nfn run(app: Deploy) {\n    if app.cmd == {\n        .Apply(a) -> apply(a, app.config)\n        ...\n    }\n}"
         },
         {
           "key": "C",
-          "name": "Two entry parameters: shared struct, then command enum",
-          "detail": "The entry takes two parameters: a #CLI struct of shared flags and the subcommand enum. Sharing is visible in the signature itself. The body receives two separate values, so shared state never travels inside the command value. The cost is a second entry shape to learn and document.",
-          "technical": "E1308 extends to a two-parameter form: fn run(globals: G, cmd: E) with G a #CLI struct and E an enum of #CLI payloads. Parse rules match option B. Single-parameter forms keep today's meaning.",
-          "code": "#CLI\nstruct Globals {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n}\n\nfn run(globals: Globals, cmd: Cmd) {\n    if globals.verbose { log.level(.Debug) }\n    ...\n}\n\n// $ deploy --verbose apply --target prod   works"
+          "name": "The bare map registry",
+          "detail": "The program is a map from command names to functions; each function's parameter list is its flags. Adding a command is one function and one line. But shared flags need a separate mechanism, inline member docs move to parameters, and the map is a second program shape next to the struct everyone already knows.",
+          "technical": "#CLI on a registry binding of function values declares the entry. The literal is read at compile time; each callable must have CLI-mappable parameters. Shared flags arrive through a hoisted #CLI struct parameter.",
+          "code": "#CLI(Standard)\ncommands :: [\n    \"plan\": plan,\n    \"apply\": apply,\n    \"rollback\": rollback,\n]\n\nfn plan(target: String) { ... }\nfn apply(#Doc(\"deploy target\") target: String, config: String?) { ... }\n\n// Adding `status`: write fn status(), add one line."
         },
         {
           "key": "D",
-          "name": "Write once, embed in every subcommand",
-          "detail": "A plain struct holds the shared fields. Each subcommand struct embeds it with one field. The flags belong to each subcommand, typed after its name, and help repeats them per subcommand. Nothing is global: each command still owns its full surface, but the declaration is written once.",
-          "technical": "Rides the deferred nested-#CLI design (spec: scoped out of v1). An embedded #CLI struct's fields join the host's flag namespace unprefixed. Flags parse only after the subcommand token. Root-position flags stay errors.",
-          "code": "#CLI\nstruct Common {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n}\n\n#CLI\nstruct ApplyArgs {\n    shared: Common\n    target: String\n}\n\n// $ deploy apply --verbose --target prod   works\n// $ deploy --verbose apply                 still an error"
+          "name": "Marker registration on each function",
+          "detail": "Each command function carries its own marker, Cobra-style. No registry at all — the marker is the registration. The cost is a scattered surface: no single place lists the program's commands, ordering is unclear, and discovering the full shell surface means reading every file.",
+          "technical": "#Command(name?) on a top-level function registers it as a subcommand. Command list order follows declaration order across files, which imports can reshuffle.",
+          "code": "#Command\nfn plan(target: String) { ... }\n\n#Command(\"apply\")\nfn apply(target: String, config: String?) { ... }\n\n// The program's command list exists nowhere in source —\n// only the compiler and --help can show it."
+        },
+        {
+          "key": "E",
+          "name": "The program struct: fields are flags, callable members are commands",
+          "detail": "One #CLI struct is the whole program. Scalar fields are shared flags with the same #Doc and = defaults as today. A callable member is a command: bind an existing function with =, or define a method whose self reads the shared flags. The member name is the command word; member #Doc is its help summary. #CLI(Standard) grants working --verbose, --quiet, --color, and --version with automatic wiring. One-command tools skip the struct entirely: parameters on fn run are the flags. Growth never rewrites: signature, then struct, then members.",
+          "technical": "Member kinds split at compile time: scalar fields become root flags parsed anywhere in argv; callable members become subcommands named by their lowercased member name. A method's self is the parsed shared-flag struct, read-only. A bound function may declare one parameter of the struct's type to receive shared flags; its remaining scalar parameters, S61 `= expr` defaults, and parameter #Doc define that command's flags.\n\n#CLI(Standard): --verbose/-v and --quiet/-q drive core.log level, --color=auto|always|never honors NO_COLOR, --version prints the package version. Bare #CLI keeps only auto --help. jet inspect expand shows every inferred piece.\n\nFlag-versus-command name collisions and callable members inside #Codable structs are compile-time errors. Callable members are not data: never constructed, serialized, or positional. Zero arguments or root --help prints the command list with member #Doc summaries and exits 0 (existing orientation law).\n\nE1308 extends to param-direct entry: fn run(path: Path, threshold: Int = 100) maps parameters as flags. Amends D-CLIFLAG1: the enum subcommand form is deleted (greenfield). The dossier, embedded schema, and completions carry command names and summaries; signature changes surface in the existing breaking-shape report.",
+          "code": "#CLI(Standard)\nstruct Deploy {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool   // shared flag\n    config: String?                                            // shared flag\n\n    // bind an existing function\n    #Doc(\"preview changes without applying\") plan = plan_impl\n\n    // or define inline — self reads the shared flags\n    #Doc(\"apply the deployment\")\n    fn apply(self, target: String) {\n        if self.verbose { ... }\n    }\n\n    #Doc(\"undo the last apply\")\n    fn rollback(self, target: String) { ... }\n}\n\n// $ deploy --verbose apply --target prod    shared flag anywhere\n// $ deploy --version                        from the manifest, for free\n// $ deploy                                  command list with #Doc summaries\n// Adding `status`: add one member. Nothing else changes.\n\n// The most common program of all — no struct at all:\n#CLI(Standard)\nfn run(path: Path, threshold: Int = 100) { ... }"
         }
       ],
       "comparisons": [
         {
+          "lang": "Swift / ArgumentParser",
+          "note": "A struct declares configuration and lists subcommand types in one place — the closest prior art for option E's program struct.",
+          "code": "struct Deploy: ParsableCommand {\n    static let configuration = CommandConfiguration(\n        subcommands: [Plan.self, Apply.self, Rollback.self])\n    @Flag(name: .shortAndLong) var verbose = false\n}"
+        },
+        {
+          "lang": "Python / Typer",
+          "note": "Function signatures become CLI flags with defaults and help from annotations — the parameter mapping options C and E share.",
+          "code": "@app.command()\ndef apply(target: str, config: str = \"\"):\n    ..."
+        },
+        {
+          "lang": "Python / Fire",
+          "note": "A plain dict of callables becomes the whole CLI — option C's map, but untyped and runtime-reflected.",
+          "code": "fire.Fire({'plan': plan, 'apply': apply, 'rollback': rollback})"
+        },
+        {
           "lang": "Go / Cobra",
-          "note": "PersistentFlags on a parent command are inherited by every child command.",
-          "code": "rootCmd.PersistentFlags().BoolVarP(&verbose, \"verbose\", \"v\", false, \"verbose output\")"
-        },
-        {
-          "lang": "Rust / clap",
-          "note": "One derive struct holds global args plus a subcommand field — the shape option B proposes.",
-          "code": "#[derive(Parser)]\nstruct Cli {\n    #[arg(short, long, global = true)]\n    verbose: bool,\n    #[command(subcommand)]\n    cmd: Commands,\n}"
-        },
-        {
-          "lang": "Python / argparse",
-          "note": "A parents=[shared] parser re-embeds shared flags per subparser — the shape option D proposes.",
-          "code": "shared = argparse.ArgumentParser(add_help=False)\nshared.add_argument('-v', '--verbose', action='store_true')\nsub.add_parser('apply', parents=[shared])"
+          "note": "Imperative AddCommand registration plus PersistentFlags — option D's scatter with extra ceremony; the video mine that raised this ballot.",
+          "code": "rootCmd.AddCommand(applyCmd)\nrootCmd.PersistentFlags().BoolVarP(&verbose, \"verbose\", \"v\", false, \"verbose\")"
         }
       ],
-      "rec": "B",
+      "rec": "E",
       "recommendation": {
-        "why": "One struct is the whole command surface, readable top to bottom, and it stays one entry parameter. Shared flags are declared once, print once in help, and work before or after the subcommand word. It matches how the typed entry already thinks: the parameter type IS the spec.",
+        "why": "The program struct keeps the struct surface Jet already ratified and absorbs the registry into it. Fields are flags, callable members are commands, and one #Doc and one = expr rule serve every member kind. The most common actions become the cheapest: one signature for a one-command tool, one member per new command, one marker argument for the standard pack. Shared flags reach commands through self with no injection mechanism to learn, and the whole shell surface is one readable struct.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "Duplication drifts silently: a struct that forgets a shared flag ships a hole no check catches, which is what the story shows."
+            "reason": "It keeps the ceremony and the silent drift the story shows, and root-position flags stay errors."
+          },
+          {
+            "key": "B",
+            "reason": "It fixes shared flags but keeps struct-plus-variant-plus-dispatch ceremony for every command, so the most common action stays the most expensive."
           },
           {
             "key": "C",
-            "reason": "It adds a second entry signature shape for the same result option B gets inside the existing one-parameter rule."
+            "reason": "The map is a second program shape whose shared flags and member docs need separate mechanisms the struct already owns."
           },
           {
             "key": "D",
-            "reason": "Flags still fail before the subcommand word, help repeats them per subcommand, and it waits on the unshipped nested-struct design."
+            "reason": "Scattered markers leave no single place that lists the program, so the shell surface becomes implicit and hard to audit."
           }
         ],
-        "tradeoff": "The derive must special-case one enum-typed field inside a #CLI struct, and a shared-versus-variant flag-name collision needs a new compile-time diagnostic. That is accepted: the check is static and the beginner surface stays one struct."
+        "tradeoff": "Struct members now come in two kinds, data and callable, and the derive must keep them apart from construction, serialization, and positional filling. That is accepted: the kinds are visually distinct in source, every misuse is a compile-time error, and the payoff is one struct that is the whole program."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The first draft compared the status quo, a root app struct, a two-parameter entry, and per-variant embedding, and recommended the root struct for one-place declaration and root-position parsing.",
-        "boilOcean": "The breadth review tested a #Persistent field marker, an implicit always-on --verbose set, and env-only sharing. All were folded away: markers and implicit sets hide the surface the struct already states, and env-only sharing changes precedence.",
-        "hybrid": "The hybrid review tested B plus D together: a root struct now, embedding later for per-command grouping. They compose without conflict, so D stays a separate future design and B stands alone.",
-        "cooperative": "The cooperative review strengthened A with a proposed drift lint and strengthened D with unprefixed field joining. A's lint still cannot make root-position flags parse; D still repeats help per subcommand.",
-        "adversarial": "The adversarial review attacked B with flag-name collisions, a struct holding two enum fields, and positional ambiguity before the token. The collision diagnostic, the exactly-one-enum-field rule in E1308, and named-value-wins cover those, so B survives."
+        "base": "The draft was rebuilt twice: first around a bare map registry, then, on owner direction, around the program struct. The final menu ranks five shapes by friction on the most common actions.",
+        "boilOcean": "The breadth review tested auto-discovery of public functions, an imperative add() builder, and manifest files, and kept marker-per-function as option D. The rest folded away: implicit surface, runtime ceremony, or truth split across files.",
+        "hybrid": "The hybrid pass produced the recommendation itself: option B's struct and option C's registry fuse into E, where callable members are the registry entries. Owner review resolved the member-kind question to both bound and method forms and deleted the standalone map.",
+        "cooperative": "The cooperative review strengthened C with compile-time map checking and B with the Standard pack, which composes with any winner. C still splits shared flags from commands; B still pays per-command ceremony.",
+        "adversarial": "The adversarial review attacked E: flag-versus-command name collisions, callable members leaking into #Codable serialization, self mutation expectations, bound-function signature drift, and positional ambiguity. Compile-time collision and serialization errors, read-only self, the existing breaking-shape report, and named-value-wins repair those, so E survives."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-10T11:33:57.657Z"
+      "status": "ratified",
+      "created": "2026-08-10T11:33:57.657Z",
+      "outcome": "E",
+      "ratifiedAt": "2026-08-10"
     }
   ],
   "questions": [
@@ -156563,9 +156817,314 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-10T11:24:14.650Z"
+    },
+    {
+      "id": "b1trfpk1",
+      "text": "Look for the best and most commonly used libraries across all major languages. What can we pull/integrate into core jet to make exceptional experiences and OBE the need to use external libs for as many users as possible.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-10T11:46:44.462Z"
+    },
+    {
+      "id": "b2gow3ol",
+      "text": "How can we rethink development in general from first principles to improve on effectiveness, efficiency, speed, and incredible ergonomics. What are the biggest pain points in development at all echelons across all domains, how can we fundamentally address them. How can we minimize friction OVERALL in development, not just with the common friction points that impact WRITING and READING code?",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-10T13:41:31.011Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-10T13:58:34.132Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0lsm8ov",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T13:58:33.687Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0lsm8ov",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T13:58:33.298Z",
+      "by": "luna-p0",
+      "action": "card.criteria-meet",
+      "ref": "c0lsm8ov",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T13:58:32.906Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0lsm8ov",
+      "note": "#1 SOFT_EXIT / TASK_CANCELLED sentinel construction no longer p"
+    },
+    {
+      "at": "2026-08-10T13:58:10.020Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c06xbujy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T13:58:09.567Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c06xbujy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T13:58:09.215Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T13:58:08.766Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0inuw9a",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T13:58:08.354Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0inuw9a",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T13:45:13.984Z",
+      "by": "luna-p0",
+      "action": "card.criteria-meet",
+      "ref": "c06xbujy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T13:45:05.735Z",
+      "by": "luna-p0",
+      "action": "card.criteria-add",
+      "ref": "c06xbujy",
+      "note": "#1 Generated AOT Rust compiles cleanly (no rustc rejection) for"
+    },
+    {
+      "at": "2026-08-10T13:44:59.124Z",
+      "by": "luna-p0",
+      "action": "card.criteria-meet",
+      "ref": "c0inuw9a",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T13:44:45.038Z",
+      "by": "luna-p0",
+      "action": "card.criteria-meet",
+      "ref": "c0inuw9a",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T13:44:13.195Z",
+      "by": "luna-p0",
+      "action": "card.add",
+      "ref": "c0ywsi40",
+      "note": "Task panic doesn't reliably propagate as process exit through group auto-join / sibling cancellation"
+    },
+    {
+      "at": "2026-08-10T13:41:31.011Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b2gow3ol",
+      "note": "How can we rethink development in general from first princip"
+    },
+    {
+      "at": "2026-08-10T13:38:34.693Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T13:38:12.266Z",
+      "by": "luna-p0",
+      "action": "card.add",
+      "ref": "c05t5j38",
+      "note": "SharedGuard JIT/native tier panics: 'must deopt until the JIT can marshal the full Prelude protocol'"
+    },
+    {
+      "at": "2026-08-10T13:31:26.252Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0lsm8ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T13:20:13.924Z",
+      "by": "luna-p0",
+      "action": "card.add",
+      "ref": "c0s0dmiy",
+      "note": "examples/features/modules/module_file_use/main.jet uses retired 'use X.{a,b}' import-list syntax"
+    },
+    {
+      "at": "2026-08-10T12:59:41.304Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0lsm8ov",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T12:59:31.528Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0lsm8ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T12:53:35.790Z",
+      "by": "luna-p0",
+      "action": "card.add",
+      "ref": "c0lsm8ov",
+      "note": "TIR interpreter ICEs on a panic inside a task combinator branch (SOFT_EXIT unregistered diagnostic code)"
+    },
+    {
+      "at": "2026-08-10T12:43:58.295Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CLI-GLOBAL1",
+      "note": "E"
+    },
+    {
+      "at": "2026-08-10T12:43:58.295Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#9 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-10T12:43:58.295Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#8 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-10T12:43:58.295Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#7 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-10T12:43:58.295Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#6 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-10T12:38:27.439Z",
+      "by": "fable-mine-video",
+      "action": "card.update",
+      "ref": "c0n8zb5c",
+      "note": "description"
+    },
+    {
+      "at": "2026-08-10T12:38:26.981Z",
+      "by": "fable-mine-video",
+      "action": "decision.update",
+      "ref": "D-CLI-GLOBAL1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-10T12:21:46.350Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c06xbujy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T12:14:30.160Z",
+      "by": "luna-p0",
+      "action": "card.add",
+      "ref": "c01d132r",
+      "note": "'task' reserved keyword collides with existing local-variable name 'task' repo-wide"
+    },
+    {
+      "at": "2026-08-10T12:04:18.461Z",
+      "by": "fable-mine-video",
+      "action": "card.update",
+      "ref": "c0n8zb5c",
+      "note": "title,description"
+    },
+    {
+      "at": "2026-08-10T12:04:05.822Z",
+      "by": "fable-mine-video",
+      "action": "decision.update",
+      "ref": "D-CLI-GLOBAL1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-10T11:55:08.772Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:54:56.182Z",
+      "by": "luna-p0",
+      "action": "card.add",
+      "ref": "c0pwqnks",
+      "note": "task.race/task.any pick a non-deterministic winner on near-simultaneous branches"
+    },
+    {
+      "at": "2026-08-10T11:48:46.754Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ALLOC-PROGRAM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-10T11:47:21.161Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-10T11:47:21.161Z"
+    },
+    {
+      "at": "2026-08-10T11:46:44.462Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b1trfpk1",
+      "note": "Look for the best and most commonly used libraries across al"
+    },
+    {
+      "at": "2026-08-10T11:45:48.289Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:36:46.875Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c06xbujy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T11:36:46.428Z",
+      "by": "luna-p0",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "phase"
+    },
     {
       "at": "2026-08-10T11:36:11.380Z",
       "by": "fable",
@@ -159778,293 +160337,6 @@
       "action": "card.update",
       "ref": "c0n2pa4q",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T15:27:32.320Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c06m9mgu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T15:27:26.680Z",
-      "by": "codex-1842",
-      "action": "card.update",
-      "ref": "c0mmq29e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:27:24.389Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0vvhs7e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T15:25:10.509Z",
-      "by": "codex-1842",
-      "action": "card.update",
-      "ref": "c0mmq29e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:25:09.295Z",
-      "by": "codex-1842",
-      "action": "card.criteria-meet",
-      "ref": "c0mmq29e",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T15:22:28.664Z",
-      "by": "luna-1685",
-      "action": "card.claim",
-      "ref": "c0587rwc",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:22:28.385Z",
-      "by": "owner",
-      "action": "card.release",
-      "ref": "c0587rwc",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:21:35.409Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0x20ruo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:20:11.502Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c0vvhs7e",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-09T15:19:35.574Z",
-      "by": "e3-burndown",
-      "action": "card.release",
-      "ref": "c0x20ruo",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-09T15:17:45.614Z",
-      "by": "codex",
-      "action": "papercut.add",
-      "ref": "pc0o10vut",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:17:28.845Z",
-      "by": "codex",
-      "action": "card.release",
-      "ref": "c0x20ruo",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-09T15:17:19.822Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0x20ruo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T15:15:18.331Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c0q9x5ds",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:15:13.106Z",
-      "by": "fable-burndown",
-      "action": "card.claim",
-      "ref": "c0q9x5ds",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:15:00.234Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0n2pa4q",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:14:51.733Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0n2pa4q",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T15:14:42.536Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c06m9mgu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T15:14:16.194Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0n2pa4q",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:14:12.614Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0n2pa4q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:14:10.870Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c06m9mgu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T15:14:05.489Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c0n2pa4q",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T15:14:00.157Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c06m9mgu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:13:57.487Z",
-      "by": "codex",
-      "action": "papercut.add",
-      "ref": "pc0v86054",
-      "note": "#1834"
-    },
-    {
-      "at": "2026-08-09T15:11:51.285Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09s0caz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T15:11:50.545Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09s0caz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T15:11:49.195Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09s0caz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T15:07:30.894Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0n2pa4q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:07:30.640Z",
-      "by": "codex",
-      "action": "papercut.add",
-      "ref": "pc05hmiyu",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:06:18.139Z",
-      "by": "codex-1842",
-      "action": "card.update",
-      "ref": "c0mmq29e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:06:12.091Z",
-      "by": "codex-1842",
-      "action": "card.claim",
-      "ref": "c0mmq29e",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:06:06.303Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0x20ruo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:05:48.978Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0x20ruo",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:05:41.932Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c06m9mgu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T15:05:37.665Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0n2pa4q",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T15:05:37.135Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c06m9mgu",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T13:47:18.870Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-09T13:47:18.870Z"
-    },
-    {
-      "at": "2026-08-09T13:28:52.760Z",
-      "by": "Codex",
-      "action": "card.release",
-      "ref": "c08qvoft",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-09T13:28:51.588Z",
-      "by": "Codex",
-      "action": "card.update",
-      "ref": "c08qvoft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T13:28:00.459Z",
-      "by": "Sol",
-      "action": "card.release",
-      "ref": "c0p3j74r",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-09T13:27:54.263Z",
-      "by": "Sol",
-      "action": "card.update",
-      "ref": "c0p3j74r",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
