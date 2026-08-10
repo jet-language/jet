@@ -149,6 +149,42 @@ test('card add probes duplicates, allows separate work, and --force bypasses', (
   assert.equal(forced.num, 3, '--force creates despite duplicate candidates');
 });
 
+test('card add does not block short title overlap without reference signal', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-duplicate-floor-'));
+  run(cwd, ['init', '--name', 'Duplicate Floor']);
+  run(cwd, ['card', 'add', '--title', 'A', '--body', 'first separate work', '--by', 'tester']);
+  const second = JSON.parse(run(cwd, [
+    'card', 'add', '--title', 'A', '--body', 'second separate work', '--json', '--by', 'tester',
+  ]).out);
+  assert.equal(second.num, 2);
+});
+
+test('card criteria --reopen reopens a verified row and audits the reason', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-criteria-reopen-'));
+  run(cwd, ['init', '--name', 'Criteria Reopen']);
+  run(cwd, ['card', 'add', '--title', 'Criteria card', '--by', 'planner']);
+  run(cwd, ['card', 'criteria', '#1', '--add', 'ship it', '--by', 'planner']);
+  run(cwd, ['card', 'criteria', '#1', '--meet', '1', '--evidence', 'built', '--by', 'builder']);
+  run(cwd, ['card', 'criteria', '#1', '--verify', '1', '--evidence', 'checked', '--by', 'verifier']);
+
+  const reopened = JSON.parse(run(cwd, [
+    'card', 'criteria', '#1', '--reopen', '1', '--reason', 'phase moved back for a missed case',
+    '--by', 'repairer', '--json',
+  ]).out);
+  assert.equal(reopened.status, 'open');
+  assert.equal(reopened.evidence, '');
+  assert.equal(reopened.metBy, null);
+  assert.equal(reopened.verifiedBy, null);
+
+  const event = JSON.parse(run(cwd, ['events', '--json']).out)
+    .find(e => e.action === 'card.criteria-reopen');
+  assert.equal(event.by, 'repairer');
+  assert.match(event.note, /phase moved back for a missed case/);
+  const help = run(cwd, ['help']).out;
+  assert.match(help, /--reopen n --reason/);
+  assert.match(help, /criteria-phase-drift/);
+});
+
 test('status renders and reports the open-card trend for a chosen window', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-status-trend-'));
   run(cwd, ['init', '--name', 'Status Trend']);
