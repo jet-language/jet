@@ -522,7 +522,7 @@ pub(crate) fn register_struct(
         if f.computed.is_some() {
             computed_fields.insert(f.name.clone(), (f.name_span, f.ty.clone()));
         } else {
-            fields.push((f.name.clone(), f.name_span, f.ty.clone(), f.is_pub));
+            fields.push((f.name.clone(), f.name_span, f.ty.clone()));
             if let Some(default) = &f.default {
                 field_defaults.insert(f.name.clone(), (**default).clone());
             }
@@ -624,7 +624,7 @@ pub(crate) fn check_strong_shared_cycles(
             continue;
         };
         let fields = fields.clone();
-        for (fname, fspan, fty, _) in &fields {
+        for (fname, fspan, fty) in &fields {
             if let Some(through) =
                 strong_shared_cycle_witness(owner, fty, registry, &mut Vec::new())
             {
@@ -685,7 +685,7 @@ fn strong_shared_cycle_witness(
             let hit = match registry.types.get(n) {
                 Some(TypeDef::Struct { fields, .. }) => fields
                     .iter()
-                    .find_map(|(_, _, fty, _)| {
+                    .find_map(|(_, _, fty)| {
                         strong_shared_cycle_witness(owner, fty, registry, stack)
                     }),
                 _ => None,
@@ -712,7 +712,7 @@ fn payload_can_reach_owner(
             match registry.types.get(n) {
                 Some(TypeDef::Struct { fields, .. }) => fields
                     .iter()
-                    .any(|(_, _, fty, _)| payload_can_reach_owner(owner, fty, registry, seen)),
+                    .any(|(_, _, fty)| payload_can_reach_owner(owner, fty, registry, seen)),
                 _ => false,
             }
         }
@@ -781,7 +781,7 @@ pub(crate) fn register_enum(
             ));
             continue;
         }
-        if let Some(other) = mangled.insert(v.name.replace('.', "__"), v.name.clone()) {
+        if let Some(other) = mangled.insert(jet_foundation::Names::mangle_path(&v.name), v.name.clone()) {
             diags.push(Diagnostic::error(
                 "E0105",
                 format!(

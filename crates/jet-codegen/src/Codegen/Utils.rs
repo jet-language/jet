@@ -21,9 +21,9 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t.as_str()) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle(t))
+                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(t))
             } else {
-                mangle(t)
+                user_type_rust(t)
             }
         })
         .unwrap_or_else(|| {

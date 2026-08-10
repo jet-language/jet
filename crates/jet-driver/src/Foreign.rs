@@ -459,7 +459,7 @@ pub fn assemble_active_namespaces_with_provenance(
                 surfaces.insert(key, idx);
                 idx
             };
-            bundle.import_targets.insert((idx, imp.span), target_idx);
+            bundle.name_ledger.record_import_target(idx, imp.span, target_idx);
         }
     }
     Ok(())

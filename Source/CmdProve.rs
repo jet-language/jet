@@ -809,15 +809,29 @@ fn capture_sites_for_target(target: &Target) -> Vec<CaptureSite> {
         let aliases = program
             .imports
             .iter()
-            .filter_map(|import| {
-                let module = import.core_module_path()?;
-                let alias = import.import_alias();
-                Some((alias, module))
-            })
-            .fold(HashMap::new(), |mut aliases, (alias, module)| {
-                aliases.insert(alias.clone(), module.clone());
-                if let Some(short) = alias.rsplit('.').next() {
-                    aliases.entry(short.to_string()).or_insert(module);
+            .fold(HashMap::new(), |mut aliases, import| {
+                if let Some(module) = import.core_module_path() {
+                    let alias = import.import_alias();
+                    aliases.insert(alias.clone(), module.clone());
+                    if let Some(short) = alias.rsplit('.').next() {
+                        aliases.entry(short.to_string()).or_insert(module);
+                    }
+                }
+                if let jet::AST::ImportKind::Unqualified {
+                    module_alias,
+                    items,
+                    ..
+                } = &import.kind
+                {
+                    if let Some(prefix) = jet::AST::core_list_prefix(module_alias) {
+                        for (original, alias) in items {
+                            let module = format!("{prefix}.{original}");
+                            if jet::Syntax::is_known_core_module(&module) {
+                                let local = jet::AST::import_item_alias(original, alias.as_deref());
+                                aliases.insert(local.to_string(), module);
+                            }
+                        }
+                    }
                 }
                 aliases
             });

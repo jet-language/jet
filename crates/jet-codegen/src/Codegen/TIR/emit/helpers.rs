@@ -165,16 +165,21 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
             return format!("{:?}.to_string()", s);
         }
     }
-    let mut body = String::from("{ let mut __jet_s = String::new(); ");
-    for p in parts {
-        match p {
+    // Do not bind a fixed Rust local here. User names are canonically mangled
+    // under `__jet`, so a parameter such as `s` would otherwise collide with a
+    // generated `__jet_s` accumulator. `format!` keeps the interpolation
+    // expression entirely hygienic while preserving the same display/debug
+    // conversion facts decided by sema and lowering.
+    let mut fmt = String::from("format!(\"");
+    let mut args = Vec::new();
+    for part in parts {
+        match part {
             TStrPart::Lit(s) => {
-                if !s.is_empty() {
-                    body.push_str(&format!("__jet_s.push_str({:?}); ", s));
-                }
+                let escaped = format!("{:?}", s.replace('{', "{{").replace('}', "}}"));
+                fmt.push_str(&escaped[1..escaped.len() - 1]);
             }
-            TStrPart::Interp(e, fmt) => {
-                let method = match fmt {
+            TStrPart::Interp(e, format) => {
+                let method = match format {
                     crate::AST::StrFormat::Display => "jet_display",
                     crate::AST::StrFormat::Debug => "jet_debug",
                     crate::AST::StrFormat::Fixed(_) => {
@@ -184,15 +189,17 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                         unreachable!("Unit interpolation lowers to a String")
                     }
                 };
-                body.push_str(&format!(
-                    "__jet_s.push_str(&({}).{method}()); ",
-                    emit_tir_expr(e, cx)
-                ));
+                fmt.push_str("{}");
+                args.push(format!("({}).{method}()", emit_tir_expr(e, cx)));
             }
         }
     }
-    body.push_str("__jet_s }");
-    body
+    fmt.push_str("\"");
+    if args.is_empty() {
+        format!("{fmt}.to_string()")
+    } else {
+        format!("{fmt}, {})", args.join(", "))
+    }
 }
 
 /// Walk a lowered select-builder chain and collect channel/timer arm expressions.

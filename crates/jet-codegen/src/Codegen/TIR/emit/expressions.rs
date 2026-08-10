@@ -841,7 +841,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("drop({})", emit_tir_expr(arg, cx))
         }
         TExprKind::Close(arg) => {
-            format!("__jet_Close::close({})", emit_tir_expr(arg, cx))
+            format!("{}::close({})", mangle("Close"), emit_tir_expr(arg, cx))
         }
         TExprKind::ResourceNew(arg) => {
             format!("JetResource::new({})", emit_tir_expr(arg, cx))
@@ -4928,7 +4928,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.rust_type(target),
                     recv
                 ),
-                THandleOp::SerdeEncode => format!("__jet_Encode::jet_encode(&({}))", recv),
+                THandleOp::SerdeEncode => {
+                    format!("{}::jet_encode(&({}))", mangle("Encode"), recv)
+                }
                 // D-SERDE-ACCESS=B: same accessors on JSON/Data.
                 THandleOp::JSONField => format!("({}).field(&({}))", recv, a(0)),
                 THandleOp::JSONAt => format!("({}).at({})", recv, a(0)),

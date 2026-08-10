@@ -3595,7 +3595,7 @@ impl<'a> Checker<'a> {
             let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
             if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
-                    if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
+                    if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, lookup_name, member)
@@ -3643,7 +3643,7 @@ impl<'a> Checker<'a> {
             if let Some(owner_mod) = self.struct_owner_module(name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, name) {
                     let subst = self.struct_subst(name, args);
-                    if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
+                    if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, name, member)

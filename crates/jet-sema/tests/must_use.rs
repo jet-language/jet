@@ -43,7 +43,7 @@ fn err_codes(src: &str) -> Vec<String> {
         ffi_callback_fns: HashSet::new(),
         cffi: CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: HashMap::new(),
+        name_ledger: jet_sema::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(),

@@ -74,7 +74,7 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if !f.is_pub {
+        if !bundle.name_ledger.public(bundle.entry, &f.name) {
             continue;
         }
         if crate::Codegen::plugin_export_shape(f).is_none() {
@@ -126,7 +126,9 @@ pub fn check_and_freeze_version(
     let mut funcs = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if !f.is_pub || crate::Codegen::plugin_export_shape(f).is_none() {
+        if !bundle.name_ledger.public(bundle.entry, &f.name)
+            || crate::Codegen::plugin_export_shape(f).is_none()
+        {
             continue;
         }
         funcs.push(ApiFreeze::FrozenFn {

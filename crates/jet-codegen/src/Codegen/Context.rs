@@ -192,7 +192,7 @@ pub(crate) struct Cx {
     pub(crate) extern_funcs: HashMap<String, String>,
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     pub(crate) code_modules: HashSet<String>,
-    /// D-MOD3: unqualified inline-module items (name → "alias__method").
+    /// D-MOD3: unqualified inline-module items (name → canonical member name).
     pub(crate) unqualified_inline: HashMap<String, String>,
     /// D-MOD3: unqualified file-module items (name → (rust_mod_name, fn_name)).
     pub(crate) unqualified_file: HashMap<String, (String, String)>,
@@ -2458,7 +2458,7 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
 
 pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         let module_funcs = extern_func_map(&module.items);
         for (name, wrapper) in module_funcs {
             map.insert(name.clone(), wrapper.clone());
@@ -2467,7 +2467,12 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
         if module.display.starts_with("cpp.") {
             for item in &module.items {
                 if let Item::Impl(def) = item {
-                    for method in def.methods.iter().filter(|method| method.is_pub) {
+                    for method in def.methods.iter().filter(|method| {
+                        bundle.name_ledger.exported(
+                            module_idx,
+                            &format!("{}.{}", def.type_name, method.name),
+                        )
+                    }) {
                         map.insert(
                             foreign_binding_method_key(&def.type_name, &method.name),
                             String::new(),
@@ -2495,9 +2500,11 @@ pub(crate) fn register_bundle_unit_metadata(
         .iter()
         .filter_map(|import| {
             bundle
-                .import_targets
-                .get(&(module_idx, import.span))
-                .copied()
+                .name_ledger
+                .effective_alias(module_idx, &import.import_alias())?;
+            bundle
+                .name_ledger
+                .import_target(module_idx, import.span)
                 .map(|target| {
                     let qualifier = bundle.modules[target].alias.clone();
                     (target, Some(qualifier))
@@ -2507,11 +2514,13 @@ pub(crate) fn register_bundle_unit_metadata(
         let module = &bundle.modules[target];
         for item in &module.items {
             if let Item::UnitFamily(family) = item {
-                if qualifier.is_some() && !family.is_pub {
-                    continue;
-                }
                 let dimension = family.resolved_dimension.clone();
                 for member in family.distinct_defs() {
+                    if qualifier.is_some()
+                        && !bundle.name_ledger.visible(module_idx, target, &member.name)
+                    {
+                        continue;
+                    }
                     let name = qualifier.as_ref().map_or_else(
                         || member.name.clone(),
                         |qualifier| format!("{qualifier}.{}", member.name),
@@ -2604,7 +2613,12 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
     let imported = bundle.modules[module_idx]
         .imports
         .iter()
-        .filter_map(|import| bundle.import_targets.get(&(module_idx, import.span)).copied());
+        .filter_map(|import| {
+            bundle
+                .name_ledger
+                .effective_alias(module_idx, &import.import_alias())?;
+            bundle.name_ledger.import_target(module_idx, import.span)
+        });
     for target in imported {
         for item in &bundle.modules[target].items {
             let (owner, methods) = match item {
@@ -2613,7 +2627,13 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 Item::Impl(def) => (&def.type_name, &def.methods),
                 _ => continue,
             };
-            for method in methods.iter().filter(|method| method.is_pub) {
+            for method in methods.iter().filter(|method| {
+                bundle.name_ledger.visible(
+                    module_idx,
+                    target,
+                    &format!("{}.{}", owner, method.name),
+                )
+            }) {
                 let key = (owner.clone(), method.name.clone());
                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
                 {
@@ -3508,7 +3528,7 @@ pub(crate) fn build_cx_items(
                     cx.code_modules.insert(cm.name.clone());
                     for inner in body {
                         if let Item::Func(f) = inner {
-                            let mangled = format!("{}__{}", cm.name, f.name);
+                            let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
                             cx.fn_type_params.insert(
                                 mangled.clone(),
                                 f.type_params.iter().map(|param| param.name.clone()).collect(),

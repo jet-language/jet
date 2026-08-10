@@ -7,7 +7,8 @@ pub use crate::Sema::ApiFreeze::{
     api_cache_dir, fn_signature, fn_signature_with_effects, legacy_api_name, legacy_api_signature,
     load_all_snapshots, load_snapshot, normalized_public_effect_row, project_capability_digest,
     qualify_api_signature, save_snapshot, snapshot_from_items,
-    signature_without_effect_row, snapshot_from_items_with_effects, trait_method_signature,
+    signature_without_effect_row, snapshot_from_items_with_effects,
+    snapshot_from_items_with_ledger, trait_method_signature,
     ApiSnapshot, FrozenFn, API_SNAPSHOT_VERSION,
 };
 
@@ -35,12 +36,14 @@ pub fn write_api_snapshot_for_entry(
         return None;
     }
     let entry = &bundle.modules[bundle.entry];
-    let snap = snapshot_from_items_with_effects(
+    let snap = snapshot_from_items_with_ledger(
         &entry.items,
         package,
         version,
         Some(&facts.solved),
-        Some(&entry.alias),
+        facts.name_ledger.module_alias(bundle.entry),
+        bundle.entry,
+        &facts.name_ledger,
     );
     let count = snap.funcs.len();
     save_snapshot(project_root, &snap).ok()?;

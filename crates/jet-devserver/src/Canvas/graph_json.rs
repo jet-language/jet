@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use jet_driver::Diagnostics::Span;
 use jet_driver::AST;
+use jet_foundation::Names::{NameLedger, NameVisibility};
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::span_overlaps;
@@ -521,7 +522,12 @@ pub(super) fn add_inline(
     });
 }
 
-pub(super) fn graph_to_json(g: &GraphBuilder, f: &AST::Func, src: &str) -> String {
+pub(super) fn graph_to_json(
+    g: &GraphBuilder,
+    f: &AST::Func,
+    src: &str,
+    visibility: &'static str,
+) -> String {
     let nodes = g.nodes.iter().map(node_json).collect::<Vec<_>>().join(",");
     let pins = g.pins.iter().map(pin_json).collect::<Vec<_>>().join(",");
     let wires = g.wires.iter().map(wire_json).collect::<Vec<_>>().join(",");
@@ -542,7 +548,7 @@ pub(super) fn graph_to_json(g: &GraphBuilder, f: &AST::Func, src: &str) -> Strin
         "{{\"graph_id\":{},\"title\":{},\"function\":{},\"event_views\":[{}],\"entry_node\":{},\"exit_nodes\":[{}],\"nodes\":[{}],\"pins\":[{}],\"wires\":[{}],\"regions\":[{}],\"inline_exprs\":[{}],\"rails\":{},\"layout_hints\":{{\"algorithm\":\"source-order-v1\",\"direction\":\"data-left-to-right/control-top-to-bottom\"}}}}",
         json_str(&g.graph_id),
         json_str(&f.name),
-        function_metadata_json(src, f),
+        function_metadata_json(src, f, visibility),
         callback_event_view_json(&g.graph_id, f).unwrap_or_default(),
         json_str(&format!("{}:entry", g.graph_id)),
         exit_nodes,
@@ -555,7 +561,7 @@ pub(super) fn graph_to_json(g: &GraphBuilder, f: &AST::Func, src: &str) -> Strin
     )
 }
 
-fn function_metadata_json(src: &str, f: &AST::Func) -> String {
+fn function_metadata_json(src: &str, f: &AST::Func, visibility: &'static str) -> String {
     let params = f
         .params
         .iter()
@@ -601,8 +607,8 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
     format!(
         "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"effect_via\":{},\"returns\":{},\"params\":[{}],\"meta\":{},\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
         json_str(&f.name),
-        json_str(&function_signature_text(src, f)),
-        json_str(function_visibility(f)),
+        json_str(&function_signature_text(src, f, visibility)),
+        json_str(visibility),
         json_str(&doc_comment_before(src, f.name_span.start)),
         if f.is_pure { "true" } else { "false" },
         if f.is_unsafe { "true" } else { "false" },
@@ -615,22 +621,25 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
     )
 }
 
-fn function_visibility(f: &AST::Func) -> &'static str {
-    if f.is_package_pub {
-        "package"
-    } else if f.is_pub {
-        "public"
-    } else {
-        "private"
+pub(super) fn ledger_function_visibility(
+    ledger: &NameLedger,
+    module_idx: usize,
+    name: &str,
+) -> &'static str {
+    match ledger.declaration(module_idx, name).map(|declaration| declaration.visibility) {
+        Some(NameVisibility::Package) => "package",
+        Some(NameVisibility::Public) => "public",
+        Some(NameVisibility::Private) => "private",
+        None => "private",
     }
 }
 
-fn function_signature_text(src: &str, f: &AST::Func) -> String {
+fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -> String {
     let mut out = String::new();
-    if f.is_package_pub {
-        out.push_str("pub(package) ");
-    } else if f.is_pub {
-        out.push_str("pub ");
+    match visibility {
+        "package" => out.push_str("pub(package) "),
+        "public" => out.push_str("pub "),
+        _ => {}
     }
     out.push_str("fn ");
     out.push_str(&f.name);

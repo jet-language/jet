@@ -7,7 +7,19 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, build_and_run_multi, have_rustc, run_default_multi};
+use tir_support::{assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi};
+
+#[test]
+fn grouped_nested_core_import_binds_dotted_leaf() {
+    let source = r#"
+use core.[encoding.json]
+
+fn run() {
+    print(json.to_string(json.parse("[42]") ?? panic("bad")))
+}
+"#;
+    assert_tiers_agree("grouped_nested_core_import", source, "[42]\n");
+}
 
 #[test]
 fn soft_public_imports_warn_once_per_outside_use() {

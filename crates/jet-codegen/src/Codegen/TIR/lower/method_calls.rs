@@ -2417,7 +2417,7 @@ pub(crate) fn lower_method_call(
                     };
                 }
                 if cx.code_modules.contains(alias.as_str()) {
-                    let mangled_key = format!("{}__{}", alias, method);
+                    let mangled_key = jet_foundation::Names::member_name(alias, method);
                     let sig = cx.sigs.get(&mangled_key).cloned();
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     return TExpr {

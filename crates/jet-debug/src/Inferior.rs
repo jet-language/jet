@@ -43,8 +43,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
+use jet_foundation::Names::mangle;
 use jet_foundation::Syntax;
-
 /// Bogus command sent after every real one. lldb echoes then rejects it
 /// (`error: '<sentinel>' is not a valid command.`, to stderr, which we null —
 /// see the module doc point 1); its echo appearing on stdout is the ONLY
@@ -412,15 +412,19 @@ impl Inferior {
     /// prefixes every non-`main` binding with `__jet_`; strip it. Names without
     /// that prefix are foreign/runtime frames and remain filtered.
     pub(crate) fn rust_local_to_jet(name: &str) -> Option<String> {
-        name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
-            .map(|s| s.to_string())
-    }
+        name.strip_prefix(Syntax::GENERATED_NAME_PREFIX).map(|rest| {
+            // The exact inverse of `Names::mangle`: a comptime-marked Jet name
+            // rides into Rust as `__jet_ct_<name>`, so give the mark back.
+            match rest.strip_prefix("ct_") {
+                Some(marked) => format!("{}{marked}", Syntax::COMPTIME_MARK),
+                None => rest.to_string(),
+            }
+        })    }
 
     /// The reverse of [`Self::rust_local_to_jet`] — the mangled Rust name
     /// lldb needs for `frame variable <name>`.
     pub(crate) fn jet_local_to_rust(name: &str) -> String {
-        Syntax::generated_name(name)
-    }
+        mangle(name)    }
 
     /// Clean a raw Rust function symbol (`prog::main::h4002…` or
     /// `prog::__jet_helper::h991…`) down to its Jet name (I2): drop the

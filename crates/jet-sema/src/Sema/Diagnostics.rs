@@ -271,7 +271,7 @@ fn is_cloneable_rec(
                 && match registry.types.get(name) {
                     Some(TypeDef::Struct { fields, .. }) => fields
                         .iter()
-                        .all(|(_, _, fty, _)| is_cloneable_rec(fty, registry, visiting)),
+                        .all(|(_, _, fty)| is_cloneable_rec(fty, registry, visiting)),
                     Some(TypeDef::Enum { variants, .. }) => {
                         variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
@@ -387,7 +387,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
             let result = match registry.types.get(name) {
                 Some(TypeDef::Struct { fields, .. }) => fields
                     .iter()
-                    .any(|(_, _, fty, _)| type_owns_heap_rec(fty, registry, visiting)),
+                    .any(|(_, _, fty)| type_owns_heap_rec(fty, registry, visiting)),
                 Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, p)| match p {
                     VariantPayload::Unit => false,
                     VariantPayload::Single(t, _) => type_owns_heap_rec(t, registry, visiting),
@@ -428,7 +428,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
                 .any(|a| type_owns_heap_rec(a, registry, visiting))
                 || matches!(
                     registry.types.get(name),
-                    Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty, _)| type_owns_heap_rec(fty, registry, visiting))
+                    Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty)| type_owns_heap_rec(fty, registry, visiting))
                 )
         }
         Type::Tuple(fields) => fields
@@ -1169,7 +1169,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
 pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
     match ty {
         Type::Named(name) => match registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty, _)| {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty)| {
                 if !types_comparable(fty, registry) {
                     Some(fname.clone())
                 } else {

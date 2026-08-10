@@ -1,6 +1,7 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
 use std::any::Any;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Names::{mangle, mangle_path, user_type_rust};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -849,7 +850,7 @@ impl CtValue {
             // each arg in Rust `{:?}` form — matching that exactly here keeps
             // `jet dev` byte-identical to the compiled binary (I2).
             CtValue::Enum { variant, args, .. } => {
-                let mangled = crate::Syntax::generated_path(variant);
+                let mangled = mangle_path(variant);
                 if args.is_empty() {
                     mangled
                 } else if args.iter().all(|(label, _)| label.is_some()) {
@@ -929,7 +930,7 @@ impl CtValue {
                 _ => variant.clone(),
             },
             CtValue::Enum { variant, args, .. } => {
-                let mangled = crate::Syntax::generated_path(variant);
+                let mangled = mangle_path(variant);
                 if args.is_empty() {
                     mangled
                 } else if args.iter().all(|(label, _)| label.is_some()) {
@@ -1203,7 +1204,7 @@ impl CtValue {
                     .iter()
                     .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
                     .collect();
-                format!("{} {{ {} }}", crate::Syntax::generated_path(type_name), parts.join(", "))
+                format!("{} {{ {} }}", user_type_rust(type_name), parts.join(", "))
             }
             CtValue::Enum {
                 type_name,
@@ -1240,7 +1241,7 @@ impl CtValue {
                 } else {
                     ct_mangle(variant)
                 };
-                let prefix = format!("{}::{}", crate::Syntax::generated_path(type_name), variant);
+                let prefix = format!("{}::{}", user_type_rust(type_name), variant);
                 if args.is_empty() {
                     prefix
                 } else if args.iter().all(|(label, _)| label.is_none()) {
@@ -1272,7 +1273,7 @@ impl CtValue {
 }
 
 fn ct_mangle(name: &str) -> String {
-    crate::Syntax::generated_name(name)
+    mangle(name)
 }
 
 #[cfg(test)]
