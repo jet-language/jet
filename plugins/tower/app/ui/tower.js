@@ -694,12 +694,14 @@ function renderRadarBody() {
 
   // Milestone drill-down: a milestone belongs to exactly one epoch, so matching
   // on milestoneId already pins the epoch. Render one flat list, no sections —
-  // the bar carries the context and the way back out.
+  // the bar carries the context and the way back out. Frozen cards stay in the
+  // list: the bar counts them, so hiding them leaves a milestone pointing at a
+  // card the owner cannot see.
   const drill = radarMilestone ? milestoneById(radarMilestone) : null;
   if (radarMilestone && !drill) radarMilestone = null;
   if (drill) {
     body.appendChild(milestoneFilterBar(drill));
-    const hits = S.cards.filter(c => c.phase !== 'frozen' && radarMatches(c, needle));
+    const hits = S.cards.filter(c => radarMatches(c, needle));
     body.appendChild(hits.length ? radarList('mile:' + drill.id, hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
