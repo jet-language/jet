@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
+use crate::Codegen::mangle;
 use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
     TPlace, TStrPart,
@@ -574,7 +575,7 @@ fn shared_projection<'a>(value: &'a CtValue, path: &[String]) -> Option<&'a CtVa
     let value = fields.iter().find_map(|(name, value)| {
         (name == field
             || name == &mangled
-            || name.strip_prefix("user_") == Some(field.as_str()))
+            || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str()))
         .then_some(value)
     })?;
     shared_projection(value, rest)
@@ -592,7 +593,7 @@ fn replace_shared_projection(value: &mut CtValue, path: &[String], replacement: 
     let Some(value) = fields.iter_mut().find_map(|(name, value)| {
         (name == field
             || name == &mangled
-            || name.strip_prefix("user_") == Some(field.as_str()))
+            || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str()))
         .then_some(value)
     }) else {
         return false;
@@ -2189,6 +2190,34 @@ impl<'a> EvalCtx<'a> {
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
+                if matches!(
+                    &inner.ty,
+                    Type::Named(name) | Type::Apply { name, .. }
+                        if matches!(
+                            name.as_str(),
+                            "HTTPMethod"
+                                | "HTTPStatus"
+                                | "HTTPVersion"
+                                | "HTTPHeaderName"
+                                | "HTTPHeaderValue"
+                        )
+                ) {
+                    let mut receiver = v.clone();
+                    let mut args = [];
+                    if let Some(result) = crate::Comptime::try_ambient_handle(
+                        "HTTPNominalShow",
+                        &mut receiver,
+                        &mut args,
+                        self.span(),
+                    ) {
+                        let shown = result?;
+                        let CtValue::Str(shown) = shown else {
+                            return Err(unsupported("HTTP nominal show adapter", self.span()));
+                        };
+                        self.write_print(&shown, false)?;
+                        return Ok(CtValue::Unit);
+                    }
+                }
                 let shown = match show_typed_value(&v, &inner.ty, false) {
                     Some(shown) => shown,
                     None => self.show_value(&v, scope)?,
@@ -2918,6 +2947,21 @@ impl<'a> EvalCtx<'a> {
                 source_span,
                 ..
             } => {
+                if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+                    if !row.accepts_arity(args.len()) {
+                        return Err(unsupported(
+                            &format!(
+                                "{}.{}(): expected {}..{} argument(s), got {}",
+                                module,
+                                method,
+                                row.arity(),
+                                row.signature.max_arity,
+                                args.len()
+                            ),
+                            *source_span,
+                        ));
+                    }
+                }
                 if module == "core.data" {
                     return self.eval_core_data_call(method, args, &expr.ty, scope);
                 }
@@ -3051,7 +3095,7 @@ impl<'a> EvalCtx<'a> {
                             .get(type_name)
                             .or_else(|| {
                                 self.struct_fields
-                                    .get(type_name.strip_prefix("user_").unwrap_or(type_name))
+                                    .get(type_name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name))
                             })
                             .map(|fields| {
                                 CtValue::List(
@@ -3508,7 +3552,7 @@ impl<'a> EvalCtx<'a> {
                                     .find(|(n, _)| {
                                         n == field
                                             || n == &mangled
-                                            || n.strip_prefix("user_") == Some(field.as_str())
+                                            || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
                                     })
                                     .map(|(_, v)| v.clone())
                                     .ok_or_else(|| {
@@ -3525,7 +3569,7 @@ impl<'a> EvalCtx<'a> {
                             .find(|(n, _)| {
                                 n == field
                                     || n == &mangled
-                                    || n.strip_prefix("user_") == Some(field.as_str())
+                                    || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
                             })
                             .map(|(_, v)| v)
                             .ok_or_else(|| unsupported(&format!("field `{field}`"), self.span()))
@@ -3938,7 +3982,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut names = vec![method.name.clone()];
                 if method.mangled {
-                    names.push(format!("user_{}", method.name));
+                    names.push(mangle(&method.name));
                 }
                 if let Type::Named(type_name) = &recv.ty {
                     names.push(format!("{type_name}::{}", method.name));
@@ -4304,6 +4348,17 @@ impl<'a> EvalCtx<'a> {
                                 &literal_refs,
                                 values.into_iter().map(|value| value.jet_show()).collect(),
                             )))
+                        }
+                        TTypedTextInterpKind::URL
+                        | TTypedTextInterpKind::Path
+                        | TTypedTextInterpKind::DateTime => {
+                            let name = match kind {
+                                TTypedTextInterpKind::URL => crate::Syntax::TYPE_URL,
+                                TTypedTextInterpKind::Path => crate::Syntax::TYPE_PATH,
+                                TTypedTextInterpKind::DateTime => crate::Syntax::TYPE_DATETIME,
+                                _ => unreachable!("typed boundary kind was matched above"),
+                            };
+                            crate::Comptime::evaluate_typed_head(name, literals, &values, self.span())
                         }
                     }
                 }
@@ -4920,7 +4975,7 @@ impl<'a> EvalCtx<'a> {
             TExprKind::ResourceTake(place) => scope
                 .get(place)
                 .cloned()
-                .or_else(|| place.strip_prefix("user_").and_then(|name| scope.get(name).cloned()))
+                .or_else(|| place.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).and_then(|name| scope.get(name).cloned()))
                 .or_else(|| self.globals.get(place).cloned())
                 .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
@@ -5309,7 +5364,7 @@ impl<'a> EvalCtx<'a> {
                         ];
                         if owner_type.is_none() {
                             candidates.push(method.name.clone());
-                            candidates.push(format!("user_{}", method.name));
+                            candidates.push(mangle(&method.name));
                         }
                         for name in candidates {
                             if let Some(func) = self.funcs.get(&name).copied() {
@@ -5366,6 +5421,28 @@ impl<'a> EvalCtx<'a> {
                         {
                             let index = self.local_cells.insert_cell(argv.remove(0));
                             return Ok(local_cell_handle("__JetTirCell", index));
+                        }
+                        if matches!(
+                            path.rsplit("::").next(),
+                            Some(
+                                "JetHTTPMethod"
+                                    | "JetHTTPStatus"
+                                    | "JetHTTPVersion"
+                                    | "JetHTTPHeaderName"
+                                    | "JetHTTPHeaderValue"
+                                    | "JetHTTPHeaders"
+                                    | "JetHTTPBody"
+                            )
+                        ) {
+                            let mut receiver = CtValue::Unit;
+                            if let Some(result) = crate::Comptime::try_ambient_handle(
+                                &format!("HTTPStatic:{path}:{}", method.name),
+                                &mut receiver,
+                                &mut argv,
+                                self.span(),
+                            ) {
+                                return result;
+                            }
                         }
                         if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                             path,
@@ -5432,10 +5509,22 @@ impl<'a> EvalCtx<'a> {
                     _ => Err(unsupported("opt-field recv", self.span())),
                 }
             }
-            TExprKind::Lambda(lambda) => Ok(self.store_callable(EvalCallable::Lambda {
-                lambda,
-                captured: scope.clone(),
-            })),
+            TExprKind::Lambda(lambda) => {
+                // A captured lambda body uses the lowered runtime place (for
+                // example `__jet_cap_stop`), while the evaluator scope still
+                // exposes the source name (`stop`). Keep both spellings in
+                // the callable frame so the interpreter consumes the same
+                // capture contract as AOT and JIT.
+                let mut captured = scope.clone();
+                for (source, runtime, _) in &lambda.captures {
+                    if runtime != source {
+                        if let Some(value) = scope.get(source).cloned() {
+                            captured.insert(runtime.clone(), value);
+                        }
+                    }
+                }
+                Ok(self.store_callable(EvalCallable::Lambda { lambda, captured }))
+            }
             TExprKind::PatternMatches { subj, pattern } => {
                 let value = self.eval_expr(subj, scope)?;
                 // Binding-free `x == .Variant` — reuse match-arm binder, discard locals.
@@ -5520,20 +5609,9 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Spawn { group, site, .. },
             } => self.eval_spawn(*site, group.as_deref(), scope),
-            // D-VERDICT-1323-1: n tasks from one callable — the same spawn the
-            // single form uses, repeated, so the group carries identical meaning.
             TExprKind::CoreClosureCall {
-                kind: TCoreClosureKind::SpawnGroup { count, site, .. },
-            } => {
-                let CtValue::Int(count) = self.eval_expr(count, scope)? else {
-                    return Err(unsupported("spawn_group count", self.span()));
-                };
-                let mut tasks = Vec::new();
-                for _ in 0..count.max(0) {
-                    tasks.push(self.eval_spawn(*site, None, scope)?);
-                }
-                Ok(CtValue::List(tasks))
-            }
+                kind: TCoreClosureKind::OnInterrupt { callback },
+            } => self.register_interrupt_callback(callback, scope),
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Guard { executable, .. },
             } => {
@@ -5747,7 +5825,7 @@ impl<'a> EvalCtx<'a> {
                                             if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
                                                 n == field
                                                     || n == &mangled
-                                                    || n.strip_prefix("user_")
+                                                    || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
                                                         == Some(field.as_str())
                                             }) {
                                                 *slot = value;
@@ -5787,7 +5865,7 @@ impl<'a> EvalCtx<'a> {
                         if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
                             n == field
                                 || n == &mangled
-                                || n.strip_prefix("user_") == Some(field.as_str())
+                                || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
                         }) {
                             *slot = value;
                         } else {
@@ -6138,7 +6216,7 @@ impl<'a> EvalCtx<'a> {
         for ((parameter, _, _), argument) in func.params.iter().zip(args.iter()) {
             if let Some(owner) = super::raw_place_local(&argument.value) {
                 let jet_parameter = parameter
-                    .strip_prefix("user_")
+                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
                     .unwrap_or(parameter.as_str());
                 owner_rebases.insert(parameter.clone(), owner.name.clone());
                 owner_rebases.insert(jet_parameter.to_string(), owner.name.clone());
@@ -6159,7 +6237,7 @@ impl<'a> EvalCtx<'a> {
             if !needs_wb {
                 continue;
             }
-            let jet = pname.strip_prefix("user_").unwrap_or(pname.as_str());
+            let jet = pname.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(pname.as_str());
             if let Some(updated) = child.get(jet) {
                 self.write_back_place(&carg.value, updated.clone(), scope)?;
             }
@@ -6283,7 +6361,7 @@ impl<'a> EvalCtx<'a> {
     pub(super) fn debug_value(&self, v: &CtValue) -> String {
         match v {
             CtValue::Struct { type_name, fields } => {
-                let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+                let ty = type_name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
                 if ty == crate::Syntax::TYPE_RANGE {
                     if let Some((start, end, exclusive)) = range_parts(v) {
                         return super::range_semantics::jet_range_structural_text(
@@ -6299,7 +6377,7 @@ impl<'a> EvalCtx<'a> {
                     let fields = fields
                         .iter()
                         .map(|(name, value)| {
-                            let name = name.strip_prefix("user_").unwrap_or(name);
+                            let name = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name);
                             (name.to_string(), self.debug_value(value))
                         })
                         .collect::<Vec<_>>();
@@ -6315,7 +6393,7 @@ impl<'a> EvalCtx<'a> {
                                 .iter()
                                 .find(|(n, _)| {
                                     n == name
-                                        || n.strip_prefix("user_") == Some(name.as_str())
+                                        || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(name.as_str())
                                 })
                                 .map(|(_, value)| self.debug_value(value))
                                 .unwrap_or_else(|| self.debug_value(&CtValue::Unit));
@@ -6330,8 +6408,8 @@ impl<'a> EvalCtx<'a> {
                 variant,
                 args,
             } => {
-                let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
-                let var = variant.strip_prefix("user_").unwrap_or(variant);
+                let ty = type_name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
+                let var = variant.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant);
                 if ty.starts_with("__JetUnion_") {
                     let payload = args
                         .first()
@@ -6345,7 +6423,7 @@ impl<'a> EvalCtx<'a> {
                         .map(|(_, value)| match value {
                             CtValue::Struct { type_name, fields }
                                 if type_name
-                                    .strip_prefix("user_")
+                                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
                                     .unwrap_or(type_name)
                                     == "IOContext" =>
                             {
@@ -6354,7 +6432,7 @@ impl<'a> EvalCtx<'a> {
                                     .iter()
                                     .map(|wanted| {
                                         let value = fields.iter().find_map(|(name, value)| {
-                                            (name.strip_prefix("user_").unwrap_or(name)
+                                            (name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name)
                                                 == *wanted)
                                                 .then_some(value)
                                         });
@@ -6363,7 +6441,7 @@ impl<'a> EvalCtx<'a> {
                                                 if args.is_empty() =>
                                             {
                                                 variant
-                                                    .strip_prefix("user_")
+                                                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
                                                     .unwrap_or(variant)
                                                     .to_string()
                                             }

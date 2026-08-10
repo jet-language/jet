@@ -1017,7 +1017,7 @@ enum Packet { Ping(Int) = 3; Data(x: Int, y: Int) = 7 }
 fn run() { print(c.repr_status(Status.Lost)); print(c.repr_packet(Packet.Ping(41))); print(c.repr_packet_size()); print(c.repr_packet_align()); print(c.repr_packet_payload_offset()) }
 "#).unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
-    assert!(out.rust.contains("#[repr(C, u8)]") && out.rust.contains("user_Lost = 7") && out.rust.contains("user_Ping(i64) = 3"));
+    assert!(out.rust.contains("#[repr(C, u8)]") && out.rust.contains("__jet_Lost = 7") && out.rust.contains("__jet_Ping(i64) = 3"));
     assert!(out.rust.contains("typedef uint8_t Packet_Tag;") && out.rust.contains("typedef union Packet_Payload") && out.rust.contains("typedef struct Packet"));
     fs::write(root.join("main.rs"),&out.rust).unwrap();
     let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lreprc2"); let built=rustc.output().unwrap();
@@ -1044,7 +1044,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     .unwrap();
     let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\nfn increment(x: I32) =[]=> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) =[]=> I32, x: I32) => I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) =[]=> I32) => I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) => x + x, 10)) }\n").unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
-    assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
+    assert!(out.rust.contains("extern \"C\" fn __jet_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
     fs::write(root.join("main.rs"),out.rust).unwrap();
     let mut rustc = Command::new("rustc");
     rustc
@@ -1095,7 +1095,7 @@ fn run() {
 }
 "#; fs::write(&main,src).unwrap();
     let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d)));
-    assert!(out.rust.contains("*mut super::user_Record")); assert!(!out.rust.contains("Result<super::user_Record"));
+    assert!(out.rust.contains("*mut super::__jet_Record")); assert!(!out.rust.contains("Result<super::__jet_Record"));
     fs::write(root.join("main.rs"),&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lstore"); if let Some(link)=out.ffi.as_ref(){add_ffi_bridge_args(&mut rustc,link);} let built=rustc.output().unwrap();
     assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"70\nstatus 9\n"); let _=fs::remove_dir_all(root);
 }
@@ -1122,7 +1122,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
     for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
         let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() => String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
         let wrapper = out.rust
-            .split_once("pub fn user_get() -> String {\n")
+            .split_once("pub fn __jet_get() -> String {\n")
             .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
             .1
             .split_once("\n}\n")

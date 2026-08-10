@@ -230,6 +230,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
         | "DBConnection" | "DBScope" | "DBError"
+        // D-LIB-CALLGRANT1=A: a loaded Mod is opaque; its read roots are the
+        // only constructable part of the host grant value.
+        | "Mod" | "ModGrant"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines" | "Stdout" | "Stderr"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
@@ -328,7 +331,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
         | "ZonedDateTime"
         // D-URL1=A: typed URL and MIME values.
-        | "Url" | "Mime"
+        | "Url" | Syntax::TYPE_URL | "Mime"
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
@@ -364,6 +367,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
+        | "FactKind" | "FactValue" | "DimensionInfo" | "DimensionAxis"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
@@ -389,6 +393,20 @@ pub(crate) fn core_lang_variants(
             })
             .collect(),
     )
+}
+
+/// D-FACT-READ1=A: reflection fact kinds are a closed typed menu, not strings
+/// smuggled through `FactInfo.kind`.
+pub(crate) fn core_fact_kind_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    (enum_name == "FactKind").then(|| {
+        let zero = Span::new(0, 0);
+        ["Effect", "State", "Tag", "Range", "Dimension"]
+            .into_iter()
+            .map(|variant| (variant.to_string(), (zero, VariantPayload::Unit)))
+            .collect()
+    })
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
@@ -445,6 +463,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "ModGrant" {
+        return match field {
+            "read" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        };
+    }
     if type_name == "ProcessChild" && field == "terminal" {
         return Some(Type::Option(Box::new(Type::Named(
             Syntax::TYPE_TERMINAL_SESSION.to_string(),
@@ -461,7 +485,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HTTPShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "TerminalSize" | "TerminalPolicy" | "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
+    if matches!(type_name, "TerminalSize" | "TerminalPolicy" | "ModGrant" | "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -732,6 +756,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
             "transitions" => Some(Type::List(Box::new(Type::Named("TransitionInfo".to_string())))),
             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+            "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };
@@ -790,7 +815,33 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "FactInfo" {
         return match field {
-            "kind" | "name" | "path" => Some(Type::String),
+            "kind" => Some(Type::Named("FactKind".to_string())),
+            "name" | "path" => Some(Type::String),
+            "value" => Some(Type::Named("FactValue".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "FactValue" {
+        return match field {
+            "kind" => Some(Type::Named("FactKind".to_string())),
+            "name" => Some(Type::String),
+            "members" => Some(Type::List(Box::new(Type::String))),
+            "range" => Some(Type::Option(Box::new(Type::Named(Syntax::TYPE_RANGE.to_string())))),
+            "dimension" => Some(Type::Option(Box::new(Type::Named("DimensionInfo".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "DimensionInfo" {
+        return match field {
+            "axes" => Some(Type::List(Box::new(Type::Named("DimensionAxis".to_string())))),
+            "identity" | "display" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "DimensionAxis" {
+        return match field {
+            "name" => Some(Type::String),
+            "exponent" => Some(Type::Int),
             _ => None,
         };
     }
@@ -820,6 +871,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
             "params" => Some(Type::List(Box::new(Type::String))),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+            "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
@@ -829,6 +881,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "name" | "ty" => Some(Type::String),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+            "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
@@ -1726,6 +1779,11 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
                 Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
             ),
         ]),
+        // D-LIB-CALLGRANT1=A: host policy is explicit and path-scoped.
+        "ModGrant" => Some(vec![(
+            "read".to_string(),
+            Type::List(Box::new(Type::String)),
+        )]),
         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: explicit terminal
         // controls use named fields so misspellings fail in sema.
         "TerminalSize" => Some(vec![

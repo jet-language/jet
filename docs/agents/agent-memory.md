@@ -2356,3 +2356,9 @@ Key facts: stale-memory corrections — SPAWN1=D, FAIL1=A, AUTHORITY-MEM2=A all 
 - Law: a declaration attaches; an alias only points; declarations never collide; a declaration replaces an alias. Prelude/Reader-Cursor/FFI shadow carve-outs = all instances of the alias rule.
 - Backend evidence (audit): six binding stores, import maps built twice (sema Bundle.rs vs Codegen/Imports.rs), call ladder duplicated, pub(package) invisible to codegen filters, 6 mangling sites + ~30 inline `user_` bypasses, devserver string-parses sema Rust source. Consolidation = one name ledger in sema; rides D-NAME-TREE1.
 - Criterion 5 open on #1625: after ratification record outcomes in syntax-decisions.md + mint impl cards.
+
+### owner-personal-notes-no-touch-2026-08-09
+
+*OWNER DECREE: never read for work-state purposes, write, update, append to, or otherwise modify the owner's personal notes or owner scratchpad.*
+
+In particular, agents must never touch `plugins/tower/.tower/scratch/owner-scratch.md` or any owner-designated personal-notes file. Keep burndown state, handoffs, dispatch logs, and progress notes in a separate orchestrator/agent file or Tower card log. This rule is absolute, including when a worker thinks a scratchpad entry would be useful.

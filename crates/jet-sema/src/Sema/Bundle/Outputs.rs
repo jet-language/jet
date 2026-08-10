@@ -259,9 +259,13 @@ fn resolve_output_callable(
     }
     let module_alias = &bundle.modules[target].alias;
     let rust_path = if target == bundle.entry {
-        format!("user_{semantic_name}")
+        Syntax::generated_name(&semantic_name)
     } else {
-        format!("user_{module_alias}::user_{source_name}")
+        format!(
+            "{}::{}",
+            Syntax::generated_name(module_alias),
+            Syntax::generated_name(&source_name)
+        )
     };
     Some(crate::AST::ResolvedOutput {
         address,

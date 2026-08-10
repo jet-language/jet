@@ -592,6 +592,54 @@ fn require_string_list(list: i64) -> Option<Vec<String>> {
     values
 }
 
+/// D-BOUND-HEAD1=A: the JIT marshals typed-head holes through the shared
+/// foundation interpolation law used by AOT and the interpreter.
+#[derive(Clone, Copy)]
+pub(crate) enum TypedHeadKind {
+    Url,
+    Path,
+    DateTime,
+}
+
+pub(crate) fn typed_head_interpolate(
+    literals: i64,
+    holes: i64,
+    kind: TypedHeadKind,
+) -> Option<String> {
+    let literals = require_string_list(literals)?;
+    let holes = require_string_list(holes)?;
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    Some(match kind {
+        TypedHeadKind::Url => jet_foundation::TypedHeads::jet_typed_url_interpolate(
+            &literal_refs,
+            &holes,
+        ),
+        TypedHeadKind::Path => jet_foundation::TypedHeads::jet_typed_path_interpolate(
+            &literal_refs,
+            &holes,
+        ),
+        TypedHeadKind::DateTime => jet_foundation::TypedHeads::jet_typed_datetime_interpolate(
+            &literal_refs,
+            &holes,
+        ),
+    })
+}
+
+extern "C" fn jet_jit_typed_head_interpolate(literals: i64, holes: i64, kind: i64) -> i64 {
+    let kind = match kind {
+        0 => TypedHeadKind::Url,
+        1 => TypedHeadKind::Path,
+        2 => TypedHeadKind::DateTime,
+        _ => {
+            trap("invalid typed boundary head kind");
+            return 0;
+        }
+    };
+    typed_head_interpolate(literals, holes, kind)
+        .map(alloc_string)
+        .unwrap_or(0)
+}
+
 fn alloc_string_list(values: Vec<String>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -761,8 +809,8 @@ host_fns! {
     typed_html_raw: "jet_jit_typed_html_raw" => jet_jit_typed_html_raw: sig_unary;
     typed_html_text: "jet_jit_typed_html_text" => jet_jit_typed_html_text: sig_unary;
     typed_html_interp: "jet_jit_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_binary;
+    typed_head_interp: "jet_jit_typed_head_interpolate" => jet_jit_typed_head_interpolate: sig_call;
 }
-
 
 
 

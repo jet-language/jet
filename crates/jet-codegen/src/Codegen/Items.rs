@@ -7,8 +7,8 @@ use crate::AST::{
 use std::collections::HashMap;
 
 /// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
-/// getter call `(self).user_field()` for a computed field (it's not a struct
-/// member), a plain member read `(self).user_field` otherwise. Used anywhere
+/// getter call `(self).__jet_field()` for a computed field (it's not a struct
+/// member), a plain member read `(self).__jet_field` otherwise. Used anywhere
 /// codegen renders a field's *value* (JetShow/JetDebug, `#[Codable]` encode)
 /// outside the struct's own member-list emission.
 fn field_self_read(f: &Field) -> String {
@@ -224,7 +224,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             ));
         }
     } else {
-        // I2: Rust's `{:?}` would leak the mangled `user_Point { user_x: … }`
+        // I2: Rust's `{:?}` would leak the mangled `__jet_Point { __jet_x: … }`
         // form. Render Jet-source names instead — the same body `jet_debug` uses.
         let show_body = struct_jet_debug_body(s, has_fn_field);
         let impl_generic = if has_view_field { "<'__jet_view>" } else { "" };
@@ -262,17 +262,18 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
 }
 
 /// D-SOA1 / D-SOA2A=C: emit the struct-of-arrays storage type for a
-/// `#layout(columnar)` struct `S`. A `[S]` collection lowers to `user_S_columns`
+/// `#layout(columnar)` struct `S`. A `[S]` collection lowers to `__jet_S_columns`
 /// (one `Vec` per field). The type exposes the v1 list surface as inherent
 /// methods (`new`, `len`, `is_empty`, `push`, `gather`, `from_aos`, `iter_aos`)
 /// so the existing dumb codegen routes columnar list ops through it (R1, I3). It
-/// is serialization-transparent (D-SOA2D): `JetShow`/`user_Encode`/`user_Decode`
+/// is serialization-transparent (D-SOA2D): `JetShow`/`__jet_Encode`/`__jet_Decode`
 /// render the gathered AoS form, byte-identical to a `Vec<S>`.
 fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     // D-FIELDPOL1: a computed field is never a stored column.
     let fields: Vec<&Field> = s.fields.iter().filter(|f| f.computed.is_none()).collect();
     let name = &s.name;
-    let cn = format!("user_{name}_columns");
+    let rust_name = user_type_rust(name);
+    let cn = crate::Syntax::generated_path(&format!("{name}_columns"));
 
     let mut rust_derives: Vec<&str> = vec!["Debug"];
     if cx.cloneable.contains(name) {
@@ -306,7 +307,8 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     ));
     // push(S) — distribute one logical value across the columns.
     out.push_str(&format!(
-        "    pub fn push(&mut self, __v: user_{name}) {{\n"
+        "    pub fn push(&mut self, __v: {rust_name}) {{\n",
+        rust_name = rust_name
     ));
     for f in &fields {
         let m = mangle(&f.name);
@@ -315,7 +317,8 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     out.push_str("    }\n");
     // gather(i) — reconstruct the logical S at index i (cloning each column cell).
     out.push_str(&format!(
-        "    pub fn gather(&self, __i: usize) -> user_{name} {{\n        user_{name} {{\n"
+        "    pub fn gather(&self, __i: usize) -> {rust_name} {{\n        {rust_name} {{\n",
+        rust_name = rust_name
     ));
     for f in &fields {
         let m = mangle(&f.name);
@@ -325,18 +328,22 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     // gather_at(i) — bounds-checked index-read producing a logical S. Mirrors the
     // `jet_index_vec` panic message so `xs[i]` reports identically AoS vs columnar.
     out.push_str(&format!(
-        "    pub fn gather_at(&self, __i: i64, __file: &str, __line: u32) -> user_{name} {{\n        let __len = self.len() as i64;\n        if __i < 0 || __i >= __len {{ jet_panic(__file, __line, &format!(\"the list has {{}} items, so position {{}} doesn't exist\", __len, __i)); }}\n        self.gather(__i as usize)\n    }}\n"
+        "    pub fn gather_at(&self, __i: i64, __file: &str, __line: u32) -> {rust_name} {{\n        let __len = self.len() as i64;\n        if __i < 0 || __i >= __len {{ jet_panic(__file, __line, &format!(\"the list has {{}} items, so position {{}} doesn't exist\", __len, __i)); }}\n        self.gather(__i as usize)\n    }}\n",
+        rust_name = rust_name
     ));
     // from_aos(Vec<S>) — build columns from an array-of-structs (list literals).
     out.push_str(&format!(
-        "    pub fn from_aos(__xs: Vec<user_{name}>) -> Self {{\n        let mut __c = Self::new();\n        for __x in __xs {{ __c.push(__x); }}\n        __c\n    }}\n"
+        "    pub fn from_aos(__xs: Vec<{rust_name}>) -> Self {{\n        let mut __c = Self::new();\n        for __x in __xs {{ __c.push(__x); }}\n        __c\n    }}\n",
+        rust_name = rust_name
     ));
     // to_aos / iter_aos — materialize for any op that needs a Vec<S> view.
     out.push_str(&format!(
-        "    pub fn to_aos(&self) -> Vec<user_{name}> {{ (0..self.len()).map(|__i| self.gather(__i)).collect() }}\n"
+        "    pub fn to_aos(&self) -> Vec<{rust_name}> {{ (0..self.len()).map(|__i| self.gather(__i)).collect() }}\n",
+        rust_name = rust_name
     ));
     out.push_str(&format!(
-        "    pub fn iter_aos(&self) -> impl Iterator<Item = user_{name}> + '_ {{ (0..self.len()).map(move |__i| self.gather(__i)) }}\n"
+        "    pub fn iter_aos(&self) -> impl Iterator<Item = {rust_name}> + '_ {{ (0..self.len()).map(move |__i| self.gather(__i)) }}\n",
+        rust_name = rust_name
     ));
     out.push_str("}\n\n");
 
@@ -363,12 +370,13 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
             .any(|block| block.trait_name == Generics::DECODE);
     if enc {
         out.push_str(&format!(
-            "impl user_Encode for {cn} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ self.to_aos().jet_encode() }}\n}}\n\n"
+            "impl __jet_Encode for {cn} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ self.to_aos().jet_encode() }}\n}}\n\n"
         ));
     }
     if dec {
         out.push_str(&format!(
-            "impl user_Decode for {cn} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        let __xs: Vec<user_{name}> = <Vec<user_{name}> as user_Decode>::jet_decode(__t)?;\n        Ok(Self::from_aos(__xs))\n    }}\n}}\n\n"
+            "impl __jet_Decode for {cn} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        let __xs: Vec<{rust_name}> = <Vec<{rust_name}> as __jet_Decode>::jet_decode(__t)?;\n        Ok(Self::from_aos(__xs))\n    }}\n}}\n\n",
+            rust_name = rust_name
         ));
     }
 }
@@ -424,6 +432,10 @@ fn cli_option_spec_line(
             "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
         ),
     }
+}
+
+fn cli_helper_name(kind: &str, type_name: &str) -> String {
+    crate::Syntax::generated_path(&format!("cli_{kind}_{type_name}"))
 }
 
 /// D-CLIFLAG1: emit `__jet_cli_spec_<Name>`/`__jet_cli_decode_<Name>` for a
@@ -527,9 +539,11 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     }
     spec_body.push_str("    __s\n");
 
+    let spec_name = cli_helper_name("spec", &s.name);
+    let decode_name = cli_helper_name("decode", &s.name);
     out.push_str(&format!(
-        "pub(crate) fn __jet_cli_spec_{name}() -> {root}JetArgsSpec {{\n{spec_body}}}\n\n",
-        name = s.name
+        "pub(crate) fn {spec_name}() -> {root}JetArgsSpec {{\n{spec_body}}}\n\n",
+        spec_name = spec_name
     ));
 
     let inits: Vec<String> = s
@@ -539,8 +553,8 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         .map(|f| mangle(&f.name))
         .collect();
     out.push_str(&format!(
-        "pub(crate) fn __jet_cli_decode_{name}(__spec: &{root}JetArgsSpec, __parsed: &{root}JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
-        name = s.name,
+        "pub(crate) fn {decode_name}(__spec: &{root}JetArgsSpec, __parsed: &{root}JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
+        decode_name = decode_name,
         inits = inits.join(", ")
     ));
 }
@@ -580,18 +594,18 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
 
     out.push_str(&format!("impl {base_rust} {{\n"));
     out.push_str(&format!(
-        "    pub fn user_apply(&self, __p: {patch_rust}) -> {base_rust} {{\n        {base_rust} {{ {} }}\n    }}\n",
+        "    pub fn __jet_apply(&self, __p: {patch_rust}) -> {base_rust} {{\n        {base_rust} {{ {} }}\n    }}\n",
         apply_fields.join(", ")
     ));
     out.push_str(&format!(
-        "    pub fn user_diff(__new: {base_rust}, __old: {base_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
+        "    pub fn __jet_diff(__new: {base_rust}, __old: {base_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
         diff_fields.join(", ")
     ));
     out.push_str("}\n\n");
 
     out.push_str(&format!("impl {patch_rust} {{\n"));
     out.push_str(&format!(
-        "    pub fn user_merge(&self, __other: {patch_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
+        "    pub fn __jet_merge(&self, __other: {patch_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
         merge_fields.join(", ")
     ));
     out.push_str("}\n\n");
@@ -635,7 +649,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .collect()
         });
         (
-            "user_run".to_string(),
+            mangle("run"),
             params,
             fallible_void_entry_error_for_func(run_fn, cx),
         )
@@ -691,6 +705,8 @@ pub(crate) fn emit_cli_entry_if_needed(
         _ => None,
     }) {
         if s.derives.iter().any(|(t, _)| t == "CLI") {
+            let spec_name = cli_helper_name("spec", name);
+            let decode_name = cli_helper_name("decode", name);
             let call_arg = arg_expr("__args");
             let invoke = emit_entry_invocation(
                 &callable,
@@ -700,8 +716,9 @@ pub(crate) fn emit_cli_entry_if_needed(
                 "                ",
             );
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
-                name = name,
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}{spec_name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                spec_name = spec_name,
+                decode_name = decode_name,
             ));
         }
         return;
@@ -817,10 +834,13 @@ fn emit_cli_subcommand_entry(
             crypto_error_type,
             "                        ",
         );
+        let spec_name = cli_helper_name("spec", payload_name);
+        let decode_name = cli_helper_name("decode", payload_name);
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = jet_args_program({helper_prefix}__jet_cli_spec_{payload}(), &__rest[0]);\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n            let __spec = jet_args_program({helper_prefix}{spec_name}(), &__rest[0]);\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
-            payload = payload_name,
+            spec_name = spec_name,
+            decode_name = decode_name,
         ));
     }
     let _ = cx;
@@ -932,6 +952,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     let (encode_unions, decode_unions) = union_codec_needs(items);
     for members in unions {
         let name = crate::AST::union_enum_name(&members);
+        let rust_name = user_type_rust(&name);
         let empty = std::collections::HashSet::new();
         let has_shared_guard = members
             .iter()
@@ -950,7 +971,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         if !rust_derives.is_empty() {
             out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
         }
-        out.push_str(&format!("pub enum user_{name} {{\n"));
+        out.push_str(&format!("pub enum {rust_name} {{\n"));
         for m in &members {
             let tag = crate::AST::union_member_tag(m);
             out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
@@ -958,7 +979,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         out.push_str("}\n\n");
         if !has_shared_guard {
             out.push_str(&format!(
-                "impl JetShow for user_{name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
+                "impl JetShow for {rust_name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
             ));
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
@@ -968,7 +989,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             }
             out.push_str("        }\n    }\n}\n\n");
             out.push_str(&format!(
-                "impl JetDebug for user_{name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
+                "impl JetDebug for {rust_name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
             ));
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
@@ -978,24 +999,24 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             }
             out.push_str("        }\n    }\n}\n\n");
             out.push_str(&format!(
-                "impl JetDisplay for user_{name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
+                "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
             ));
         }
         if encode_unions.contains(&name) {
             out.push_str(&format!(
-                "impl user_Encode for user_{name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
+                "impl __jet_Encode for {rust_name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
             ));
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
                 out.push_str(&format!(
-                    "            Self::{tag}(v) => user_Encode::jet_encode(v),\n"
+                    "            Self::{tag}(v) => __jet_Encode::jet_encode(v),\n"
                 ));
             }
             out.push_str("        }\n    }\n}\n\n");
         }
         if decode_unions.contains(&name) {
             out.push_str(&format!(
-                "impl user_Decode for user_{name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        match __t {{\n"
+                "impl __jet_Decode for {rust_name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        match __t {{\n"
             ));
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
@@ -1004,7 +1025,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                     continue;
                 };
                 out.push_str(&format!(
-                    "            {shape_pat} => Ok(Self::{tag}(<{rust} as user_Decode>::jet_decode(__t)?)),\n"
+                    "            {shape_pat} => Ok(Self::{tag}(<{rust} as __jet_Decode>::jet_decode(__t)?)),\n"
                 ));
             }
             out.push_str(
@@ -1152,6 +1173,7 @@ fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
+    let rust_name = user_type_rust(&e.name);
     let has_view_payload = enum_has_view_payload(cx, e);
     let has_mutable_view_payload = e.variants.iter().any(|variant| match &variant.payload {
         VariantPayload::Unit => false,
@@ -1203,7 +1225,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     } else {
         ""
     };
-    out.push_str(&format!("pub enum user_{}{view_generic} {{\n", e.name));
+    out.push_str(&format!("pub enum {rust_name}{view_generic} {{\n"));
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
@@ -1239,16 +1261,14 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     let type_arg = impl_generic;
     if !has_shared_guard && cx.auto_printable.contains(&e.name) {
         out.push_str(&format!(
-            "impl{impl_generic} JetShow for user_{}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-            e.name,
-            enum_jet_render_body(e)
+            "impl{impl_generic} JetShow for {rust_name}{type_arg} {{\n    fn jet_show(&self) -> String {{ {body} }}\n}}\n\n",
+            body = enum_jet_render_body(e)
         ));
     }
     if !has_shared_guard && cx.auto_debug.contains(&e.name) {
         out.push_str(&format!(
-            "impl{impl_generic} JetDebug for user_{}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-            e.name,
-            enum_jet_render_body(e)
+            "impl{impl_generic} JetDebug for {rust_name}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {body} }}\n}}\n\n",
+            body = enum_jet_render_body(e)
         ));
     }
     if !has_shared_guard
@@ -1256,8 +1276,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         && !cx.display_types.contains(&e.name)
     {
         out.push_str(&format!(
-            "impl{impl_generic} JetDisplay for user_{}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
-            e.name
+            "impl{impl_generic} JetDisplay for {rust_name}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
         ));
     }
 }
@@ -1443,7 +1462,7 @@ pub(super) fn migration_shapes(
 }
 
 /// D-MIGRATE4: the `jet_decode_traced` override emitted inside the type's
-/// `user_Decode` impl. Tries the current shape first (plain `jet_decode` — the
+/// `__jet_Decode` impl. Tries the current shape first (plain `jet_decode` — the
 /// cheap happy path, and the documented "prefer newest" ambiguity rule); on
 /// failure detects which historical shape the data's key set matches, newest
 /// first, and walks the step functions forward from there. Data matching no
@@ -1547,7 +1566,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                         )
                     });
                     out.push_str(&format!(
-                        "    __pairs.push(({key:?}.to_string(), user_Encode::jet_encode(&{}())));\n",
+                        "    __pairs.push(({key:?}.to_string(), __jet_Encode::jet_encode(&{}())));\n",
                         mangle(df)
                     ));
                 }
@@ -1567,7 +1586,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                         None => crate::Sema::error_conv_fn_name(&from_ty.name(), &to_ty.name()),
                     };
                     out.push_str(&format!(
-                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as user_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::FieldError::under_errors({key:?}, __e))?;\n            __p.1 = user_Encode::jet_encode(&{conv}(__old));\n        }}\n    }}\n"
+                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as __jet_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::FieldError::under_errors({key:?}, __e))?;\n            __p.1 = __jet_Encode::jet_encode(&{conv}(__old));\n        }}\n    }}\n"
                     ));
                 }
             }
@@ -1728,7 +1747,7 @@ pub(crate) fn emit_trait_impl(
     }
     if block.trait_name == crate::Syntax::TRAIT_DEBUG {
         out.push_str(&format!(
-            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as user_Debug>::debug(self) }}\n}}\n\n",
+            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
             user_type_rust(type_name),
             tp_use,
             user_type_rust(type_name),
@@ -1738,7 +1757,7 @@ pub(crate) fn emit_trait_impl(
 }
 
 /// I2: render an enum value with Jet-source names. Rust's derived `Debug` would
-/// print the mangled `user_Red` / `user_Some(user_x: …)` form. Payloads render
+/// print the mangled `__jet_Red` / `__jet_Some(__jet_x: …)` form. Payloads render
 /// through `jet_debug` — the same rule struct bodies use, so a `String` payload
 /// keeps its quotes in both lenses.
 fn enum_jet_render_body(e: &EnumDef) -> String {
@@ -1858,7 +1877,7 @@ pub(crate) fn emit_external_trait_impl(
     if let Some(field) = &i.delegation_field {
         // S62: delegation — emit forwarding methods directly to avoid the method
         // call mangling that the standard path applies (trait methods are not
-        // prefixed with `user_` in Rust).
+        // prefixed with `__jet_` in Rust).
         for m in &i.methods {
             // c109 Phase 15: route a covered delegation method through the typed IR.
             // Byte-identical Rust (golden parity); the whole method is structural so
@@ -1903,7 +1922,7 @@ pub(crate) fn emit_external_trait_impl(
     }
     if trait_name == crate::Syntax::TRAIT_DEBUG {
         out.push_str(&format!(
-            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as user_Debug>::debug(self) }}\n}}\n\n",
+            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
             user_type_rust(&i.type_name),
             tp_use,
             user_type_rust(&i.type_name),
@@ -1921,7 +1940,7 @@ fn emit_trait_method(
     indent: usize,
 ) {
     // c109 Phase N: the typed IR is the only codegen seam (R7). A trait-impl
-    // method always emits at indent 1 inside the `impl Trait for user_<T>` block
+    // method always emits at indent 1 inside the `impl Trait for __jet_<T>` block
     // the caller opened; it lowers + emits through the TIR. A gate-miss is an
     // internal compiler error (I2-class), never an AST fallback.
     debug_assert_eq!(
@@ -1944,6 +1963,7 @@ fn emit_trait_method(
 /// newtype for a distinct type declaration. The inner field is `pub` so
 /// codegen can access it for `.raw()` (lowers to `.0`).
 pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
+    let rust_name = user_type_rust(&d.name);
     let base_rust = cx.rust_type(&d.base);
     // Backend representation derives only. The distinct type's Jet
     // Equatable/Comparable implementations come from the sema source path.
@@ -1960,23 +1980,21 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         rust_derives.push("PartialOrd");
     }
     out.push_str(&format!(
-        "#[repr(transparent)]\n#[derive({})]\npub struct user_{}(pub {});\n\n",
+        "#[repr(transparent)]\n#[derive({})]\npub struct {rust_name}(pub {base});\n\n",
         rust_derives.join(", "),
-        d.name,
-        base_rust
+        base = base_rust
     ));
     // Unit-family print follows Display so an explicit Display impl overrides
     // the generated magnitude + symbol default. Other distinct types keep
     // their existing debug-shaped JetShow output.
     if cx.unit_labels.contains_key(&d.name) {
         out.push_str(&format!(
-            "impl JetShow for user_{0} {{\n    fn jet_show(&self) -> String {{ self.jet_display() }}\n}}\n\n",
-            d.name
+            "impl JetShow for {rust_name} {{\n    fn jet_show(&self) -> String {{ self.jet_display() }}\n}}\n\n"
         ));
     } else {
         out.push_str(&format!(
-            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_show())\n    }}\n}}\n\n",
-            d.name, d.name
+            "impl JetShow for {rust_name} {{\n    fn jet_show(&self) -> String {{\n        format!(\"{display_name}({{}})\", (self.0).jet_show())\n    }}\n}}\n\n",
+            display_name = d.name
         ));
     }
     // JetDebug: a distinct type wrapped in a struct/enum field is debug-rendered
@@ -1985,25 +2003,25 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     // type, so the newtype must satisfy `JetDebug` — render the base value's own
     // debug wrapped in the type name (`Meters(10.0)`), mirroring `jet_show`.
     out.push_str(&format!(
-        "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_debug())\n    }}\n}}\n\n",
-        d.name, d.name
+        "impl JetDebug for {rust_name} {{\n    fn jet_debug(&self) -> String {{\n        format!(\"{display_name}({{}})\", (self.0).jet_debug())\n    }}\n}}\n\n",
+        display_name = d.name
     ));
     // .raw() method: unwrap to the base type.
     let raw_value = if base_is_copy { "self.0" } else { "self.0.clone()" };
     out.push_str(&format!(
-        "impl user_{} {{\n    pub fn raw(&self) -> {} {{ {} }}\n}}\n\n",
-        d.name, base_rust, raw_value
+        "impl {rust_name} {{\n    pub fn raw(&self) -> {base} {{ {raw} }}\n}}\n\n",
+        base = base_rust,
+        raw = raw_value
     ));
     if d.quantity.is_some() {
         out.push_str(&format!(
-            "impl crate::JetQuantity for user_{n} {{\n    fn raw(&self) -> f64 {{ self.0 }}\n    fn from_float(value: f64) -> Self {{ user_{n}(value) }}\n}}\n\n",
-            n = d.name
+            "impl crate::JetQuantity for {rust_name} {{\n    fn raw(&self) -> f64 {{ self.0 }}\n    fn from_float(value: f64) -> Self {{ {rust_name}(value) }}\n}}\n\n"
         ));
     }
     if let Some((lo, hi, _)) = d.range {
         out.push_str(&format!(
-            "impl user_{n} {{\n    pub fn try_new(__v: {base}) -> Result<user_{n}, String> {{\n        if __v >= {lo} && __v <= {hi} {{ Ok(user_{n}(__v)) }} else {{ Err(format!(\"value {{}} is outside {n}'s range {lo}..{hi}\", __v)) }}\n    }}\n}}\n\n",
-            n = d.name,
+            "impl {rust_name} {{\n    pub fn try_new(__v: {base}) -> Result<{rust_name}, String> {{\n        if __v >= {lo} && __v <= {hi} {{ Ok({rust_name}(__v)) }} else {{ Err(format!(\"value {{}} is outside {display_name}'s range {lo}..{hi}\", __v)) }}\n    }}\n}}\n\n",
+            display_name = d.name,
             base = base_rust,
             lo = lo,
             hi = hi
@@ -2014,27 +2032,24 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
             if d.range.is_none() {
                 out.push_str(&format!(
-                    "impl user_{trait_name} for user_{n} {{ fn {method}(&self, rhs: &Self) -> Self {{ user_{n}(self.0 {op} rhs.0) }} }}\n\n",
+                    "impl __jet_{trait_name} for {rust_name} {{ fn {method}(&self, rhs: &Self) -> Self {{ {rust_name}(self.0 {op} rhs.0) }} }}\n\n",
                     trait_name = trait_name,
-                    n = d.name,
                     method = trait_name.to_lowercase(),
                     op = op
                 ));
             }
             if d.range.is_some() {
                 out.push_str(&format!(
-                    "impl std::ops::{}<user_{n}> for user_{n} {{\n    type Output = {base};\n    fn {lc}(self, rhs: user_{n}) -> {base} {{ self.0 {op} rhs.0 }}\n}}\n\n",
-                    trait_name,
-                    n = d.name,
+                    "impl std::ops::{trait_name}<{rust_name}> for {rust_name} {{\n    type Output = {base};\n    fn {lc}(self, rhs: {rust_name}) -> {base} {{ self.0 {op} rhs.0 }}\n}}\n\n",
+                    trait_name = trait_name,
                     base = base_rust,
                     lc = trait_name.to_lowercase(),
                     op = op
                 ));
             } else {
                 out.push_str(&format!(
-                    "impl std::ops::{}<user_{n}> for user_{n} {{\n    type Output = user_{n};\n    fn {lc}(self, rhs: user_{n}) -> user_{n} {{ user_{n}(self.0 {op} rhs.0) }}\n}}\n\n",
-                    trait_name,
-                    n = d.name,
+                    "impl std::ops::{trait_name}<{rust_name}> for {rust_name} {{\n    type Output = {rust_name};\n    fn {lc}(self, rhs: {rust_name}) -> {rust_name} {{ {rust_name}(self.0 {op} rhs.0) }}\n}}\n\n",
+                    trait_name = trait_name,
                     lc = trait_name.to_lowercase(),
                     op = op
                 ));
@@ -2044,8 +2059,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     if let Some(label) = cx.unit_labels.get(&d.name) {
         if !cx.display_types.contains(&d.name) {
             out.push_str(&format!(
-                "impl JetDisplay for user_{n} {{\n    fn jet_display(&self) -> String {{ format!(\"{{}} {symbol}\", (self.0).to_string()) }}\n}}\n\n",
-                n = d.name,
+                "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ format!(\"{{}} {symbol}\", (self.0).to_string()) }}\n}}\n\n",
                 symbol = label.symbol,
             ));
         }
@@ -2055,33 +2069,30 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     // without this marker sema never lets a value reach here (E0138).
     if distinct_has_derive(d, crate::Generics::PRINTABLE) {
         out.push_str(&format!(
-            "impl JetDisplay for user_{n} {{\n    fn jet_display(&self) -> String {{ (self.0).jet_display() }}\n}}\n\n",
-            n = d.name
+            "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ (self.0).jet_display() }}\n}}\n\n"
         ));
     }
     // D-CAPBUNDLE1 `#CodableAsBase`: encode/decode via the base type's own
-    // wire representation (`user_Encode`/`user_Decode`, the same traits
+    // wire representation (`__jet_Encode`/`__jet_Decode`, the same traits
     // struct/enum `#[Codable]` derives target — I8: one wire mechanism).
     if distinct_has_derive(d, crate::Generics::ENCODE)
         && distinct_has_derive(d, crate::Generics::DECODE)
         && !cx.used_core.is_empty()
     {
         out.push_str(&format!(
-            "impl crate::user_Encode for user_{n} {{\n    fn jet_encode(&self) -> crate::jet_std::DataTree {{ crate::user_Encode::jet_encode(&self.0) }}\n}}\n\n",
-            n = d.name
+            "impl crate::__jet_Encode for {rust_name} {{\n    fn jet_encode(&self) -> crate::jet_std::DataTree {{ crate::__jet_Encode::jet_encode(&self.0) }}\n}}\n\n"
         ));
         if let Some((lo, hi, _)) = d.range {
             out.push_str(&format!(
-                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, Vec<crate::jet_std::FieldError>> {{\n        let __value = <{base} as crate::user_Decode>::jet_decode(__t)?;\n        if __value < ({lo} as {base}) || __value > ({hi} as {base}) {{\n            return Err(crate::jet_std::FieldError::one(\"expected {n} within {lo}..{hi}\"));\n        }}\n        Ok(user_{n}(__value))\n    }}\n}}\n\n",
-                n = d.name,
+                "impl crate::__jet_Decode for {rust_name} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, Vec<crate::jet_std::FieldError>> {{\n        let __value = <{base} as crate::__jet_Decode>::jet_decode(__t)?;\n        if __value < ({lo} as {base}) || __value > ({hi} as {base}) {{\n            return Err(crate::jet_std::FieldError::one(\"expected {name} within {lo}..{hi}\"));\n        }}\n        Ok({rust_name}(__value))\n    }}\n}}\n\n",
+                name = d.name,
                 base = base_rust,
                 lo = lo,
                 hi = hi,
             ));
         } else {
             out.push_str(&format!(
-                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, Vec<crate::jet_std::FieldError>> {{ Ok(user_{n}(<{base} as crate::user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
-                n = d.name,
+                "impl crate::__jet_Decode for {rust_name} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, Vec<crate::jet_std::FieldError>> {{ Ok({rust_name}(<{base} as crate::__jet_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
                 base = base_rust
             ));
         }
@@ -2239,7 +2250,7 @@ pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut 
     let to_rust = cx.rust_type(&crate::AST::Type::Named(ec.to_ty.clone()));
     *cx.current_fn.borrow_mut() = fn_name.clone();
     out.push_str(&format!(
-        "pub fn {fn_name}(user_self: {from}) -> {to} {{\n",
+        "pub fn {fn_name}(__jet_self: {from}) -> {to} {{\n",
         fn_name = fn_name,
         from = from_rust,
         to = to_rust,

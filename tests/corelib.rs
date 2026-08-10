@@ -460,14 +460,14 @@ use core.crypto as crypto
 fn run() {
     password :: crypto.Secret.from_text("not-logged")
     dkim_key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
-    dkim := email.DkimConfig.{
+    dkim :: email.DkimConfig.{
         domain: "example.com",
         selector: "login-2026",
         private_key: dkim_key,
         signed_headers: ["from", "subject", "mime-version", "content-type"],
     }
-    auth := email.SMTPAuth.Password.{ username: "mailer", password: password }
-    config := email.SMTPConfig.{
+    auth :: SMTPAuth.{ .Password.{ username: "mailer", password: password } }
+    config :: email.SMTPConfig.{
         host: "localhost",
         port: 465,
         security: .TLS,
@@ -477,8 +477,8 @@ fn run() {
         limits: email.Limits.safe(),
         dkim: Val(dkim),
     }
-    mailer := email.smtp(config) ?? panic("mailer config")
-    env_mailer := email.smtp_from_env() ?? panic("environment mailer config")
+    mailer :: email.smtp(config) ?? panic("mailer config")
+    env_mailer :: email.smtp_from_env() ?? panic("environment mailer config")
     sender :: email.address("sender@example.com") ?? panic("sender")
     recipient :: email.address("recipient@example.net") ?? panic("recipient")
     message :: email.message(sender, [recipient], [], "subject", "body", "", []) ?? panic("message")
@@ -3139,7 +3139,7 @@ fn run() {
     });
     let parse_renamed = out.rust.replacen("fn jet_enc_cbor_parse(", "fn jet_enc_cbor_parse_inner(", 1);
     assert_ne!(parse_renamed, out.rust, "generated CBOR parser seam changed");
-    let renamed = parse_renamed.replacen("fn jet_enc_cbor_decode<T: user_Decode>(", "fn jet_enc_cbor_decode_inner<T: user_Decode>(", 1);
+    let renamed = parse_renamed.replacen("fn jet_enc_cbor_decode<T: __jet_Decode>(", "fn jet_enc_cbor_decode_inner<T: __jet_Decode>(", 1);
     assert_ne!(renamed, parse_renamed, "generated CBOR typed decoder seam changed");
     let allocator = r#"
 mod jet_cbor_alloc_probe {
@@ -3190,7 +3190,7 @@ fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<
     assert!(peak <= ceiling, "CBOR requested allocation peak {peak} exceeded {ceiling}");
     result
 }
-fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_cbor_decode<T: __jet_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, Vec<jet_std::FieldError>> {
     let ceiling = options.max_bytes as usize;
     jet_cbor_alloc_probe::begin();
     let result = jet_enc_cbor_decode_inner(bytes, options);
@@ -3227,6 +3227,47 @@ fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     })
 }
 
+fn standalone_tls_probe_source(mut rust: String) -> String {
+    rust = rust.replacen("fn main()", "fn jet_generated_main()", 1);
+    let mut isolated = String::with_capacity(rust.len());
+    let mut cfg_test = false;
+    let mut test_module = 0usize;
+    for line in rust.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        if body == "#[cfg(test)]" {
+            cfg_test = true;
+            isolated.push_str(line);
+            continue;
+        }
+        if body.starts_with("extern crate jet_ffi_") {
+            continue;
+        }
+        if body.starts_with("fn jet_ffi_install_reporter() {") {
+            isolated.push_str("fn jet_ffi_install_reporter() {}");
+            if line.ends_with('\n') {
+                isolated.push('\n');
+            }
+            continue;
+        }
+        if cfg_test {
+            cfg_test = false;
+            let trimmed = body.trim_start();
+            if trimmed.starts_with("mod tests {") {
+                let indent = &body[..body.len() - trimmed.len()];
+                isolated.push_str(indent);
+                isolated.push_str(&format!("mod jet_standalone_test_module_{test_module} {{"));
+                if line.ends_with('\n') {
+                    isolated.push('\n');
+                }
+                test_module += 1;
+                continue;
+            }
+        }
+        isolated.push_str(line);
+    }
+    isolated
+}
+
 #[test]
 fn invariant_refinement_proves_fixed_array_index() {
     let src = r#"
@@ -3234,7 +3275,7 @@ fn invariant_refinement_proves_fixed_array_index() {
 Index4 :: distinct Int
 
 fn pick(xs: [String#4], i: Index4) => String {
-    return xs[i]
+    return ~xs[i]
 }
 
 fn run() {
@@ -3266,7 +3307,7 @@ fn comptime_find_glob_records_sorted_lock_inputs() {
 $paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
 
 fn run() {
-    print(paths.join("|"))
+    print($paths.join("|"))
 }
 "#;
     let path = dir.join("main.jet");
@@ -3445,6 +3486,129 @@ fn run() {
     let (code, stdout, stderr) = build_and_run(&dir, "os_facts", src, &[], None);
     assert_eq!(code, 0, "core.os program failed: {stderr}");
     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn core_os_interrupt_named_and_indirect_callbacks_match_dev_tiers() {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_interrupt_callback_forms_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+
+    let aot_source = r#"
+use core.os as os
+
+fn named_callback() {
+    print("named")
+}
+
+fn run() {
+    indirect :: named_callback
+    os.on_interrupt(named_callback)
+    os.on_interrupt(indirect)
+    print("registered")
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "named_indirect_aot", aot_source, &[], None);
+    assert_eq!(code, 0, "named/indirect AOT callback program failed: {stderr}");
+    assert_eq!(stdout, "registered\n");
+
+    let dev_source = r#"
+use core.os as os
+
+fn named_callback() {
+    print("named")
+}
+
+fn stop_callback() {
+    print("stop")
+    panic("stop")
+}
+
+fn run() {
+    indirect :: stop_callback
+    os.on_interrupt(named_callback)
+    os.on_interrupt(indirect)
+    loop {
+        tick :: 0
+    }
+}
+"#;
+    let path = dir.join("named_indirect_dev.jet");
+    fs::write(&path, dev_source).unwrap();
+
+    for (tier, force_interpreter) in [("resident JIT", false), ("forced interpreter", true)] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command
+            .args(["dev", path.to_str().unwrap(), "--watch=off"])
+            .current_dir(&dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if force_interpreter {
+            command.arg("--interpret");
+        } else {
+            command.arg("--trace-tiers");
+        }
+        let mut child = command
+            .spawn()
+            .unwrap_or_else(|error| panic!("spawn {tier} callback program: {error}"));
+        std::thread::sleep(Duration::from_secs(5));
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+        assert_eq!(
+            unsafe { kill(child.id() as i32, 2) },
+            0,
+            "send SIGINT to {tier} callback program"
+        );
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let output = child
+                    .wait_with_output()
+                    .expect("collect timed-out callback child output");
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                panic!(
+                    "{tier} callback program did not exit after SIGINT: stdout={stdout:?} stderr={stderr:?}"
+                );
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        let output = child.wait_with_output().unwrap();
+        let stdout = String::from_utf8(output.stdout).expect("callback stdout is UTF-8");
+        let stderr = String::from_utf8(output.stderr).expect("callback stderr is UTF-8");
+        assert!(
+            status.code() == Some(70),
+            "{tier} callback program failed: stdout={stdout:?} stderr={stderr:?}"
+        );
+        assert_eq!(stdout, "named\nstop\n", "{tier} callback dispatch drifted");
+        assert!(
+            stderr.contains("panic: stop"),
+            "{tier} callback lost the runtime panic diagnostic: {stderr:?}"
+        );
+        if force_interpreter {
+            assert!(
+                !stderr.contains("E2201") && !stderr.contains("unsupported"),
+                "{tier} emitted an unsupported-feature diagnostic: {stderr}"
+            );
+        } else {
+            assert!(
+                stderr.contains("tier1 native"),
+                "{tier} proof did not report a native tier: {stderr}"
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -3628,10 +3792,11 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     let task_mem = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
     let time = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
     let scheduler = include_str!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
+    let core = include_str!("../crates/jet-codegen/src/Prelude/Core.rs");
     assert!(!task_mem.contains("process::exit(70)"));
     assert!(!time.contains("process::exit(70)"));
-    assert_eq!(scheduler.matches("process::exit(70)").count(), 1);
-    assert!(task_mem.contains("super::jet_panic(\"<core.tasks>\""));
+    assert_eq!(scheduler.matches("process::exit(70)").count(), 0);
+    assert!(task_mem.contains("super::jet_panic("));
     // The deadline helper binds the rendered E3003 to a local so it can feed
     // interrupt handlers, native wait boundaries, and explicitly typed deadline
     // tasks while ordinary scheduler tasks retain the exact process-fatal E3003
@@ -3642,6 +3807,8 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(time.contains("jet_scheduler_wait_boundary_should_unwind()"));
     assert!(time.contains("jet_typed_deadline_boundary_should_unwind()"));
     assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
+    assert!(scheduler.contains("jet_runtime_diagnostic(format!(\"panic: {msg}\")"));
+    assert!(scheduler.contains("jet_runtime_diagnostic(rendered)"));
     assert!(scheduler.contains("struct JetSchedulerWaitBoundary"));
     assert!(scheduler.contains("let _boundary = JetSchedulerWaitBoundary::enter()"));
     assert!(scheduler.contains("struct JetTypedDeadlineBoundary"));
@@ -3653,10 +3820,12 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
         .split_once("pub fn pause")
         .expect("typed-deadline task spawn boundary")
         .0;
-    assert!(typed_task_spawn.contains(
-        "let _typed_deadline_boundary = super::JetTypedDeadlineBoundary::enter()"
+    assert!(typed_task_spawn.contains("let _typed_deadline_boundary"));
+    assert!(typed_task_spawn.contains("super::JetTypedDeadlineBoundary::enter()"));
+    assert_eq!(core.matches("std::process::exit(70)").count(), 1);
+    assert!(core.contains(
+        "Self::SchedulerFatal { msg } => jet_runtime_diagnostic(format!(\"panic: {msg}\"))"
     ));
-    let core = include_str!("../crates/jet-codegen/src/Prelude/Core.rs");
     assert!(core.contains("fn jet_runtime_should_unwind() -> bool"));
     assert!(core.contains("jet_scheduler_in_task() || jet_interrupt_handler_should_unwind()"));
     assert!(core.contains("if jet_runtime_should_unwind()"));
@@ -4781,7 +4950,7 @@ fn run() {{
             .Ok(_) -> panic("zero limit looked like EOF")
             .Err(error) -> {{
                 if error == {{
-                    .InvalidInput(context) -> print(if context.operation == .Read {{ "invalid" }} else {{ "wrong-operation" }})
+                    .InvalidInput(context) -> print(if context.operation == .Read -> "invalid" else -> "wrong-operation")
                     else -> {{ print("wrong-error") }}
                 }}
             }}
@@ -4802,7 +4971,7 @@ fn run() {{
     print("reply:{{reply.len()}}")
     if net.unix_write_all_bytes(&client, [5]) == {{
         .Ok(_) -> panic("write after half-close succeeded")
-        .Err(error) -> print(if net.error_operation(error) == "unix write" {{ "half-closed" }} else {{ "wrong-half-close" }})
+        .Err(error) -> print(if net.error_operation(error) == "unix write" -> "half-closed" else -> "wrong-half-close")
     }}
     net.unix_close(&client) ?? panic("close")
     net.unix_close(&client) ?? panic("second close")
@@ -4810,7 +4979,7 @@ fn run() {{
         .Ok(_) -> panic("closed read succeeded")
         .Err(error) -> {{
             if error == {{
-                .Closed(context) -> print(if context.operation == .Read {{ "closed" }} else {{ "wrong-close-operation" }})
+                .Closed(context) -> print(if context.operation == .Read -> "closed" else -> "wrong-close-operation")
                 else -> {{ print("wrong-close-error") }}
             }}
         }}
@@ -5135,7 +5304,7 @@ fn run() {
         .Ok(_) -> panic("flush succeeded")
         .Err(error) -> {
             if error == {
-                .Other(context) -> print(if context.operation == .Flush { "flush" } else { "wrong-flush-operation" })
+                .Other(context) -> print(if context.operation == .Flush -> "flush" else -> "wrong-flush-operation")
                 else -> { print("wrong-flush-kind") }
             }
         }
@@ -5389,7 +5558,7 @@ fn run() {
         .Ok(_) -> panic("closed read succeeded")
         .Err(error) -> {
             if error == {
-                .Closed(context) -> print(if context.operation == .Read { "closed" } else { "wrong-operation" })
+                .Closed(context) -> print(if context.operation == .Read -> "closed" else -> "wrong-operation")
                 else -> { print("wrong-error") }
             }
         }
@@ -5497,7 +5666,7 @@ fn run() {{
     if cfg2.with_alpn(invalid_alpn()) == {{
         .Ok(_) -> panic("empty dynamic ALPN accepted")
         .Err(error) -> if error == {{
-            .InvalidInput(context) -> print(if context.operation == .Connect {{ "alpn-rejected" }} else {{ "wrong-alpn-operation" }})
+            .InvalidInput(context) -> print(if context.operation == .Connect -> "alpn-rejected" else -> "wrong-alpn-operation")
             else -> {{ panic("wrong ALPN error") }}
         }}
     }}
@@ -5523,7 +5692,7 @@ fn run() {{
     if secure.write_all(one, deadline: budget) == {{
         .Ok(_) -> panic("write after close_write succeeded")
         .Err(error) -> if error == {{
-            .Closed(context) -> print(if context.operation == .Write {{ "write-closed" }} else {{ "wrong-write-operation" }})
+            .Closed(context) -> print(if context.operation == .Write -> "write-closed" else -> "wrong-write-operation")
             else -> {{ panic("wrong post-close error") }}
         }}
     }}
@@ -5564,8 +5733,7 @@ fn core_tls_identity_drop_and_protocol_mapping_use_shared_runtime_laws() {
         "tls_runtime_laws.jet",
         "use core.tls as tls\nfn run() { _config :: tls.ClientConfig.default() }\n",
     );
-    let mut rust = compiled.rust;
-    rust = rust.replacen("fn main()", "fn jet_generated_main()", 1);
+    let mut rust = standalone_tls_probe_source(compiled.rust);
     rust.push_str(r#"
 fn main() {
     let zeroized = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<u8>>::new()));
@@ -5592,7 +5760,7 @@ fn main() {
     assert_eq!(&*zeroized.borrow(), &vec![vec![0; 7], vec![0; 7]]);
 
     let cause = "TLS protocol truncation: peer closed without close-notify".to_string();
-    match jet_net_tls_io_result::<()>(.Err(cause.clone()), jet_std::IOOperation::Read).unwrap_err() {
+    match jet_net_tls_io_result::<()>(Err(cause.clone()), jet_std::IOOperation::Read).unwrap_err() {
         jet_std::IOError::Protocol(context) => {
             assert_eq!(context.operation, jet_std::IOOperation::Read);
             assert_eq!(context.cause, Ok(cause));
@@ -5608,16 +5776,10 @@ fn main() {
         &mut rustc,
         &rs,
         &rust,
-        compiled.ffi.is_some(),
+        false,
         &["--cfg", "test"],
     );
     rustc.arg("-o").arg(&bin);
-    if let Some(link) = compiled.ffi {
-        rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
-        }
-    }
     let built = rustc.output().unwrap();
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
     let ran = Command::new(bin).output().unwrap();
@@ -5754,12 +5916,12 @@ fn run() {
     );
     assert!(out.rust.contains("jet_enc_csv_decode"));
     assert!(
-        out.rust.contains("jet_enc_csv_decode::<user_Ticket>"),
+        out.rust.contains("jet_enc_csv_decode::<__jet_Ticket>"),
         "core.data.csv must lower its sema-owned list element type exactly:\n{}",
         out.rust
     );
     assert!(
-        !out.rust.contains("jet_enc_csv_decode::<Vec<user_Ticket>>"),
+        !out.rust.contains("jet_enc_csv_decode::<Vec<__jet_Ticket>>"),
         "core.data.csv nested its list result at the runtime boundary:\n{}",
         out.rust
     );
@@ -6183,16 +6345,22 @@ fn run() {
         .Ok(_) -> panic("header injection accepted")
         .Err(_) -> print("header-rejected")
     }
-    recipients.{ [~recipient]
+    recipients := [~recipient]
     count := 1
-    loop count < 101 { recipients.push(~recipient); count++ }
+    loop count < 101 {
+        recipients.push(~recipient)
+        count++
+    }
     if email.message(~sender, recipients, [], "subject", "text", "", []) == {
         .Ok(_) -> panic("recipient bound ignored")
         .Err(_) -> print("recipient-bound")
     }
     too_large := [U8].{ 0 }
     count = 1
-    loop count < 26214401 { too_large.push(0); count++ }
+    loop count < 26214401 {
+        too_large.push(0)
+        count++
+    }
     if email.attachment("large.bin", "application/octet-stream", too_large) == {
         .Ok(_) -> panic("attachment bound ignored")
         .Err(_) -> print("attachment-bound")
@@ -6247,16 +6415,16 @@ fn run() {
     envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
     replaced :: message.with_envelope(envelope) ?? panic("replace")
     bytes :: email.serialize(replaced) ?? panic("serialize")
-    start_tls := email.SMTPSecurity.StartTls
-    transport_tls := email.SMTPSecurity.TLS
-    require_all := email.RecipientPolicy.RequireAll
-    recipient := email.RecipientReport.{
+    start_tls :: email.SMTPSecurity.StartTls
+    transport_tls :: email.SMTPSecurity.TLS
+    require_all :: email.RecipientPolicy.RequireAll
+    recipient :: email.RecipientReport.{
         address: hidden,
         accepted: true,
         code: 250,
         message: "accepted",
     }
-    report := email.SendReport.{
+    report :: email.SendReport.{
         server: "smtp.example.com",
         accepted: [recipient],
         rejected: [],
@@ -6264,18 +6432,18 @@ fn run() {
         response: "queued",
         accepted_at: "2026-07-13T17:00:00Z",
     }
-    problem := email.EmailError.Configuration.{
+    problem :: EmailError.{ .Configuration.{
         operation: "send",
         server: Val("smtp.example.com"),
         code: Val(451),
         reason: "stopped",
-    }
-    tls_problem := email.EmailError.TLS.{
+    } }
+    tls_problem :: EmailError.{ .TLS.{
         operation: "handshake",
         server: Val("smtp.example.com"),
         code: Val(525),
         reason: "certificate",
-    }
+    } }
     print(start_tls == .StartTls)
     print(transport_tls == .TLS)
     print(require_all == .RequireAll)
@@ -7717,9 +7885,9 @@ fn run() {
     let compiled = compile_temp("date_today_immutable", src);
     let user_run = compiled
         .rust
-        .split_once("pub fn user_run() {")
+        .split_once("pub fn __jet_run() {")
         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
-        .expect("generated Rust must contain the user_run body");
+        .expect("generated Rust must contain the __jet_run body");
     assert_eq!(
         user_run.matches("JetDate::today_utc()").count(),
         2,
@@ -8059,14 +8227,14 @@ fn summarize() => String {
     utf16 :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
     conflict :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0 }
 
-    plain_doc := xml.parse_bytes(plain) ?? panic("plain parse")
-    plain_out := xml.to_bytes(plain_doc) ?? panic("plain render")
-    utf8_doc := xml.parse_bytes(utf8_bom) ?? panic("UTF-8 BOM parse")
-    utf8_out := xml.to_bytes(utf8_doc, xml.XMLRenderOptions.{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
-    utf16_doc := xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
-    utf16_out := xml.to_bytes(utf16_doc, xml.XMLRenderOptions.{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
+    plain_doc :: xml.parse_bytes(plain) ?? panic("plain parse")
+    plain_out :: xml.to_bytes(plain_doc) ?? panic("plain render")
+    utf8_doc :: xml.parse_bytes(utf8_bom) ?? panic("UTF-8 BOM parse")
+    utf8_out :: xml.to_bytes(utf8_doc, xml.XMLRenderOptions.{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
+    utf16_doc :: xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
+    utf16_out :: xml.to_bytes(utf16_doc, xml.XMLRenderOptions.{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
 
-    conflict_result :: DataTree ? XMLError.{ xml.parse_bytes(conflict) }
+    conflict_result :: xml.parse_bytes(conflict)
     if conflict_result == {
         .Ok(_) -> return "encoding-conflict-missed"
         .Err(error) -> {
@@ -8135,9 +8303,9 @@ fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
-    print("{numeric}|{runtime_numeric}")
-    print("{attribute}|{runtime_attribute}")
-    print("{namespace}|{runtime_namespace}")
+    print("{$numeric}|{runtime_numeric}")
+    print("{$attribute}|{runtime_attribute}")
+    print("{$namespace}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
@@ -8192,12 +8360,12 @@ fn summarize(source: String) => String {
 
 $cr :: String.from_bytes([13]) ?? panic("CR")
 $close :: "/>"
-$source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
-$normalized :: summarize(source)
+$source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{$cr}\nD{$cr}E' b='&#xD;&#xA;&#x9;'{$close}"
+$normalized :: summarize($source)
 
 fn run() {
-    runtime := summarize(source)
-    print("{normalized}|{runtime}")
+    runtime := summarize($source)
+    print("{$normalized}|{runtime}")
 }
 "#;
     let expected = "true|true|3|true|true|true|3|true\n";
@@ -8237,6 +8405,11 @@ fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"corelib_base_decoder\"\nversion: \"0.1.0\"\nedition: \"2026\"\n",
+    )
+    .unwrap();
     let source = r#"
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
@@ -8303,24 +8476,24 @@ fn run() {
     r_base32_bits := show32("MZ======")
     r_base32_short := show32("A")
     r_base32_alphabet := show32("M0======")
-    print("{standard_ws}|{r_standard_ws}")
-    print("{standard_unpadded}|{r_standard_unpadded}")
-    print("{standard_interior}|{r_standard_interior}")
-    print("{standard_excess}|{r_standard_excess}")
-    print("{standard_bits}|{r_standard_bits}")
-    print("{standard_padding}|{r_standard_padding}")
-    print("{standard_alphabet}|{r_standard_alphabet}")
-    print("{standard_size}|{r_standard_size}")
-    print("{url_outer_ws}|{r_url_outer_ws}")
-    print("{url_interior}|{r_url_interior}")
-    print("{url_standard_alphabet}|{r_url_standard_alphabet}")
-    print("{url_bits}|{r_url_bits}")
-    print("{url_padding}|{r_url_padding}")
-    print("{url_size}|{r_url_size}")
-    print("{base32_loose}|{r_base32_loose}")
-    print("{base32_bits}|{r_base32_bits}")
-    print("{base32_short}|{r_base32_short}")
-    print("{base32_alphabet}|{r_base32_alphabet}")
+    print("{$standard_ws}|{r_standard_ws}")
+    print("{$standard_unpadded}|{r_standard_unpadded}")
+    print("{$standard_interior}|{r_standard_interior}")
+    print("{$standard_excess}|{r_standard_excess}")
+    print("{$standard_bits}|{r_standard_bits}")
+    print("{$standard_padding}|{r_standard_padding}")
+    print("{$standard_alphabet}|{r_standard_alphabet}")
+    print("{$standard_size}|{r_standard_size}")
+    print("{$url_outer_ws}|{r_url_outer_ws}")
+    print("{$url_interior}|{r_url_interior}")
+    print("{$url_standard_alphabet}|{r_url_standard_alphabet}")
+    print("{$url_bits}|{r_url_bits}")
+    print("{$url_padding}|{r_url_padding}")
+    print("{$url_size}|{r_url_size}")
+    print("{$base32_loose}|{r_base32_loose}")
+    print("{$base32_bits}|{r_base32_bits}")
+    print("{$base32_short}|{r_base32_short}")
+    print("{$base32_alphabet}|{r_base32_alphabet}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);
@@ -8728,11 +8901,7 @@ fn run() {
 
 #[test]
 fn db_checked_sql_params_feed_parameterized_execute() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping db checked sql test (need rustc)");
-        return;
-    }
+    assert!(common::have_rustc(), "DB query_one proof requires rustc");
     let dir = std::env::temp_dir().join(format!("jet_corelib_db_sql_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -8762,6 +8931,7 @@ fn run() {
     ]) ?? 0
     row :: scoped.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
     found :: row ?? panic("missing")
+    missing :: scoped.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(99)]) ?? panic("missing query")
     count :: scoped.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
     counted :: count ?? panic("missing count")
     print(created)
@@ -8771,6 +8941,7 @@ fn run() {
     print(db.row_text(found, "name") ?? "bad")
     print(db.row_int(found, "active") ?? 0)
     print(db.row_int(counted, "n") ?? 0)
+    if missing == .None { print("absent") } else { panic("unexpected row") }
     _closed :: scoped.close()
 }
 "#,
@@ -8778,17 +8949,13 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "db checked sql test failed: {stderr}");
-    assert_eq!(stdout, "1\n0\n0\n7\nAda\n1\n1\n");
+    assert_eq!(stdout, "1\n0\n0\n7\nAda\n1\n1\nabsent\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn core_db_implements_driver_trait() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping db Driver trait test (need rustc)");
-        return;
-    }
+    assert!(common::have_rustc(), "DB Driver query_one proof requires rustc");
     let dir = std::env::temp_dir().join(format!("jet_corelib_db_driver_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -8798,6 +8965,8 @@ use core.db as db
 fn count_people<T: Driver>(&conn: T) => Int ? DBError {
     row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])?
     found :: row ?? panic("missing")
+    missing :: conn.query_one("SELECT id, name FROM person WHERE id = ?", [DBValue.Int(99)])?
+    if missing == .None { print("absent") } else { panic("unexpected row") }
     return .Ok(db.row_int(found, "n") ?? 0)
 }
 
@@ -8825,7 +8994,7 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "db Driver trait AOT failed: {stderr}");
-    assert_eq!(stdout, "1\n");
+    assert_eq!(stdout, "absent\n1\n");
 
     // I9: default `jet run` (Cranelift) must share the same Driver meaning.
     let jet = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/jet");
@@ -8841,7 +9010,87 @@ fn run() {
         "db Driver trait JIT failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "1\n");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "absent\n1\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_db_query_one_first_row_matches_all_execution_tiers() {
+    assert!(common::have_rustc(), "DB query_one parity proof requires rustc");
+    assert!(
+        jet_jit::cranelift_host_supported(),
+        "DB query_one parity proof requires a resident Cranelift host"
+    );
+    let dir = common::unique_tmp("jet_corelib_db_query_one_parity");
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.db as db
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _ :: db.migrate(scoped, "person-v1", [
+        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"
+    ]) ?? panic("create")
+    _ :: scoped.execute(
+        "INSERT INTO person (id, name) VALUES (?, ?)",
+        [DBValue.Int(7), DBValue.Text("Ada")]
+    ) ?? panic("insert")
+    present :: scoped.query_one(
+        "SELECT id, name FROM person WHERE id = ?",
+        [DBValue.Int(7)]
+    ) ?? panic("present query")
+    if present == {
+        .Val(_) -> {
+            print("present")
+        }
+        .None -> { panic("present row absent") }
+    }
+    absent :: scoped.query_one(
+        "SELECT id, name FROM person WHERE id = ?",
+        [DBValue.Int(99)]
+    ) ?? panic("absent query")
+    if absent == .None { print("absent") } else { panic("absent row present") }
+    _closed :: scoped.close()
+}
+"#;
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "db_query_one_parity", src, &[], None);
+    assert_eq!(code, 0, "DB query_one AOT failed: {stderr}");
+    let expected = "present\nabsent\n";
+    assert_eq!(aot_stdout, expected);
+
+    let file = dir.join("db_query_one_parity.jet");
+    fs::write(&file, src).unwrap();
+    let path = file.to_string_lossy().into_owned();
+    let interpreted = match jet::Interpreter::dev_iteration(&path, false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("DB query_one forced interpreter failed: {diags:?}")
+        }
+    };
+    assert_eq!(interpreted, expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match jet::Interpreter::dev_iteration(&path, false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("DB query_one resident JIT failed: {diags:?}")
+        }
+    };
+    assert_eq!(resident, expected);
+    assert!(jet_jit::jit_executed_for_test(), "DB query_one must execute in resident JIT");
+    assert!(!jet_jit::deopt_invoked_for_test(), "DB query_one must not deopt");
+    assert!(!jet_jit::fallback_invoked_for_test(), "DB query_one must not fall back");
+    assert_eq!(resident, interpreted, "DB query_one tiers diverged");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -9724,28 +9973,28 @@ fn run() {
 "#,
     );
     let rs = &out.rust;
-    // D-SERDE9: the wire-reaching param T carries `user_Encode`/`user_Decode`.
+    // D-SERDE9: the wire-reaching param T carries `__jet_Encode`/`__jet_Decode`.
     assert!(
-        rs.contains("impl<T: user_Encode") && rs.contains("user_Encode for user_Wrap<T>"),
-        "Wrap's Encode impl must bound T: user_Encode\n{rs}"
+        rs.contains("impl<T: __jet_Encode") && rs.contains("__jet_Encode for __jet_Wrap<T>"),
+        "Wrap's Encode impl must bound T: __jet_Encode\n{rs}"
     );
     assert!(
-        rs.contains("impl<T: user_Decode") && rs.contains("user_Decode for user_Wrap<T>"),
-        "Wrap's Decode impl must bound T: user_Decode\n{rs}"
+        rs.contains("impl<T: __jet_Decode") && rs.contains("__jet_Decode for __jet_Wrap<T>"),
+        "Wrap's Decode impl must bound T: __jet_Decode\n{rs}"
     );
     // D-SERDE10: the phantom param K gets NO Encode/Decode bound (only Clone).
     // (D-MEM1 S6: struct renamed `Id<K>` -> `Tagged<K>` — `Id<T>` is now the
     // reserved `Pool<T>` handle type.)
     assert!(
-        rs.contains("impl<K: Clone> user_Encode for user_Tagged<K>"),
-        "Tagged's Encode impl must NOT bound K with user_Encode (phantom param)\n{rs}"
+        rs.contains("impl<K: Clone> __jet_Encode for __jet_Tagged<K>"),
+        "Tagged's Encode impl must NOT bound K with __jet_Encode (phantom param)\n{rs}"
     );
     assert!(
-        rs.contains("impl<K: Clone> user_Decode for user_Tagged<K>"),
-        "Tagged's Decode impl must NOT bound K with user_Decode (phantom param)\n{rs}"
+        rs.contains("impl<K: Clone> __jet_Decode for __jet_Tagged<K>"),
+        "Tagged's Decode impl must NOT bound K with __jet_Decode (phantom param)\n{rs}"
     );
     assert!(
-        !rs.contains("K: user_Encode") && !rs.contains("K: user_Decode"),
+        !rs.contains("K: __jet_Encode") && !rs.contains("K: __jet_Decode"),
         "phantom param K must never get a serde bound\n{rs}"
     );
 }
@@ -9863,7 +10112,7 @@ fn run() {
 
 // ── card #131 S1-bridge: hand-written `impl T.Encode` / `impl T.Decode` (D-SERDE2) ──
 // A hand codec passes sema and MUST produce Rust rustc accepts (I2). The Jet-facing
-// verbs `encode`/`decode` bridge internally to the Rust `user_Encode`/`user_Decode`
+// verbs `encode`/`decode` bridge internally to the Rust `__jet_Encode`/`__jet_Decode`
 // traits' `jet_encode(&self) -> DataTree` / `jet_decode(&DataTree) -> Result<Self, …>`.
 // The impl uses a custom wire key (`"email"`, not the field name `addr`) so the round
 // trip can only succeed through the HAND methods, never a derive.
@@ -9952,9 +10201,9 @@ fn run() {
 }
 "#;
     let out = compile_temp("datatree_decode.jet", src);
-    assert!(out.rust.contains("<i64 as user_Decode>::jet_decode"));
-    assert!(out.rust.contains("<user_Point as user_Decode>::jet_decode"));
-    assert!(out.rust.contains("<user_Email as user_Decode>::jet_decode"));
+    assert!(out.rust.contains("<i64 as __jet_Decode>::jet_decode"));
+    assert!(out.rust.contains("<__jet_Point as __jet_Decode>::jet_decode"));
+    assert!(out.rust.contains("<__jet_Email as __jet_Decode>::jet_decode"));
     let (code, stdout, stderr) = build_and_run(&dir, "datatree_decode", src, &[], None);
     assert_eq!(code, 0, "DataTree.decode dispatch failed: {stderr}");
     assert_eq!(stdout, "50\na@b\n");
@@ -10091,10 +10340,10 @@ fn run() {
 fn nested_pattern_subjects_clone_read_self_and_keep_take_self_by_value() {
     fn method_body<'a>(rust: &'a str, name: &str) -> &'a str {
         let tail = rust
-            .split_once(&format!("fn user_{name}"))
+            .split_once(&format!("fn __jet_{name}"))
             .map(|(_, tail)| tail)
             .unwrap_or_else(|| panic!("missing generated method `{name}`"));
-        let next_method = tail.find("\n    fn user_");
+        let next_method = tail.find("\n    fn __jet_");
         let impl_end = tail.find("\n}\n");
         let end = match (next_method, impl_end) {
             (Some(a), Some(b)) => a.min(b),
@@ -10586,7 +10835,7 @@ fn encoded(e: Email, i: Int) => String {
     computed := DataTree.Text(~e.items[i + 1].text)
     called := DataTree.Text(~e.items[pick()].text)
     parenthesized := DataTree.Text(~e.items[-(-i)].text)
-    conditional := DataTree.Text(~e.items[if i == 0 { 0 } else { 1 }].text)
+    conditional := DataTree.Text(~e.items[if i == 0 -> 0 else -> 1].text)
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
@@ -10967,7 +11216,7 @@ fn run() {
     // default) — no per-type override in the user section.
     let user_section = out
         .rust
-        .split("impl user_Decode for user_")
+        .split("impl __jet_Decode for __jet_")
         .skip(1)
         .collect::<String>();
     assert!(

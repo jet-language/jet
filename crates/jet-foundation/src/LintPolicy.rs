@@ -3,6 +3,14 @@
 use crate::Diagnostics::{Diagnostic, Severity};
 use crate::Syntax;
 
+/// Canonical names are the only values accepted in a user policy. Diagnostic
+/// codes remain the internal/rendered identity of each lint.
+const LINT_POLICY_NAMES: &[(&str, &str)] = &[
+    ("same_enum_guard_table", "L0302"),
+    ("float_money", "L0504"),
+    ("compiler_extension", "L1401"),
+];
+
 /// Parse the `lints:` part of a package policy.
 pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, String> {
     let Some(lints_body) = block_body(body, Syntax::POLICY_FIELD_LINTS, '{', '}') else {
@@ -11,7 +19,7 @@ pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, String> {
     let mut deny = Vec::new();
     for (key, value) in key_value_entries(&lints_body) {
         if key == Syntax::LINTS_FIELD_DENY {
-            deny = parse_lint_code_list(value.trim())?;
+            deny = parse_lint_name_list(value.trim())?;
         } else {
             return Err(format!(
                 "unknown `policy.lints` field `{key}` — allowed: `{}`",
@@ -67,35 +75,66 @@ fn e1293(original: &Diagnostic) -> Diagnostic {
     )
 }
 
-fn parse_lint_code_list(value: &str) -> Result<Vec<String>, String> {
+fn parse_lint_name_list(value: &str) -> Result<Vec<String>, String> {
     let inner = value
         .trim()
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .ok_or_else(|| {
             format!(
-                "`{}:` must be a list like `[L0504, L2401]`",
+                "`{}:` must be a list like `[same_enum_guard_table, float_money]`",
                 Syntax::LINTS_FIELD_DENY
             )
         })?;
-    let mut names = Vec::new();
+    let mut codes = Vec::new();
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
         }
         let name = unquote(entry);
-        if !is_lint_code_shape(&name) {
+        let Some(code) = lint_code_for_name(&name) else {
+            if let Some(canonical_name) = lint_name_for_code(&name) {
+                return Err(format!(
+                    "`{name}` is a diagnostic code; use `{canonical_name}` in `policy.lints.deny`"
+                ));
+            }
+            if is_diagnostic_code_shape(&name) {
+                return Err(format!(
+                    "`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values"
+                ));
+            }
             return Err(format!(
-                "`{name}` isn't shaped like a lint code (`L` + 4 digits)"
+                "`{name}` isn't a registered lint policy name; allowed: {}",
+                known_lint_policy_names()
             ));
-        }
-        names.push(name);
+        };
+        codes.push(code.to_string());
     }
-    Ok(names)
+    Ok(codes)
 }
 
-fn is_lint_code_shape(value: &str) -> bool {
+fn lint_code_for_name(name: &str) -> Option<&'static str> {
+    LINT_POLICY_NAMES
+        .iter()
+        .find_map(|(canonical_name, code)| (*canonical_name == name).then_some(*code))
+}
+
+fn lint_name_for_code(code: &str) -> Option<&'static str> {
+    LINT_POLICY_NAMES
+        .iter()
+        .find_map(|(canonical_name, lint_code)| (*lint_code == code).then_some(*canonical_name))
+}
+
+fn known_lint_policy_names() -> String {
+    LINT_POLICY_NAMES
+        .iter()
+        .map(|(name, _)| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn is_diagnostic_code_shape(value: &str) -> bool {
     let mut chars = value.chars();
     if chars.next() != Some('L') {
         return false;
@@ -287,11 +326,25 @@ mod tests {
     #[test]
     fn parses_current_deny_spelling() {
         let codes = parse_package_source(
-            r#"policy: .{ lints: .{ deny: [L0302, "L0504"] } }"#,
+            r#"policy: .{ lints: .{ deny: [same_enum_guard_table, "float_money", compiler_extension] } }"#,
         )
         .unwrap()
         .unwrap();
-        assert_eq!(codes, vec!["L0302".to_string(), "L0504".to_string()]);
+        assert_eq!(
+            codes,
+            vec![
+                "L0302".to_string(),
+                "L0504".to_string(),
+                "L1401".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_diagnostic_code_policy_value() {
+        let error = parse_package_source(r#"policy: .{ lints: .{ deny: [L0302] } }"#)
+            .unwrap_err();
+        assert!(error.contains("use `same_enum_guard_table`"));
     }
 
     #[test]

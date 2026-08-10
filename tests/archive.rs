@@ -99,11 +99,11 @@ fn archive_bridge_embeds_the_canonical_ring_source() {
     let output = jet::compile_with_path(entry_source, entry.to_str().unwrap())
         .expect("Core source package must compile through the normal frontend");
     assert!(
-        output.rust.contains("mod user_core_archive"),
+        output.rust.contains("mod __jet_core_archive"),
         "reachable archive source module must be emitted"
     );
     assert!(
-        output.rust.contains("user_core_archive::user_zip_compress"),
+        output.rust.contains("__jet_core_archive::__jet_zip_compress"),
         "public archive calls must target the emitted source module"
     );
 }

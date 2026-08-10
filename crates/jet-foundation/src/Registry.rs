@@ -24,6 +24,7 @@
 
 use std::sync::LazyLock;
 
+use crate::Diagnostics::{ReportMoment, Severity};
 use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
 
 /// Names of the type-v2 planes in the one registration table.
@@ -36,7 +37,21 @@ pub const TYPE_PLANE_CLASSIFICATION: &str = "Type.Classification";
 pub const TYPE_PLANE_EXACTNESS: &str = "Type.Exactness";
 pub const TYPE_PLANE_OBLIGATION: &str = "Type.Obligation";
 
-/// What a row attaches to. This is the whole difference between the four uses
+/// D-TYPE2-PLANE1=A: the type-plane vocabulary has one source in the one
+/// registry. Consumers enumerate this slice instead of keeping a second list
+/// of planes beside the rows.
+pub const TYPE_PLANE_ROWS: &[(&str, bool)] = &[
+    (TYPE_PLANE_NOMINAL, true),
+    (TYPE_PLANE_INTERVAL, true),
+    (TYPE_PLANE_LAYOUT, true),
+    (TYPE_PLANE_MEASURE, true),
+    (TYPE_PLANE_DIMENSION, true),
+    (TYPE_PLANE_CLASSIFICATION, false),
+    (TYPE_PLANE_EXACTNESS, true),
+    (TYPE_PLANE_OBLIGATION, false),
+];
+
+/// What a row attaches to. This is the whole difference between the six uses
 /// of the one table, so `RowKind` is read off the target rather than stated
 /// twice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,9 +67,11 @@ pub enum RowTarget {
     /// D-ONCE-LAW1=A: the compiler's own source. A truth stated once in one
     /// file, rendered from there by everything that needs it.
     Corpus,
+    /// D-REPORT-HOME1=A: a typed compile-time diagnostic row.
+    Report,
 }
 
-/// The five uses of the one table.
+/// The six uses of the one table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowKind {
     Marker,
@@ -62,6 +79,7 @@ pub enum RowKind {
     Right,
     Fact,
     Truth,
+    Diagnostic,
 }
 
 impl RowKind {
@@ -72,6 +90,7 @@ impl RowKind {
             Self::Right => "right",
             Self::Fact => "fact",
             Self::Truth => "truth",
+            Self::Diagnostic => "diagnostic",
         }
     }
 }
@@ -84,6 +103,7 @@ impl RowTarget {
             Self::Scope => RowKind::Right,
             Self::Build => RowKind::Fact,
             Self::Corpus => RowKind::Truth,
+            Self::Report => RowKind::Diagnostic,
         }
     }
 }
@@ -179,6 +199,8 @@ pub struct RegistryRow {
     /// one; every other kind names none. A registered corpus row with no guard
     /// fails `law_violations`.
     pub guard: Option<Guard>,
+    /// D-REPORT-HOME1=A: the typed diagnostic payload for a report row.
+    pub diagnostic: Option<&'static DiagnosticRow>,
     /// The ratified decision this row answers to.
     pub decision: &'static str,
 }
@@ -198,6 +220,42 @@ impl RegistryRow {
     }
 }
 
+/// Whether a diagnostic row is currently produced by the compiler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticStatus {
+    Active,
+    Retired,
+    Reserved,
+}
+
+impl DiagnosticStatus {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Retired => "retired",
+            Self::Reserved => "reserved",
+        }
+    }
+}
+
+/// D-REPORT-HOME1=A: one typed report row. The row owns the protocol fields
+/// and the user-facing templates; call sites only supply filled values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiagnosticRow {
+    pub code: &'static str,
+    pub stage: &'static str,
+    pub severity: Severity,
+    pub moment: ReportMoment,
+    pub status: DiagnosticStatus,
+    pub meaning: &'static str,
+    pub what: &'static str,
+    pub why: &'static str,
+    pub fix: &'static str,
+    pub template_holes: &'static [&'static str],
+    pub detail: bool,
+    pub structured_fix: Option<&'static str>,
+}
+
 /// D-FACT-LAW1=B / D-FACTDECL1=A: the non-code rows are read from Prelude
 /// declarations. The source carries the columns that define the law; this
 /// type only holds their parsed form for the one registry.
@@ -214,11 +272,151 @@ pub struct FactDeclaration {
 /// The one authority for the non-code registration rows.
 pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.jet");
 
+/// D-REPORT-HOME1=A: the compile-time row source. Markdown and terminal
+/// renderers are projections of this table, never another authority.
+pub const DIAGNOSTIC_SOURCE: &str =
+    include_str!("../../jet-codegen/src/Prelude/Diagnostics.jet");
+
 static FACT_DECLARATIONS: LazyLock<Vec<FactDeclaration>> = LazyLock::new(read_fact_declarations);
+static DIAGNOSTIC_ROWS: LazyLock<Vec<DiagnosticRow>> = LazyLock::new(read_diagnostic_rows);
 
 /// Read every `fact` declaration in `FACT_SOURCE`.
 pub fn fact_declarations() -> &'static [FactDeclaration] {
     &FACT_DECLARATIONS
+}
+
+/// Every typed diagnostic row, in source order.
+pub fn diagnostic_rows() -> &'static [DiagnosticRow] {
+    &DIAGNOSTIC_ROWS
+}
+
+/// One typed-row lookup used by every diagnostic constructor and renderer.
+pub fn diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
+    diagnostic_rows().iter().find(|row| row.code == code)
+}
+
+/// Diagnostic rows as rows of the shared registration table.
+pub fn diagnostic_registry_rows() -> impl Iterator<Item = &'static RegistryRow> {
+    rows().iter().filter(|row| row.kind() == RowKind::Diagnostic)
+}
+
+fn read_diagnostic_rows() -> Vec<DiagnosticRow> {
+    DIAGNOSTIC_SOURCE
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .map(diagnostic_row_from_source)
+        .collect()
+}
+
+fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
+    let fields: Vec<&str> = line.split('\t').collect();
+    assert_eq!(
+        fields.len(),
+        12,
+        "diagnostic row needs 12 tab-separated fields: {line}"
+    );
+    assert_eq!(fields[0], "diagnostic", "unknown diagnostic row kind: {line}");
+    let code = leak(&unescape_source(fields[1]));
+    let stage = leak(&unescape_source(fields[2]));
+    let severity = match fields[3] {
+        "error" => Severity::Error,
+        "lint" => Severity::Lint,
+        other => panic!("unknown diagnostic severity `{other}` in {line}"),
+    };
+    let moment = match fields[4] {
+        "compile" => ReportMoment::Compile,
+        "run" => ReportMoment::Run,
+        "test" => ReportMoment::Test,
+        "tool" => ReportMoment::Tool,
+        other => panic!("unknown diagnostic moment `{other}` in {line}"),
+    };
+    let status = match fields[5] {
+        "active" => DiagnosticStatus::Active,
+        "retired" => DiagnosticStatus::Retired,
+        "reserved" => DiagnosticStatus::Reserved,
+        other => panic!("unknown diagnostic status `{other}` in {line}"),
+    };
+    let meaning = leak(&unescape_source(fields[6]));
+    let what = leak(&unescape_source(fields[7]));
+    let why = leak(&unescape_source(fields[8]));
+    let fix = leak(&unescape_source(fields[9]));
+    let detail = match fields[10] {
+        "true" => true,
+        "false" => false,
+        other => panic!("diagnostic detail flag `{other}` is not bool in {line}"),
+    };
+    let structured_fix = match fields[11] {
+        "-" => None,
+        value => Some(leak(&unescape_source(value))),
+    };
+    DiagnosticRow {
+        code,
+        stage,
+        severity,
+        moment,
+        status,
+        meaning,
+        what,
+        why,
+        fix,
+        template_holes: template_holes(&[what, why, fix]),
+        detail,
+        structured_fix,
+    }
+}
+
+fn unescape_source(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut escaped = false;
+    for character in value.chars() {
+        if escaped {
+            out.push(match character {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
+            });
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else {
+            out.push(character);
+        }
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
+}
+
+fn template_holes(templates: &[&str]) -> &'static [&'static str] {
+    let mut holes = Vec::new();
+    for template in templates {
+        let bytes = template.as_bytes();
+        let mut start = 0;
+        while start < bytes.len() {
+            let Some(open) = template[start..].find('{') else {
+                break;
+            };
+            let open = start + open;
+            let Some(close) = template[open + 1..].find('}') else {
+                break;
+            };
+            let close = open + 1 + close;
+            let hole = &template[open + 1..close];
+            if !hole.is_empty()
+                && hole
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                && !holes.contains(&hole)
+            {
+                holes.push(leak(hole));
+            }
+            start = close + 1;
+        }
+    }
+    leak_slice(holes)
 }
 
 fn read_fact_declarations() -> Vec<FactDeclaration> {
@@ -385,6 +583,7 @@ fn fact_row(declaration: &FactDeclaration) -> RegistryRow {
         home: None,
         renderers: &[],
         guard: None,
+        diagnostic: None,
         decision: declaration.decision,
     }
 }
@@ -410,6 +609,7 @@ const fn truth_row(
         home: Some(home),
         renderers,
         guard: Some(guard),
+        diagnostic: None,
         decision,
     }
 }
@@ -432,6 +632,7 @@ fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
         home: None,
         renderers: &[],
         guard: None,
+        diagnostic: None,
         decision: "D-VERDICT-1455-1",
     }
 }
@@ -448,7 +649,25 @@ const fn type_plane_row(name: &'static str, identity_bearing: bool) -> RegistryR
         home: None,
         renderers: &[],
         guard: None,
+        diagnostic: None,
         decision: "D-TYPE2-FOUND1",
+    }
+}
+
+fn diagnostic_registry_row(row: &'static DiagnosticRow) -> RegistryRow {
+    RegistryRow {
+        name: row.code,
+        target: RowTarget::Report,
+        identity_bearing: false,
+        safe_direction: SafeDirection::None,
+        gates: &[],
+        published_by: None,
+        rule: None,
+        home: None,
+        renderers: &[],
+        guard: None,
+        diagnostic: Some(row),
+        decision: "D-REPORT-HOME1",
     }
 }
 
@@ -482,11 +701,14 @@ const TRUTH_ROWS: &[RegistryRow] = &[
         "D-ONCE-LAW1",
     ),
     truth_row(
-        "AotCoreCalls",
+        "CoreCalls",
         "crates/jet-foundation/src/Syntax/core_calls.rs",
-        &["AOT emit of every plain core.* call"],
+        &[
+            "sema/TIR/AOT/comptime projections of every plain core.* call",
+            "effect and sink facts for every plain core.* call",
+        ],
         Guard {
-            test: "aot_projection_is_complete_both_directions",
+            test: "core_projection_is_complete_both_directions",
             file: "tests/core_call_table.rs",
             proof: GuardProof::CountsSites,
         },
@@ -546,17 +768,14 @@ static REGISTRY: LazyLock<Vec<RegistryRow>> = LazyLock::new(|| {
         .iter()
         .map(marker_row)
         .chain(FACT_DECLARATIONS.iter().map(fact_row))
-        .chain([
-            type_plane_row(TYPE_PLANE_NOMINAL, true),
-            type_plane_row(TYPE_PLANE_INTERVAL, true),
-            type_plane_row(TYPE_PLANE_LAYOUT, true),
-            type_plane_row(TYPE_PLANE_MEASURE, true),
-            type_plane_row(TYPE_PLANE_DIMENSION, true),
-            type_plane_row(TYPE_PLANE_CLASSIFICATION, false),
-            type_plane_row(TYPE_PLANE_EXACTNESS, true),
-            type_plane_row(TYPE_PLANE_OBLIGATION, false),
-        ])
+        .chain(
+            TYPE_PLANE_ROWS
+                .iter()
+                .copied()
+                .map(|(name, identity_bearing)| type_plane_row(name, identity_bearing)),
+        )
         .chain(TRUTH_ROWS.iter().copied())
+        .chain(DIAGNOSTIC_ROWS.iter().map(diagnostic_registry_row))
         .collect()
 });
 
@@ -585,7 +804,30 @@ pub fn row(name: &str) -> Option<&'static RegistryRow> {
 /// with no direction to loosen, a prover row that claims plane algebra, a gate
 /// word nothing spells, and a name registered twice.
 pub fn law_violations() -> Vec<String> {
-    check(rows())
+    let mut violations = check(rows());
+    for (name, identity_bearing) in TYPE_PLANE_ROWS {
+        let matches: Vec<_> = rows().iter().filter(|row| row.name == *name).collect();
+        if matches.len() != 1 {
+            violations.push(format!(
+                "type plane `{name}` has {} registry rows; one plane needs one row",
+                matches.len()
+            ));
+            continue;
+        }
+        let row = matches[0];
+        if row.kind() != RowKind::Plane {
+            violations.push(format!(
+                "type plane `{name}` is registered as `{}`",
+                row.kind().name()
+            ));
+        }
+        if row.identity_bearing != *identity_bearing {
+            violations.push(format!(
+                "type plane `{name}` identity policy drifted from the one table"
+            ));
+        }
+    }
+    violations
 }
 
 fn check(rows: &[RegistryRow]) -> Vec<String> {
@@ -633,6 +875,12 @@ fn check(rows: &[RegistryRow]) -> Vec<String> {
         if matches!(row.target, RowTarget::Code(_)) != row.rule.is_some() {
             violations.push(format!(
                 "`{}` attaches to written code exactly when it carries a marker signature",
+                row.name
+            ));
+        }
+        if (row.kind() == RowKind::Diagnostic) != row.diagnostic.is_some() {
+            violations.push(format!(
+                "`{}` is a diagnostic row exactly when it carries a typed diagnostic payload",
                 row.name
             ));
         }
@@ -688,8 +936,9 @@ fn truth_violations(row: &RegistryRow) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        law_violations, row, rows, RowKind, RowTarget, SafeDirection, TYPE_PLANE_INTERVAL,
-        TYPE_PLANE_OBLIGATION,
+        diagnostic, diagnostic_registry_rows, diagnostic_rows, law_violations, row, rows,
+        RowKind, RowTarget, SafeDirection, TYPE_PLANE_INTERVAL, TYPE_PLANE_OBLIGATION,
+        TYPE_PLANE_ROWS,
     };
 
     #[test]
@@ -700,6 +949,7 @@ mod tests {
             RowKind::Right,
             RowKind::Fact,
             RowKind::Truth,
+            RowKind::Diagnostic,
         ] {
             assert!(
                 rows().iter().any(|row| row.kind() == kind),
@@ -716,6 +966,7 @@ mod tests {
         assert_eq!(RowTarget::Scope.kind(), RowKind::Right);
         assert_eq!(RowTarget::Build.kind(), RowKind::Fact);
         assert_eq!(RowTarget::Corpus.kind(), RowKind::Truth);
+        assert_eq!(RowTarget::Report.kind(), RowKind::Diagnostic);
     }
 
     #[test]
@@ -730,6 +981,16 @@ mod tests {
                 .expect("obligation plane is registered")
                 .is_identity_bearing()
         );
+    }
+
+    #[test]
+    fn every_type_plane_has_one_row_from_the_shared_list() {
+        for (name, identity_bearing) in TYPE_PLANE_ROWS {
+            let matches: Vec<_> = rows().iter().filter(|row| row.name == *name).collect();
+            assert_eq!(matches.len(), 1, "type plane `{name}` must have one row");
+            assert_eq!(matches[0].kind(), RowKind::Plane);
+            assert_eq!(matches[0].identity_bearing, *identity_bearing);
+        }
     }
 
     #[test]
@@ -753,6 +1014,7 @@ mod tests {
             home: None,
             renderers: &[],
             guard: None,
+            diagnostic: None,
             decision: "D-TEST",
         };
         assert_eq!(check(&[gate_with_no_direction]).len(), 1);
@@ -796,6 +1058,7 @@ mod tests {
                 file: "tests/marker_registry_coverage.rs",
                 proof: GuardProof::CountsSites,
             }),
+            diagnostic: None,
             decision: "D-TEST",
         };
         assert_eq!(check(&[guarded]), Vec::<String>::new());
@@ -838,5 +1101,24 @@ mod tests {
         assert!(sendability.is_prover_supplied());
         assert_eq!(sendability.safe_direction, SafeDirection::None);
         assert!(sendability.gates.is_empty());
+    }
+
+    #[test]
+    fn diagnostic_rows_are_typed_and_have_one_source() {
+        assert!(diagnostic_rows().len() >= 700);
+        assert_eq!(diagnostic("E0102").expect("E0102 row").severity, crate::Diagnostics::Severity::Error);
+        assert_eq!(diagnostic("L2001").expect("L2001 row").severity, crate::Diagnostics::Severity::Lint);
+        for row in diagnostic_rows() {
+            assert!(!row.code.is_empty());
+            assert!(!row.what.is_empty());
+            assert!(!row.why.is_empty());
+            assert!(!row.fix.is_empty());
+            assert!(diagnostic(row.code).is_some());
+        }
+        assert_eq!(
+            diagnostic_registry_rows().count(),
+            diagnostic_rows().len(),
+            "every typed row must be in the shared registration table"
+        );
     }
 }

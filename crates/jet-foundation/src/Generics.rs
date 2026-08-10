@@ -13,7 +13,7 @@ pub const EQUATABLE: &str = "Equatable";
 pub const COMPARABLE: &str = "Comparable";
 pub const SERIALIZE: &str = "Serialize";
 /// D-SERDE4 (= B, owner-modified): the serde derive traits. `#[Codable]` derives
-/// both; `#[Encode]`/`#[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
+/// both; `#[Encode]`/`#[Decode]` derive one. They lower to `__jet_Encode`/`__jet_Decode`.
 pub const ENCODE: &str = "Encode";
 pub const DECODE: &str = "Decode";
 /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): `Renderable` — the trait-bounded
@@ -61,29 +61,29 @@ pub fn is_builtin_trait(name: &str) -> bool {
 pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
     match trait_name {
         PRINTABLE => Some("JetShow"),
-        DISPLAY => Some("user_Display"),
+        DISPLAY => Some("__jet_Display"),
         DEBUG => Some("JetDebug"),
-        EQUATABLE => Some("user_Equatable"),
-        COMPARABLE => Some("user_Comparable"),
-        SERIALIZE => Some("user_Serialize"),
-        ENCODE => Some("user_Encode"),
-        DECODE => Some("user_Decode"),
+        EQUATABLE => Some("__jet_Equatable"),
+        COMPARABLE => Some("__jet_Comparable"),
+        SERIALIZE => Some("__jet_Serialize"),
+        ENCODE => Some("__jet_Encode"),
+        DECODE => Some("__jet_Decode"),
         RENDERABLE => Some("JetDisplay"),
         IO_READER => Some("JetIOReader"),
         IO_WRITER => Some("JetIOWriter"),
         DRIVER => Some("JetDBDriver"),
-        CLOSE => Some("user_Close"),
-        ADD => Some("user_Add"),
-        SUB => Some("user_Sub"),
-        MUL => Some("user_Mul"),
-        DIV => Some("user_Div"),
+        CLOSE => Some("__jet_Close"),
+        ADD => Some("__jet_Add"),
+        SUB => Some("__jet_Sub"),
+        MUL => Some("__jet_Mul"),
+        DIV => Some("__jet_Div"),
         _ => None,
     }
 }
 
 /// User trait → Rust trait name.
 pub fn user_trait_rust(name: &str) -> String {
-    format!("user_{name}")
+    Syntax::generated_name(name)
 }
 
 /// Substitute type parameters in `ty` using `subst`.
@@ -806,14 +806,14 @@ pub fn collect_type_param_mentions(
 }
 
 /// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `#[Codable]`/
-/// `#[Encode]`/`#[Decode]` impl. The compiler injects `T: user_Encode` /
-/// `T: user_Decode` — never spelled by the user — for *exactly* the type params
+/// `#[Encode]`/`#[Decode]` impl. The compiler injects `T: __jet_Encode` /
+/// `T: __jet_Decode` — never spelled by the user — for *exactly* the type params
 /// that reach the wire (D-SERDE10: those mentioned by some non-skipped field
 /// type in `wire_types`). A phantom/skip-only param gets no serde bound, so e.g.
 /// `Id<Kind>` serializes regardless of `Kind`.
 ///
 /// `bound` is the serde trait name (`Encode`/`Decode`); it flows through
-/// `rust_type_param_list`'s builtin-trait mapping to `user_Encode`/`user_Decode`.
+/// `rust_type_param_list`'s builtin-trait mapping to `__jet_Encode`/`__jet_Decode`.
 pub fn rust_extra_serde_bounds(
     params: &[TypeParam],
     wire_types: &[&Type],

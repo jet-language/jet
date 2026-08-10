@@ -129,7 +129,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
 
 /// c109 Phase 21 + D-COROUTINE1=A / D-TUPLE-DESTRUCT1: is `(method, nargs)` a
 /// Task/Receiver/Sender concurrency method (`emit_builtin_method`'s `Type::Apply`-
-/// receiver arms)? `Task.join()/wait()/detach()/pause()/resume()/cancel()/trace()`,
+/// receiver arms)? `Task.join()/detach()/pause()/resume()/cancel()`,
 /// `Receiver.receive()`, `Sender.send(v)`. The arg count disambiguates
 /// `Task.join()` (0 args) from the list `join(sep)` (1 arg, shape d) and `Sender.send(v)`
 /// (1 arg) — every name+arity here is disjoint from every other covered shape.
@@ -137,27 +137,15 @@ pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
         ("join", 0)
-            | ("wait", 0)
+            
             | ("detach", 0)
             | ("pause", 0)
             | ("pause", 1)
             | ("resume", 0)
             | ("cancel", 0)
-            | ("trace", 0)
-            | ("exception", 0)
             | ("receive", 0)
             | ("send", 1)
             | ("close", 0)
-            // D-VERDICT-1323-1: the task-group twins.
-            | ("wait_all", 0)
-            | ("join_all", 0)
-            | ("wait_any", 0)
-            | ("detach_all", 0)
-            | ("cancel_all", 0)
-            | ("pause_all", 0)
-            | ("pause_all", 1)
-            | ("resume_all", 0)
-            | ("trace_all", 0)
     )
 }
 

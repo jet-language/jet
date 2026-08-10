@@ -485,7 +485,7 @@ fn eval_zip(
         if let Some(CtValue::Struct { fields, .. }) = &column_fills {
             let field = zip_field_name(index);
             if let Some((_, value)) = fields.iter().find(|(name, _)| {
-                name == &field || name.strip_prefix("user_") == Some(field.as_str())
+                name == &field || name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
             }) {
                 return value.clone();
             }

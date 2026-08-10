@@ -2,9 +2,54 @@ use super::super::{
     AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
     TokKind, Type,
 };
-use crate::AST::ParamZone;
+use crate::AST::{ParamZone, PatSlot, Pattern};
 
 impl<'a> Parser<'a> {
+    /// S83: parse either an ordinary parameter list or one bare variant head
+    /// (`Circle(r: Float)`). The head keeps its payload params for sema's
+    /// later table fold; no second pattern dialect is introduced.
+    fn parse_func_params(&mut self) -> Result<(Vec<Param>, Option<Pattern>), Diagnostic> {
+        let is_head = matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(self.peek2().kind, TokKind::LParen | TokKind::RParen);
+        if !is_head {
+            return Ok((self.parse_param_list()?, None));
+        }
+
+        let (variant, variant_span) = self.expect_ident("for a multi-head variant")?;
+        let (params, pattern_end) = if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump();
+            let params = self.parse_param_list()?;
+            let pattern_end = self.toks[self.pos.saturating_sub(1)].span.end;
+            self.expect(TokKind::RParen, "after a multi-head payload")?;
+            (params, pattern_end)
+        } else {
+            self.expect(TokKind::RParen, "after a unit multi-head variant")?;
+            (Vec::new(), variant_span.end)
+        };
+        let bindings = params
+            .iter()
+            .map(|param| {
+                if param.name == Syntax::PAT_WILDCARD_SLOT {
+                    PatSlot::Wildcard
+                } else {
+                    PatSlot::Bind {
+                        name: param.name.clone(),
+                        span: param.name_span,
+                    }
+                }
+            })
+            .collect();
+        Ok((
+            params,
+            Some(Pattern::Variant {
+                variant,
+                bindings,
+                leading_dot: false,
+                span: Span::new(variant_span.start, pattern_end),
+            }),
+        ))
+    }
+
         #[allow(clippy::too_many_arguments)]
         pub(super) fn func_after_fn(
             &mut self,
@@ -64,7 +109,7 @@ impl<'a> Parser<'a> {
             };
             let type_params = self.parse_opt_type_params()?;
             self.expect(TokKind::LParen, "after the function name")?;
-            let params = self.parse_param_list()?;
+            let (params, head_pattern) = self.parse_func_params()?;
             self.validate_variadic_params(&params);
             self.validate_param_labels(&params);
             if external_type.is_some() {
@@ -122,6 +167,7 @@ impl<'a> Parser<'a> {
                     name_span,
                     meta,
                     type_params,
+                    head_pattern,
                     params,
                     return_type,
                     return_type_span,
@@ -180,6 +226,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 meta,
                 type_params,
+                head_pattern,
                 params,
                 return_type,
                 return_type_span,

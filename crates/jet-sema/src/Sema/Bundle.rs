@@ -1,11 +1,12 @@
 use super::*;
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, TextEdit};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    CodeModule, ConstAttr, EnumDef, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
-    GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg, OrFallback,
-    ProgramBundle, RustConstKind, Stmt, StrPart, Type, VariantPayload,
+    AccessConvention, CodeModule, ConstAttr, EnumDef, EnumLitArg, Expr, ForKind, Func,
+    GenericModuleDef, GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef,
+    ModuleArg, OrFallback, Param, ParamZone, Pattern, ProgramBundle, RustConstKind, Stmt, StrPart,
+    SwitchArm, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -86,6 +87,220 @@ fn mark_failed_pending_functions(
             }
         }
     }
+}
+
+/// D-CHOOSE-HEADS1=A / S83: keep the authored head order, then lower all
+/// heads with one function name into one ordinary enum pattern table. The
+/// regular registration, checker, TIR, AOT, JIT, and interpreter paths then
+/// see exactly one function and one proof site.
+fn desugar_multi_head_functions(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+    let mut variants: HashMap<String, Vec<(String, VariantPayload)>> = HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            let Item::Enum(def) = item else { continue };
+            for variant in &def.variants {
+                variants
+                    .entry(variant.name.clone())
+                    .or_default()
+                    .push((def.name.clone(), variant.payload.clone()));
+            }
+        }
+    }
+
+    enum OrderedItem {
+        Item(Item),
+        Heads(String),
+    }
+
+    for module in &mut bundle.modules {
+        let items = std::mem::take(&mut module.items);
+        let mut grouped: HashMap<String, Vec<Func>> = HashMap::new();
+        let mut ordered = Vec::with_capacity(items.len());
+        for item in items {
+            match item {
+                Item::Func(function) if function.head_pattern.is_some() => {
+                    let name = function.name.clone();
+                    let heads = grouped.entry(name.clone()).or_default();
+                    if heads.is_empty() {
+                        ordered.push(OrderedItem::Heads(name));
+                    }
+                    heads.push(function);
+                }
+                item => ordered.push(OrderedItem::Item(item)),
+            }
+        }
+
+        let mut rebuilt = Vec::with_capacity(ordered.len());
+        for item in ordered {
+            match item {
+                OrderedItem::Item(item) => rebuilt.push(item),
+                OrderedItem::Heads(name) => {
+                    let heads = grouped
+                        .remove(&name)
+                        .expect("multi-head placeholder has a group");
+                    rebuilt.push(Item::Func(fold_multi_head_function(
+                        heads, &variants, diags,
+                    )));
+                }
+            }
+        }
+        module.items = rebuilt;
+    }
+}
+
+fn fold_multi_head_function(
+    heads: Vec<Func>,
+    variants: &HashMap<String, Vec<(String, VariantPayload)>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Func {
+    let mut folded = heads
+        .first()
+        .cloned()
+        .expect("multi-head group is non-empty");
+    let mut enum_name: Option<String> = None;
+    let mut invalid = false;
+    let mut arms = Vec::with_capacity(heads.len());
+
+    for head in &heads {
+        let Some(pattern) = head.head_pattern.clone() else {
+            invalid = true;
+            continue;
+        };
+        let Pattern::Variant { variant, .. } = &pattern else {
+            diags.push(Diagnostic::error(
+                "E0305",
+                "a multi-head declaration needs an enum variant head".to_string(),
+                "multi-head coverage is proved by the enum pattern table".to_string(),
+                "write a variant head such as `Circle(radius: Float)`".to_string(),
+                Some(pattern.span()),
+            ));
+            invalid = true;
+            continue;
+        };
+        let Some(candidates) = variants.get(variant) else {
+            diags.push(Diagnostic::error(
+                "E0305",
+                format!("multi-head variant `{variant}` is not an enum variant"),
+                "a multi-head table can only cover variants declared by an enum".to_string(),
+                "check the variant spelling or declare the enum first".to_string(),
+                Some(pattern.span()),
+            ));
+            invalid = true;
+            continue;
+        };
+        let Some((candidate_enum, payload)) = candidates.first() else {
+            invalid = true;
+            continue;
+        };
+        if candidates
+            .iter()
+            .any(|(other_enum, _)| other_enum != candidate_enum)
+        {
+            diags.push(Diagnostic::error(
+                "E0305",
+                format!("multi-head variant `{variant}` is ambiguous"),
+                "a bare head must identify one enum so one table subject can be typed".to_string(),
+                "use one enum's variants for this function name".to_string(),
+                Some(pattern.span()),
+            ));
+            invalid = true;
+        }
+        if let Some(previous) = &enum_name {
+            if previous != candidate_enum {
+                diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "multi-head variants `{}` and `{variant}` belong to different enums",
+                        previous
+                    ),
+                    "one function has one argument type and one coverage table".to_string(),
+                    "put heads for one enum under one function name".to_string(),
+                    Some(pattern.span()),
+                ));
+                invalid = true;
+            }
+        } else {
+            enum_name = Some(candidate_enum.clone());
+        }
+
+        let expected = match payload {
+            VariantPayload::Unit => Vec::new(),
+            VariantPayload::Single(ty, _) => vec![ty.clone()],
+            VariantPayload::Named(fields) => fields.iter().map(|field| field.ty.clone()).collect(),
+        };
+        for (param, expected_ty) in head.params.iter().zip(expected.iter()) {
+            if param.ty != *expected_ty {
+                diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "multi-head binding `{}` has type `{}` but variant `{variant}` carries `{}`",
+                        param.name,
+                        param.ty.show(),
+                        expected_ty.show()
+                    ),
+                    "head bindings must use the variant payload types".to_string(),
+                    format!("write `{}` for this binding", expected_ty.show()),
+                    Some(param.ty_span),
+                ));
+                invalid = true;
+            }
+        }
+
+        let pattern_span = pattern.span();
+        arms.push(SwitchArm {
+            cond: Expr::PatternTest {
+                subject: Box::new(Expr::Ident(
+                    Syntax::INTERNAL_MULTI_HEAD_SUBJECT.to_string(),
+                    folded.name_span,
+                )),
+                pattern,
+                span: pattern_span,
+            },
+            body: head.body.clone(),
+            span: pattern_span,
+        });
+    }
+
+    if invalid || enum_name.is_none() {
+        folded.head_pattern = None;
+        return folded;
+    }
+    let enum_name = enum_name.expect("validated multi-head enum");
+    let full_span = Span::new(
+        folded.span.start,
+        heads.last().map_or(folded.span.end, |head| head.span.end),
+    );
+    let subject = Expr::Ident(
+        Syntax::INTERNAL_MULTI_HEAD_SUBJECT.to_string(),
+        folded.name_span,
+    );
+    folded.params = vec![Param {
+        convention: AccessConvention::Read,
+        root: false,
+        name: Syntax::INTERNAL_MULTI_HEAD_SUBJECT.to_string(),
+        name_span: folded.name_span,
+        public_label: None,
+        zone: ParamZone::Either,
+        ty: Type::Named(enum_name),
+        ty_span: folded.name_span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+    }];
+    folded.body = vec![Stmt::Switch {
+        subject,
+        arms,
+        else_body: None,
+        // Point coverage failures at the authored function name, not at a
+        // compiler-created brace or switch span.
+        span: folded.name_span,
+    }];
+    folded.span = full_span;
+    folded.return_view_provenance = None;
+    folded.declared_return_view_provenance = None;
+    folded.head_pattern = None;
+    folded
 }
 
 fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
@@ -671,33 +886,242 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
     out
 }
 
-fn package_lints_deny(bundle: &ProgramBundle) -> Vec<String> {
-    let Some(entry) = bundle.modules.get(bundle.entry) else {
-        return Vec::new();
-    };
-    // `compile_src`/eval bundles are intentionally filesystem-free. A package
-    // wall belongs only to a loaded project bundle, whose entry path is real.
-    if !entry.path.is_file() {
-        return Vec::new();
-    }
-    for file in [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE] {
-        let path = bundle.project_root.join(file);
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        return jet_foundation::LintPolicy::parse_package_source(&source)
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-    }
-    Vec::new()
-}
-
 /// D-MOD2: inside an inline `module math { … }`, a call to a sibling function
 /// `helper(x)` must lower to the mangled `math__helper`. This pre-pass rewrites
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
     check_bundle_opts_for_output(bundle, mode, false, false, None, None).0
+}
+
+/// Prepare script entries for entry-swap callers (`jet dev` and named tasks)
+/// before they install their ordinary forwarding `run` wrapper.
+pub fn prepare_script_entries(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    materialize_script_entries(bundle, &mut diags);
+    diags
+}
+
+/// D-ENTRY-SCRIPT1=B: keep the script surface in the parser/formatter, then
+/// lower only the entry file's loose statements to the ordinary `run` path.
+/// Imported scripts are rejected before registration so their statements can
+/// never become an accidental runtime side effect.
+fn materialize_script_entries(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+    for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
+        let body = std::mem::take(&mut module.script_body);
+        if body.is_empty() {
+            continue;
+        }
+        let script_span = Span::new(
+            body.first().map_or(0, |stmt| stmt.span().start),
+            body.last().map_or(0, |stmt| stmt.span().end),
+        );
+        let explicit_run = module.items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == "run" => Some(function.clone()),
+            _ => None,
+        });
+
+        if module_idx != bundle.entry {
+            diags.push(Diagnostic::error(
+                "E0620",
+                format!("imported script `{}` has executable top-level statements", module.display),
+                "imported files provide declarations; only the entry file may have a script body".to_string(),
+                "move the statements into the entry file's `fn run`, or import a declaration-only file"
+                    .to_string(),
+                Some(script_span),
+            ));
+        } else if let Some(run) = explicit_run {
+            let mut diagnostic = Diagnostic::error(
+                "E0621",
+                "a script cannot have loose statements and an explicit `fn run`".to_string(),
+                "a script's loose statements already form its one `run` body".to_string(),
+                "run `jet fix` to move the loose statements into `fn run`, or remove the explicit function"
+                    .to_string(),
+                Some(run.name_span),
+            );
+            diagnostic.edit = script_conflict_edit(&module.source, &body, &run);
+            diags.push(diagnostic);
+        } else {
+            module
+                .items
+                .push(Item::Func(Func::implicit_run(body, script_span)));
+        }
+    }
+}
+
+/// Produce the unified `jet fix`/LSP edit for the common explicit-run case.
+/// The edit is deliberately conservative for unusual same-line layouts; the
+/// diagnostic still remains actionable when no mechanical edit is safe.
+fn script_conflict_edit(source: &str, body: &[Stmt], run: &Func) -> Option<TextEdit> {
+    let statement_ranges = body
+        .iter()
+        .map(|stmt| statement_line_range(source, stmt.span()))
+        .collect::<Vec<_>>();
+    let mut ranges = statement_ranges.clone();
+    ranges.sort_by_key(|(start, _)| *start);
+    ranges.dedup();
+    if ranges.len() != statement_ranges.len() {
+        return None;
+    }
+    if ranges
+        .windows(2)
+        .any(|pair| pair[0].1 > pair[1].0)
+        || ranges
+            .iter()
+            .any(|(start, end)| *start < run.span.end && *end > run.span.start)
+    {
+        return None;
+    }
+
+    let open = source
+        .get(run.name_span.start..run.span.end)?
+        .find('{')?
+        + run.name_span.start;
+    let close = matching_brace(source, open)?;
+    let before = body
+        .iter()
+        .filter(|stmt| stmt.span().start < run.span.start)
+        .map(|stmt| source_slice_for_statement(source, stmt.span()))
+        .collect::<Vec<_>>()
+        .join("");
+    let after = body
+        .iter()
+        .filter(|stmt| stmt.span().start > run.span.end)
+        .map(|stmt| source_slice_for_statement(source, stmt.span()))
+        .collect::<Vec<_>>()
+        .join("");
+    let before_insert = (!before.is_empty()).then(|| {
+        let text = indent_script(&before);
+        if source.as_bytes().get(open + 1) == Some(&b'\n') {
+            text
+        } else {
+            format!("\n{text}")
+        }
+    });
+    let after_insert = (!after.is_empty()).then(|| {
+        let text = indent_script(&after);
+        if source.as_bytes().get(close.saturating_sub(1)) == Some(&b'\n') {
+            text
+        } else {
+            format!("\n{text}")
+        }
+    });
+
+    let mut edits = ranges
+        .into_iter()
+        .map(|(start, end)| (start, end, String::new()))
+        .collect::<Vec<_>>();
+    if let Some(text) = before_insert {
+        edits.push((open + 1, open + 1, text));
+    }
+    if let Some(text) = after_insert {
+        edits.push((close, close, text));
+    }
+    edits.sort_by_key(|(start, end, _)| (*start, *end));
+
+    let mut fixed = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (start, end, replacement) in edits {
+        if start < cursor || end > source.len() || start > end {
+            return None;
+        }
+        fixed.push_str(source.get(cursor..start)?);
+        fixed.push_str(&replacement);
+        cursor = end;
+    }
+    fixed.push_str(source.get(cursor..)?);
+    Some(TextEdit {
+        span: Span::new(0, source.len()),
+        new_text: fixed,
+    })
+}
+
+fn statement_line_range(source: &str, span: Span) -> (usize, usize) {
+    let start = source[..span.start.min(source.len())]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let end = source[span.end.min(source.len())..]
+        .find('\n')
+        .map_or(source.len(), |index| span.end.min(source.len()) + index + 1);
+    (start, end)
+}
+
+fn source_slice_for_statement(source: &str, span: Span) -> &str {
+    let (start, end) = statement_line_range(source, span);
+    &source[start..end]
+}
+
+fn indent_script(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                format!("    {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if source.ends_with('\n') { "\n" } else { "" }
+}
+
+fn matching_brace(source: &str, open: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut index = open;
+    let mut string = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if line_comment {
+            if byte == b'\n' {
+                line_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if block_comment {
+            if bytes.get(index..index + 2) == Some(b"*/") {
+                block_comment = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if string {
+            if byte == b'\\' {
+                index += 2;
+            } else {
+                string = byte != b'"';
+                index += 1;
+            }
+            continue;
+        }
+        if bytes.get(index..index + 2) == Some(b"//") {
+            line_comment = true;
+            index += 2;
+        } else if bytes.get(index..index + 2) == Some(b"/*") {
+            block_comment = true;
+            index += 2;
+        } else if byte == b'"' {
+            string = true;
+            index += 1;
+        } else if byte == b'{' {
+            depth += 1;
+            index += 1;
+        } else if byte == b'}' {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(index);
+            }
+            index += 1;
+        } else {
+            index += 1;
+        }
+    }
+    None
 }
 
 /// Check one explicitly addressed runnable Output. Sema marks that resolved
@@ -826,6 +1250,7 @@ fn check_bundle_opts_for_output_inner(
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
+    diags.extend(prepare_script_entries(bundle));
     diags.extend(inject_units_prelude(bundle));
     super::Prelude::inject(bundle);
     diags.extend(super::Casing::validate_bundle(bundle));
@@ -847,6 +1272,9 @@ fn check_bundle_opts_for_output_inner(
     // D-GENMOD2=A: expand module aliases into concrete CodeModules before any
     // sibling-call mangling or registration sees the items.
     expand_generic_module_aliases(bundle, &mut diags);
+    // D-CHOOSE-HEADS1=A: fold ordered multi-head declarations into one
+    // ordinary enum pattern table before registration and body checking.
+    desugar_multi_head_functions(bundle, &mut diags);
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
@@ -903,6 +1331,11 @@ fn check_bundle_opts_for_output_inner(
             unqualified: HashMap::new(),
             unqualified_file: HashMap::new(),
             reexports: HashMap::new(),
+            inline_unqualified: HashMap::new(),
+            inline_unqualified_file: HashMap::new(),
+            inline_core_imports: HashMap::new(),
+            inline_reexport_inline: HashMap::new(),
+            inline_reexport_file: HashMap::new(),
         })
         .collect();
 
@@ -1312,6 +1745,7 @@ fn check_bundle_opts_for_output_inner(
                 // registry row for #1456's declaration-side parse.
                 Item::EffectDecl(_)
                 | Item::MarkerDecl(_)
+                | Item::FactDecl(_)
                 | Item::GenericModule(_)
                 | Item::ModuleAlias(_) => {}
             }
@@ -1891,6 +2325,161 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
+    // D-NAME-WALK1=A: resolve use/pub use declared inside inline-module
+    // bodies. These bindings inherit the enclosing file's module aliases, but
+    // are keyed by inline module so they cannot leak into sibling or top-level
+    // bodies. Generic module instances are ordinary CodeModules by this pass.
+    for idx in 0..bundle.modules.len() {
+        let inline_imports: Vec<(String, Vec<crate::AST::ImportDecl>)> = bundle.modules[idx]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::CodeModule(cm) if cm.body.is_some() && !cm.imports.is_empty() => {
+                    Some((cm.name.clone(), cm.imports.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for (inline_name, imports) in inline_imports {
+            for imp in imports {
+                let ImportKind::Unqualified {
+                    module_alias,
+                    module_alias_span,
+                    items,
+                    ..
+                } = imp.kind
+                else {
+                    // Inline bodies inherit file/module aliases; a second
+                    // module-loading declaration has no loader target.
+                    continue;
+                };
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.unwrap_or_else(|| orig.clone());
+                    enum Target {
+                        Inline { alias: String, mangled: String },
+                        File { name: String, module_idx: usize },
+                        Core { module: String },
+                    }
+                    let resolved = {
+                        let st = &states[idx];
+                        if let Some(canonical) = st.code_modules.get(&module_alias) {
+                            let mangled = format!("{canonical}__{orig}");
+                            if !st.funcs.contains_key(&mangled) {
+                                diags.push(Diagnostic::error(
+                                    "E0611",
+                                    format!("{orig} is not defined in module {module_alias}"),
+                                    "check the module body for the item you are importing".to_string(),
+                                    "make sure the name is spelled correctly".to_string(),
+                                    Some(module_alias_span),
+                                ));
+                                None
+                            } else {
+                                let visible = st.func_pub.get(&mangled).copied().unwrap_or(false)
+                                    || st.func_pkg_pub.get(&mangled).copied().unwrap_or(false);
+                                if !visible {
+                                    diags.push(Diagnostic::error(
+                                        "E0609",
+                                        format!("{orig} is private in module {module_alias}"),
+                                        "only public items can be brought into scope with use".to_string(),
+                                        format!("add pub before fn {orig} in module {module_alias}"),
+                                        Some(module_alias_span),
+                                    ));
+                                    None
+                                } else {
+                                    Some(Target::Inline {
+                                        alias: module_alias.clone(),
+                                        mangled,
+                                    })
+                                }
+                            }
+                        } else if module_alias == "core" || module_alias == "jet" {
+                            let full = format!("core.{orig}");
+                            if !crate::Syntax::is_known_core_module(&full) {
+                                diags.push(Diagnostic::error(
+                                    "E1001",
+                                    format!("there is no core module {full}"),
+                                    "core is compiler-known, and only the frozen core modules exist".to_string(),
+                                    format!("import one of: {}", crate::Syntax::core_modules_list()),
+                                    Some(module_alias_span),
+                                ));
+                                None
+                            } else {
+                                Some(Target::Core { module: full })
+                            }
+                        } else if let Some(&target_idx) = st.imports.get(&module_alias) {
+                            let target = &states[target_idx];
+                            let same_pkg = target.package_scope == st.package_scope;
+                            let visible = target.func_pub.get(&orig).copied().unwrap_or(false)
+                                || (same_pkg
+                                    && target.func_pkg_pub.get(&orig).copied().unwrap_or(false));
+                            if !target.funcs.contains_key(&orig) {
+                                diags.push(Diagnostic::error(
+                                    "E0611",
+                                    format!("{orig} is not defined in module {module_alias}"),
+                                    "check the module for the item you are importing".to_string(),
+                                    "make sure the name is spelled correctly".to_string(),
+                                    Some(module_alias_span),
+                                ));
+                                None
+                            } else if !visible {
+                                diags.push(Diagnostic::error(
+                                    "E0609",
+                                    format!("{orig} is private in module {module_alias}"),
+                                    "only public items can be brought into scope with use".to_string(),
+                                    format!("add pub before fn {orig} in the imported file"),
+                                    Some(module_alias_span),
+                                ));
+                                None
+                            } else {
+                                Some(Target::File {
+                                    name: orig.clone(),
+                                    module_idx: target_idx,
+                                })
+                            }
+                        } else {
+                            diags.push(Diagnostic::error(
+                                "E0610",
+                                format!("no module named {module_alias} in scope"),
+                                "the alias must refer to a module in the enclosing file".to_string(),
+                                format!("import a module as {module_alias} before this use"),
+                                Some(module_alias_span),
+                            ));
+                            None
+                        }
+                    };
+                    let Some(target) = resolved else { continue };
+                    let st = &mut states[idx];
+                    match target {
+                        Target::Inline { alias, mangled } => {
+                            st.inline_unqualified
+                                .insert((inline_name.clone(), local.clone()), mangled.clone());
+                            if imp.is_pub {
+                                st.inline_reexport_inline.insert(
+                                    (inline_name.clone(), local),
+                                    (alias, mangled),
+                                );
+                            }
+                        }
+                        Target::File { name, module_idx } => {
+                            st.inline_unqualified_file.insert(
+                                (inline_name.clone(), local.clone()),
+                                (name.clone(), module_idx),
+                            );
+                            if imp.is_pub {
+                                st.inline_reexport_file
+                                    .insert((inline_name.clone(), local), (name, module_idx));
+                            }
+                        }
+                        Target::Core { module } => {
+                            st.inline_core_imports
+                                .insert((inline_name.clone(), local), module);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     for idx in 0..bundle.modules.len() {
         for item in &bundle.modules[idx].items {
             let Item::Impl(i) = item else { continue };
@@ -1967,6 +2556,7 @@ fn check_bundle_opts_for_output_inner(
                 }
                 Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)
@@ -1997,7 +2587,7 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
-    // Each non-entry module becomes a Rust `mod user_<alias>`; a type in the
+    // Each non-entry module becomes a Rust `mod __jet_<alias>`; a type in the
     // entry file with the same name would collide in the type namespace.
     for (idx, m) in bundle.modules.iter().enumerate() {
         if idx == bundle.entry {
@@ -2440,10 +3030,6 @@ fn check_bundle_opts_for_output_inner(
     bundle.ffi_callback_fns = ffi_callback_fns;
     diags.extend(super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
-    let lints_deny = package_lints_deny(bundle);
-    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    bundle.parse_teaching = jet_foundation::LintPolicy::apply(&lints_deny, parse_teaching);
-    let diags = jet_foundation::LintPolicy::apply(&lints_deny, diags);
     (
         diags,
         super::Effects::SemIndexEffectFacts {
@@ -2514,6 +3100,7 @@ mod structure_tests {
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),
+                script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling,
                 pub_file: program.pub_file,

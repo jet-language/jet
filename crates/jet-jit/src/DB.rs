@@ -13,6 +13,11 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+// The shared DB wire fragment receives the host's row carrier through this
+// name. AOT supplies its JetMap; JIT keeps rows in the native map until heap
+// marshalling.
+type JetMap<K, V> = std::collections::BTreeMap<K, V>;
+
 /// Canonical `core.db` FFI runtime (rusqlite).
 mod runtime {
     include!("../../jet-pkg-model/src/Prelude/DB.rs");
@@ -174,7 +179,7 @@ extern "C" fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) ->
     scope
 }
 
-fn rows_to_list_of_maps(rows: Vec<std::collections::BTreeMap<String, wire::DBValue>>) -> i64 {
+fn rows_to_list_of_maps(rows: Vec<wire::JetDBRow>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for row in rows {
@@ -292,31 +297,17 @@ extern "C" fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
-    let Some((base, table, expression, user)) = scope_parts(handle as u64) else {
-        return result_err_msg("database row operations require a policy scope");
-    };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
-        Ok(value) => value,
-        Err(error) => return result_err_msg(&error.message),
-    };
-    let wire_s = wire::jet_db_encode_params(&values);
-    let out = runtime::jet_db_query(base, &sql, &wire_s);
-    match wire::jet_db_decode_query_result(&out) {
-        Ok(rows) => {
-            let opt = match rows.into_iter().next() {
-                None => 0i64,
-                Some(row) => {
-                    let list = rows_to_list_of_maps(vec![row]);
-                    let map = Concurrency::with_runtime_mut(|rt| {
-                        rt.heap.list_get_int(list, 0).unwrap_or(0)
-                    });
-                    map.wrapping_add(1)
-                }
-            };
-            result_ok(opt as u64)
+    match scoped_query(handle as u64, &sql, &values, false).map(wire::jet_db_first_row) {
+        Ok(Ok(row)) => {
+            let list = rows_to_list_of_maps(vec![row]);
+            let map = Concurrency::with_runtime_mut(|rt| {
+                rt.heap.list_get_int(list, 0).unwrap_or(0)
+            });
+            result_ok(map.wrapping_add(1) as u64)
         }
+        Ok(Err(_)) => result_ok(0),
         Err(e) => result_err_msg(&e.message),
     }
 }
@@ -358,7 +349,7 @@ fn scoped_query(
     sql: &str,
     params: &Vec<wire::DBValue>,
     allow_schema: bool,
-) -> Result<Vec<std::collections::BTreeMap<String, wire::DBValue>>, wire::DBError> {
+) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
     let Some((base, table, expression, user)) = scope_parts(scope) else {
         return Err(wire::DBError {
             message: "database row operations require a policy scope".to_string(),
@@ -404,7 +395,7 @@ impl wire::JetDBBackend for JitDbBackend {
         sql: &String,
         params: &Vec<wire::DBValue>,
         allow_schema: bool,
-    ) -> Result<Vec<std::collections::BTreeMap<String, wire::DBValue>>, wire::DBError> {
+    ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
         scoped_query(self.scope, sql, params, allow_schema)
     }
 }
@@ -627,8 +618,6 @@ host_fns! {
     dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
     dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
 }
-
-
 
 
 

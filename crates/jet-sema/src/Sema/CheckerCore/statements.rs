@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        fn check_break_without_value(
+        pub(in crate::Sema) fn check_break_without_value(
             &mut self,
             target: Option<(&str, crate::Diagnostics::Span)>,
             span: crate::Diagnostics::Span,
@@ -1531,7 +1531,15 @@ impl<'a> Checker<'a> {
                                 } else {
                                     false
                                 };
+                                // `note.Note` and bare `Note` are one nominal
+                                // type when both resolve to the same imported
+                                // module. Keep the return diagnostic on the
+                                // canonical identity rule; raw enum inequality
+                                // would otherwise reintroduce E0113.
+                                let nominal_type_compatible =
+                                    self.nominal_type_identity(&rt, &et);
                                 if et != rt
+                                    && !nominal_type_compatible
                                     && !reported
                                     && !http_handler_lambda
                                     && !string_view_compatible
@@ -1792,7 +1800,8 @@ impl<'a> Checker<'a> {
                                     mutable: false,
                                     param_conv: None,
                                     decl_loop_depth: self.loop_depth,
-                                    sendable: true,
+                                sendable: true,
+                                interrupt_sendable: false,
                                     reactive_local: false,
                                     reactive_shared: false,
                                     task_lint_span: None,
@@ -2327,13 +2336,19 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.exit_memory_policy_region();
                 }
-                // D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — structured task scope.
+                // D-CONC-SPAWN1=D: `task.group g { … }` — structured task scope.
                 Stmt::TaskGroup {
                     name,
                     name_span,
+                    limit,
                     body,
                     ..
                 } => {
+                    if let Some(limit) = limit {
+                        if let Some(limit_ty) = self.infer(limit) {
+                            self.check_type_assignable(&Type::Int, &limit_ty, limit.span());
+                        }
+                    }
                     self.push_scope();
                     self.declare(
                         name,
@@ -2344,7 +2359,8 @@ impl<'a> Checker<'a> {
                             mutable: false,
                             param_conv: None,
                             decl_loop_depth: self.loop_depth,
-                            sendable: true,
+                        sendable: true,
+                        interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
                             task_lint_span: None,
@@ -2364,7 +2380,7 @@ impl<'a> Checker<'a> {
                     self.pop_scope();
                 }
                 // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a
-                // Cassowary-style constraint block. Unlike `region`/`taskgroup`,
+                // Cassowary-style constraint block. Unlike `region`/`task.group`,
                 // `name` is declared in the CURRENT scope (not pushed/popped
                 // around it) so the handle outlives the block — later code reads
                 // solved values (`NAME.value(v)`) or calls `NAME.suggest(...)`.
@@ -2389,7 +2405,8 @@ impl<'a> Checker<'a> {
                             mutable: false,
                             param_conv: None,
                             decl_loop_depth: self.loop_depth,
-                            sendable: true,
+                        sendable: true,
+                        interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
                             task_lint_span: None,

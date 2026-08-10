@@ -23,6 +23,7 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable,
+                    interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
                     task_lint_span,

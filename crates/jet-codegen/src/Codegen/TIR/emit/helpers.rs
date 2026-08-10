@@ -2,6 +2,7 @@ use crate::AST::Type;
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
+use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
@@ -129,7 +130,7 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 let enum_name = crate::AST::union_enum_name(members);
                 let tag = crate::AST::union_member_tag(&a.value.ty);
                 // Bare member-type tags — matches `emit_anonymous_unions` / match arms.
-                s = format!("user_{enum_name}::{tag}({s})");
+                s = format!("{}::{tag}({s})", user_type_rust(&enum_name));
             }
             // Fn-typed coercion: wrap to match `cx.rust_type` (Rc / Arc / Box for FnMut).
             // Skip wrap when the value already emits Rc/Arc/Box::new (named fn / lambda).
@@ -164,12 +165,12 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
             return format!("{:?}.to_string()", s);
         }
     }
-    let mut body = String::from("{ let mut _jet_s = String::new(); ");
+    let mut body = String::from("{ let mut __jet_s = String::new(); ");
     for p in parts {
         match p {
             TStrPart::Lit(s) => {
                 if !s.is_empty() {
-                    body.push_str(&format!("_jet_s.push_str({:?}); ", s));
+                    body.push_str(&format!("__jet_s.push_str({:?}); ", s));
                 }
             }
             TStrPart::Interp(e, fmt) => {
@@ -184,13 +185,13 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     }
                 };
                 body.push_str(&format!(
-                    "_jet_s.push_str(&({}).{method}()); ",
+                    "__jet_s.push_str(&({}).{method}()); ",
                     emit_tir_expr(e, cx)
                 ));
             }
         }
     }
-    body.push_str("_jet_s }");
+    body.push_str("__jet_s }");
     body
 }
 
@@ -327,6 +328,29 @@ pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
                 format!(": ({inner})")
             }
         }
+        TLetTy::SendFn(ty) => {
+            let Type::Fn {
+                params,
+                ret,
+                return_view_provenance,
+                ..
+            } = ty
+            else {
+                return format!(": {}", cx.rust_type(ty));
+            };
+            let ordinary = cx.rust_fn_trait(
+                params,
+                ret.as_deref(),
+                return_view_provenance.as_ref(),
+                false,
+            );
+            let send = ordinary
+                .strip_prefix("std::rc::Rc<")
+                .and_then(|inner| inner.strip_suffix('>'))
+                .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync>"))
+                .unwrap_or(ordinary);
+            format!(": {send}")
+        }
         TLetTy::Annotated { ty, mut_fn, wrapper } => {
             let base = if let Type::Fn {
                 params,
@@ -419,7 +443,7 @@ pub(crate) fn emit_require_stop(
                     None => "\"condition failed\".to_string()".to_string(),
                 };
                 return format!(
-                    "{{ if !({cond_s}) {{ let _jet_msg = {msg_s}; return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &_jet_msg)); }} }}",
+                    "{{ if !({cond_s}) {{ let __jet_msg = {msg_s}; return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &__jet_msg)); }} }}",
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -439,7 +463,7 @@ pub(crate) fn emit_require_stop(
             let right_s = emit_tir_expr(right, cx);
             if cx.test_mode {
                 return format!(
-                    "{{ let _jet_left = ({left_s}); let _jet_right = ({right_s}); if !(_jet_left == _jet_right) {{ let _jet_msg = format!(\"expected {{}}, got {{}}\", _jet_right.jet_show(), _jet_left.jet_show()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &_jet_msg)); }} }}",
+                    "{{ let __jet_left = ({left_s}); let __jet_right = ({right_s}); if !(__jet_left == __jet_right) {{ let __jet_msg = format!(\"expected {{}}, got {{}}\", __jet_right.jet_show(), __jet_left.jet_show()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &__jet_msg)); }} }}",
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -449,7 +473,7 @@ pub(crate) fn emit_require_stop(
                 );
             }
             format!(
-                "{{ let _jet_left = ({left_s}); let _jet_right = ({right_s}); if !(_jet_left == _jet_right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                "{{ let __jet_left = ({left_s}); let __jet_right = ({right_s}); if !(__jet_left == __jet_right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", __jet_left.jet_show(), __jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,
                 file = escape_rust_str(&loc.file),
                 line = loc.line,

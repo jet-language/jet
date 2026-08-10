@@ -462,6 +462,26 @@ fn run() {
     );
 }
 
+/// D-BOUND-HEAD1=A: DateTime heads use the same complete-literal parser when
+/// sema folds them and when the generated runtime constructs them.
+#[test]
+fn typed_datetime_head_matches_comptime_and_runtime() {
+    check_comptime_src(
+        34_002,
+        "typed DateTime head",
+        r#"
+$stamp :: DateTime.{"2026-08-07T12:00:00Z"}
+$expected :: $stamp.to_string()
+
+fn run() {
+    runtime :: DateTime.{"2026-08-07T12:00:00Z"}
+    print("{$expected}")
+    print("{runtime.to_string()}")
+}
+"#,
+    );
+}
+
 /// A compile-time binding that advances a receiver has to leave the advance
 /// behind for the next compile-time binding to see, or the folded answers drift
 /// from what the same code does at run time: two sequential reads would both
@@ -1056,7 +1076,7 @@ fn run() { show(4) }
         compiled.rust
     );
     assert!(
-        compiled.rust.contains("user_n") && compiled.rust.contains("+ 1"),
+        compiled.rust.contains("__jet_n") && compiled.rust.contains("+ 1"),
         "the unsupported binding did not silently remain runtime code:\n{}",
         compiled.rust
     );

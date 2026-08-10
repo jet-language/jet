@@ -44,6 +44,7 @@
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut prog.imports),
                 items: std::mem::take(&mut prog.items),
+                script_body: std::mem::take(&mut prog.script_body),
                 block_spans: std::mem::take(&mut prog.block_spans),
                 source: src.to_string(),
                 web_target_ceiling: prog.web_target_ceiling,
@@ -421,7 +422,7 @@ fn make(n: String) => Person {
         // c109 (foreign struct literal): an UNqualified cross-module foreign struct literal
         // (`Note { … }`, no `import_ns`) is now covered — the StructLit gate admits a
         // `cx.foreign_types` type and lowering prefixes the module head
-        // (`user_notes::user_Note`). The construct miscompiled to a bare `user_Note { … }`
+        // (`__jet_notes::__jet_Note`). The construct miscompiled to a bare `__jet_Note { … }`
         // (E0422) before; the fix prefixes the foreign module.
         let src = "\
 fn mk() {
@@ -429,7 +430,7 @@ fn mk() {
     print(n.text)
 }
 ";
-        assert!(covers_with_foreign(src, "mk", &[("Note", "user_notes")]));
+        assert!(covers_with_foreign(src, "mk", &[("Note", "__jet_notes")]));
     }
 
     #[test]

@@ -20,16 +20,23 @@ use std::sync::Arc;
 
 type JetDataTree = crate::Encoding::json_rt::DataTree;
 
-trait user_Encode {
+include!("../../jet-foundation/src/TypedHeads.rs");
+
+trait __jet_Encode {
     fn jet_encode(&self) -> JetDataTree;
 }
-trait user_Decode: Sized {
+impl __jet_Encode for i64 {
+    fn jet_encode(&self) -> JetDataTree {
+        JetDataTree::Int(*self)
+    }
+}
+trait __jet_Decode: Sized {
     fn jet_decode_traced(tree: &JetDataTree) -> Result<(Self, ()), Vec<jet_std::FieldError>>;
 }
-fn jet_enc_json_to_string<T: user_Encode>(v: &T) -> String {
+fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
     crate::Encoding::json_rt::render_datatree_json(&v.jet_encode(), false, 0)
 }
-fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = crate::Encoding::json_rt::parse_datatree(text).map_err(|error| {
         jet_std::FieldError::one(format!(
             "invalid JSON (line {}): {}",

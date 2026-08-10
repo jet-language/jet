@@ -281,41 +281,160 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             return src.to_string();
         };
         let bytes = src.as_bytes();
-        let mut depth = 0usize;
-        let mut i = start;
+        let Some(open) = bytes[start..]
+            .iter()
+            .position(|byte| *byte == b'{')
+            .map(|offset| start + offset)
+        else {
+            return src.to_string();
+        };
+        fn raw_string_start(bytes: &[u8], i: usize) -> Option<(usize, usize)> {
+            let raw = if bytes.get(i) == Some(&b'r') {
+                i
+            } else if bytes.get(i) == Some(&b'b') && bytes.get(i + 1) == Some(&b'r') {
+                i + 1
+            } else {
+                return None;
+            };
+            let mut quote = raw + 1;
+            while bytes.get(quote) == Some(&b'#') {
+                quote += 1;
+            }
+            (bytes.get(quote) == Some(&b'"')).then_some((quote, quote - raw - 1))
+        }
+        #[derive(Clone, Copy)]
+        enum State {
+            Normal,
+            LineComment,
+            BlockComment(usize),
+            String,
+            RawString(usize),
+        }
+        let mut depth = 1usize;
+        let mut i = open + 1;
         let mut end = src.len();
-        let mut seen_brace = false;
-        // Generated Rust bodies are full of `format!("{...}")`/error-string
-        // literals — a `{`/`}` inside a `"..."` string isn't a brace, and
-        // counting it desyncs the depth tracker, cutting the module short
-        // and leaving its tail (e.g. `unsafe impl … Send for JetSharedCell`)
-        // behind as unstripped, falsely-flagged "user" code.
-        let mut in_string = false;
+        let mut state = State::Normal;
         while i < bytes.len() {
-            match bytes[i] {
-                b'"' if !in_string => in_string = true,
-                b'"' if in_string => in_string = false,
-                b'\\' if in_string => i += 1, // skip the escaped byte too
-                b'{' if !in_string => {
-                    depth += 1;
-                    seen_brace = true;
-                }
-                b'}' if !in_string => {
-                    depth -= 1;
-                    if seen_brace && depth == 0 {
-                        end = i + 1;
-                        break;
+            match state {
+                State::Normal => {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+                        state = State::LineComment;
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        state = State::BlockComment(1);
+                        i += 2;
+                        continue;
+                    }
+                    if let Some((quote, hashes)) = raw_string_start(bytes, i) {
+                        state = State::RawString(hashes);
+                        i = quote + 1;
+                        continue;
+                    }
+                    if bytes[i] == b'"' || (bytes[i] == b'b' && bytes.get(i + 1) == Some(&b'"')) {
+                        state = State::String;
+                        i += usize::from(bytes[i] == b'b') + 1;
+                        continue;
+                    }
+                    if bytes[i] == b'\'' {
+                        let mut j = i + 1;
+                        let mut escaped = false;
+                        let mut closed = false;
+                        while j < bytes.len() && bytes[j] != b'\n' {
+                            if escaped {
+                                escaped = false;
+                            } else if bytes[j] == b'\\' {
+                                escaped = true;
+                            } else if bytes[j] == b'\'' {
+                                closed = true;
+                                break;
+                            }
+                            j += 1;
+                        }
+                        if closed {
+                            i = j + 1;
+                            continue;
+                        }
+                        i += 1;
+                        continue;
+                    }
+                    match bytes[i] {
+                        b'{' => depth += 1,
+                        b'}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = i + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
+                State::LineComment => {
+                    if bytes[i] == b'\n' {
+                        state = State::Normal;
+                    }
+                }
+                State::BlockComment(comment_depth) => {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        state = State::BlockComment(comment_depth + 1);
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        i += 2;
+                        if comment_depth == 1 {
+                            state = State::Normal;
+                        } else {
+                            state = State::BlockComment(comment_depth - 1);
+                        }
+                        continue;
+                    }
+                }
+                State::String => {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    } else if bytes[i] == b'"' {
+                        state = State::Normal;
+                    }
+                }
+                State::RawString(hashes) => {
+                    if bytes[i] == b'"'
+                        && (0..hashes)
+                            .all(|offset| bytes.get(i + 1 + offset) == Some(&b'#'))
+                    {
+                        i += 1 + hashes;
+                        state = State::Normal;
+                        continue;
+                    }
+                }
             }
             i += 1;
         }
         format!("{}{}", &src[..start], &src[end..])
     }
+    fn strip_jet_cell(src: &str) -> String {
+        // Codegen emits this module as one contiguous source part: the opening
+        // marker in `CORELIB_KERNEL_PARTS`, `LocalCell.rs`, then this exact
+        // closing/re-export marker. Use that source boundary instead of
+        // guessing where a Rust token-tree brace belongs.
+        const BEGIN: &str = "\nmod jet_cell {\n";
+        const END: &str =
+            "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n";
+        let Some(start) = src.find(BEGIN) else {
+            return src.to_string();
+        };
+        let body_start = start + BEGIN.len();
+        let Some(relative_end) = src[body_start..].find(END) else {
+            return src.to_string();
+        };
+        let end = body_start + relative_end + END.len();
+        format!("{}{}", &src[..start], &src[end..])
+    }
     let s = strip_mod(rust_code, "jet_uninit_semantics");
     let s = strip_mod(&s, "jet_mem");
-    let s = strip_mod(&s, "jet_cell");
+    let s = strip_jet_cell(&s);
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");
@@ -325,12 +444,17 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_gtk");
     let s = strip_mod(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
+    s = strip_marked_regions(
+        &s,
+        "// jet:shared-guard-internal-begin",
+        "// jet:shared-guard-internal-end",
+    );
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "ffi_reporter");
-    while s.contains("mod user___c_") {
+    while s.contains("mod __jet___c_") {
         let before = s.clone();
-        s = strip_mod(&s, "user___c_");
+        s = strip_mod(&s, "__jet___c_");
         if s == before {
             break;
         }
@@ -348,6 +472,20 @@ fn strip_scheduler_native(src: &str) -> String {
             s
         }
         _ => src.to_string(),
+    }
+}
+
+fn strip_marked_regions(src: &str, begin: &str, end: &str) -> String {
+    let mut out = src.to_string();
+    loop {
+        let (Some(start), Some(end_pos)) = (out.find(begin), out.find(end)) else {
+            return out;
+        };
+        if end_pos < start {
+            return out;
+        }
+        let end_offset = end_pos + end.len();
+        out = format!("{}{}", &out[..start], &out[end_offset..]);
     }
 }
 

@@ -399,7 +399,10 @@ fn shutdown_term_args(args: &[(Option<String>, CtValue)]) -> Option<ShutdownPoli
 }
 
 fn named_payload_field(name: Option<&str>) -> Option<&str> {
-    name.map(|name| name.strip_prefix("user_").unwrap_or(name))
+    name.map(|name| {
+        name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(name)
+    })
 }
 
 /// Set `slot` from `v` if it's a `Str`; otherwise capture it in `extra` (same

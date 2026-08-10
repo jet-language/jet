@@ -61,8 +61,8 @@ pub mod CompilerExtension;
 pub mod FFI;
 // Card #1421 criteria 2-3: `.jetlib` loadable-library artifact stamp and the
 // load-time trust boundary (D-LIB-REUSE1=B compiler-identity pin,
-// D-LIB-DYNTRUST1=A declared-effect grant). Pure data/check machinery, same
-// bar as `EffectBudget`/`Envelope` — no manifest/build-path wiring yet.
+// D-LIB-DYNTRUST1=A declared-effect grant). The driver and embedded Prelude
+// consume this pure data/check machinery; no second loader policy is allowed.
 pub mod JetLib;
 pub mod JSON;
 pub mod LintPolicy;

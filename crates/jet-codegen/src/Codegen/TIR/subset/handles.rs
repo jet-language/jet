@@ -488,6 +488,9 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin` instance methods.
         ("Plugin", "call", 2) => THandleOp::PluginCall,
         ("Plugin", "call_int", 2) => THandleOp::PluginCallInt,
+        // D-LIB-CALLGRANT1=A: the first pinned-library call is a checked
+        // homogeneous Int entry point.
+        ("Mod", "on_tick", 1) => THandleOp::ModOnTick,
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): `Reader`
         // instance methods. `take_pattern` isn't here — an argument-dependent
         // method (like Cursor's), resolved at its call site.
@@ -582,6 +585,8 @@ pub(crate) fn handle_method_return_ty(
         .or_else(|| {
             if handle == "Plugin" {
                 Some(crate::Sema::plugin_method_return_ty(method))
+            } else if handle == "Mod" {
+                Some(crate::Sema::mod_method_return_ty(method))
             } else {
                 None
             }
@@ -723,16 +728,8 @@ pub(crate) fn handle_method_return_ty(
 /// closure's body type — total from the lowered lambda's return); `serve` → Unit (runs
 /// forever); `guard` → `ScopeGuard`. These types are rarely load-bearing in emit (a
 /// binding carries sema's `b.ty`), but kept total per the design principle.
-pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: Type) -> Type {
+pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, _body_ty: Type) -> Type {
     match (module, method) {
-        ("core.tasks", "spawn") => Type::Apply {
-            name: "Task".to_string(),
-            args: vec![body_ty],
-        },
-        ("core.tasks", "spawn_group") => Type::List(Box::new(Type::Apply {
-            name: "Task".to_string(),
-            args: vec![body_ty],
-        })),
         ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
         ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
         _ => unit_type(),

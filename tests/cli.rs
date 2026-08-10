@@ -2576,29 +2576,10 @@ fn color_always_adds_ansi_but_flag_wins_over_no_color() {
 
 #[test]
 fn every_registered_code_has_an_explain_entry() {
-    let md = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/diagnostics.md"),
-    )
-    .unwrap();
-
-    // Pull every E####/L#### that appears as the first cell of a table row —
-    // i.e. a registered code, not an in-prose mention.
-    let mut codes: Vec<String> = Vec::new();
-    for line in md.lines() {
-        let line = line.trim();
-        if !line.starts_with("| E") && !line.starts_with("| L") {
-            continue;
-        }
-        let first = line
-            .trim_matches('|')
-            .split('|')
-            .next()
-            .unwrap_or("")
-            .trim();
-        if is_code(first) && !codes.contains(&first.to_string()) {
-            codes.push(first.to_string());
-        }
-    }
+    let codes: Vec<String> = jet_foundation::Registry::diagnostic_rows()
+        .iter()
+        .map(|row| row.code.to_string())
+        .collect();
     assert!(
         codes.len() > 150,
         "expected the full code registry, found {}",
@@ -2609,7 +2590,7 @@ fn every_registered_code_has_an_explain_entry() {
     for code in &codes {
         assert!(
             index.contains_key(code),
-            "code {} is registered in diagnostics.md but has no explain entry",
+            "code {} is registered in typed diagnostic rows but has no explain entry",
             code
         );
         // And `jet explain <code>` must succeed at the CLI for every code.

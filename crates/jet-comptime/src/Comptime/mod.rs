@@ -66,6 +66,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
+use crate::{Syntax, TypedHeads};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
@@ -82,6 +83,83 @@ pub use Methods::{
 /// EncodingLite CSV splitter as comptime typed decode (no second codec).
 pub fn runtime_csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
     EncodingLite::csv_parse(text)
+}
+
+/// D-BOUND-HEAD1: typed URL heads validate at comptime with the same URL
+/// kernel that backs the runtime string constructor.
+pub fn validate_url_literal(value: &str) -> Result<(), String> {
+    UrlLite::parse(value).map(|_| ())
+}
+
+/// D-BOUND-HEAD1: typed DateTime heads validate through the shared Prelude
+/// parser; runtime string constructors remain unchanged.
+pub fn validate_datetime_literal(value: &str) -> Result<(), String> {
+    Methods::validate_datetime_literal(value)
+}
+
+/// D-BOUND-HEAD1: evaluate a sema-rewritten typed head through the one shared
+/// interpolation law, then reuse the existing pure Core parsers for the
+/// nominal values. Runtime string constructors stay on their existing paths.
+pub fn evaluate_typed_head(
+    name: &str,
+    literals: &[String],
+    holes: &[CtValue],
+    span: crate::Diagnostics::Span,
+) -> Result<CtValue, Diagnostic> {
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    let shown_holes = holes.iter().map(CtValue::jet_show).collect::<Vec<_>>();
+    let text = match name {
+        Syntax::TYPE_URL => TypedHeads::jet_typed_url_interpolate(&literal_refs, &shown_holes),
+        Syntax::TYPE_PATH => TypedHeads::jet_typed_path_interpolate(&literal_refs, &shown_holes),
+        Syntax::TYPE_DATETIME => {
+            TypedHeads::jet_typed_datetime_interpolate(&literal_refs, &shown_holes)
+        }
+        _ => {
+            return Err(Diagnostic::error(
+                "E0956",
+                format!("typed head `{name}` can't run at compile time yet"),
+                "the canonical TIR evaluator only accepts the ratified URL, Path, and DateTime heads".to_string(),
+                "use one of `URL.{\"…\"}`, `Path.{\"…\"}`, or `DateTime.{\"…\"}`".to_string(),
+                Some(span),
+            ))
+        }
+    };
+    let parsed = match name {
+        Syntax::TYPE_URL => apply_core_call(
+            "core.url",
+            "parse",
+            vec![CtValue::Str(text)],
+            span,
+            false,
+        )?,
+        Syntax::TYPE_DATETIME => apply_core_call(
+            "core.time",
+            "parse_rfc3339",
+            vec![CtValue::Str(text)],
+            span,
+            false,
+        )?,
+        Syntax::TYPE_PATH => {
+            return Ok(CtValue::Struct {
+                type_name: Syntax::TYPE_PATH.to_string(),
+                fields: vec![("inner".to_string(), CtValue::Str(text))],
+            })
+        }
+        _ => unreachable!("typed-head name was checked above"),
+    };
+    match parsed {
+        CtValue::Present(value) => Ok(*value),
+        failure => Err(Diagnostic::error(
+            "E0956",
+            format!("{name} typed head produced an invalid value"),
+            format!(
+                "the typed head parser returned `{}` after sema validation",
+                failure.jet_show()
+            ),
+            "keep the literal skeleton valid and let holes supply only head-safe values".to_string(),
+            Some(span),
+        )),
+    }
 }
 
 /// D-DATA-STATUS1 / #708: the same rows `data.status()` returns, from the one
@@ -1276,4 +1354,17 @@ pub fn evaluate_derive_body(
     scope.insert(type_param.to_string(), type_info);
     interp.exec_block(body, &mut scope)?;
     Ok(interp.emitted_fragments)
+}
+
+#[cfg(test)]
+mod typed_head_tests {
+    use super::{validate_datetime_literal, validate_url_literal};
+
+    #[test]
+    fn boundary_heads_use_the_canonical_validation_kernels() {
+        assert!(validate_url_literal("https://api.example.com/v2/jet-hole").is_ok());
+        assert!(validate_url_literal("https:").is_err());
+        assert!(validate_datetime_literal("2026-08-07T12:00:00Z").is_ok());
+        assert!(validate_datetime_literal("2026-08-07T12:00:00").is_err());
+    }
 }

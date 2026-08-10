@@ -250,7 +250,7 @@ fn run() {
     let user = common::strip_vetted_prelude_modules(&output.rust);
     assert!(user.contains("[std::mem::MaybeUninit::<u8>::uninit(); 256]"), "{user}");
     assert!(user.contains("JetFixed::over_uninit"), "{user}");
-    assert!(user.contains("impl user_Close for jet_mem::JetFixed"), "{user}");
+    assert!(user.contains("impl __jet_Close for jet_mem::JetFixed"), "{user}");
 
     let over_src = r#"
 use core.mem
@@ -266,7 +266,7 @@ fn run() {
         .expect("Fixed.over should accept one mutable inline byte array");
     let over_user = common::strip_vetted_prelude_modules(&over.rust);
     assert!(
-        over_user.contains("JetFixed::over_uninit_fixed(&mut user_bytes)"),
+        over_user.contains("JetFixed::over_uninit_fixed(&mut __jet_bytes)"),
         "{over_user}"
     );
     if common::have_rustc() {
@@ -331,7 +331,7 @@ fn run() {
     )
     .expect("non-Core allocator lookalikes should compile");
     let user = common::strip_vetted_prelude_modules(&output.rust);
-    assert!(!user.contains("impl user_Close for jet_mem::"), "{user}");
+    assert!(!user.contains("impl __jet_Close for jet_mem::"), "{user}");
 }
 
 #[test]

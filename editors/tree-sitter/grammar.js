@@ -17,7 +17,7 @@ const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reacti
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
-const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Deque", "Derived", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "Group", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "PriorityQueue", "Ptr", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "SortedSet", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
+const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "DateTime", "Decimal", "Deque", "Derived", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "Group", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "Path", "PriorityQueue", "Ptr", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "SortedSet", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "URL", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["channel", "check", "input", "join", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Job", "Kernel", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "$[", "&", "...", "::", ":=", "]$", "^", "~"];
@@ -754,6 +754,7 @@ module.exports = grammar({
         $.string_literal,
         $.char_literal,
         $.identifier,
+        $.typed_literal,
         $.type_identifier,
         $.copy_expr,
         $.primitive_type,
@@ -1016,6 +1017,35 @@ module.exports = grammar({
     // An anonymous record literal `{ key: value, … }` (used as a config/manifest
     // value, e.g. `payload: { name: "x", version: "1.0" }`).
     record_literal: ($) => $.record_body,
+
+    // D-DOTCTOR3 / D-BOUND-HEAD1: every named typed literal uses the universal
+    // `Type.{ … }` head. The body is intentionally permissive here; the Jet
+    // parser and sema own the exact body shape and typed-hole law.
+    typed_literal: ($) =>
+      prec.right(
+        6,
+        seq(
+          field("head", $._type),
+          token.immediate("."),
+          "{",
+          field(
+            "body",
+            optional(
+              choice(
+                $.string_literal,
+                $.multiline_string,
+                commaSep1(
+                  choice(
+                    seq(field("field", $.identifier), ":", field("value", $._expr)),
+                    $._expr,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          "}",
+        ),
+      ),
 
     record_body: ($) =>
       seq(

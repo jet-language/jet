@@ -196,10 +196,11 @@ pub struct JetSocketAddr {
     inner: std::net::SocketAddr,
 }
 
+#[derive(Clone)]
 pub struct JetUDPSocket {
-    inner: std::net::UdpSocket,
-    timeout_ms: std::sync::Mutex<Option<i64>>,
-    closed: std::sync::atomic::AtomicBool,
+    inner: std::sync::Arc<std::net::UdpSocket>,
+    timeout_ms: std::sync::Arc<std::sync::Mutex<Option<i64>>>,
+    closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
@@ -1909,7 +1910,11 @@ fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
-    Ok(JetUDPSocket { inner, timeout_ms: std::sync::Mutex::new(None), closed: std::sync::atomic::AtomicBool::new(false) })
+    Ok(JetUDPSocket {
+        inner: std::sync::Arc::new(inner),
+        timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    })
 }
 
 fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetError> {
@@ -1917,7 +1922,11 @@ fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetErr
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
-    Ok(JetUDPSocket { inner, timeout_ms: std::sync::Mutex::new(None), closed: std::sync::atomic::AtomicBool::new(false) })
+    Ok(JetUDPSocket {
+        inner: std::sync::Arc::new(inner),
+        timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    })
 }
 
 fn jet_net_udp_open(socket: &JetUDPSocket, operation: &str) -> Result<(), JetNetError> {

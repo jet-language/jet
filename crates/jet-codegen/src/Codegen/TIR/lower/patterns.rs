@@ -1,11 +1,12 @@
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 use crate::Codegen::Cx;
+use crate::Codegen::mangle;
 use crate::Codegen::mangle_variant;
+use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::expr_ast_jet_ty;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
@@ -439,21 +440,33 @@ pub(crate) fn lower_enum_match(
         _ => (lower_expr(subject, cx, env), false),
     };
     // Resolve the owning enum once — drives the Rust variant prefix in patterns.
-    // D-UNIONTYPE1=A: anonymous unions lower to a generated enum named by members.
-    let subject_ty = expr_ast_jet_ty(subject, env);
-    let enum_type = match &subject_ty {
-        Some(Type::Union(members)) => Some(crate::AST::union_enum_name(members)),
-        _ => arms.iter().find_map(|a| {
-            arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
-        }),
+    // Variant names are not unique (`Closed`, for example), so prefer the checked
+    // subject type over the lossy variant-name fallback.
+    let subject_ty = scrutinee.ty.clone();
+    let subject_enum = match &subject_ty {
+        Type::Union(members) => Some(crate::AST::union_enum_name(members)),
+        Type::Named(name) | Type::Apply { name, .. } => {
+            let resolved = cx
+                .core_qualified_rust_type_name(name)
+                .unwrap_or(name.as_str());
+            cx.enum_variants
+                .contains_key(resolved)
+                .then(|| resolved.to_string())
+        }
+        _ => None,
     };
+    let enum_type = subject_enum.or_else(|| {
+        arms.iter().find_map(|a| {
+            arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
+        })
+    });
     let mut tarms = Vec::new();
     for arm in arms {
         let pattern = arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
         // The arm body sees the variant's payload bindings, typed from the layout. The
         // arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
-        tir_add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
+        tir_add_pattern_bindings(cx, &pattern, &mut body_env, Some(&subject_ty));
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm {
             pattern: TPattern::arm(pattern, enum_type.clone()),
@@ -618,12 +631,12 @@ pub(crate) fn variant_payload_types(
 
 /// c109 Phase 24: the Rust enum-literal head `{prefix}::{mangle(variant)}` for a payload
 /// or named enum literal, reproducing `emit_enum_lit`'s `type_prefix` (Expression.rs): a
-/// FOREIGN (imported) enum → `{root}{mod}::user_<T>::user_<V>`, a local enum →
-/// `user_<T>::user_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
+/// FOREIGN (imported) enum → `{root}{mod}::__jet_<T>::__jet_<V>`, a local enum →
+/// `__jet_<T>::__jet_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
 pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
     // D-UNIONTYPE1=A: compiler-generated union enums use bare member-type tags.
     if type_name.starts_with("__JetUnion_") {
-        return format!("user_{type_name}::{variant}");
+        return format!("{}::{variant}", user_type_rust(type_name));
     }
     // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum; its Rust name is `JetKey`.
     // Variant names are not mangled (Char, Enter, …).
@@ -631,9 +644,11 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
         return format!("{}JetKey::{}", cx.root_prefix, variant);
     }
     if type_name == crate::Syntax::TYPE_REMOVE_BY
-        || type_name == format!("user_{}", crate::Syntax::TYPE_REMOVE_BY)
+        || type_name == mangle(crate::Syntax::TYPE_REMOVE_BY)
     {
-        let variant = variant.strip_prefix("user_").unwrap_or(variant);
+        let variant = variant
+            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(variant);
         return format!("{}JetRemoveBy::{}", cx.root_prefix, variant);
     }
     if type_name == "DataEvent" {
@@ -710,8 +725,8 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
         return format!("{}JetServiceError::{}", cx.root_prefix, variant);
     }
     let type_prefix = match cx.foreign_types.get(type_name) {
-        Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
-        None => format!("user_{}", type_name),
+        Some(rust_mod) => format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(type_name)),
+        None => user_type_rust(type_name),
     };
     format!("{}::{}", type_prefix, mangle_variant(variant))
 }

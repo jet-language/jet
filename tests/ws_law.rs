@@ -8,16 +8,16 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
-trait user_Encode {}
-impl<T> user_Encode for T {}
+trait __jet_Encode {}
+impl<T> __jet_Encode for T {}
 
-trait user_Decode: Sized {}
+trait __jet_Decode: Sized {}
 
-fn jet_enc_json_to_string<T: user_Encode>(_value: &T) -> String {
+fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
     String::new()
 }
 
-fn jet_enc_json_decode<T: user_Decode>(_text: &str) -> Result<T, String> {
+fn jet_enc_json_decode<T: __jet_Decode>(_text: &str) -> Result<T, String> {
     Err("unused test decoder".to_string())
 }
 
@@ -65,6 +65,11 @@ thread_local! {
     static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
     static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn jet_runtime_diagnostic(rendered: String) -> ! {
+    eprintln!("{rendered}");
+    std::process::exit(70);
 }
 
 fn jet_scheduler_task_panic_enter() {

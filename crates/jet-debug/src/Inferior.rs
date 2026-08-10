@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
+use jet_foundation::Syntax;
 
 /// Bogus command sent after every real one. lldb echoes then rejects it
 /// (`error: '<sentinel>' is not a valid command.`, to stderr, which we null —
@@ -408,24 +409,23 @@ impl Inferior {
 
     /// D-DBG3 step 2 (I2): translate a raw Rust local/param name back to its
     /// Jet spelling. Codegen's `mangle()` (`crates/jet-codegen/src/Codegen/mod.rs`)
-    /// prefixes every non-`main` binding with `user_`; strip it. A name
-    /// WITHOUT that prefix is a compiler-internal temporary
-    /// (`_jet_switch_subject`, destructure temps, …) that should never
-    /// surface — `None` means "filter this one out", not "show it raw".
+    /// prefixes every non-`main` binding with `__jet_`; strip it. Names without
+    /// that prefix are foreign/runtime frames and remain filtered.
     pub(crate) fn rust_local_to_jet(name: &str) -> Option<String> {
-        name.strip_prefix("user_").map(|s| s.to_string())
+        name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
+            .map(|s| s.to_string())
     }
 
     /// The reverse of [`Self::rust_local_to_jet`] — the mangled Rust name
     /// lldb needs for `frame variable <name>`.
     pub(crate) fn jet_local_to_rust(name: &str) -> String {
-        format!("user_{}", name)
+        Syntax::generated_name(name)
     }
 
     /// Clean a raw Rust function symbol (`prog::main::h4002…` or
-    /// `prog::user_helper::h991…`) down to its Jet name (I2): drop the
+    /// `prog::__jet_helper::h991…`) down to its Jet name (I2): drop the
     /// trailing `::h<hash>` rustc appends, take the last path segment, then
-    /// strip the `user_` mangling prefix (bare `main` passes through
+    /// strip the `__jet_` mangling prefix (bare `main` passes through
     /// unchanged since codegen never mangles it — see `mangle()`).
     pub(crate) fn rust_func_to_jet(func: &str) -> String {
         let mut segs: Vec<&str> = func.split("::").collect();
@@ -436,7 +436,9 @@ impl Inferior {
             segs.pop();
         }
         let name = segs.last().copied().unwrap_or(func);
-        name.strip_prefix("user_").unwrap_or(name).to_string()
+        name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(name)
+            .to_string()
     }
 }
 
@@ -519,19 +521,19 @@ mod tests {
 
     #[test]
     fn parses_a_frame_line() {
-        let out = "Process 1 stopped\n* thread #1, stop reason = breakpoint 1.1\n    frame #0: 0x0000000100000f50 jet_golden_05_loops`user_main + 20 at 05_loops.rs:7:5\n";
+        let out = "Process 1 stopped\n* thread #1, stop reason = breakpoint 1.1\n    frame #0: 0x0000000100000f50 jet_golden_05_loops`__jet_main + 20 at 05_loops.rs:7:5\n";
         let f = Inferior::parse_top_frame(out).expect("frame parsed");
-        assert_eq!(f.func, "user_main");
+        assert_eq!(f.func, "__jet_main");
         assert_eq!(f.rust_file, "05_loops.rs");
         assert_eq!(f.rust_line, 7);
     }
 
     #[test]
     fn parses_multiple_frames_for_backtrace() {
-        let out = "  * frame #0: 0x1 bin`user_helper at a.rs:3:1\n    frame #1: 0x2 bin`user_main + 10 at a.rs:9:1\n";
+        let out = "  * frame #0: 0x1 bin`__jet_helper at a.rs:3:1\n    frame #1: 0x2 bin`__jet_main + 10 at a.rs:9:1\n";
         let frames = Inferior::parse_frames(out);
         assert_eq!(frames.len(), 2);
-        assert_eq!(frames[0].func, "user_helper");
+        assert_eq!(frames[0].func, "__jet_helper");
         assert_eq!(frames[1].rust_line, 9);
     }
 
@@ -563,7 +565,7 @@ mod tests {
     /// should be captured, not truncated at the first `{`.
     #[test]
     fn parses_a_multiline_struct_without_a_summary_provider() {
-        let out = "(user_Point) p = {\n  x = 1\n  y = 2\n}\n";
+        let out = "(__jet_Point) p = {\n  x = 1\n  y = 2\n}\n";
         let locals = Inferior::parse_locals(out);
         assert_eq!(locals.len(), 1);
         assert_eq!(locals[0].0, "p");
@@ -578,12 +580,14 @@ mod tests {
     #[test]
     fn local_name_translation_round_trips() {
         assert_eq!(
-            Inferior::rust_local_to_jet("user_total"),
+            Inferior::rust_local_to_jet("__jet_total"),
             Some("total".to_string())
         );
-        assert_eq!(Inferior::jet_local_to_rust("total"), "user_total");
-        // A compiler-internal temp (no `user_` prefix) is filtered, not shown raw.
-        assert_eq!(Inferior::rust_local_to_jet("_jet_switch_subject"), None);
+        assert_eq!(Inferior::jet_local_to_rust("total"), "__jet_total");
+        assert_eq!(
+            Inferior::rust_local_to_jet("__jet_switch_subject"),
+            Some("switch_subject".to_string())
+        );
     }
 
     #[test]
@@ -593,7 +597,7 @@ mod tests {
             "main"
         );
         assert_eq!(
-            Inferior::rust_func_to_jet("prog::user_helper::h991a2b3c4d5e6f70"),
+            Inferior::rust_func_to_jet("prog::__jet_helper::h991a2b3c4d5e6f70"),
             "helper"
         );
         // No hash suffix and no `::` path (e.g. a libc frame, already past

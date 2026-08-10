@@ -9,6 +9,7 @@ use jet_codegen::scheduler::{
     jet_scheduler_yield_now, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
     JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
+use jet_foundation::Outcome::{JetOutcome, JetTaskFailure};
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -66,6 +67,59 @@ where
     match jet_scheduler_wait_without_unwind(f) {
         JetSchedulerWait::Ready(value) => {
             WAIT_VALUE.with(|slot| slot.set(value));
+            JitWaitStatus::Ready as i64
+        }
+        JetSchedulerWait::Cancelled => {
+            set_pending_shield_exit(JetShieldExit::Cancelled);
+            JitWaitStatus::Interrupted as i64
+        }
+        JetSchedulerWait::Deadline(rendered) => {
+            with_runtime_mut(|rt| rt.set_deadline(rendered));
+            JitWaitStatus::Interrupted as i64
+        }
+        JetSchedulerWait::Panicked(message) => {
+            with_runtime_mut(|rt| {
+                let line = format!("panic: {message}\n");
+                if !rt.stderr.ends_with(&line) {
+                    rt.stderr.push_str(&line);
+                }
+            });
+            trap_panic(&message);
+            JitWaitStatus::Panicked as i64
+        }
+    }
+}
+
+/// Marshal the typed Prelude task rail through the resident JIT's one-i64
+/// Result carrier. Child failure is a value on the `Err` side; only a wait
+/// boundary interrupt changes the host status and lexical control flow.
+fn wait_task_result<T, F, Encode>(f: F, encode: Encode) -> i64
+where
+    F: FnOnce() -> JetOutcome<T, JetTaskFailure>,
+    Encode: FnOnce(&mut super::JitRuntime, T) -> u64,
+{
+    match jet_scheduler_wait_without_unwind(f) {
+        JetSchedulerWait::Ready(Ok(value)) => {
+            let result = with_runtime_mut(|rt| {
+                let bits = encode(rt, value);
+                super::runtime_host::alloc_jit_result(rt, true, bits)
+            });
+            WAIT_VALUE.with(|slot| slot.set(result));
+            JitWaitStatus::Ready as i64
+        }
+        JetSchedulerWait::Ready(Err(failure)) => {
+            let result = with_runtime_mut(|rt| {
+                let bits = match failure {
+                    JetTaskFailure::Cancelled => 0,
+                    JetTaskFailure::DeadlineBlown => 1,
+                    JetTaskFailure::Panicked(reason) => {
+                        let reason = rt.heap.alloc_string(reason);
+                        ((reason as u64) << 8) | 2
+                    }
+                };
+                super::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+            WAIT_VALUE.with(|slot| slot.set(result));
             JitWaitStatus::Ready as i64
         }
         JetSchedulerWait::Cancelled => {
@@ -590,7 +644,9 @@ fn close_task_group(group: i64) -> i64 {
         |task| {
             let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
             if let Some(join) = join {
-                let child = wait_status(|| join.join());
+                let child = wait_status(|| match join.join() {
+                    Ok(_) | Err(_) => 0,
+                });
                 if status == JitWaitStatus::Ready as i64 {
                     status = child;
                 }
@@ -700,9 +756,12 @@ extern "C" fn jet_jit_task_join(task: i64) -> i64 {
         rt.tasks[idx].take()
     });
     match join {
-        Some(j) => wait_status(|| j.join()),
+        Some(j) => wait_task_result(|| j.join(), |_, value| value as u64),
         None => {
-            WAIT_VALUE.with(|slot| slot.set(task));
+            let result = with_runtime_mut(|rt| {
+                super::runtime_host::alloc_jit_result(rt, true, task as u64)
+            });
+            WAIT_VALUE.with(|slot| slot.set(result));
             JitWaitStatus::Ready as i64
         }
     }
@@ -714,10 +773,10 @@ extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
     });
-    wait_status(|| {
-        let values = jet_scheduler_all(entries);
-        with_runtime_mut(|rt| store_i64_list(rt, values))
-    })
+    wait_task_result(
+        || jet_scheduler_all(entries),
+        |rt, values| store_i64_list(rt, values) as u64,
+    )
 }
 
 // D-VERDICT-1323-1: the task-group twins. Each marshals the JIT's list of task
@@ -764,7 +823,7 @@ extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
     });
-    wait_status(|| jet_scheduler_race(entries))
+    wait_task_result(|| jet_scheduler_race(entries), |_, value| value as u64)
 }
 
 /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result.
@@ -773,7 +832,7 @@ extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
     });
-    wait_status(|| jet_scheduler_any(entries))
+    wait_task_result(|| jet_scheduler_any(entries), |_, value| value as u64)
 }
 
 /// D-CONCSELECT1=A: `g.select().recv(…).after(ms[, v]).wait()`.
@@ -984,7 +1043,6 @@ host_fns! {
     deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
     deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;
 }
-
 
 
 

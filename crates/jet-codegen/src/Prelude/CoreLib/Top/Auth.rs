@@ -178,7 +178,10 @@ fn jet_auth_claims(
         .map_err(|_| JetAuthError::MalformedToken("claims are not valid UTF-8".to_string()))?;
     let fields = jet_auth_object(text)?;
     let expires_at = jet_auth_required_i64(&fields, "exp")?;
+    let subject = jet_auth_optional_text(&fields, "sub")?;
+    let expected_audience = jet_auth_audience(&fields, audience)?;
     let actual_issuer = jet_auth_optional_text(&fields, "iss")?;
+    let issued_at = jet_auth_optional_i64(&fields, "iat")?;
     if let Some(expected) = issuer {
         if actual_issuer.as_deref() != Some(expected) {
             return Err(JetAuthError::WrongIssuer {
@@ -204,11 +207,11 @@ fn jet_auth_claims(
         return Err(JetAuthError::TokenExpired);
     }
     Ok(JetAuthClaims {
-        subject: jet_auth_optional_text(&fields, "sub")?,
-        audience: jet_auth_audience(&fields, audience)?,
-        issuer: jet_auth_optional_text(&fields, "iss")?,
+        subject,
+        audience: expected_audience,
+        issuer: actual_issuer,
         expires_at,
-        issued_at: jet_auth_optional_i64(&fields, "iat")?,
+        issued_at,
     })
 }
 
@@ -286,4 +289,3 @@ where
     }
     jet_auth_claims(&message, audience, issuer.map(String::as_str), clock_skew_ms)
 }
-

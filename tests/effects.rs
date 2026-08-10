@@ -1010,12 +1010,12 @@ fn run() {
     );
     let rust = jet::compile(src).expect("compiles").rust;
     assert!(
-        rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_from))"),
+        rust.contains("jet_txn::snapshot(&mut __jet_tx, &mut (*__jet_from))"),
         "expected an auto-snapshot of the mutated `from`: {}",
         rust
     );
     assert!(
-        rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_to))"),
+        rust.contains("jet_txn::snapshot(&mut __jet_tx, &mut (*__jet_to))"),
         "expected an auto-snapshot of the mutated `to`: {}",
         rust
     );

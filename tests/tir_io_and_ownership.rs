@@ -109,8 +109,8 @@ fn run() {
 /// Three covered fns: a generic `largest<T: Comparable>(xs: [T]) -> (T?)` (a `>` on a
 /// `Comparable`-bound type var, `[T]` indexing, a `T?` return with `value`/`None`); a
 /// trait-OBJECT param `print_area(s: Shape)` (dynamic dispatch `s.name()`/`s.area()`
-/// through a `Box<dyn user_Shape>`); and `main` — a `[Shape]` trait-object list built from
-/// `Box::new(<lit>) as Box<dyn user_Shape>` element coercions, iterated via `.each`
+/// through a `Box<dyn __jet_Shape>`); and `main` — a `[Shape]` trait-object list built from
+/// `Box::new(<lit>) as Box<dyn __jet_Shape>` element coercions, iterated via `.each`
 /// (`jet_list_each_ref`), plus a generic call `largest(nums)` and a derived-Comparable
 /// `scores.sort_by(...)`. All route `ROUTE TIR` (the Circle/Square trait methods already
 /// route since Phase 12), and the whole suite is byte-identical (golden parity).
@@ -385,8 +385,8 @@ fn run() {
 
 /// c109 (foreign struct literal): an UNqualified cross-module foreign struct literal
 /// (`Note.{ text: "hi" }` written in an importing module, no `note.` namespace) must
-/// prefix the foreign module (`user_notes::user_Note`) or rustc can't find the type
-/// (E0422). The AST `emit_struct_lit` plain branch only prefixed via `user_type_apply_rust`
+/// prefix the foreign module (`__jet_notes::__jet_Note`) or rustc can't find the type
+/// (E0422). The AST `emit_struct_lit` plain branch only prefixed via `generated_path`
 /// once `cx.foreign_types` is consulted (the fix); the TIR reproduces the prefixed head.
 /// `main` constructs + reads the foreign struct and routes through the TIR.
 #[test]

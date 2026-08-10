@@ -274,7 +274,7 @@ pub(crate) fn resolve_builtin_op(
                         variant,
                         ..
                     }) if type_name == crate::Syntax::TYPE_REMOVE_BY => {
-                        match variant.strip_prefix("user_").unwrap_or(variant) {
+                        match variant.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant) {
                             "Val" => Some(ListRemoveMode::Value),
                             "Slot" => Some(ListRemoveMode::Slot),
                             _ => None,

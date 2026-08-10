@@ -1,7 +1,7 @@
 //! Diagnostics coverage accounting (board card c116, P0).
 //!
 //! Enforces invariant I4: every emitted code must have
-//!   (a) an entry in docs/spec/diagnostics.md,
+//!   (a) an entry in the typed diagnostic-row registry,
 //!   (b) at least one tests/ui (or tests/ui_lint, tests/cli, tests/release)
 //!       snapshot that mentions it, and
 //!   (c) a `jet explain` page (resolves through Explain::lookup).
@@ -100,67 +100,27 @@ fn walk_rs(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
     }
 }
 
-/// All codes registered in docs/spec/diagnostics.md (the registry table rows,
-/// excluding separator lines).
+/// All codes registered in the typed compile-time diagnostic rows.
 fn registered_codes() -> BTreeSet<String> {
-    let diag_md = read(&root().join("docs/spec/diagnostics.md"));
-    let mut out = BTreeSet::new();
-    for line in diag_md.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with('|') {
-            continue;
-        }
-        let cells: Vec<&str> = trimmed.split('|').map(str::trim).collect();
-        if cells.len() < 3 {
-            continue;
-        }
-        let code = cells[1].trim();
-        if jet::Explain::is_code(code) {
-            out.insert(code.to_string());
-        }
-    }
-    out
+    jet_foundation::Registry::diagnostic_rows()
+        .iter()
+        .map(|row| row.code.to_string())
+        .collect()
 }
 
 fn registered_code_rows() -> Vec<(String, usize)> {
-    let diag_md = read(&root().join("docs/spec/diagnostics.md"));
-    let mut rows = Vec::new();
-    let mut in_registry = false;
-    for (idx, line) in diag_md.lines().enumerate() {
-        if line.trim() == "## Error code registry" {
-            in_registry = true;
-            continue;
-        }
-        if in_registry && line.starts_with("## ") {
-            break;
-        }
-        if !in_registry {
-            continue;
-        }
-        let trimmed = line.trim();
-        if !trimmed.starts_with('|') {
-            continue;
-        }
-        let cells: Vec<&str> = trimmed.split('|').map(str::trim).collect();
-        if cells.len() < 3 {
-            continue;
-        }
-        let code = cells[1].trim();
-        if jet::Explain::is_code(code) {
-            rows.push((code.to_string(), idx + 1));
-        }
-    }
-    rows
+    jet_foundation::Registry::diagnostic_rows()
+        .iter()
+        .enumerate()
+        .map(|(idx, row)| (row.code.to_string(), idx + 5))
+        .collect()
 }
 
-/// Whether a code is marked as retired in diagnostics.md.
-fn is_retired(code: &str, diag_md: &str) -> bool {
-    for line in diag_md.lines() {
-        if line.contains(code) && line.contains("retired") {
-            return true;
-        }
-    }
-    false
+/// Whether a code is marked retired in the typed row source.
+fn is_retired(code: &str, _diag_md: &str) -> bool {
+    jet_foundation::Registry::diagnostic(code).is_some_and(|row| {
+        row.status == jet_foundation::Registry::DiagnosticStatus::Retired
+    })
 }
 
 /// All [EL]NNNN codes that appear in snapshot files or legacy test assertions.
@@ -402,15 +362,15 @@ const RUSTC_CODES_IN_SOURCE: &[&str] = &[
 /// Internal placeholder used in Jetpack/ModuleEval — never reaches the user.
 const INTERNAL_PLACEHOLDER: &[&str] = &["E0000"];
 
-/// Codes registered in diagnostics.md as *retired*; still emitted for backward-compat
+/// Codes registered in the typed rows as *retired*; still emitted for backward-compat
 /// log readability but not expected to have new snapshots.
 /// (E0019 is retired but still fires for legacy `import` spelling. The
-///  retirement note in diagnostics.md is the coverage proof.)
+///  retirement status in the row is the coverage proof.)
 const RETIRED_WITH_LEGACY_EMISSION: &[&str] = &["E0019"];
 
 /// Codes that are fully implemented (parser + sema) but gated behind an
 /// unreleased syntax feature; the gate is named here. They satisfy I4 via
-/// the diagnostics.md entry + the gate comment; snapshots will land with the gate.
+/// the typed row + the gate comment; snapshots will land with the gate.
 ///
 /// Gate: D-UNINIT1 (#Uninit binding) — parser gate in Parser/Statements.rs:660
 const STAGED_BEHIND_GATE: &[&str] = &[
@@ -424,7 +384,7 @@ const STAGED_BEHIND_GATE: &[&str] = &[
 /// Codes that ARE fully implemented but cannot be snapshot-tested via a .jet file
 /// because the triggering condition causes a physical problem (stack overflow, system
 /// dependency) before the diagnostic fires. Coverage is via Source/ unit tests or
-/// the diagnostic code entry in diagnostics.md.
+/// the typed diagnostic row.
 ///
 /// E0909: Parser depth-guards at 64 levels of generic nesting, but the parser's
 ///        own recursive descent overflows the stack before reaching depth 64.
@@ -633,11 +593,11 @@ fn allowed_backend_voice_snapshot(path: &std::path::Path, text: &str, needle: &s
 }
 
 // ---------------------------------------------------------------------------
-// I4(a): every emitted Jet code has a diagnostics.md entry
+// I4(a): every emitted Jet code has a typed row
 // ---------------------------------------------------------------------------
 
 #[test]
-fn every_emitted_code_has_diagnostics_md_entry() {
+fn every_emitted_code_has_typed_row() {
     let emitted = emitted_codes();
     let registered = registered_codes();
     let exclusions = all_exclusions();
@@ -652,10 +612,9 @@ fn every_emitted_code_has_diagnostics_md_entry() {
 
     assert!(
         missing.is_empty(),
-        "The following codes are emitted in Source/ but have NO entry in \
-         docs/spec/diagnostics.md (invariant I4a).\n\
-         For each: add a row to the Error code registry table with code, stage, and meaning,\n\
-         then add what/why/fix and a tests/ui snapshot.\n\
+        "The following codes are emitted in Source/ but have NO typed diagnostic row \
+         (invariant I4a). For each: add one row with code, stage, severity, moment, \
+         What/Why/Fix templates, then add a tests/ui snapshot.\n\
          Missing:\n  {}",
         missing.join("\n  ")
     );
@@ -667,12 +626,12 @@ fn diagnostics_registry_has_no_duplicate_code_rows() {
     let mut duplicates = Vec::new();
     for (code, line) in registered_code_rows() {
         if !seen.insert(code.clone()) {
-            duplicates.push(format!("{code} at docs/spec/diagnostics.md:{line}"));
+            duplicates.push(format!("{code} at Diagnostics.jet:{line}"));
         }
     }
     assert!(
         duplicates.is_empty(),
-        "duplicate code rows in docs/spec/diagnostics.md Error code registry:\n{}",
+        "duplicate code rows in the typed diagnostic source:\n{}",
         duplicates.join("\n")
     );
 }
@@ -686,7 +645,7 @@ fn every_emitted_code_has_snapshot() {
     let emitted = emitted_codes();
     let snaps = snapshot_codes();
     let exclusions = all_exclusions();
-    let diag_md = read(&root().join("docs/spec/diagnostics.md"));
+    let diag_md = "";
     let acknowledged: BTreeSet<String> = ACKNOWLEDGED_COVERAGE_GAPS
         .iter()
         .map(|s| s.to_string())
@@ -721,7 +680,7 @@ fn every_emitted_code_has_snapshot() {
 #[test]
 fn acknowledged_gaps_are_still_unresolved() {
     let snaps = snapshot_codes();
-    let diag_md = read(&root().join("docs/spec/diagnostics.md"));
+    let diag_md = "";
 
     // Codes in the acknowledged list that now have snapshot coverage — time to remove them.
     let mut now_covered: Vec<String> = ACKNOWLEDGED_COVERAGE_GAPS
@@ -774,13 +733,13 @@ fn exclusion_list_counts_do_not_grow() {
 }
 
 // ---------------------------------------------------------------------------
-// I4(c): jet explain resolves for every live registered code
+// I4(c): jet explain resolves for every live typed row
 // ---------------------------------------------------------------------------
 
 #[test]
 fn every_registered_code_has_explain_page() {
     let registered = registered_codes();
-    let diag_md = read(&root().join("docs/spec/diagnostics.md"));
+    let diag_md = "";
 
     let mut missing: Vec<String> = registered
         .iter()
@@ -792,17 +751,17 @@ fn every_registered_code_has_explain_page() {
 
     assert!(
         missing.is_empty(),
-        "The following codes are registered in docs/spec/diagnostics.md but \
+        "The following codes are registered in the typed row source but \
          `jet explain <code>` returns None (invariant I4c).\n\
-         Since Explain.rs is built directly from diagnostics.md, this means the code \
-         is malformed in the registry table (check pipe-column count).\n\
+         Since Explain.rs is built directly from the row registry, this means the \
+         typed row is malformed or missing.\n\
          Missing explain:\n  {}",
         missing.join("\n  ")
     );
 }
 
 // ---------------------------------------------------------------------------
-// Audit: codes in diagnostics.md but NOT emitted (spec ahead of impl)
+// Audit: typed rows but NOT emitted (spec ahead of impl)
 //
 // This is NOT a failure — it's an informational audit. Codes may be
 // registered before their feature lands. We print a note if running with
@@ -811,7 +770,7 @@ fn every_registered_code_has_explain_page() {
 
 #[test]
 fn registered_unimplemented_codes_are_expected() {
-    // These codes are in diagnostics.md but not yet emitted in Source/.
+    // These codes are in the typed source but not yet emitted in Source/.
     // They are INTENTIONALLY registered ahead of their feature milestone.
     // If a new code appears here that is NOT in this list, it is unexpected
     // and should be investigated.
@@ -900,11 +859,11 @@ fn registered_unimplemented_codes_are_expected() {
 
     assert!(
         registered.contains("E0033"),
-        "E0033 is a retired reservation and must remain in docs/spec/diagnostics.md"
+        "E0033 is a retired reservation and must remain in the typed rows"
     );
     assert!(
-        registered.contains("E0745") && is_retired("E0745", &read(&root().join("docs/spec/diagnostics.md"))),
-        "E0745 is a retired reservation and must remain in docs/spec/diagnostics.md"
+        registered.contains("E0745") && is_retired("E0745", ""),
+        "E0745 is a retired reservation and must remain in the typed rows"
     );
     let parser = read(&root().join("crates/jet-parser/src/Parser/mod.rs"));
     assert!(
@@ -915,6 +874,11 @@ fn registered_unimplemented_codes_are_expected() {
     let spec_ahead_of_impl: BTreeSet<String> = registered
         .iter()
         .filter(|c| !exclusions.contains(*c))
+        .filter(|c| {
+            jet_foundation::Registry::diagnostic(c).is_some_and(|row| {
+                row.status != jet_foundation::Registry::DiagnosticStatus::Reserved
+            })
+        })
         .filter(|c| !emitted.contains(*c))
         .cloned()
         .collect();
@@ -925,7 +889,7 @@ fn registered_unimplemented_codes_are_expected() {
 
     assert!(
         unexpected.is_empty(),
-        "Unexpected codes registered in diagnostics.md but not emitted in Source/.\n\
+        "Unexpected codes registered in typed rows but not emitted in Source/.\n\
          If this is intentional (staged feature), add the code to \
          EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
          Unexpected:\n  {}",

@@ -13,6 +13,14 @@ fn jet_path_from(s: &String) -> JetPath {
         inner: std::path::PathBuf::from(s),
     }
 }
+
+/// D-BOUND-HEAD1=A: encode each Path hole as one component, then use the
+/// existing infallible Path constructor.
+fn jet_typed_path_literal(literals: &[&str], holes: Vec<String>) -> JetPath {
+    let text = jet_typed_path_interpolate(literals, &holes);
+    jet_path_from(&text)
+}
+
 fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
     JetPath {
         inner: std::path::PathBuf::from(jet_std_path_join(

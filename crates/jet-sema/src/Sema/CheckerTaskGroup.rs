@@ -4,7 +4,7 @@ use crate::Syntax;
 use crate::AST::{CallArg, Expr, Stmt};
 use std::collections::HashSet;
 
-/// A child task spawned inside the active `taskgroup` scope.
+/// A child task spawned inside the active `task.group` scope.
 pub(crate) struct PendingTaskSpawn {
     pub binding: Option<String>,
     pub span: Span,
@@ -64,7 +64,7 @@ impl TaskGroupCtx {
     fn next_synth(&mut self) -> String {
         let n = self.synth_counter;
         self.synth_counter += 1;
-        format!("__jet_tg_{n}")
+        Syntax::generated_name(&format!("tg_{n}"))
     }
 }
 
@@ -81,14 +81,64 @@ impl<'a> Checker<'a> {
             .map(|g| g.name.as_str())
     }
 
+    /// D-CONC-SPAWN1=D: resolve parser-created `task` nodes without exposing
+    /// the compiler-private receiver to ordinary name lookup. A lexical or
+    /// parameter group reuses the existing scoped-task machinery; a detached
+    /// spawn and the top-level combinators use the same core task implementation.
+    pub(crate) fn infer_task_surface_method(
+        &mut self,
+        receiver: &mut Box<Expr>,
+        method: &str,
+        span: Span,
+        args: &mut Vec<CallArg>,
+        recv_type_out: &mut Option<String>,
+        resolved_ret_out: &mut Option<Type>,
+    ) -> Option<Type> {
+        let active_group = self.active_taskgroup().map(|group| group.name.clone());
+        if let Some(group) = active_group {
+            *receiver = Box::new(Expr::Ident(group, receiver.span()));
+            let group_name = match receiver.as_ref() {
+                Expr::Ident(name, _) => name.clone(),
+                _ => unreachable!("canonical task group receiver is an identifier"),
+            };
+            let ret = match method {
+                "spawn" => self.infer_task_spawn(Some(&group_name), args, span),
+                "all" => self.infer_taskgroup_all(args, span),
+                "race" => self.infer_taskgroup_race(args, span),
+                "any" => self.infer_taskgroup_any(args, span),
+                _ => None,
+            };
+            *recv_type_out = Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE.to_string());
+            *resolved_ret_out = ret.clone();
+            return ret;
+        }
+
+        if method == "spawn" {
+            let ret = self.infer_task_spawn(None, args, span);
+            *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
+            *resolved_ret_out = ret.clone();
+            return ret;
+        }
+
+        let ret = match method {
+            "all" => self.infer_taskgroup_all(args, span),
+            "race" => self.infer_taskgroup_race(args, span),
+            "any" => self.infer_taskgroup_any(args, span),
+            _ => None,
+        };
+        *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
+        *resolved_ret_out = ret.clone();
+        ret
+    }
+
     pub(crate) fn taskgroup_receiver_ok(&mut self, receiver: &Expr, span: Span) -> bool {
         let Expr::Ident(name, rspan) = receiver else {
             self.diags.push(Diagnostic::error(
                 "E1110",
-                "`.task => …` must be called on a taskgroup handle".to_string(),
-                "structured spawning goes through a lexical taskgroup or a `TaskGroup` parameter"
+                "`task` needs an active task group".to_string(),
+                "structured spawning goes through a lexical `task.group` or a `TaskGroup` parameter"
                     .to_string(),
-                "write `g.task => …` where `g` is a taskgroup name or parameter".to_string(),
+                "write `task work()` inside a group, or pass a `TaskGroup` parameter".to_string(),
                 Some(span),
             ));
             return false;
@@ -104,22 +154,22 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E1110",
                 format!(
-                    "`.task` must be called on the active taskgroup handle `{}`, not `{}`",
+                    "`task` must use the active task group `{}`, not `{}`",
                     active, name
                 ),
-                "each lexical `taskgroup` block owns spawns on its bound handle; a helper can instead receive `TaskGroup` as a parameter".to_string(),
+                "each lexical `task.group` block owns spawns; a helper can instead receive `TaskGroup` as a parameter".to_string(),
                 format!(
-                    "write `{active}.task => …`, or pass `{active}` to `fn helper(group: TaskGroup)`"
+                    "write `task work()` in the active group, or pass `{active}` to `fn helper(group: TaskGroup)`"
                 ),
                 Some(*rspan),
             ));
         } else {
             self.diags.push(Diagnostic::error(
                 "E1110",
-                "`.task => …` needs a taskgroup handle".to_string(),
-                "structured spawning is scoped to a lexical taskgroup or a `TaskGroup` parameter"
+                "`task` needs an active task group".to_string(),
+                "structured spawning is scoped to a lexical `task.group` or a `TaskGroup` parameter"
                     .to_string(),
-                "wrap the call in `taskgroup g { … }`, or add `group: TaskGroup` to this helper"
+                "wrap the call in `task.group g { … }`, or add `group: TaskGroup` to this helper"
                     .to_string(),
                 Some(*rspan),
             ));
@@ -133,7 +183,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|fact| matches!(fact.access, ViewAccess::Write))
     }
 
-    /// D-TASKBORROW1=A: admit a borrowed capture in a `taskgroup` child.
+    /// D-TASKBORROW1=A: admit a borrowed capture in a `task.group` child.
     ///
     /// Reads are admitted freely; a write is admitted only when its place is
     /// provably disjoint from every place a sibling already holds. A group can
@@ -202,7 +252,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E1101",
                 what,
-                "a taskgroup runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap"
+                "a task.group runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap"
                     .to_string(),
                 "borrow separate fields or constant indexes, give each task its own owned copy, or send results back through a channel"
                     .to_string(),
@@ -220,7 +270,7 @@ impl<'a> Checker<'a> {
         Some(true)
     }
 
-    /// D-TASKBORROW1=A: a loan to a taskgroup child opens before the child
+    /// D-TASKBORROW1=A: a loan to a task.group child opens before the child
     /// launches and closes only when the group joins. Until then the parent may
     /// not move, drop, or write the lent place.
     ///
@@ -254,7 +304,7 @@ impl<'a> Checker<'a> {
             "E1101",
             format!("`{changed_name}` cannot {action} while `{lent}` is lent to a task in `{group}`"),
             format!(
-                "a taskgroup joins its children at the end of the block, so `{lent}` stays borrowed until `{group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads"
+                "a task.group joins its children at the end of the block, so `{lent}` stays borrowed until `{group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads"
             ),
             format!(
                 "do this after the `{group}` block ends, or give the task its own owned copy instead of a borrow"
@@ -364,7 +414,11 @@ impl<'a> Checker<'a> {
         if self.active_taskgroup().is_none() {
             return false;
         }
-        if !self.taskgroup_receiver_ok(receiver, mspan) {
+        let canonical_task = matches!(
+            receiver,
+            Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER
+        );
+        if !canonical_task && !self.taskgroup_receiver_ok(receiver, mspan) {
             let _ = self.infer(expr);
             return false;
         }
@@ -434,25 +488,15 @@ impl<'a> Checker<'a> {
             return None;
         }
         *recv_type_out = Some(Syntax::TYPE_TASKGROUP.to_string());
-        let receiver_name = match receiver.as_ref() {
-            Expr::Ident(name, _) => name.clone(),
-            _ => unreachable!("taskgroup_receiver_ok accepted a non-identifier"),
-        };
         match method {
-            Syntax::TASKGROUP_SPAWN_METHOD => {
-                self.infer_taskgroup_spawn(&receiver_name, args, span)
-            }
-            Syntax::TASKGROUP_ALL_METHOD => self.infer_taskgroup_all(args, span),
-            Syntax::TASKGROUP_RACE_METHOD => self.infer_taskgroup_race(args, span),
-            Syntax::TASKGROUP_ANY_METHOD => self.infer_taskgroup_any(args, span),
             Syntax::TASKGROUP_SELECT_METHOD => self.infer_taskgroup_select(args, span),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`TaskGroup` has no method `{other}`"),
-                    "structured taskgroups support `.task => …`, `.all([…])`, `.race([…])`, `.any([…])`, and `.select()`"
+                    "task groups use the `task` keyword; `TaskGroup` values only support the fluent select builder"
                         .to_string(),
-                    "write `g.task => work()`, `g.all([h1, h2])`, or `g.select().recv(ch).wait()`".to_string(),
+                    "write `task work()`, `task.all { … }`, or `task.group g { g.select().recv(ch).wait() }".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {
@@ -463,9 +507,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn infer_taskgroup_spawn(
+    fn infer_task_spawn(
         &mut self,
-        receiver: &str,
+        receiver: Option<&str>,
         args: &mut Vec<CallArg>,
         span: Span,
     ) -> Option<Type> {
@@ -473,12 +517,12 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`.task => …` takes one body, got {} argument{}",
+                    "`task` takes one body, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
-                "a scoped task runs the `{ … }` body on a worker thread".to_string(),
-                "write `g.task => your_work()`".to_string(),
+                "a scoped task runs its body on a worker thread".to_string(),
+                "write `task your_work()`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -503,11 +547,11 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0104",
                         format!(
-                            "`.task => …` needs a zero-parameter body, got {} parameter{}",
+                            "`task` needs a zero-parameter body, got {} parameter{}",
                             params.len(),
                             if params.len() == 1 { "" } else { "s" }
                         ),
-                        "a scoped task body captures values from the enclosing scope — it takes no parameters"
+                        "a task body captures values from the enclosing scope — it takes no parameters"
                             .to_string(),
                         "move data in via capture instead of lambda parameters".to_string(),
                         Some(args[0].expr.span()),
@@ -519,9 +563,9 @@ impl<'a> Checker<'a> {
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!("`.task` needs a block body, not {}", other.show()),
-                    "a scoped task runs a block on a worker thread".to_string(),
-                    "write `g.task => your_work()`".to_string(),
+                    format!("`task` needs a callable body, not {}", other.show()),
+                    "a task runs its body on a worker thread".to_string(),
+                    "write `task your_work()`".to_string(),
                     Some(args[0].expr.span()),
                 ));
                 Type::Named("Unit".to_string())
@@ -538,7 +582,9 @@ impl<'a> Checker<'a> {
             );
         }
         let binding = self.current_binding_name.clone();
-        self.register_taskgroup_spawn(receiver, binding, span);
+        if let Some(receiver) = receiver {
+            self.register_taskgroup_spawn(receiver, binding, span);
+        }
         Some(Type::Apply {
             name: "Task".to_string(),
             args: vec![t],
@@ -550,13 +596,13 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`.all()` takes one list of task handles, got {} argument{}",
+                    "`task.all` takes task branches, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
-                "`.all([h1, h2, …])` waits for every handle and returns the results in order"
-                    .to_string(),
-                "write `g.all([h1, h2])`".to_string(),
+                    "`task.all { … }` waits for every branch and returns the results in order"
+                        .to_string(),
+                "write `task.all { first(), second() }`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -574,12 +620,12 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
-                            "`.all()` needs a list of task handles, not `[{}]`",
+                    "`task.all` needs task branches, not `[{}]`",
                             other.show()
                         ),
-                        "each element must be a `Task<T>` handle returned from `g.task => …`"
+                        "each branch must produce one task result"
                             .to_string(),
-                        "write `g.all([h1, h2])` where each handle came from `g.task`".to_string(),
+                        "write `task.all { first(), second() }`".to_string(),
                         Some(args[0].expr.span()),
                     ));
                     return None;
@@ -589,11 +635,11 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0112",
                     format!(
-                        "`.all()` needs a list of task handles, not {}",
+                        "`task.all` needs task branches, not {}",
                         other.show()
                     ),
-                    "pass a `[Task<T>]` list of handles from `g.task => …`".to_string(),
-                    "write `g.all([h1, h2])`".to_string(),
+                    "give `task.all` one or more task branches".to_string(),
+                    "write `task.all { first(), second() }`".to_string(),
                     Some(args[0].expr.span()),
                 ));
                 return None;
@@ -608,8 +654,8 @@ impl<'a> Checker<'a> {
         self.infer_taskgroup_first_task(
             args,
             span,
-            "`.race()`",
-            "`.race([h1, h2, …])` returns the first completed result",
+            "`task.race`",
+            "`task.race { … }` returns the first successful result and cancels the losers",
         )
     }
 
@@ -617,8 +663,8 @@ impl<'a> Checker<'a> {
         self.infer_taskgroup_first_task(
             args,
             span,
-            "`.any()`",
-            "`.any([h1, h2, …])` returns the first completed result",
+            "`task.any`",
+            "`task.any { … }` returns the first completed result and cancels the rest",
         )
     }
 
@@ -633,12 +679,12 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "{method_label} takes one list of task handles, got {} argument{}",
+                    "{method_label} takes task branches, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
                 why.to_string(),
-                "write `g.race([h1, h2])`".to_string(),
+                "write `task.race { first(), second() }`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -656,12 +702,11 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
-                            "{method_label} needs a list of task handles, not `[{}]`",
+                            "{method_label} needs task branches, not `[{}]`",
                             other.show()
                         ),
-                        "each element must be a `Task<T>` handle returned from `g.task => …`"
-                            .to_string(),
-                        "write `g.race([h1, h2])` where each handle came from `g.task`".to_string(),
+                        "each branch must produce one task result".to_string(),
+                        "write `task.race { first(), second() }`".to_string(),
                         Some(args[0].expr.span()),
                     ));
                     return None;
@@ -671,11 +716,11 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0112",
                     format!(
-                        "{method_label} needs a list of task handles, not {}",
+                        "{method_label} needs task branches, not {}",
                         other.show()
                     ),
-                    "pass a `[Task<T>]` list of handles from `g.task => …`".to_string(),
-                    "write `g.race([h1, h2])`".to_string(),
+                    "give the combinator one or more task branches".to_string(),
+                    "write `task.race { first(), second() }`".to_string(),
                     Some(args[0].expr.span()),
                 ));
                 return None;

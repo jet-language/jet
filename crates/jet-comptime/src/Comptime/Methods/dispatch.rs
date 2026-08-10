@@ -1202,10 +1202,18 @@ impl<'a> Interp<'a> {
                                 .find(|(name, _)| name == &field.name)
                                 .map(|(_, value)| value.debug_rust())
                                 .unwrap_or_else(|| CtValue::Unit.debug_rust());
-                            format!("user_{}: {}", field.name, rendered)
+                            format!(
+                                "{}: {}",
+                                jet_foundation::Syntax::generated_name(&field.name),
+                                rendered
+                            )
                         })
                         .collect();
-                    return format!("user_{type_name} {{ {} }}", parts.join(", "));
+                    return format!(
+                        "{} {{ {} }}",
+                        jet_foundation::Syntax::generated_path(type_name),
+                        parts.join(", ")
+                    );
                 }
                 let parts: Vec<String> = def
                     .fields

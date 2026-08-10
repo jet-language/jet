@@ -67,14 +67,14 @@ impl JetShow for JetRange {
         self.structural_text()
     }
 }
-impl user_Display for JetRange {
+impl __jet_Display for JetRange {
     fn display(&self) -> String {
         self.structural_text()
     }
 }
 impl JetDisplay for JetRange {
     fn jet_display(&self) -> String {
-        <Self as user_Display>::display(self)
+        <Self as __jet_Display>::display(self)
     }
 }
 impl JetDebug for JetRange {
@@ -82,7 +82,7 @@ impl JetDebug for JetRange {
         self.structural_text()
     }
 }
-impl user_Equatable for JetRange {
+impl __jet_Equatable for JetRange {
     fn equal(&self, rhs: &Self) -> bool {
         jet_range_equal(
             self.start,
@@ -400,6 +400,29 @@ impl JetDebug for JetAbsent {
     }
     fn jet_report_is_clean() -> bool {
         true
+    }
+}
+impl JetShow for JetTaskFailure {
+    fn jet_show(&self) -> String {
+        match self {
+            JetTaskFailure::Cancelled => "Cancelled".to_string(),
+            JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+            JetTaskFailure::Panicked(reason) => format!("Panicked({reason})"),
+        }
+    }
+}
+impl JetDisplay for JetTaskFailure {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+impl JetDebug for JetTaskFailure {
+    fn jet_debug(&self) -> String {
+        match self {
+            JetTaskFailure::Cancelled => "Cancelled".to_string(),
+            JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+            JetTaskFailure::Panicked(reason) => format!("Panicked({reason:?})"),
+        }
     }
 }
 impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {

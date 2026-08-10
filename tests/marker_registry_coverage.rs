@@ -199,9 +199,9 @@ fn repeatable_rows_are_declared_not_assumed() {
 }
 
 /// D-META-REG1=A: the marker rows are rows of the one registration table, and a
-/// knowledge plane, a right, a build fact, and a corpus truth are its other
-/// four uses. The coverage guard above walks the marker rows; these walk the
-/// whole table, so no kind gets a guard of its own.
+/// knowledge plane, a right, a build fact, a corpus truth, and a diagnostic row
+/// are its other five uses. The coverage guard above walks the marker rows;
+/// these walk the whole table, so no kind gets a guard of its own.
 #[test]
 fn the_one_table_holds_every_kind() {
     use jet_foundation::Registry::{self, RowKind, RowTarget, SafeDirection};
@@ -212,6 +212,7 @@ fn the_one_table_holds_every_kind() {
         RowKind::Right,
         RowKind::Fact,
         RowKind::Truth,
+        RowKind::Diagnostic,
     ] {
         let row = Registry::rows()
             .iter()
@@ -228,6 +229,12 @@ fn the_one_table_holds_every_kind() {
         assert_eq!(registered.target, RowTarget::Code(row.sites));
         assert_eq!(registered.rule.map(|rule| rule.name), Some(row.name));
         assert_eq!(registered.safe_direction, SafeDirection::None);
+    }
+
+    for (name, _) in Registry::TYPE_PLANE_ROWS {
+        let row = Registry::row(name)
+            .unwrap_or_else(|| panic!("type plane `{name}` is not in the one table"));
+        assert_eq!(row.kind(), RowKind::Plane);
     }
 }
 

@@ -39,6 +39,12 @@ loop ev, reader {
 writer :: json.writer(^out, canonical: true)?
 ```
 
+The matched Python API fixture is `examples/features/serde/encoding_json_stream.py`;
+it uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and `json.load`
+for the same canonical file round trip. `tests/encoding_parity.rs` must prove the
+Jet fixture on AOT, resident JIT, and the forced interpreter; E0956/E0953 is a
+tier failure, not an accepted parity result.
+
 ## D-ENCSTREAM-SURFACE1=A — Public streaming encoding surface
 
 Ratified D-ENCSTREAM1=A fixes the architecture, not this public spelling: every codec stays in core.encoding.<format>; whole-value and stream modes share DataTree and Codable; streaming is one mode of the same adapter. This ballot adds no language syntax and does not create a second codec family. Existing parse/to_string/encode/decode and the shipped json.events(DataTree) => String path transcript remain unchanged under release policy. Pull events exist only through json.reader and use DataEvent. Any future json.events rename or return-type change requires an edition-migration decision with source rewrite, deprecation window, and old-edition behavior; no return-type-only overload exists (I8).

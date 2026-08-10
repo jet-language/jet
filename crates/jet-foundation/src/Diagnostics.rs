@@ -69,7 +69,7 @@ pub enum ReportMoment {
 }
 
 impl ReportMoment {
-    fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Compile => "compile",
             Self::Run => "run",
@@ -198,6 +198,9 @@ impl Diagnostic {
 }
 
 impl Diagnostic {
+    /// Build a report from the one typed row. The supplied strings are the
+    /// row's holes after sema has filled them; code, severity, and moment never
+    /// come from a second call-site policy.
     pub fn error(
         code: impl Into<String>,
         what: String,
@@ -205,10 +208,13 @@ impl Diagnostic {
         fix: String,
         span: Option<Span>,
     ) -> Self {
+        let code = code.into();
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         let mut d = Diagnostic {
-            moment: ReportMoment::Compile,
-            severity: Severity::Error,
-            code: code.into(),
+            moment: row.moment,
+            severity: row.severity,
+            code,
             what,
             why,
             fix,
@@ -270,10 +276,13 @@ impl Diagnostic {
         fix: String,
         span: Option<Span>,
     ) -> Self {
+        let code = code.into();
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         Diagnostic {
-            moment: ReportMoment::Compile,
-            severity: Severity::Lint,
-            code: code.into(),
+            moment: row.moment,
+            severity: row.severity,
+            code,
             what,
             why,
             fix,
@@ -1014,6 +1023,29 @@ mod crypto_diagnostic_contract_tests {
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
         assert_eq!(render_all_json("x.jet", "", &[]), "");
+    }
+
+    #[test]
+    fn constructors_take_metadata_from_the_typed_row() {
+        let error = Diagnostic::error(
+            "E0102",
+            "nothing named `pirnt` exists here".into(),
+            "only known functions can be called".into(),
+            "did you mean `print`?".into(),
+            None,
+        );
+        assert_eq!(error.severity, Severity::Error);
+        assert_eq!(error.moment, ReportMoment::Compile);
+
+        let lint = Diagnostic::lint(
+            "L2001",
+            "an item is deprecated".into(),
+            "the edition keeps it during migration".into(),
+            "use the replacement".into(),
+            None,
+        );
+        assert_eq!(lint.severity, Severity::Lint);
+        assert_eq!(lint.moment, ReportMoment::Compile);
     }
 
     #[test]

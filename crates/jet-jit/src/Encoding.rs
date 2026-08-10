@@ -1815,7 +1815,7 @@ extern "C" fn jet_jit_datatree_int(tree: i64) -> i64 {
     }
 }
 
-/// `user_Decode for Int`, distinct from strict `DataTree.int()`.
+/// `__jet_Decode for Int`, distinct from strict `DataTree.int()`.
 extern "C" fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode("", "invalid DataTree");

@@ -352,7 +352,7 @@ impl Session {
     fn render_locals(&mut self) -> String {
         match self.inf.locals() {
             Ok(out) => {
-                // I2: only `user_`-mangled bindings are Jet locals; a
+                // I2: only `__jet_`-mangled bindings are Jet locals; a
                 // compiler-internal temp (no prefix) is filtered, never shown.
                 let body: Vec<String> = Inferior::parse_locals(&out)
                     .iter()

@@ -39,6 +39,10 @@ fn is_simple_stmt(stmt: &Stmt) -> bool {
     }
 }
 
+pub(super) fn is_generated_label(name: &str) -> bool {
+    name.starts_with(Syntax::GENERATED_NAME_PREFIX)
+}
+
 /// Format a parsed program back to canonical Jet source.
 pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> String {
     let (source_toks, _) = crate::Lexer::lex(src);
@@ -293,6 +297,24 @@ fn format_program_with_tokens(
         f.fmt_item(item);
         f.emit_trailing(item_span_end(item));
     }
+    // D-ENTRY-SCRIPT1=B: script statements stay on the top-level surface for
+    // formatting; sema adds the implicit `run` only after this pass.
+    for (index, stmt) in prog.script_body.iter().enumerate() {
+        if !first {
+            if index == 0 {
+                f.blank_separator_before_item();
+            } else if !f.at_line_start {
+                f.newline();
+            }
+        }
+        first = false;
+        f.emit_leading(stmt.span().start);
+        f.fmt_stmt(stmt);
+        f.emit_trailing(f.statement_source_end(stmt));
+        if !f.at_line_start {
+            f.newline();
+        }
+    }
     f.emit_remaining_comments();
     if !f.out.ends_with('\n') {
         f.out.push('\n');
@@ -419,6 +441,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Tag(t) => t.span.start,
         Item::EffectDecl(declaration) => declaration.span.start,
         Item::MarkerDecl(declaration) => declaration.span.start,
+        Item::FactDecl(declaration) => declaration.span.start,
         Item::Module(m) => src[..m.name_span.start]
             .rfind(Syntax::KW_MODULE)
             .unwrap_or(m.span.start),
@@ -503,6 +526,7 @@ fn item_span_end(item: &Item) -> usize {
         Item::Tag(t) => t.span.end,
         Item::EffectDecl(declaration) => declaration.span.end,
         Item::MarkerDecl(declaration) => declaration.span.end,
+        Item::FactDecl(declaration) => declaration.span.end,
         Item::Module(m) => m.span.end,
         Item::CModule(cm) => cm.span.end,
         Item::CodeModule(cm) => cm.span.end,

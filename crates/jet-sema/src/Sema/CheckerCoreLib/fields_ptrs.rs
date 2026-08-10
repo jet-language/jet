@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
             }
             // E3101: pointer construction is a low-level operation; it needs the
             // audit gate.
-            if !self.in_unsafe {
+            if Syntax::core_mem_requires_audit(Syntax::MEM_FROM_ADDR) && !self.in_unsafe {
                 self.diags.push(e3101(Syntax::MEM_FROM_ADDR, span));
             }
             // The address is a plain Int.

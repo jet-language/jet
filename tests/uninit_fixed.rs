@@ -134,7 +134,7 @@ fn initialized_fixed_storage_mutating_borrow_writes_back() {
     let generated = jet::compile(MUTATING_BORROW_SOURCE).unwrap();
     let user = strip_vetted_prelude_modules(&generated.rust);
     assert!(
-        user.contains("user_set_first((user_bytes).as_array_mut())"),
+        user.contains("__jet_set_first((__jet_bytes).as_array_mut())"),
         "{user}"
     );
     if have_rustc() {

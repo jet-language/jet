@@ -4,6 +4,7 @@
 //! under the card #510 boundary.
 
 use super::*;
+use crate::AST::Type;
 
 pub(crate) const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
 pub(crate) const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
@@ -111,6 +112,7 @@ pub(crate) fn collect_used_core(
                 Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::EffectDecl(_)
                 | Item::MarkerDecl(_)
+                | Item::FactDecl(_)
                 | Item::Trait(_)
                 | Item::Tag(_) // D-QUAL2: tags use no core imports
                 | Item::ExternRust(_)
@@ -144,6 +146,19 @@ fn note_core_usage(
     if let Some(s) = span {
         spans.entry(key).or_insert(s);
     }
+}
+
+fn is_http_nominal_type(name: &str) -> bool {
+    matches!(
+        name,
+        "HTTPMethod"
+            | "HTTPStatus"
+            | "HTTPVersion"
+            | "HTTPHeaderName"
+            | "HTTPHeaderValue"
+            | "HTTPHeaders"
+            | "HTTPBody"
+    )
 }
 
 /// D-RINGLAYER1=A M2: bump inferred layer from emitted helper usage and enforce ceiling.
@@ -440,16 +455,6 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
-            if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
-                && method == Syntax::TASKGROUP_SPAWN_METHOD
-            {
-                note_core_usage(
-                    used,
-                    spans,
-                    "core.tasks::spawn",
-                    Some(*method_span),
-                );
-            }
             if matches!(
                 recv_type.as_deref(),
                 Some(crate::Syntax::TYPE_BIGINT)
@@ -486,6 +491,15 @@ pub(crate) fn collect_core_expr(
                     format!("core.crypto::__nominal__.{method}"),
                     Some(*method_span),
                 );
+            }
+            // D-NETDEP1=A: sema normalizes `http.Body.bytes(...)` and the other
+            // static HTTP nominal calls to a bare `HTTP*` receiver before this
+            // whole-program walk. Preserve the module reachability marker so
+            // AOT embeds the same HTTPMessage Prelude source used by JIT.
+            if recv_type.as_deref().is_some_and(is_http_nominal_type)
+                || matches!(receiver.as_ref(), Expr::Ident(name, _) if is_http_nominal_type(name))
+            {
+                note_core_usage(used, spans, "core.http::__nominal__", Some(*method_span));
             }
             if recv_type.as_deref() == Some(crate::Syntax::DURATION_TYPE)
                 || matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::DURATION_TYPE)
@@ -572,6 +586,22 @@ pub(crate) fn collect_core_expr(
             // CORELIB_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
             if c.name == Syntax::BUILTIN_INPUT {
                 note_core_usage(used, spans, "core.io::input", Some(c.name_span));
+            }
+            // D-BOUND-HEAD1=A: sema rewrites URL/Path/DateTime heads to their
+            // ordinary alternating literal/hole call before this reachability
+            // walk. Keep the owning optional prelude fragment reachable from
+            // that canonical call instead of inspecting source text.
+            match c.name.as_str() {
+                Syntax::TYPE_URL => {
+                    note_core_usage(used, spans, "core.url::typed_head", Some(c.name_span))
+                }
+                Syntax::TYPE_PATH => {
+                    note_core_usage(used, spans, "core.path::typed_head", Some(c.name_span))
+                }
+                Syntax::TYPE_DATETIME => {
+                    note_core_usage(used, spans, "core.time::typed_head", Some(c.name_span))
+                }
+                _ => {}
             }
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
@@ -669,7 +699,21 @@ pub(crate) fn collect_core_expr(
                 collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
-        Expr::TypedLit { body, .. } => {
+        Expr::TypedLit { head, body, span } => {
+            if let Some(Type::Named(name)) = head {
+                match name.as_str() {
+                    Syntax::TYPE_URL => {
+                        note_core_usage(used, spans, "core.url::typed_head", Some(*span))
+                    }
+                    Syntax::TYPE_PATH => {
+                        note_core_usage(used, spans, "core.path::typed_head", Some(*span))
+                    }
+                    Syntax::TYPE_DATETIME => {
+                        note_core_usage(used, spans, "core.time::typed_head", Some(*span))
+                    }
+                    _ => {}
+                }
+            }
             body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
         }
         Expr::EnumLit { args, .. } => {

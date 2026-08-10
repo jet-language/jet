@@ -9,7 +9,7 @@ use jet_foundation::Syntax;
 use jet_foundation::AST::ProgramBundle;
 use jet_foundation::{AST, Collections};
 
-use crate::Build::{SymKind, SymbolDB};
+use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
 use crate::Types::SourceSpan;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -730,12 +730,14 @@ fn semantic_shape(
 ) -> (SemanticSymbolKind, String) {
     match kind {
         SymKind::Module => (SemanticSymbolKind::Module, format!("module {name}")),
-        SymKind::Function { params, ret, effects, effect_via } => {
-            let params = params
-                .iter()
-                .map(|(name, ty)| format!("{name}: {}", ty.name()))
-                .collect::<Vec<_>>()
-                .join(", ");
+        SymKind::Function {
+            params,
+            param_contract,
+            ret,
+            effects,
+            effect_via,
+        } => {
+            let params = function_parameter_parts(params, param_contract).join(", ");
             let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
             let arrow = if let Some((param, _)) = effect_via {
                 format!(" =[via {param}]=>")

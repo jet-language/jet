@@ -281,7 +281,7 @@ fn jet_xml_decode_shape_error(reason: String) -> Vec<jet_std::FieldError> {
     jet_std::FieldError::one(reason)
 }
 
-fn jet_enc_xml_decode_projected<T: user_Decode>(projected: &jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_xml_decode_projected<T: __jet_Decode>(projected: &jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>> {
     match T::jet_decode(projected) {
         Ok(value) => Ok(value),
         Err(primary) => {
@@ -305,7 +305,7 @@ fn jet_enc_xml_decode_projected<T: user_Decode>(projected: &jet_std::DataTree) -
     }
 }
 
-fn jet_enc_xml_decode<T: user_Decode>(
+fn jet_enc_xml_decode<T: __jet_Decode>(
     text: &String,
     options: jet_std::XMLParseOptions,
 ) -> Result<T, Vec<jet_std::FieldError>> {
@@ -316,7 +316,7 @@ fn jet_enc_xml_decode<T: user_Decode>(
     jet_enc_xml_decode_projected(&jet_xml_to_data_tree(projected))
 }
 
-fn jet_enc_xml_decode_bytes<T: user_Decode>(
+fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
     bytes: &Vec<u8>,
     options: jet_std::XMLParseOptions,
 ) -> Result<T, Vec<jet_std::FieldError>> {
@@ -367,12 +367,12 @@ fn jet_cbor_encode_val(v: &jet_std::DataTree, out: &mut Vec<u8>, canonical: bool
     }
     Ok(())
 }
-fn jet_enc_cbor_to_bytes<T: user_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
+fn jet_enc_cbor_to_bytes<T: __jet_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
     let mut out = Vec::new();
     jet_cbor_encode_val(&value.jet_encode(), &mut out, false)?;
     Ok(out)
 }
-fn jet_enc_cbor_to_bytes_canonical<T: user_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
+fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
     let mut out = Vec::new();
     jet_cbor_encode_val(&value.jet_encode(), &mut out, true)?;
     Ok(out)
@@ -599,7 +599,7 @@ fn jet_cbor_decode_source_error(error: jet_std::CBORError) -> Vec<jet_std::Field
     )
 }
 
-fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_cbor_decode<T: __jet_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, Vec<jet_std::FieldError>> {
     jet_cbor_validate_options(&options).map_err(jet_cbor_decode_source_error)?;
     if bytes.len() as i64 > options.max_bytes {
         return Err(jet_cbor_decode_source_error(jet_cbor_error(

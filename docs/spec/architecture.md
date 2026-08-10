@@ -517,7 +517,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   internal-compiler-error banner owned by `Source/CmdCompile.rs`, exits 101,
   and is treated as a P0 bug. rustc's stderr is shown only inside that banner.
   Missing rustc, linker, or C library is a tool/user diagnostic, not an ICE.
-- **R6 — Name mangling.** User identifiers are emitted as `user_<name>`
+- **R6 — Name mangling.** User identifiers are emitted as `__jet_<name>`
   (`main` excepted) so user code can never collide with Rust keywords,
   macros, or std items.
 - **R7 — Backend is swappable.** Rust emission stays in

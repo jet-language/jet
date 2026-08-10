@@ -12,6 +12,8 @@ use std::io::{BufRead, Read};
 use std::time::Instant;
 use crate::Marshal::{clone_string, result_ok, result_err_msg};
 
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
+
 /// Stream / Inherit / Capture — same order as `jet_std::ProcessStreamMode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StreamMode {
@@ -661,10 +663,8 @@ extern "C" fn jet_jit_process_spec_capabilities(_spec: i64) -> i64 {
         // A resident string set is a set of heap string handles tagged
         // `string_kind = true`.
         let mut facts = std::collections::HashSet::new();
-        if process_pty::supported() {
-            for fact in ["terminal", "resize", "raw"] {
-                facts.insert(rt.heap.alloc_string(fact.to_string()));
-            }
+        for fact in jet_process_policy::terminal_facts(process_pty::supported()) {
+            facts.insert(rt.heap.alloc_string((*fact).to_string()));
         }
         rt.sets.push(facts);
         rt.set_string_kinds.push(true);
@@ -1069,7 +1069,6 @@ host_fns! {
     terminal_resize: "jet_jit_terminal_session_resize" => jet_jit_terminal_session_resize: sig_binary;
     stream_lines: "jet_jit_process_stream_lines" => jet_jit_process_stream_lines: sig_binary;
 }
-
 
 
 

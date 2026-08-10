@@ -1,13 +1,26 @@
 use super::*;
 use crate::Traits;
 use crate::AST::{AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Look up the pre-resolved module index for an import. Returns `None` for
 /// core modules, C imports, and unqualified imports (they have no file target).
 #[inline]
 fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
     bundle.import_targets.get(&(module_idx, imp.span)).copied()
+}
+
+fn file_import_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    alias: &str,
+) -> Option<usize> {
+    bundle.modules[module_idx]
+        .imports
+        .iter()
+        .filter(|imp| !matches!(imp.kind, ImportKind::Unqualified { .. }))
+        .filter(|imp| imp.import_alias() == alias)
+        .find_map(|imp| resolve_target(bundle, module_idx, imp))
 }
 
 fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
@@ -51,7 +64,7 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
 
 /// Build a map from pub type name → Rust module path for all types defined in
 /// imported file-modules of `module_idx`. Used by codegen to qualify cross-module
-/// type references (e.g. `Note` → `user_note::user_Note`).
+/// type references (e.g. `Note` → `__jet_note::__jet_Note`).
 pub(crate) fn foreign_type_map(
     bundle: &ProgramBundle,
     module_idx: usize,
@@ -70,7 +83,7 @@ pub(crate) fn foreign_type_map(
             continue;
         }
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
-            let rust_mod = format!("user_{}", bundle.modules[target].alias);
+            let rust_mod = mangle(&bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
                     Item::Struct(s) if s.is_pub && !is_local(&s.name) => {
@@ -138,13 +151,13 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
         if imp.is_c_import() {
             if let Some(target) = bundle.cffi.target_for(module_idx, &alias) {
                 let stem = &bundle.modules[target].alias;
-                map.insert(alias, format!("user_{}", stem));
+                map.insert(alias, mangle(stem));
             }
             continue;
         }
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
             let stem = &bundle.modules[target].alias;
-            map.insert(alias, format!("user_{}", stem));
+            map.insert(alias, mangle(stem));
         }
     }
     map
@@ -182,14 +195,9 @@ pub(crate) fn reexport_call_map(
                 continue;
             }
             // Resolve `module_alias` within the target module's own imports.
-            let real_idx = target
-                .imports
-                .iter()
-                .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
-                .filter(|i2| i2.import_alias() == *module_alias)
-                .find_map(|i2| resolve_target(bundle, target_idx, i2));
+            let real_idx = file_import_target(bundle, target_idx, module_alias);
             if let Some(real_idx) = real_idx {
-                let real_mod = format!("user_{}", bundle.modules[real_idx].alias);
+                let real_mod = mangle(&bundle.modules[real_idx].alias);
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
                     map.insert(
@@ -197,6 +205,39 @@ pub(crate) fn reexport_call_map(
                         (real_mod.clone(), orig.clone()),
                     );
                 }
+            }
+        }
+    }
+    // D-NAME-WALK1=A: an inline module can re-export a file-module item from
+    // the enclosing file. It lowers through the same qualified map as a
+    // top-level file-module re-export; inline-to-inline re-exports use the
+    // separate InlineMangled map below.
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        for reimp in &cm.imports {
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &reimp.kind
+            else {
+                continue;
+            };
+            if !reimp.is_pub {
+                continue;
+            }
+            let Some(real_idx) = file_import_target(bundle, module_idx, module_alias) else {
+                continue;
+            };
+            let real_mod = mangle(&bundle.modules[real_idx].alias);
+            for (orig, alias_opt) in items {
+                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                map.insert(
+                    (cm.name.clone(), local.to_string()),
+                    (real_mod.clone(), orig.clone()),
+                );
             }
         }
     }
@@ -281,16 +322,10 @@ pub(crate) fn unqualified_import_maps(
                 let key = format!("{}__{}", module_alias, orig);
                 inline_map.insert(local.to_string(), key);
             }
-        } else if let Some(target) = module
-            .imports
-            .iter()
-            .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
-            .filter(|i2| i2.import_alias() == *module_alias)
-            .find_map(|i2| resolve_target(bundle, module_idx, i2))
-        {
+        } else if let Some(target) = file_import_target(bundle, module_idx, module_alias) {
             // File module: resolve the file-import whose alias matches, then point
             // each unqualified item at that Rust module.
-            let rust_mod = format!("user_{}", bundle.modules[target].alias);
+            let rust_mod = mangle(&bundle.modules[target].alias);
             for (orig, alias_opt) in items {
                 let local = alias_opt.as_deref().unwrap_or(orig.as_str());
                 file_map.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
@@ -298,6 +333,167 @@ pub(crate) fn unqualified_import_maps(
         }
     }
     (inline_map, file_map)
+}
+
+/// D-NAME-WALK1=A: build the import scopes for functions inside inline
+/// modules. The enclosing file's unqualified maps remain in `Cx`; these maps
+/// contain only body-local bindings and are selected by the emitted mangled
+/// function name.
+pub(crate) fn inline_import_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (
+    HashMap<String, HashMap<String, String>>,
+    HashMap<String, HashMap<String, (String, String)>>,
+    HashSet<String>,
+    HashMap<(String, String), String>,
+) {
+    let module = &bundle.modules[module_idx];
+    let code_module_names: std::collections::HashSet<String> = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::CodeModule(cm) if cm.body.is_some() => Some(cm.name.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut inline_scopes = HashMap::new();
+    let mut file_scopes = HashMap::new();
+    let mut names = std::collections::HashSet::new();
+    let mut inline_reexports = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        let Some(body) = &cm.body else {
+            continue;
+        };
+        let mut inline_scope = HashMap::new();
+        let mut file_scope = HashMap::new();
+        for imp in &cm.imports {
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &imp.kind
+            else {
+                continue;
+            };
+            if code_module_names.contains(module_alias) {
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    inline_scope.insert(local.to_string(), format!("{module_alias}__{orig}"));
+                    names.insert(local.to_string());
+                    if imp.is_pub {
+                        inline_reexports.insert(
+                            (cm.name.clone(), local.to_string()),
+                            format!("{module_alias}__{orig}"),
+                        );
+                    }
+                }
+            } else if module_alias != "core" && module_alias != "jet" {
+                let target = file_import_target(bundle, module_idx, module_alias);
+                if let Some(target) = target {
+                    let rust_mod = mangle(&bundle.modules[target].alias);
+                    for (orig, alias_opt) in items {
+                        let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                        file_scope.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
+                        names.insert(local.to_string());
+                    }
+                }
+            }
+        }
+        for inner in body {
+            let Item::Func(function) = inner else {
+                continue;
+            };
+            let key = format!("{}__{}", cm.name, function.name);
+            if !inline_scope.is_empty() {
+                inline_scopes.insert(key.clone(), inline_scope.clone());
+            }
+            if !file_scope.is_empty() {
+                file_scopes.insert(key, file_scope.clone());
+            }
+        }
+    }
+    (inline_scopes, file_scopes, names, inline_reexports)
+}
+
+/// Build signature/return entries for selective imports whose target is a file
+/// module. The local key is the spelling used in the body; the second key is
+/// the target's declared function name. This is needed for both top-level and
+/// inline-module `use mod.[item]` calls.
+fn unqualified_file_function_entries(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imports: &[ImportDecl],
+) -> Vec<(
+    String,
+    String,
+    Vec<(AccessConvention, Type)>,
+    Option<Type>,
+)> {
+    let mut entries = Vec::new();
+    for imp in imports {
+        let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &imp.kind
+        else {
+            continue;
+        };
+        let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
+            continue;
+        };
+        for (orig, alias_opt) in items {
+            let local = alias_opt.as_deref().unwrap_or(orig.as_str()).to_owned();
+            let Some(item) = bundle.modules[target].items.iter().find(|item| match item {
+                Item::Func(f) => f.name == *orig && f.is_pub,
+                _ => false,
+            }) else {
+                if let Some(Item::CModule(cm)) = bundle.modules[target].items.iter().find(|item| {
+                    matches!(item, Item::CModule(_))
+                }) {
+                    if let Some(function) = cm.functions.iter().find(|function| function.name == *orig) {
+                        entries.push((
+                            local,
+                            orig.clone(),
+                            function
+                                .params
+                                .iter()
+                                .map(|param| (param.convention, param.ty.clone()))
+                                .collect(),
+                            function.return_type.clone(),
+                        ));
+                    }
+                }
+                continue;
+            };
+            let Item::Func(function) = item else {
+                continue;
+            };
+            entries.push((
+                local,
+                orig.clone(),
+                function
+                    .params
+                    .iter()
+                    .map(|param| {
+                        (
+                            param.convention,
+                            qualify_unit_type(bundle, target, &param.ty),
+                        )
+                    })
+                    .collect(),
+                function
+                    .return_type
+                    .as_ref()
+                    .map(|ty| qualify_unit_type(bundle, target, ty)),
+            ));
+        }
+    }
+    entries
 }
 
 pub(crate) fn import_sig_map(
@@ -346,11 +542,25 @@ pub(crate) fn import_sig_map(
             }
         }
     }
+    for (local, original, params, _) in
+        unqualified_file_function_entries(bundle, module_idx, &module.imports)
+    {
+        map.insert((local, original), params);
+    }
+    for item in &module.items {
+        if let Item::CodeModule(cm) = item {
+            for (local, original, params, _) in
+                unqualified_file_function_entries(bundle, module_idx, &cm.imports)
+            {
+                map.insert((local, original), params);
+            }
+        }
+    }
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
-        let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
+        let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
@@ -411,8 +621,22 @@ pub(crate) fn import_ret_map(
             }
         }
     }
+    for (local, original, _, ret) in
+        unqualified_file_function_entries(bundle, module_idx, &module.imports)
+    {
+        map.insert((local, original), ret);
+    }
+    for item in &module.items {
+        if let Item::CodeModule(cm) = item {
+            for (local, original, _, ret) in
+                unqualified_file_function_entries(bundle, module_idx, &cm.imports)
+            {
+                map.insert((local, original), ret);
+            }
+        }
+    }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
-        let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
+        let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
@@ -454,7 +678,7 @@ pub(crate) fn emit_program_items(
         _ => false,
     });
     if !cx.root_prefix.is_empty() && has_serde_protocol_impl {
-        out.push_str("use super::{user_Encode, user_Decode, jet_std};\n\n");
+        out.push_str("use super::{__jet_Encode, __jet_Decode, jet_std};\n\n");
     }
     let tuple_shapes = collect_tuple_shapes(items);
     emit_tuple_structs(cx, &tuple_shapes, out);
@@ -487,6 +711,7 @@ pub(crate) fn emit_program_items(
             }
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase

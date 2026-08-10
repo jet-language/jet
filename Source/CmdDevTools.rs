@@ -1598,6 +1598,14 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if matches!(
+        args.first().map(|arg| arg.as_str()),
+        Some("json" | "csv" | "sql" | "xml" | "proto")
+    ) {
+        let format = args[0].as_str();
+        run_data_bind(format, &args[1..]);
+        return;
+    }
     if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT) {
         run_cpp_bind(&args[1..]);
         return;
@@ -1639,6 +1647,10 @@ pub(crate) fn run_bind(args: &[&String]) {
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         eprintln!(
             "usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        );
+        eprintln!(
+            "       {} bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]",
             jet::Syntax::BINARY_NAME
         );
         eprintln!();
@@ -1755,6 +1767,154 @@ pub(crate) fn run_bind(args: &[&String]) {
             println!("  - {} — {}", name, why);
         }
     }
+}
+
+fn run_data_bind(format: &str, args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} bind {} <input> [--type <Type>] [-o <output>]",
+            jet::Syntax::BINARY_NAME,
+            format
+        );
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
+    }
+    let input_path = args[0].as_str();
+    let mut root_type = None;
+    let mut output = None;
+    let mut index = 1usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--type" => {
+                let Some(value) = args.get(index + 1) else {
+                    crate::cli_error!("E2102", "bind {format} requires a value after --type");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                if value.is_empty() {
+                    crate::cli_error!("E2102", "bind {format} type name cannot be empty");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                root_type = Some(value.to_string());
+                index += 2;
+            }
+            "-o" | "--out" => {
+                let Some(value) = args.get(index + 1) else {
+                    crate::cli_error!("E2102", "bind {format} requires a value after -o");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                if value.is_empty() {
+                    crate::cli_error!("E2102", "bind {format} output path cannot be empty");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                output = Some(value.to_string());
+                index += 2;
+            }
+            other => {
+                crate::cli_error!("E2102", "unknown bind {format} argument {other}");
+                usage();
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+    let input = match fs::read_to_string(input_path) {
+        Ok(input) => input,
+        Err(error) => data_bind_error(
+            format,
+            input_path,
+            &format!("the input could not be read ({error})"),
+        ),
+    };
+    let output_path = output.clone().unwrap_or_else(|| {
+        let base = input_path
+            .rsplit(|ch| ch == '/' || ch == '\\')
+            .next()
+            .unwrap_or(input_path);
+        let stem = base
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(base);
+        let mut safe = String::new();
+        for ch in stem.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                safe.push(ch.to_ascii_lowercase());
+            } else if !safe.ends_with('_') {
+                safe.push('_');
+            }
+        }
+        while safe.ends_with('_') {
+            safe.pop();
+        }
+        if safe.is_empty() {
+            safe.push_str("schema");
+        }
+        format!("bindings/{safe}.{}", jet::Syntax::FILE_EXT)
+    });
+    let mut command = vec![
+        jet::Syntax::BINARY_NAME.to_string(),
+        "bind".to_string(),
+        format.to_string(),
+        input_path.to_string(),
+    ];
+    if let Some(root_type) = &root_type {
+        command.push("--type".to_string());
+        command.push(root_type.clone());
+    }
+    if let Some(output) = &output {
+        command.push("-o".to_string());
+        command.push(output.clone());
+    }
+    let command = command.join(" ");
+    let result = match jet::CBind::generate_data(
+        format,
+        input_path,
+        &input,
+        root_type.as_deref(),
+        &command,
+    ) {
+        Ok(result) => result,
+        Err(error) => data_bind_error(format, input_path, &error),
+    };
+    if let Some(parent) = Path::new(&output_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                data_bind_error(
+                    format,
+                    input_path,
+                    &format!("could not create output directory {} ({error})", parent.display()),
+                );
+            }
+        }
+    }
+    if let Err(error) = fs::write(&output_path, result.source) {
+        data_bind_error(
+            format,
+            input_path,
+            &format!("could not write {output_path} ({error})"),
+        );
+    }
+    println!(
+        "bound {} {} record{} from {input_path} → {output_path}",
+        result.record_count,
+        format,
+        if result.record_count == 1 { "" } else { "s" }
+    );
+}
+
+fn data_bind_error(format: &str, path: &str, why: &str) -> ! {
+    eprintln!("Error [E3208]: Could not generate {format} bindings from {path}.");
+    eprintln!(" Why: {why}.");
+    eprintln!(" Fix: provide a well-formed {format} schema and rerun jet bind {format}.");
+    exit(ExitCodes::USER_ERROR)
 }
 
 fn run_cpp_bind(args: &[&String]) {

@@ -3,6 +3,7 @@ use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 use core.path as path
+use core.testing as testing
 
 fn write_catalog(path: String) {
     out :: files.create(path) ?? panic("create")
@@ -19,16 +20,26 @@ fn write_catalog(path: String) {
 }
 
 fn run() {
-    // Scratch output belongs in a fresh temp directory, never the working
-    // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-json") ?? panic("temp_dir")
-    path :: path.join(scratch.path, "catalog.json")
+    // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
+    path :: path.join(testing.temp_dir("encoding-json-stream"), "catalog.json")
     write_catalog(path)
     input :: files.open(path) ?? panic("open")
     reader :: json.reader(^input) ?? panic("reader")
+    read_count := 0
     loop event, reader {
-        print("event")
+        if event == {
+            .ObjectStart -> print("event:ObjectStart")
+            .Key(key) && key == "b" -> print("event:Key:b")
+            .Int(value) && value == 2 -> print("event:Int:2")
+            .Key(key) && key == "a" -> print("event:Key:a")
+            .Int(value) && value == 1 -> print("event:Int:1")
+            .ObjectEnd -> print("event:ObjectEnd")
+            else -> panic("unexpected JSON event")
+        }
+        read_count++
     }
+    print("read-count:{read_count}")
     print("eof")
     print(files.read(path) ?? panic("read"))
+    files.remove(path) ?? panic("remove")
 }

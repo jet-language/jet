@@ -1021,7 +1021,7 @@ fn run() {
 "#;
     let generated = jet::compile(src).expect("explicit unit conversions should compile").rust;
     assert!(
-        !generated.contains("fn user_from_"),
+        !generated.contains("fn __jet_from_"),
         "unit conversion behavior belongs to TIR, not generated destination methods"
     );
     let (code, stdout) = tir_support::build_and_run("quantity_explicit_exact_rounded", src);
@@ -1139,11 +1139,11 @@ fn family_erases_in_codegen() {
         "the family marker must erase, found UnitFamily in output"
     );
     assert!(
-        out.rust.contains("struct user_Usd"),
+        out.rust.contains("struct __jet_Usd"),
         "Usd should lower to a distinct newtype"
     );
     assert!(
-        out.rust.contains("struct user_Eur"),
+        out.rust.contains("struct __jet_Eur"),
         "Eur should lower to a distinct newtype"
     );
     assert!(
@@ -1170,8 +1170,8 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("dimensionally valid program should compile");
-    assert!(out.rust.contains("user_Meter"));
-    assert!(out.rust.contains("user_Second"));
+    assert!(out.rust.contains("__jet_Meter"));
+    assert!(out.rust.contains("__jet_Second"));
     assert!(out.rust.contains(".0 /"), "unit division must erase to base arithmetic");
     assert!(out.rust.contains(".0 *"), "unit multiplication must erase to base arithmetic");
     assert!(!out.rust.contains("Quantity<"), "dimension facts must not reach emitted Rust");

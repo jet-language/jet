@@ -74,7 +74,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
-        fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
+        pub(in crate::Parser) fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
             let start = self.bump().span; // consume `use`
             match &self.peek().kind {
                 TokKind::Str(parts) => {
@@ -105,7 +105,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Ident(_) => {
                     // Peek ahead to decide which import form this is:
-                    //   use ident.{A, B}    → Unqualified group
+                    //   use ident.[A, B]    → Unqualified group
                     //   use ident.ident ;   → Unqualified single (no `as`)
                     //   use ident.ident.*   → error: wildcard
                     //   use ident ...       → Module (may have dots + `as alias`)
@@ -114,54 +114,16 @@ impl<'a> Parser<'a> {
                         // Look two tokens ahead (past the dot).
                         let after_dot = &self.peek2().kind;
                         match after_dot {
-                            TokKind::LBrace => {
-                                // use alias.{A, B as C, ...}
+                            TokKind::LBrace => Err(Diagnostic::error(
+                                "E0003",
+                                "`.{…}` is retired for selective imports".to_string(),
+                                "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
+                                "write `use alias.[item, other as local]`".to_string(),
+                                Some(self.peek2().span),
+                            )),
+                            TokKind::LBracket => {
                                 self.bump(); // consume `.`
-                                let lbrace_span = self.bump().span; // consume `{`
-                                let mut items: Vec<(String, Option<String>)> = Vec::new();
-                                loop {
-                                    if matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-                                        break;
-                                    }
-                                    let (item, _) = self.expect_ident("inside `use alias.{…}`")?;
-                                    // D-SELIMPORT1=A: optional `as alias` after each item.
-                                    let alias = if matches!(
-                                        &self.peek().kind,
-                                        TokKind::Ident(n) if n == Syntax::KW_AS
-                                    ) {
-                                        self.bump(); // consume `as`
-                                        let (a, _) = self.expect_ident("after `as` in import list")?;
-                                        Some(a)
-                                    } else {
-                                        None
-                                    };
-                                    items.push((item, alias));
-                                    if matches!(self.peek().kind, TokKind::Comma) {
-                                        self.bump();
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                let rbrace_span = self.peek().span;
-                                self.expect(TokKind::RBrace, "to close `use alias.{…}`")?;
-                                let items_span = Span::new(lbrace_span.start, rbrace_span.end);
-                                self.expect(TokKind::Semi, "after an import")?;
-                                let end = self.toks[self.pos - 1].span.end;
-                                Ok(crate::AST::ImportDecl {
-                                    kind: crate::AST::ImportKind::Unqualified {
-                                        module_alias: first.clone(),
-                                        module_alias_span: first_span,
-                                        items,
-                                        items_span,
-                                        span: Span::new(start.start, end),
-                                    },
-                                    alias: first,
-                                    alias_span: first_span,
-                                    span: Span::new(start.start, end),
-                                    is_pub: false,
-                                    is_package_pub: false,
-                                    inline_version: None,
-                                })
+                                self.import_decl_unqualified_list(start, first, first_span)
                             }
                             TokKind::Star => {
                                 // use alias.* — wildcard: reject
@@ -171,7 +133,7 @@ impl<'a> Parser<'a> {
                                     "E0612",
                                     "wildcard imports are not supported".to_string(),
                                     "`use math.*` would hide where each name comes from".to_string(),
-                                    "list each item instead: `use math.{clamp, lerp}`".to_string(),
+                                    "list each item instead: `use math.[clamp, lerp]`".to_string(),
                                     Some(star_span),
                                 ));
                             }
@@ -224,11 +186,9 @@ impl<'a> Parser<'a> {
                         if matches!(self.peek().kind, TokKind::LBrace) {
                             return Err(Diagnostic::error(
                                 "E0003",
-                                "selective imports aren't part of Jet".to_string(),
-                                "modules keep their namespace so call sites show where a library function comes from"
-                                    .to_string(),
-                                "import the module with `as`, then call items through the alias: `use core.math as math; math.clamp(x, lo, hi);`"
-                                    .to_string(),
+                                "`.{…}` is retired for selective imports".to_string(),
+                                "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
+                                "write `use alias.[item, other as local]`".to_string(),
                                 Some(self.peek().span),
                             ));
                         }
@@ -312,13 +272,14 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::LBrace) {
                 return Err(Diagnostic::error(
                     "E0003",
-                    "selective imports aren't part of Jet".to_string(),
-                    "modules keep their namespace so call sites show where a library function comes from"
-                        .to_string(),
-                    "import the module with `as`, then call items through the alias: `use core.math as math; math.clamp(x, lo, hi);`"
-                        .to_string(),
+                    "`.{…}` is retired for selective imports".to_string(),
+                    "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
+                    "write `use alias.[item, other as local]`".to_string(),
                     Some(self.peek().span),
                 ));
+            }
+            if matches!(self.peek().kind, TokKind::LBracket) {
+                return self.import_decl_unqualified_list(start, name, module_span);
             }
             let alias_default = name.rsplit('.').next().unwrap_or(name.as_str()).to_string();
             let (alias, alias_span) = if matches!(
@@ -342,6 +303,65 @@ impl<'a> Parser<'a> {
                 is_package_pub: false,
                 // A dotted module path (`use core.files;`) never takes U11's `#version`
                 // — that's the single-segment `pkg` form only.
+                inline_version: None,
+            })
+        }
+
+        /// D-CORE-USELIST1=A: parse the canonical `use prefix.[items]` form.
+        /// Item paths retain dots so `use core.encoding.[json, csv]` and
+        /// `use core.[encoding.json]` carry the same member walk to sema.
+        fn import_decl_unqualified_list(
+            &mut self,
+            start: Span,
+            module_alias: String,
+            module_alias_span: Span,
+        ) -> Result<crate::AST::ImportDecl, Diagnostic> {
+            let lbracket_span = self.bump().span;
+            let mut items = Vec::new();
+            while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
+                let (first, _) = self.expect_ident("inside `use prefix.[…]`")?;
+                let mut item = first;
+                while matches!(self.peek().kind, TokKind::Dot) {
+                    self.bump();
+                    let (part, _) = self.expect_ident("after `.` in an import list")?;
+                    item.push('.');
+                    item.push_str(&part);
+                }
+                let alias = if matches!(
+                    &self.peek().kind,
+                    TokKind::Ident(n) if n == Syntax::KW_AS
+                ) {
+                    self.bump();
+                    let (alias, _) = self.expect_ident("after `as` in import list")?;
+                    Some(alias)
+                } else {
+                    None
+                };
+                items.push((item, alias));
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+            let rbracket_span = self.peek().span;
+            self.expect(TokKind::RBracket, "to close `use prefix.[…]`")?;
+            let items_span = Span::new(lbracket_span.start, rbracket_span.end);
+            self.expect(TokKind::Semi, "after an import")?;
+            let end = self.toks[self.pos - 1].span.end;
+            Ok(crate::AST::ImportDecl {
+                kind: crate::AST::ImportKind::Unqualified {
+                    module_alias: module_alias.clone(),
+                    module_alias_span,
+                    items,
+                    items_span,
+                    span: Span::new(start.start, end),
+                },
+                alias: module_alias,
+                alias_span: module_alias_span,
+                span: Span::new(start.start, end),
+                is_pub: false,
+                is_package_pub: false,
                 inline_version: None,
             })
         }
@@ -401,6 +421,7 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn program(&mut self) -> Program {
             let mut imports = Vec::new();
             let mut items = Vec::new();
+            let mut script_body = Vec::new();
             let mut web_target_ceiling = None;
             let mut default_target: Option<String> = None;
             let mut html_path: Option<String> = None;
@@ -1100,6 +1121,11 @@ impl<'a> Parser<'a> {
                     TokKind::Ident(n) if n == Syntax::KW_MARKER && self.at_marker_decl() => {
                         self.marker_decl().map(Item::MarkerDecl)
                     }
+                    // D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` — a
+                    // non-code registry declaration with the shared parameter shape.
+                    TokKind::Ident(n) if n == Syntax::KW_FACT && self.at_fact_decl() => {
+                        self.fact_decl().map(Item::FactDecl)
+                    }
                     // D-TYPEALIAS1: `alias Name<T> = …`
                     TokKind::Ident(n) if n == Syntax::KW_ALIAS => {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
@@ -1330,28 +1356,14 @@ impl<'a> Parser<'a> {
                         self.sync_stmt();
                         continue;
                     }
-                    other => {
-                        let d = Diagnostic::error(
-                            "E0003",
-                            format!(
-                                "expected `{}`, `#{}`, `{}`, or `{}` here, found {}",
-                                Syntax::KW_FN,
-                                Syntax::KW_TEST,
-                                Syntax::KW_STRUCT,
-                                Syntax::KW_COMPTIME,
-                                describe(other)
-                            ),
-                            "at the top level of a file, only definitions can appear".to_string(),
-                            format!(
-                                "define a function ({} run() {{ ... }}), #{} block, struct, or comptime binding",
-                                Syntax::KW_FN,
-                                Syntax::KW_TEST
-                            ),
-                            Some(self.peek().span),
-                        );
-                        self.diags.push(d);
-                        self.bump();
-                        self.sync_top();
+                    _other => {
+                        match self.stmt() {
+                            Ok(stmt) => script_body.push(stmt),
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_stmt();
+                            }
+                        }
                         continue;
                     }
                 };
@@ -1381,6 +1393,7 @@ impl<'a> Parser<'a> {
             Program {
                 imports,
                 items,
+                script_body,
                 block_spans: std::mem::take(&mut self.block_spans),
                 fenced_statements: Vec::new(),
                 web_target_ceiling,

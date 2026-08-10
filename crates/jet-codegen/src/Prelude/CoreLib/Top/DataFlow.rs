@@ -476,7 +476,7 @@ fn jet_data_field_errors_reason(errors: Vec<jet_std::FieldError>) -> String {
         .join("; ")
 }
 
-fn jet_data_stream_decode_csv_row<T: user_Decode>(
+fn jet_data_stream_decode_csv_row<T: __jet_Decode>(
     headers: &[String],
     row: Vec<String>,
     row_index: i64,
@@ -630,13 +630,13 @@ fn jet_data_json_fold_from_event(
 
 // D-FAIL-CARRIER1=A: the row is `T? ? DataError` — end of stream is a clean
 // absence, a broken row is a report.
-fn jet_data_stream_next<T: user_Decode>(
+fn jet_data_stream_next<T: __jet_Decode>(
     stream: &mut jet_std::DataStream,
 ) -> Result<JetOutcome<T, JetAbsent>, jet_std::DataError> {
     jet_data_stream_scan(stream).map(jet_outcome_of)
 }
 
-fn jet_data_stream_scan<T: user_Decode>(
+fn jet_data_stream_scan<T: __jet_Decode>(
     stream: &mut jet_std::DataStream,
 ) -> Result<Option<T>, jet_std::DataError> {
     if let Some(error) = &stream.terminal {
@@ -759,7 +759,7 @@ fn jet_data_stream_scan<T: user_Decode>(
     }
 }
 
-fn jet_data_stream_collect<T: user_Decode + Clone>(
+fn jet_data_stream_collect<T: __jet_Decode + Clone>(
     stream: &mut jet_std::DataStream,
 ) -> Result<Vec<T>, jet_std::DataError> {
     jet_data_limits_validate(&stream.limits)?;
@@ -794,7 +794,7 @@ fn jet_data_group_mean_stream<T, FK, FV>(
     value: FV,
 ) -> Result<Vec<jet_std::DataGroup>, jet_std::DataError>
 where
-    T: user_Decode + Clone,
+    T: __jet_Decode + Clone,
     FK: Fn(T) -> String,
     FV: Fn(T) -> f64,
 {

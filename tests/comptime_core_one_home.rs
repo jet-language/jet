@@ -190,6 +190,24 @@ fn xml_has_one_semantic_home() {
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
     let jit = read("crates/jet-jit/src/Encoding.rs");
     let aot = read("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs");
+    for (tier, source, call) in [
+        ("AOT", aot.as_str(), "jet_xml_kernel::parse_document(text)"),
+        (
+            "comptime/interpreter",
+            comptime_production,
+            "XmlKernel::parse_document(text)",
+        ),
+        (
+            "JIT",
+            jit.as_str(),
+            "XmlKernel::parse_document(&clone_string(text))",
+        ),
+    ] {
+        assert!(
+            source.contains(call),
+            "{tier} must pass XML source unchanged to the shared kernel"
+        );
+    }
     for operation in [
         "parse_document(",
         "parse_document_with(",

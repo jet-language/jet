@@ -488,6 +488,23 @@ fn run() {
     }
 
     #[test]
+    fn completion_exposes_public_labels_and_parameter_zones() {
+        let src =
+            "fn connect(host: String, /, *, timeout seconds: Int = 30) => String {\n    return host\n}\nfn run() {\n    \n}\n";
+        let (project, _, bundle, facts) = check_test_document(src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.rfind("    \n").unwrap() + 4;
+        let item = compute_completions(&db, src, offset, project.entry(), None, None)
+            .into_iter()
+            .find(|item| item.label == "connect")
+            .expect("connect completion");
+        assert_eq!(
+            item.detail.as_deref(),
+            Some("fn connect(host: String, /, *, timeout seconds: Int) =[]=> String")
+        );
+    }
+
+    #[test]
     fn completion_uses_builtin_member_facts_for_list_local() {
         let src = "fn run() {\n    items :: [1, 2]\n    count :: items.len()\n}\n";
         let (project, _, bundle, facts) = check_test_document(src);

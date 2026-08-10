@@ -58,6 +58,9 @@ pub use jet_driver::{
     Lexer,
     LintPolicy,
     Loader,
+    LibraryExport,
+    JetLibArtifact,
+    JetLibStamp,
     Lock,
     Manifest,
     Package,
@@ -995,6 +998,18 @@ pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
             Sema::CompileMode::Check,
             Some(Syntax::TARGET_PLUGIN),
         )
+    })
+}
+
+/// Compile a package's selected `Library` output. Library-shaped sources do
+/// not need an executable `fn run`; the native build adapter consumes the
+/// checked projections on `CompileOutput`.
+pub fn compile_library(
+    file: &str,
+    output: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_library(file, Sema::CompileMode::Check, output)
     })
 }
 

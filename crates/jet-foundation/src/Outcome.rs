@@ -140,6 +140,15 @@ mod err_tests {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
 pub struct JetAbsent;
 
+/// D-CONC-FAIL1=A: the one typed failure report for a joined task.  The
+/// scheduler produces this value; AOT, JIT, and TIR only marshal it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum JetTaskFailure {
+    Cancelled,
+    DeadlineBlown,
+    Panicked(String),
+}
+
 /// The optional view of the carrier: `T?`.
 ///
 /// Every method here reads the same carrier the fallible view reads. They exist

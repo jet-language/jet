@@ -117,7 +117,7 @@ fn eval_zip_family(
                     Some(CtValue::Struct { fields, .. }) => fields
                         .iter()
                         .find(|(name, _)| {
-                            name == field || name.strip_prefix("user_") == Some(field)
+                            name == field || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field)
                         })
                         .map(|(_, value)| {
                             coerce_zip_fill(

@@ -285,6 +285,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         name_span: span,
         meta: None,
         type_params: Vec::new(),
+        head_pattern: None,
         params: vec![value_param],
         return_type: Some(Type::Result {
             ok: Box::new(Type::Named(s.name.clone())),

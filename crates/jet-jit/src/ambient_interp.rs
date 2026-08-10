@@ -15,9 +15,15 @@ use crate::DB;
 use crate::IO;
 use jet_codegen::Comptime::ServicesLite as service_prelude;
 
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
+
+// The shared DB wire fragment receives the host's row carrier through this
+// name. The interpreter uses its native map until converting to CtValue.
+type JetMap<K, V> = BTreeMap<K, V>;
 
 mod wire {
     #[allow(unused_imports)]
@@ -27,6 +33,72 @@ mod wire {
 
 fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::e0956_unsupported(what, span)
+}
+
+fn interpreter_process_spec(cmd: Vec<CtValue>) -> CtValue {
+    CtValue::Struct {
+        type_name: "ProcessSpec".to_string(),
+        fields: vec![
+            ("cmd".to_string(), CtValue::List(cmd)),
+            ("terminal".to_string(), CtValue::Bool(false)),
+        ],
+    }
+}
+
+fn process_spec_field<'a>(recv: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    (type_name == "ProcessSpec")
+        .then(|| fields.iter().find_map(|(name, value)| (name == wanted).then_some(value)))
+        .flatten()
+}
+
+fn process_spec_with_terminal(recv: &CtValue) -> Option<CtValue> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    if type_name != "ProcessSpec" {
+        return None;
+    }
+    let mut fields = fields.clone();
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "terminal") {
+        *value = CtValue::Bool(true);
+    } else {
+        fields.push(("terminal".to_string(), CtValue::Bool(true)));
+    }
+    Some(CtValue::Struct {
+        type_name: type_name.clone(),
+        fields,
+    })
+}
+
+fn process_spec_capabilities(recv: &CtValue) -> Option<CtValue> {
+    process_spec_field(recv, "terminal")?;
+    let items = jet_process_policy::terminal_facts(jet_codegen::process_pty::supported())
+        .iter()
+        .map(|fact| CtValue::Str((*fact).to_string()))
+        .collect();
+    Some(CtValue::Struct {
+        type_name: "Set".to_string(),
+        fields: vec![("items".to_string(), CtValue::List(items))],
+    })
+}
+
+fn ambient_process_handle(
+    op: &str,
+    recv: &mut CtValue,
+    _args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let method = op.strip_prefix("ProcessSpec:")?;
+    Some(match method {
+        "terminal" => process_spec_with_terminal(recv)
+            .ok_or_else(|| unsupported("ProcessSpec.terminal receiver", span)),
+        "capabilities" => process_spec_capabilities(recv)
+            .ok_or_else(|| unsupported("ProcessSpec.capabilities receiver", span)),
+        _ => return None,
+    })
 }
 
 fn crypto_err(msg: impl Into<String>) -> CtValue {
@@ -170,6 +242,47 @@ fn db_handle(recv: &CtValue) -> Option<u64> {
                 _ => None,
             }),
         _ => None,
+    }
+}
+
+fn mod_grant_roots(value: &CtValue) -> Option<Vec<String>> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "ModGrant" {
+        return None;
+    }
+    let CtValue::List(values) = fields
+        .iter()
+        .find_map(|(name, value)| (name == "read").then_some(value))?
+    else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn mod_handle(value: &CtValue) -> Option<i64> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    (type_name == "Mod").then(|| {
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("handle", CtValue::Int(value)) if *value > 0 => Some(*value),
+            _ => None,
+        })
+    })?
+}
+
+fn mod_value(handle: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: "Mod".to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
     }
 }
 
@@ -374,7 +487,7 @@ fn wire_db_value(v: wire::DBValue) -> CtValue {
     }
 }
 
-fn row_map(row: BTreeMap<String, wire::DBValue>) -> CtValue {
+fn row_map(row: wire::JetDBRow) -> CtValue {
     let mut m = BTreeMap::new();
     for (k, v) in row {
         m.insert(CtKey::Str(k), wire_db_value(v));
@@ -414,7 +527,7 @@ fn ambient_db_scope_query(
     sql: &str,
     params: &Vec<wire::DBValue>,
     allow_schema: bool,
-) -> Result<Vec<BTreeMap<String, wire::DBValue>>, wire::DBError> {
+) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
     let (handle, table, expression, user) = scope;
     let (sql, values) = if allow_schema {
         wire::jet_db_apply_migration_policy(sql, params, table, expression, user)?
@@ -456,7 +569,7 @@ impl wire::JetDBBackend for AmbientDbBackend {
         sql: &String,
         params: &Vec<wire::DBValue>,
         allow_schema: bool,
-    ) -> Result<Vec<BTreeMap<String, wire::DBValue>>, wire::DBError> {
+    ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
         ambient_db_scope_query(&self.scope, sql, params, allow_schema)
     }
 }
@@ -495,6 +608,21 @@ pub fn ambient_core_call(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+        if !row.accepts_arity(args.len()) {
+            return Some(Err(unsupported(
+                &format!(
+                    "{}.{}(): expected {}..{} argument(s), got {}",
+                    module,
+                    method,
+                    row.arity(),
+                    row.signature.max_arity,
+                    args.len()
+                ),
+                span,
+            )));
+        }
+    }
     if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
         return Some(result);
     }
@@ -513,6 +641,18 @@ pub fn ambient_core_call(
         return Some(result);
     }
     match (module, method) {
+        ("core.process", "cmd") => {
+            let Some(CtValue::List(items)) = args.into_iter().next() else {
+                return Some(Err(unsupported("core.process.cmd arguments", span)));
+            };
+            if !items.iter().all(|item| matches!(item, CtValue::Str(_))) {
+                return Some(Err(unsupported(
+                    "core.process.cmd expects text command words",
+                    span,
+                )));
+            }
+            Some(Ok(interpreter_process_spec(items)))
+        }
         ("core.testing", "temp_dir") => {
             let Some(CtValue::Str(prefix)) = args.first() else {
                 return Some(Err(unsupported("core.testing.temp_dir arguments", span)));
@@ -619,6 +759,18 @@ pub fn ambient_core_call(
                 _ => return Some(Err(unsupported("core.db.open path", span))),
             };
             Some(Ok(db_conn_value(DB::runtime_open(&path))))
+        }
+        ("core.mod", "load") => {
+            let Some(CtValue::Str(path)) = args.first() else {
+                return Some(Err(unsupported("core.mod.load path", span)));
+            };
+            let Some(read) = args.get(1).and_then(mod_grant_roots) else {
+                return Some(Err(unsupported("core.mod.load grant", span)));
+            };
+            Some(Ok(match crate::Mod::load(path.clone(), read) {
+                Ok(handle) => CtValue::Present(Box::new(mod_value(handle))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            }))
         }
         ("core.crypto", "sha512_bytes") => {
             let data = match as_bytes(args.first()?, span) {
@@ -1201,6 +1353,9 @@ pub fn ambient_handle(
     if let Some(result) = crate::enc_stream::ambient_handle(op, recv, args, span) {
         return Some(result);
     }
+    if let Some(result) = ambient_process_handle(op, recv, args, span) {
+        return Some(result);
+    }
     if let Some(result) = ambient_webapp_handle(op, recv, args, span) {
         return Some(result);
     }
@@ -1288,6 +1443,18 @@ pub fn ambient_handle(
             Err(error) => CtValue::failed(Box::new(service_error_value(error))),
         }));
     }
+    if op == "ModOnTick" {
+        let Some(handle) = mod_handle(recv) else {
+            return Some(Err(unsupported("Mod receiver", span)));
+        };
+        let Some(CtValue::Int(dt)) = args.first() else {
+            return Some(Err(unsupported("Mod.on_tick dt", span)));
+        };
+        return Some(Ok(match crate::Mod::on_tick(handle, *dt) {
+            Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+        }));
+    }
     let handle = db_handle(recv)?;
     match op {
         "DBBegin" => Some(Ok(CtValue::Bool(DB::runtime_begin(handle)))),
@@ -1359,24 +1526,17 @@ pub fn ambient_handle(
                 Ok(p) => p,
                 Err(e) => return Some(Err(e)),
             };
-            let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, expression, user)) => match wire::jet_db_apply_policy(
-                    &sql, &values, &table, &expression, &user,
-                ) {
-                    Ok((sql, values)) => (handle, sql, values),
-                    Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
-                },
+            let scope = match db_scope_parts(recv) {
+                Some(scope) => scope,
                 None => return Some(Ok(CtValue::failed(Box::new(db_err(
                     "database row operations require a policy scope",
                 ))))),
             };
-            let params = wire::jet_db_encode_params(&values);
-            let out = DB::runtime_query(handle, &sql, &params);
-            Some(Ok(match wire::jet_db_decode_query_result(&out) {
+            Some(Ok(match ambient_db_scope_query(&scope, &sql, &values, false) {
                 Ok(rows) => {
-                    let opt = match rows.into_iter().next() {
-                        Some(row) => CtValue::Present(Box::new(row_map(row))),
-                        None => CtValue::absent(Type::Map {
+                    let opt = match wire::jet_db_first_row(rows) {
+                        Ok(row) => CtValue::Present(Box::new(row_map(row))),
+                        Err(_) => CtValue::absent(Type::Map {
                             key: Box::new(Type::String),
                             key_span: None,
                             value: Box::new(Type::Named("DBValue".into())),
@@ -1608,6 +1768,38 @@ fn ambient_http_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(static_call) = op.strip_prefix("HTTPStatic:") {
+        let Some((path, method)) = static_call.rsplit_once(':') else {
+            return Some(Err(unsupported("HTTP nominal static adapter", span)));
+        };
+        return Some(crate::net_http_rt::runtime_http_nominal_static(path, method, args)
+            .map_err(|error| unsupported(&error, span)));
+    }
+    if op == "HTTPNominalShow" {
+        let handle = match recv {
+            CtValue::Struct { type_name, fields }
+                if matches!(
+                    type_name.as_str(),
+                    "HTTPMethod"
+                        | "HTTPStatus"
+                        | "HTTPVersion"
+                        | "HTTPHeaderName"
+                        | "HTTPHeaderValue"
+                ) => fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+                    ("handle", CtValue::Int(handle)) if *handle > 0 => Some(*handle),
+                    _ => None,
+                }),
+            _ => None,
+        };
+        let Some(handle) = handle else {
+            return Some(Err(unsupported("HTTP nominal show receiver", span)));
+        };
+        return Some(
+            crate::net_http_rt::runtime_http_nominal_show(handle)
+                .map(CtValue::Str)
+                .map_err(|error| unsupported(&error, span)),
+        );
+    }
     if op == "HTTPJSONDecodeError" {
         return Some(Ok(CtValue::failed(Box::new(
             crate::net_http_rt::runtime_http_json_decode_error(),
@@ -1655,6 +1847,56 @@ fn ambient_http_handle(
                     crate::net_http_rt::runtime_http_body_json_text(body, Some(*limit))
                         .map_err(|error| unsupported(&error, span))?;
                 Ok(http_json_text_result(result))
+            })
+        }
+        "HTTPClient:HTTPBody:bytes" | "HTTPServer:HTTPBody:bytes" if args.len() == 1 => {
+            let body = http_handle_id(recv, "HTTPBody")
+                .ok_or_else(|| unsupported("HTTPBody.bytes receiver", span));
+            body.and_then(|body| {
+                let Some(CtValue::Int(limit)) = args.first() else {
+                    return Err(unsupported("HTTPBody.bytes limit", span));
+                };
+                let result = crate::net_http_rt::runtime_http_body_bytes(body, *limit)
+                    .map_err(|error| unsupported(&error, span))?;
+                Ok(match result {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(error) => CtValue::failed(Box::new(error)),
+                })
+            })
+        }
+        "HTTPClient:HTTPBody:text" | "HTTPServer:HTTPBody:text" if args.len() == 1 => {
+            let body = http_handle_id(recv, "HTTPBody")
+                .ok_or_else(|| unsupported("HTTPBody.text receiver", span));
+            body.and_then(|body| {
+                let Some(CtValue::Int(limit)) = args.first() else {
+                    return Err(unsupported("HTTPBody.text limit", span));
+                };
+                let result = crate::net_http_rt::runtime_http_body_text(body, *limit)
+                    .map_err(|error| unsupported(&error, span))?;
+                Ok(match result {
+                    Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                    Err(error) => CtValue::failed(Box::new(error)),
+                })
+            })
+        }
+        "HTTPClient:HTTPBody:copy_to" | "HTTPServer:HTTPBody:copy_to" if args.len() == 2 => {
+            let body = http_handle_id(recv, "HTTPBody")
+                .ok_or_else(|| unsupported("HTTPBody.copy_to receiver", span));
+            body.and_then(|body| {
+                let Some(CtValue::Int(writer)) = args.first() else {
+                    return Err(unsupported("HTTPBody.copy_to writer", span));
+                };
+                let Some(CtValue::Int(limit)) = args.get(1) else {
+                    return Err(unsupported("HTTPBody.copy_to limit", span));
+                };
+                let writer = crate::enc_stream::take_file_writer_for_http(*writer)
+                    .map_err(|error| unsupported(&format!("HTTPBody.copy_to: {error}"), span))?;
+                let result = crate::net_http_rt::runtime_http_body_copy_to(body, writer, *limit)
+                    .map_err(|error| unsupported(&error, span))?;
+                Ok(match result {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
+                    Err(error) => CtValue::failed(Box::new(error)),
+                })
             })
         }
         "HTTPClient:HTTPRequest:body" if args.len() == 1 => {

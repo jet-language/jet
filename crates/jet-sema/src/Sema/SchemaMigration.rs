@@ -149,6 +149,7 @@ fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func
         name_span: span,
         meta: None,
                     type_params: Vec::new(),
+        head_pattern: None,
         params: Vec::new(),
         return_type: Some(ty.clone()),
         return_type_span: Some(span),
@@ -233,6 +234,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
         name_span: span,
         meta: None,
                     type_params: Vec::new(),
+        head_pattern: None,
         params: vec![Param {
             name: param_name,
             name_span: span,

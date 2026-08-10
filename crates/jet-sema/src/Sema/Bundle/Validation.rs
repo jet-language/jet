@@ -1009,6 +1009,7 @@ pub(crate) fn check_module_bodies(
                     name_span: t.name_span,
                     meta: None,
                     type_params: Vec::new(),
+                    head_pattern: None,
                     params: t.params.clone(),
                     return_type: None,
                     return_type_span: None,
@@ -1087,6 +1088,7 @@ pub(crate) fn check_module_bodies(
                     name_span: b.name_span,
                     meta: None,
                     type_params: Vec::new(),
+                    head_pattern: None,
                     params: Vec::new(),
                     return_type: None,
                     return_type_span: None,
@@ -1162,8 +1164,7 @@ pub(crate) fn check_module_bodies(
                             // emits this function's local summary.
                             let previous = summaries.remove(&f.name);
                             let pending_start = pending_diagnostics_out.len();
-                            diags.extend(check_func_body_incremental(
-                                format!("{module_key}::module:{}::fn:{}", cm.name, f.name),
+                            diags.extend(check_func_body_bundle_scoped(
                                 f,
                                 module_idx,
                                 states,
@@ -1182,8 +1183,7 @@ pub(crate) fn check_module_bodies(
                                 no_prelude,
                                 reference_anchors,
                                 pending_diagnostics_out,
-                                incremental.as_deref_mut(),
-                                cache_allowed,
+                                Some(&cm.name),
                             ));
                             for pending in &mut pending_diagnostics_out[pending_start..] {
                                 pending.function_key = format!("{}__{}", cm.name, f.name);
@@ -1212,6 +1212,7 @@ pub(crate) fn check_module_bodies(
                     name_span: ec.from_span,
                     meta: None,
                     type_params: Vec::new(),
+                    head_pattern: None,
                     params: vec![Param {
                         name: crate::Syntax::KW_SELF.to_string(),
                         name_span: ec.from_span,
@@ -1433,7 +1434,72 @@ pub(crate) fn check_func_body_bundle(
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
 ) -> Vec<Diagnostic> {
+    check_func_body_bundle_scoped(
+        f,
+        module_idx,
+        states,
+        effect_facts,
+        owner_type,
+        ct_funcs,
+        ct_externs,
+        ct_base_dir,
+        ct_globals,
+        freestanding,
+        allow_impure,
+        summaries,
+        embed_inputs_out,
+        global_addr_taken,
+        _no_alloc,
+        no_prelude,
+        reference_anchors,
+        pending_diagnostics_out,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_func_body_bundle_scoped(
+    f: &mut Func,
+    module_idx: usize,
+    states: &[ModuleState],
+    effect_facts: &jet_foundation::Facts::FactRegistry,
+    owner_type: Option<&str>,
+    ct_funcs: &HashMap<String, Func>,
+    ct_externs: &HashSet<String>,
+    ct_base_dir: &std::path::Path,
+    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
+    freestanding: bool,
+    allow_impure: bool,
+    summaries: &mut HashMap<String, EffectSummary>,
+    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
+    global_addr_taken: &mut HashSet<String>,
+    _no_alloc: bool,
+    no_prelude: bool,
+    reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
+    inline_module: Option<&str>,
+) -> Vec<Diagnostic> {
     let st = &states[module_idx];
+    let mut scoped_core_imports = st.core_imports.clone();
+    let mut scoped_unqualified = st.unqualified.clone();
+    let mut scoped_unqualified_file = st.unqualified_file.clone();
+    if let Some(inline_module) = inline_module {
+        for ((scope, name), module) in &st.inline_core_imports {
+            if scope == inline_module {
+                scoped_core_imports.insert(name.clone(), module.clone());
+            }
+        }
+        for ((scope, name), mangled) in &st.inline_unqualified {
+            if scope == inline_module {
+                scoped_unqualified.insert(name.clone(), mangled.clone());
+            }
+        }
+        for ((scope, name), target) in &st.inline_unqualified_file {
+            if scope == inline_module {
+                scoped_unqualified_file.insert(name.clone(), target.clone());
+            }
+        }
+    }
     let mut ck = Checker {
         funcs: &st.funcs,
         registry: &st.registry,
@@ -1442,11 +1508,16 @@ pub(crate) fn check_func_body_bundle(
         modules: Some(states),
         module_idx,
         imports: &st.imports,
-        core_imports: &st.core_imports,
+        core_imports: &scoped_core_imports,
         code_modules: &st.code_modules,
         code_module_identities: &st.code_module_identities,
-        unqualified: &st.unqualified,
-        unqualified_file: &st.unqualified_file,
+        unqualified: &scoped_unqualified,
+        unqualified_file: &scoped_unqualified_file,
+        inline_unqualified: &st.inline_unqualified,
+        inline_unqualified_file: &st.inline_unqualified_file,
+        inline_module: inline_module.map(str::to_owned),
+        inline_reexport_inline: &st.inline_reexport_inline,
+        inline_reexport_file: &st.inline_reexport_file,
         func_pub: &st.func_pub,
         func_pkg_pub: &st.func_pkg_pub,
         module_path: &st.module_path,
@@ -1524,6 +1595,7 @@ pub(crate) fn check_func_body_bundle(
         inferred_lambda_mut_captures: HashSet::new(),
         lambda_params_are_lending_views: false,
         is_task_spawn: false,
+        interrupt_callback_depth: 0,
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,
         view_capture_tasks: HashSet::new(),

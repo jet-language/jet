@@ -1799,7 +1799,8 @@ public-by-default with a single **`#PubFile`** marker (D-VISDEFAULT1=C /
 D-VISDEFAULT2=A); inside such a file, top-level items export unless marked
 **`priv`**. The driver loads the import
 graph, sema checks the whole program, codegen emits one Rust file with **`mod`**
-blocks and `user_<module>_<name>` mangling (`main` stays `main`).
+blocks; generated module and item names each use the canonical `__jet_` prefix
+(`main` stays `main`).
 
 Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
 **E0604** import cycle · **E0605** private item · **E0606** ambiguous module.
@@ -1842,9 +1843,13 @@ containing file, no file lookup. `module` is shared with the JetOS declaration
 contribution path) and by the `;` form, which is always a code module.
 
 **Access (D-MOD2).** Qualified `math.clamp(…)` always works. Optionally bring
-items unqualified with `use math.clamp;` or a group `use math.{clamp, lerp};`.
-Wildcards (`use math.*`) are rejected — **E0612**. Unqualified import of an
-undefined item is **E0611**; of an item in a module not in scope, **E0610**.
+items unqualified with `use math.clamp;` or a group `use math.[clamp, lerp];`.
+The same `.[ ]` form means “these members of that prefix” in both positions:
+after `use` it creates aliases; in an expression such as `point.[x, y]` it
+creates the member values. Expression entries remain members; use entries may
+also carry `as` aliases and dotted paths. Wildcards (`use math.*`) are
+rejected — **E0612**. Unqualified import of an undefined item is **E0611**; of
+an item in a module not in scope, **E0610**.
 
 **Visibility (D-MOD3, D-PUBPKG1).** Private by default; `pub` exports to every
 consumer; `pub(package)` exports only inside the same payload/workspace package

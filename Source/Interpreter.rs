@@ -20,7 +20,7 @@ pub use jet_foundation::JitBackend::RunOutcome;
 pub enum DevMode {
     /// A program that finishes on its own — rerun it from scratch on each save.
     RunToCompletion,
-    /// A program that stays up (a top-level `loop`, or a `task.spawn`) — a
+    /// A program that stays up (a top-level `loop`, or a canonical `task`) — a
     /// type-stable edit takes the swap path, a type-changing edit announces a
     /// clean restart (D-HOTSWAP1).
     Resident,
@@ -28,7 +28,7 @@ pub enum DevMode {
 
 /// c77 (D-DEVMODE1=A): auto-detect whether `run` runs to completion or stays
 /// resident. A `run` whose body contains a top-level `loop { … }` or a
-/// `*.spawn(...)` call (the `core.tasks` spawn surface) is `Resident`;
+/// a compiler-lowered `task` spawn is `Resident`;
 /// everything else is `RunToCompletion`. The scan only looks at `run`'s own
 /// statement list (top level) per the D-DEVMODE1 Q2 rule — a `loop` buried
 /// inside a helper does not make a program resident.
@@ -45,8 +45,8 @@ pub fn detect_dev_mode(bundle: &ProgramBundle) -> DevMode {
 }
 
 /// A single top-level statement that marks a program resident: a `loop { … }`
-/// or any statement whose expression is (or contains, top-level) a `.spawn(…)`
-/// method call.
+/// or any statement whose expression is (or contains, top-level) a compiler-
+/// lowered `task` spawn method call.
 fn stmt_is_resident(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Loop { .. } => true,
@@ -57,8 +57,8 @@ fn stmt_is_resident(stmt: &Stmt) -> bool {
     }
 }
 
-/// True when `e` is, at this level, a `*.spawn(...)` method call — the
-/// `core.tasks` resident-task surface (`tasks.spawn(() => …)`).
+/// True when `e` is, at this level, a compiler-lowered `task` spawn method
+/// call. The parser lowers the one-word surface before resident-mode checks.
 fn expr_has_spawn(e: &Expr) -> bool {
     matches!(e, Expr::MethodCall { method, .. } if method == "spawn")
 }
@@ -396,9 +396,10 @@ fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
                             )
                 )
             });
-            let has_run = program.items.iter().any(
-                |item| matches!(item, crate::AST::Item::Func(function) if function.name == "run"),
-            );
+            let has_run = !program.script_body.is_empty()
+                || program.items.iter().any(
+                    |item| matches!(item, crate::AST::Item::Func(function) if function.name == "run"),
+                );
             (has_app && !has_run)
                 .then(|| format!("{source}\nfn run() {{ app().serve() }}\n"))
         });
@@ -416,12 +417,19 @@ fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
                 let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
                 // Same gate as `jet build` / entry-swap: recoverable parse
                 // teaching must not disappear on the default `jet run` path.
-                // Extension hooks are empty here (no plugin session on plain run);
-                // `compile_bundle_path_opts_full` still passes them on the build path.
+                // The canonical extension hook runs before this gate so its
+                // findings receive the same project lint policy as sema lints.
+                let extension_diags = jet_driver::CompilerExtensionHook::post_sema_diagnostics(
+                    &bundle,
+                    None,
+                    &diags,
+                );
+                let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
                 let _lints = crate::Driver::gate_diagnostics(
-                    std::mem::take(&mut bundle.parse_teaching),
+                    &bundle,
+                    parse_teaching,
                     diags,
-                    Vec::new(),
+                    extension_diags,
                 )?;
                 Ok(bundle)
             }
@@ -569,7 +577,7 @@ mod tests {
 
     #[test]
     fn task_spawn_is_resident() {
-        let src = "use core.tasks as tasks\nfn job() => Int {\n    return 1\n}\nfn run() {\n    h :: tasks.spawn(() => job())\n    print(h.join())\n}\n";
+        let src = "fn job() => Int {\n    return 1\n}\nfn run() {\n    h :: task job()\n    print(h.join())\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
     }

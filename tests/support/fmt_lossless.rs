@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use jet::Lexer::{StrTokPart, TokKind, Token};
 
 const UI_PARSE_INVALID: &[&str] = &[
+    "tests/ui/E0922_body_debug_derive.jet",
     "tests/ui/E0927_retired_pure_callable.jet",
     "tests/ui/E0927_retired_pure_trait_oneline.jet",
     "tests/ui/E0927_retired_pure_trait_twoline.jet",
     "tests/ui/E0927_unknown_marker_function.jet",
+    "tests/ui/E0929_body_capability_derive.jet",
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/auto_derive_invalid_sign.jet",

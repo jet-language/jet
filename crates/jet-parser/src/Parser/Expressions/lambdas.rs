@@ -162,19 +162,4 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-TASKSCOPE1=A as respelled by D-ARROW-CONTROL1:
-        /// `=> expr-or-block` after `.task` becomes a zero-parameter lambda.
-        pub(super) fn parse_task_body_lambda(&mut self) -> Result<Lambda, Diagnostic> {
-            let open = self.peek().span;
-            self.expect(TokKind::LambdaArrow, "before the task body")?;
-            let (body, end) = self.lambda_arrow_body(open.end)?;
-            Ok(Lambda {
-                take_names: Vec::new(),
-                params: Vec::new(),
-                body,
-                span: Span::new(open.start, end),
-                meta: LambdaMeta::default(),
-            })
-        }
-
 }

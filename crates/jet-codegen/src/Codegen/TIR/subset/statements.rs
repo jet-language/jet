@@ -742,7 +742,7 @@ pub(crate) fn switch_in_subset(
     // and field expressions single-evaluation.
     // D-DESTRUCT1: a struct-pattern arm head (`.{ kind: "page", title, .. }`) also
     // lowers through this chain: value fields become boolean equality checks, and bind
-    // fields clone from the borrowed `_jet_switch_subject` at the top of the arm body.
+    // fields clone from the borrowed `__jet_switch_subject` at the top of the arm body.
     // Conservative: a variant/fallible pattern-test arm in the chain excludes the whole
     // switch (stays on the AST path). The `else` is optional.
     if arms.iter().all(|a| {

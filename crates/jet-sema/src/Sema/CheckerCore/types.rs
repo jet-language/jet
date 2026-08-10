@@ -10,6 +10,12 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
                     Type::Named(crate::Syntax::TYPE_DATA.to_string())
                 }
+                // D-BOUND-HEAD1=A: `URL` is the canonical source spelling;
+                // keep the existing `Url` nominal in semantic and generated
+                // value types.
+                Type::Named(n) if n == crate::Syntax::TYPE_URL => {
+                    Type::Named("Url".to_string())
+                }
                 // D-LANGNS-NAME1=A: `core.lang` publishes compiler vocabulary as
                 // ordinary generated enum declarations. Membership is decided by
                 // the rule table, not a fixed leaf list, so it can't join the

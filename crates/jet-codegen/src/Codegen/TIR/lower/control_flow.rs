@@ -894,7 +894,7 @@ fn range_inclusive_cond(subject_ty: &Type, lo: i64, hi: i64) -> TExpr {
 
 /// c109 Phase 15: lower a MIXED comparison/Bool `when` switch (shape D) to a
 /// `TStmt::MixedSwitch`, reproducing `emit_mixed_switch` (Source/Codegen/Statement.rs).
-/// The subject is bound once to `_jet_switch_subject = &(subject)` (emitted for parity);
+/// The subject is bound once to `__jet_switch_subject = &(subject)` (emitted for parity);
 /// each arm's PLAIN condition is resolved to a Rust string at lowering (`emit_expr`); the
 /// arm bodies + `else` are lowered in separate lexical environments.
 pub(crate) fn lower_mixed_switch(
@@ -950,7 +950,7 @@ pub(crate) fn lower_mixed_switch(
 }
 
 /// D-DESTRUCT1: value tests in `.{ field: value, ... }` become equality checks
-/// against the borrowed `_jet_switch_subject` that `MixedSwitch` emits.
+/// against the borrowed `__jet_switch_subject` that `MixedSwitch` emits.
 fn struct_pattern_cond_expr(
     pattern: &Pattern,
     subject_ty: &Type,
@@ -1038,14 +1038,14 @@ pub(super) fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     let Pattern::StrMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
-    str_match_scan_closure_ex(parts, cx, "_jet_switch_subject.as_str()", true)
+    str_match_scan_closure_ex(parts, cx, "__jet_switch_subject.as_str()", true)
 }
 
 /// D-PARSESTR1 (extended for D-SHIFT1's `Cursor.take_pattern` consume mode —
 /// I8, one matcher engine, not a second one): the same scan engine as above,
 /// generalized over WHERE the subject text comes from (`subject_src`, a raw
 /// Rust expression) and whether the WHOLE subject must be consumed
-/// (`require_full_match`). The `if == {}` shape uses `_jet_switch_subject`
+/// (`require_full_match`). The `if == {}` shape uses `__jet_switch_subject`
 /// and requires full consumption; `take_pattern` scans a local `__jet_tail`
 /// slice and only needs a PREFIX match — the caller advances a cursor by the
 /// consumed byte count, which (when `require_full_match` is false) is
@@ -1085,7 +1085,10 @@ pub(crate) fn str_match_scan_closure_ex(
                 i += 1;
             }
             crate::AST::StrMatchPart::Hole { name, ty, .. } => {
-                let var = format!("__jet_sm_{}", mangle(name));
+                let var = format!(
+                    "__jet_sm_{}",
+                    crate::Syntax::generated_suffix(&mangle(name))
+                );
                 // Find the boundary: the next literal anchor's text (non-greedy —
                 // the FIRST occurrence from the cursor), or end-of-string if this
                 // hole is the last part.
@@ -1152,7 +1155,12 @@ pub(crate) fn str_match_scan_closure_ex(
     }
     let mut tuple_vars: Vec<String> = holes
         .iter()
-        .map(|(n, _)| format!("__jet_sm_{}", mangle(n)))
+        .map(|(n, _)| {
+            crate::Syntax::generated_name(&format!(
+                "sm_{}",
+                crate::Syntax::generated_suffix(&mangle(n))
+            ))
+        })
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {
@@ -1181,7 +1189,7 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     let Pattern::BinMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
-    bin_match_scan_closure_ex(parts, cx, "(_jet_switch_subject).as_slice()", true)
+    bin_match_scan_closure_ex(parts, cx, "(__jet_switch_subject).as_slice()", true)
 }
 
 /// D-BINPAT1 (card #506 follow-up): the same bit-scan engine, generalized
@@ -1227,7 +1235,10 @@ pub(crate) fn bin_match_scan_closure_ex(
             }
             BinMatchPart::Hole { name, spec, .. } => match spec {
                 BinSpec::Rest => {
-                    let var = format!("__jet_bm_{}", mangle(name));
+                    let var = format!(
+                        "__jet_bm_{}",
+                        crate::Syntax::generated_suffix(&mangle(name))
+                    );
                     body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
                     body.push_str(&format!(
                         "let {var}: Vec<u8> = __jet_bm[__jet_pos / 8..].to_vec(); __jet_pos = __jet_total;\n"
@@ -1238,7 +1249,10 @@ pub(crate) fn bin_match_scan_closure_ex(
                     ));
                 }
                 BinSpec::Bits { width, endian } => {
-                    let var = format!("__jet_bm_{}", mangle(name));
+                    let var = format!(
+                        "__jet_bm_{}",
+                        crate::Syntax::generated_suffix(&mangle(name))
+                    );
                     let ty = cx.rust_type(&bin_bits_type(*width));
                     let w = *width as usize;
                     body.push_str(&format!("if __jet_pos + {w} > __jet_total {{ return None; }}\n"));
@@ -1272,7 +1286,12 @@ pub(crate) fn bin_match_scan_closure_ex(
     }
     let mut tuple_vars: Vec<String> = holes
         .iter()
-        .map(|(n, _)| format!("__jet_bm_{}", mangle(n)))
+        .map(|(n, _)| {
+            crate::Syntax::generated_name(&format!(
+                "bm_{}",
+                crate::Syntax::generated_suffix(&mangle(n))
+            ))
+        })
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {

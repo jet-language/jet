@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 mod common;
 use common::{add_generated_rust, have_rustc, panic_message, test_worker_count, FfiBridgeLock};
-use jet::Interpreter::{dev_iteration, dev_run_bundle, run_named_task, RunOutcome};
+use jet::Interpreter::{dev_iteration, dev_run_bundle, run_jit_once, run_named_task, RunOutcome};
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
@@ -45,6 +45,17 @@ fn skip_if_cranelift_host_unsupported() -> bool {
         eprintln!("note: cranelift-jit host path unsupported on this architecture; skipping resident JIT assertion");
         true
     }
+}
+
+fn require_multi_head_parity_prereqs() {
+    assert!(
+        jet_jit::cranelift_host_supported(),
+        "multi-head parity requires a supported Cranelift host; project harness must provision one"
+    );
+    assert!(
+        have_rustc(),
+        "multi-head parity requires rustc; project harness must provision it"
+    );
 }
 
 /// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
@@ -1419,6 +1430,59 @@ fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
     }
 }
 
+#[test]
+fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() {
+    let path = std::env::temp_dir().join(format!(
+        "jet_interpreter_boundary_files_{}.jet",
+        std::process::id()
+    ));
+    let data_path = path.with_extension("txt");
+    fs::write(&data_path, "shared-prelude").unwrap();
+    let data_path = data_path.to_string_lossy().replace('\\', "/");
+    fs::write(
+        &path,
+        format!(
+            "use core.files as files\nfn run() {{\n    text :: files.read(\"{data_path}\") ?? panic(\"read\")\n    print(text == \"shared-prelude\")\n}}\n"
+        ),
+    )
+    .unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let bundle = jet::Loader::load_entry(&shown).expect("files boundary fixture should load");
+    assert!(
+        jet_driver::InterpreterBoundary::dev_boundary_scan(&bundle).is_none(),
+        "default dev must reach the shared encoding/files Prelude"
+    );
+    jet_jit::reset_jit_trace_for_test();
+    match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(stdout, "true\n", "dev shared-Prelude output drifted");
+            assert!(stderr.is_empty(), "dev shared Prelude emitted stderr: {stderr}");
+            assert_eq!(exit_code, 0, "dev shared Prelude exited {exit_code}");
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "default dev must execute the shared Prelude through resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+                "default dev must not deopt or fall back around the shared Prelude"
+            );
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("dev must execute core.files through the shared Prelude: {diags:?}")
+        }
+    }
+    let debug = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle)
+        .expect("source debug must retain the impurity gate");
+    assert_eq!(debug.code, "E2203");
+    assert!(debug.what.contains("reads or writes files"));
+    let _ = fs::remove_file(path.with_extension("txt"));
+    let _ = fs::remove_file(path);
+}
+
 /// c139 M4: task programs inside `resident_jit_safe` run via default `jet dev` (Cranelift), not E2201.
 #[test]
 fn task_program_runs_via_jit() {
@@ -1768,6 +1832,71 @@ fn run() {
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
         "loop values must not use interpreter fallback"
     );
+}
+
+#[test]
+fn value_loop_named_routes_match_interpreter_default_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let dir = common::unique_tmp("jet_dev_value_loop_routes");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("value_loop_routes.jet");
+    fs::write(
+        &file,
+        r#"fn run() {
+    attempts := 0
+    retry :: loop {
+        attempts += 1
+        found :: loop value, [1] {
+            if attempts == 2 { break value }
+        } ?? next(retry)
+        print(found)
+        break(retry)
+    }
+    stop :: loop {
+        ignored :: loop value, [1] {
+            if value == 2 { break value }
+        } ?? break(stop)
+        print(ignored)
+    }
+    print("done")
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+    let expected = ProgramOutput::ran("1\ndone\n".into(), String::new(), 0);
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("value-loop interpreter failed: {diags:?}"),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("value-loop default run failed: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test(), "value-loop routes must execute JIT");
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "value-loop routes must not use interpreter fallback"
+    );
+    let aot = compiled_binary_output(&dir, "value_loop_routes", 0, "value_loop_routes", &shown);
+
+    assert_eq!(interpreted, expected, "interpreter value-loop route drift");
+    assert_eq!(default, expected, "default JIT value-loop route drift");
+    assert_eq!(aot, expected, "AOT value-loop route drift");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// c728 C6: one-shot `jet dev` deopts on a JIT gap and exits 0.
@@ -2763,7 +2892,8 @@ fn run_cranelift_outcome_without_fallback(src: &str, tag: &str) -> RunOutcome {
     fs::write(&p, src).unwrap();
     let shown = p.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
-    // #778: coverage gaps silent-deopt; do not require full resident safety.
+    // #778: coverage gaps silent-deopt; preserve the shared helper's existing
+    // tiered behavior for unrelated dev tests.
     let mut backend = CraneliftBackend::new();
     backend.run(&bundle, false)
 }
@@ -2777,6 +2907,148 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
     }
+}
+
+fn run_cranelift_resident_outcome(src: &str, tag: &str) -> RunOutcome {
+    let p = std::env::temp_dir().join(format!("jet_jit_resident_{tag}.jet"));
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, src).unwrap();
+    let shown = p.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    jet_jit::run_resident_strict_for_test(&bundle)
+        .unwrap_or_else(|reason| panic!("`{tag}` resident JIT failed: {reason}"))
+}
+
+/// Run one resident-JIT fixture on the same bounded stack used by the dev
+/// battery. A successful interpreter result is not resident-JIT evidence.
+fn run_cranelift_resident(src: &str, tag: &str) -> ProgramOutput {
+    let src = src.to_owned();
+    let tag = tag.to_owned();
+    std::thread::Builder::new()
+        .name(format!("resident-{tag}"))
+        .stack_size(DEV_BATTERY_STACK)
+        .spawn(move || {
+            jet_jit::reset_jit_trace_for_test();
+            let outcome = run_cranelift_resident_outcome(&src, &tag);
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "`{tag}` must execute resident Cranelift"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+                "`{tag}` must not deopt to the interpreter or use fallback"
+            );
+            match outcome {
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => ProgramOutput::ran(stdout, stderr, exit_code),
+                RunOutcome::Problems(ds) => {
+                    panic!("`{tag}` resident JIT returned diagnostics: {ds:?}")
+                }
+            }
+        })
+        .expect("spawn resident-JIT proof worker")
+        .join()
+        .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+}
+
+fn run_default_dev_resident(file: &str, tag: &str) -> ProgramOutput {
+    jet_jit::reset_jit_trace_for_test();
+    let outcome = dev_iteration_with_timeout(tag, file, false);
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "default dev `{tag}` must execute resident Cranelift"
+    );
+    if jet_jit::deopt_invoked_for_test() || jet_jit::fallback_invoked_for_test() {
+        let bundle = checked_bundle_from_path(file);
+        panic!(
+            "default dev `{tag}` must not deopt to the interpreter or use fallback; tier plan: {:?}",
+            jet_jit::plan_bundle_tiers(&bundle)
+        );
+    }
+    match outcome {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(ds) => panic!("default dev `{tag}` returned diagnostics: {ds:?}"),
+    }
+}
+
+/// Drive the real CLI default backend. `--trace-tiers` is the observable
+/// proof that this child process stayed in resident Cranelift.
+fn run_cli_default_resident(command: &str, file: &str, tag: &str) -> ProgramOutput {
+    let cache = common::unique_tmp(&format!("jet_{tag}_cache"));
+    fs::create_dir_all(&cache).unwrap();
+    let mut args = vec![command, file, "--trace-tiers"];
+    if command == "dev" {
+        args.extend(["--watch=off", "--quiet"]);
+    }
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+    cmd.args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .env("JET_RUN_CACHE_DIR", &cache)
+        .env("JET_CACHE_DIR", cache.join("build"));
+    let output = command_output_with_timeout(
+        cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("default CLI {command} for `{tag}`"),
+    );
+    assert!(
+        output.status.success(),
+        "default CLI {command} failed for `{tag}`:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let trace = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        trace.contains("tier1 native"),
+        "default CLI {command} did not report native Cranelift for `{tag}`:\n{trace}"
+    );
+    assert!(
+        !trace.contains("tier0 interp"),
+        "default CLI {command} deopted to the interpreter for `{tag}`:\n{trace}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stdout = match stdout.find("✓ ran in ") {
+        Some(end) => stdout[..end].to_string(),
+        None => stdout,
+    };
+    let _ = fs::remove_dir_all(&cache);
+    ProgramOutput::ran(stdout, String::new(), output.status.code().unwrap_or(1))
+}
+
+fn assert_cli_diagnostic_snapshot(command: &str, fixture: &str, snapshot: &str) {
+    let mut args = vec![command, fixture];
+    if command == "dev" {
+        args.extend(["--watch=off", "--quiet"]);
+    }
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+    cmd.args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1");
+    let output = command_output_with_timeout(
+        cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("default CLI {command} diagnostic"),
+    );
+    assert!(
+        !output.status.success(),
+        "default CLI {command} unexpectedly accepted `{fixture}`"
+    );
+    let rendered = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        rendered.starts_with(snapshot),
+        "default CLI {command} diagnostic drifted from UI snapshot:\n{rendered}"
+    );
 }
 
 #[test]
@@ -3180,7 +3452,7 @@ fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
 
     let source = fs::read_to_string(file).unwrap();
     jet_jit::reset_jit_trace_for_test();
-    let resident = run_cranelift_without_fallback(&source, "set_union");
+    let resident = run_cranelift_resident(&source, "set_union");
     assert!(
         jet_jit::jit_executed_for_test(),
         "Set example must execute as native JIT"
@@ -8417,6 +8689,219 @@ fn cranelift_covers_function_calls() {
 }
 
 #[test]
+fn multi_head_functions_match_interpreter_resident_jit_and_aot() {
+    require_multi_head_parity_prereqs();
+    let src = "\
+enum Shape {
+    Circle(Float)
+    Rect(w: Float, h: Float)
+}
+fn area(Circle(r: Float)) => Float { return r * r }
+fn area(Rect(w: Float, h: Float)) => Float { return w * h }
+fn run() {
+    print(area(Shape.Circle(3.0)))
+    print(area(.Rect.{ w: 2.0, h: 4.0 }))
+}
+";
+    let dir = std::env::temp_dir().join(format!("jet_multi_head_parity_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("multi_head.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("interpreter failed multi-head functions: {diags:?}"),
+    };
+    let jit = run_cranelift_resident(src, "multi_head_functions");
+    let default_dev = run_default_dev_resident(&shown, "multi_head_default_dev");
+    let aot = compiled_binary_output(
+        &dir,
+        "multi_head_functions",
+        0,
+        "multi_head_functions",
+        &shown,
+    );
+    let cli_run = run_cli_default_resident("run", &shown, "multi_head_cli_run");
+    let cli_dev = run_cli_default_resident("dev", &shown, "multi_head_cli_dev");
+    assert_eq!(default_dev, interpreted, "default dev/JIT drifted from interpreter");
+    assert_eq!(jit, interpreted, "resident JIT drifted from interpreter");
+    assert_eq!(aot, interpreted, "AOT drifted from interpreter");
+    assert_eq!(cli_run, interpreted, "default `jet run` drifted from interpreter");
+    assert_eq!(cli_dev, interpreted, "default `jet dev` drifted from interpreter");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn multi_head_missing_head_e0307_reaches_all_diagnostic_entries() {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui/multi_head_not_exhaustive.jet");
+    let shown = file.to_string_lossy().into_owned();
+    let src = fs::read_to_string(&file).unwrap();
+    let snapshot = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/ui/multi_head_not_exhaustive.stderr"),
+    )
+    .unwrap();
+    const SNAPSHOT_FILE: &str = "tests/ui/multi_head_not_exhaustive.jet";
+
+    require_multi_head_parity_prereqs();
+    let entries = multi_head_diagnostic_entries(&shown, &src);
+    let expected = diagnostic_shapes(&entries.sema);
+    assert_eq!(
+        expected.len(),
+        1,
+        "missing-head fixture must produce exactly one diagnostic: {expected:?}"
+    );
+    assert_eq!(expected[0].code, "E0307");
+    assert_eq!(
+        jet::render_diagnostics(SNAPSHOT_FILE, &src, &entries.sema),
+        snapshot,
+        "the sema diagnostic must match the checked-in UI snapshot"
+    );
+    for command in ["run", "dev"] {
+        assert_cli_diagnostic_snapshot(command, SNAPSHOT_FILE, &snapshot);
+    }
+
+    for (tier, diags) in [
+        ("sema", RunOutcome::Problems(entries.sema)),
+        ("AOT", RunOutcome::Problems(entries.aot)),
+        ("resident JIT", entries.jit),
+        ("default dev", entries.default_dev),
+        ("forced interpreter", entries.interpreter),
+    ] {
+        let RunOutcome::Problems(diags) = diags else {
+            panic!("{tier} entry must reject missing multi-head coverage")
+        };
+        assert_eq!(
+            diagnostic_shapes(&diags),
+            expected,
+            "{tier} diagnostic code/text/span drifted from sema"
+        );
+        assert_eq!(
+            jet::render_diagnostics(SNAPSHOT_FILE, &src, &diags),
+            snapshot,
+            "{tier} rendered diagnostic drifted from the UI snapshot"
+        );
+    }
+}
+
+#[derive(Debug)]
+struct MultiHeadDiagnosticEntries {
+    sema: Vec<jet::Diagnostics::Diagnostic>,
+    aot: Vec<jet::Diagnostics::Diagnostic>,
+    jit: RunOutcome,
+    default_dev: RunOutcome,
+    interpreter: RunOutcome,
+}
+
+fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEntries {
+    let file = file.to_owned();
+    let src = src.to_owned();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::Builder::new()
+        .name("multi-head-diagnostic".into())
+        .stack_size(DEV_BATTERY_STACK)
+        .spawn(move || {
+            let mut bundle = jet::Loader::load_entry(&file)
+                .expect("missing-head fixture should load");
+            let sema = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+            let aot = jet::compile_with_path(&src, &file)
+                .err()
+                .expect("AOT entry must reject missing multi-head coverage");
+            let entries = MultiHeadDiagnosticEntries {
+                sema,
+                aot,
+                jit: run_jit_once(&file),
+                default_dev: dev_iteration(&file, false, false),
+                interpreter: dev_iteration(&file, false, true),
+            };
+            tx.send(entries).expect("multi-head diagnostic receiver");
+        })
+        .expect("spawn multi-head diagnostic worker");
+    let entries = rx.recv_timeout(DEV_DIFF_TIMEOUT).expect("multi-head diagnostic worker");
+    worker
+        .join()
+        .expect("multi-head diagnostic worker panicked");
+    entries
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiagnosticShape {
+    severity: jet::Diagnostics::Severity,
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
+    span: Option<(usize, usize)>,
+}
+
+fn diagnostic_shapes(diags: &[jet::Diagnostics::Diagnostic]) -> Vec<DiagnosticShape> {
+    diags
+        .iter()
+        .map(|diagnostic| DiagnosticShape {
+            severity: diagnostic.severity,
+            code: diagnostic.code.clone(),
+            what: diagnostic.what.clone(),
+            why: diagnostic.why.clone(),
+            fix: diagnostic.fix.clone(),
+            span: diagnostic.span.map(|span| (span.start, span.end)),
+        })
+        .collect()
+}
+
+#[test]
+fn multi_head_duplicate_head_l0301_keeps_first_match_across_runtime_tiers() {
+    require_multi_head_parity_prereqs();
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_lint/multi_head_unreachable.jet");
+    let shown = file.to_string_lossy().into_owned();
+    let src = fs::read_to_string(&file).unwrap();
+    let dir = common::unique_tmp("jet_multi_head_duplicate_head");
+    fs::create_dir_all(&dir).unwrap();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("duplicate-head fixture should load");
+    let sema = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        sema.iter().any(|diagnostic| diagnostic.code == "L0301"),
+        "sema must retain duplicate-head lint: {sema:?}"
+    );
+    let compiled = jet::compile_with_path(&src, &shown)
+        .expect("duplicate-head lint must not block AOT compilation");
+    assert!(
+        compiled
+            .lints
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L0301"),
+        "AOT entry lost duplicate-head lint: {:?}",
+        compiled.lints
+    );
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("interpreter rejected duplicate-head fixture: {diags:?}"),
+    };
+    let jit = run_cranelift_resident(&src, "multi_head_duplicate_head");
+    let aot = compiled_binary_output(
+        &dir,
+        "multi_head_duplicate_head",
+        0,
+        "multi_head",
+        &shown,
+    );
+    let expected = ProgramOutput::ran("first\n".into(), String::new(), 0);
+    assert_eq!(interpreted, expected, "interpreter first-head order drifted");
+    assert_eq!(jit, expected, "resident JIT first-head order drifted");
+    assert_eq!(aot, expected, "AOT first-head order drifted");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cranelift_matches_plain_parameter_read_write_and_take_modes() {
     assert_cranelift_deopts_on_gap(
         "fn read(text: String) { print(text) }\nfn edit(values: &[Int]) { values[0] = 9 }\nfn consume(text: ^String) { print(text) }\nfn run() {\n    text :: \"hello\"\n    values := [1, 2]\n    read(text)\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}\n",
@@ -9360,4 +9845,30 @@ fn tracked_float_origin_matches_aot_in_default_dev() {
     assert_eq!(aot, ProgramOutput::ran(expected_stdout, String::new(), 0));
     assert_eq!(dev, aot);
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// Tower #1754: keep the repaired collection surface on a small, explicit
+/// three-way parity lens. The existing corpus battery is intentionally broad;
+/// this test makes the card's four rows independently runnable.
+#[test]
+fn tower_1754_collection_parity_focus() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let _guard = dev_diff_lock().lock().unwrap();
+            for stem in [
+                "collections/iter_adapters",
+                "collections/iter_tools_audit",
+                "collections/list_surface",
+                "effects/taint",
+            ] {
+                assert_cranelift_three_way(&example_path(stem), stem);
+            }
+        })
+        .expect("Tower #1754 parity worker")
+        .join()
+        .expect("Tower #1754 parity worker panicked");
 }

@@ -301,6 +301,16 @@
         }
     }
 
+    /// D-BOUND-HEAD1=A: URL heads use the shared hole encoder, then the
+    /// existing URL parser. Sema has already checked the literal skeleton.
+    pub fn jet_typed_url_literal(literals: &[&str], holes: Vec<String>) -> JetURL {
+        let text = super::jet_typed_url_interpolate(literals, &holes);
+        match JetURL::parse(&text) {
+            Ok(url) => url,
+            Err(error) => unreachable!("sema accepted an invalid URL typed head: {error}"),
+        }
+    }
+
     impl crate::JetShow for JetURL {
         fn jet_show(&self) -> String {
             self.to_string_value()

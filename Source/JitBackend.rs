@@ -18,10 +18,8 @@ use crate::AST::ProgramBundle;
 /// Used for explicit `jet run --interpret` and `jet dev --interpret`
 /// (D-JIT1 / D-LENS-RUN1).
 ///
-/// Every entry arms the `jet_jit` fallback tripwire. The call is not gated on
-/// `cfg(test)`: integration tests link this crate without `cfg(test)`, so a
-/// gated tripwire never fires and every `!fallback_invoked_for_test()`
-/// assertion in `tests/` would pass without proving anything.
+/// Explicit interpreter selection is not a JIT fallback. Cranelift's fallback
+/// and deopt sites own their trace tripwires, so this backend leaves them clear.
 #[derive(Default)]
 pub struct InterpreterBackend;
 
@@ -33,7 +31,6 @@ impl InterpreterBackend {
 
 impl JitBackend for InterpreterBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
-        jet_jit::note_fallback_invoked_for_test();
         jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))
     }
 
@@ -43,7 +40,6 @@ impl JitBackend for InterpreterBackend {
         bundle: &ProgramBundle,
         try_anyway: bool,
     ) -> Result<RunOutcome, Vec<Diagnostic>> {
-        jet_jit::note_fallback_invoked_for_test();
         match jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway)) {
             RunOutcome::Ran {
                 stdout,
@@ -59,7 +55,6 @@ impl JitBackend for InterpreterBackend {
     }
 
     fn restart(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
-        jet_jit::note_fallback_invoked_for_test();
         // D-HOTSWAP1 / D-PERSIST1: interpreter restart drops shared persist.
         jet_foundation::Persist::shared_clear();
         jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))

@@ -1014,7 +1014,12 @@ impl TraitRegistry {
             Type::Tagged { inner, .. } => {
                 self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
-            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => true,
+            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => {
+                type_params
+                    .iter()
+                    .find(|param| param.name == *name)
+                    .is_some_and(|param| param.bounds.iter().any(|bound| bound == trait_name))
+            }
             Type::Named(name) => foreign_supports(name, trait_name)
                 .unwrap_or_else(|| self.implements_trait(name, trait_name)),
             Type::Int
@@ -2218,7 +2223,7 @@ pub fn rust_type_name(ty: &Type) -> String {
 }
 
 /// Like `rust_type_name`, but renders a name in `assoc` (a trait's associated
-/// types) as `Self::Name` rather than `user_Name`. Used inside a `trait`
+/// types) as `Self::Name` rather than `__jet_Name`. Used inside a `trait`
 /// declaration where `type Item` is in scope (D-LIB2).
 pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
     match ty {
@@ -2230,7 +2235,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::List(inner) => format!("Vec<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Named(n) if n.is_empty() => "Self".to_string(),
         Type::Named(n) if assoc.contains(n) => format!("Self::{n}"),
-        Type::Named(n) => format!("user_{n}"),
+        Type::Named(n) => Syntax::generated_path(n),
         Type::Apply { name, args } if name == "View" && args.len() == 1 => {
             if matches!(&args[0], Type::Named(inner) if inner == "str") {
                 "&str".to_string()
@@ -2242,7 +2247,8 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
             format!("&mut [{}]", rust_type_name_assoc(&args[0], assoc))
         }
         Type::Apply { name, args } => format!(
-            "user_{name}<{}>",
+            "{}<{}>",
+            Syntax::generated_path(name),
             args.iter()
                 .map(|a| rust_type_name_assoc(a, assoc))
                 .collect::<Vec<_>>()
@@ -2253,7 +2259,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::TraitObject(t) => format!(
             "Box<dyn {}>",
             t.iter()
-                .map(|n| format!("user_{n}"))
+                .map(|n| Syntax::generated_path(n))
                 .collect::<Vec<_>>()
                 .join(" + ")
         ),
@@ -2283,7 +2289,7 @@ pub fn emit_trait_def(
     out: &mut String,
     render_view_return: impl Fn(&Type, &HashSet<String>) -> String,
 ) {
-    out.push_str(&format!("pub trait user_{} {{\n", t.name));
+    out.push_str(&format!("pub trait {} {{\n", Syntax::generated_name(&t.name)));
     // D-LIB2: declare each associated type; method sigs below render uses of it
     // as `Self::Name`, and each impl emits `type Name = <concrete>;`.
     let assoc: HashSet<String> = t.assoc_types.iter().map(|(n, _)| n.clone()).collect();

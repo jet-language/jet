@@ -31,6 +31,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             alias: "main".into(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
+            script_body: std::mem::take(&mut program.script_body),
             source: src.into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
@@ -83,7 +84,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         }
         modules.push(LoadedModule {
             path: PathBuf::from(path), display: (*path).into(), alias: path.trim_end_matches(".jet").into(),
-            imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), source: (*src).into(),
+            imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), script_body: std::mem::take(&mut program.script_body), source: (*src).into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
             html_path: program.html_path, no_alloc_policy: program.no_alloc_policy,

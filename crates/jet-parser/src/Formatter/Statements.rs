@@ -390,15 +390,13 @@ impl<'a> Fmt<'a> {
             }
             Stmt::Continue(_) => self.write(Syntax::KW_NEXT),
             Stmt::BreakLabel(name, _)
-                if name.starts_with("__jet_collect_loop_")
-                    || name.starts_with("__jet_value_loop_") =>
+                if super::is_generated_label(name) =>
             {
                 self.write("break")
             }
             Stmt::BreakLabel(name, _) => self.write(&format!("break({})", name)),
             Stmt::BreakLabelValue(name, _, value, _)
-                if name.starts_with("__jet_collect_loop_")
-                    || name.starts_with("__jet_value_loop_") =>
+                if super::is_generated_label(name) =>
             {
                 self.write("break ");
                 self.fmt_expr(value, Prec::OrFallback);
@@ -407,6 +405,11 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("break({}, ", name));
                 self.fmt_expr(value, Prec::OrFallback);
                 self.write(")");
+            }
+            Stmt::ContinueLabel(name, _)
+                if super::is_generated_label(name) =>
+            {
+                self.write(Syntax::KW_NEXT)
             }
             Stmt::ContinueLabel(name, _) => self.write(&format!("next({})", name)),
             // D-LOOP-COMMA1=A: `loop init, cond, step { body }`.
@@ -531,9 +534,15 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-TASKSCOPE1=A: `taskgroup g { … }`.
-            Stmt::TaskGroup { name, body, .. } => {
-                self.write(&format!("{} {} {{", Syntax::KW_TASKGROUP, name));
+            // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }`.
+            Stmt::TaskGroup { name, limit, body, .. } => {
+                self.write(&format!("{}.group {}", Syntax::KW_CONC_TASK, name));
+                if let Some(limit) = limit {
+                    self.write("(limit: ");
+                    self.fmt_expr(limit, Prec::OrFallback);
+                    self.write(")");
+                }
+                self.write(" {");
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();

@@ -85,8 +85,8 @@ fn run() {
 }
 "#,
     );
-    let lookup = user_body(&rust, "user_lookup");
-    let parse = user_body(&rust, "user_parse");
+    let lookup = user_body(&rust, "__jet_lookup");
+    let parse = user_body(&rust, "__jet_parse");
 
     assert!(
         lookup.contains("JetOutcome<i64, JetAbsent>"),
@@ -107,7 +107,7 @@ fn run() {
         "the optional view builds the carrier:\n{lookup}"
     );
 
-    let run = user_body(&rust, "user_run");
+    let run = user_body(&rust, "__jet_run");
     assert!(
         !run.contains("Some(") && !run.contains("None"),
         "`??` reads both views the same way:\n{run}"
@@ -130,7 +130,7 @@ fn run() {
 }
 "#,
     );
-    let body = user_body(&rust, "user_birth_year");
+    let body = user_body(&rust, "__jet_birth_year");
     assert!(
         body.contains(".or_err(\"nobody in the book is called that\""),
         "`.or_err` must reach the prelude's one meaning:\n{body}"
@@ -175,7 +175,7 @@ fn run() {
 }
 "#,
     );
-    let run = user_body(&rust, "user_run");
+    let run = user_body(&rust, "__jet_run");
     assert!(
         run.contains("jet_partial(&(") && run.contains("__jet_report.user_partial.clone()"),
         "`.partial` must marshal onto the prelude's `jet_partial`:\n{run}"
@@ -388,8 +388,8 @@ fn run() {
 }
 "#,
     );
-    let body = user_body(&rust, "user_first_even");
-    let run = user_body(&rust, "user_run");
+    let body = user_body(&rust, "__jet_first_even");
+    let run = user_body(&rust, "__jet_run");
     for shape in ["Vec::", "vec!", "to_vec()", "String::new()"] {
         assert!(
             !body.contains(shape),

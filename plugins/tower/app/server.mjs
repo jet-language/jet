@@ -53,7 +53,17 @@ const TOWER_BIN = join(TOWER_ROOT, 'tower.mjs');
 // process — one the self-restart watcher failed to swap out — is visible
 // to the owner instead of silently 404ing new routes.
 const START_VERSION = computeVersion(TOWER_ROOT);
-const projected = (store) => ({ ...store.project(), boot: BOOT, cli: `node ${TOWER_BIN}` });
+// #1738 — the highest store rev this process has served to its clients,
+// tracked on the store handle (per data dir, survives a reopen). Every
+// write route compares a fresh on-disk read against it and refuses with a
+// conflict when another writer (CLI, other agent) advanced the store past
+// what this server last saw — surfaced, never overwritten.
+const noteSeen = (store, rev) => { if (rev != null && rev > (store.serveSeenRev ?? 0)) store.serveSeenRev = rev; };
+const projected = (store) => {
+  const p = { ...store.project(), boot: BOOT, cli: `node ${TOWER_BIN}` };
+  noteSeen(store, p.meta?.rev);
+  return p;
+};
 const sseClients = new Set();
 function broadcast(store) {
   if (!sseClients.size) return;
@@ -198,6 +208,22 @@ export function serve(store, port = 7878, open = false) {
   // to require a key from non-localhost devices. No VAPID provisioning.
   const token = store.config.auth?.token || null;
 
+  // #1738 criterion 1: re-read the store before every board write; if the
+  // on-disk rev moved past what this process last served, refuse with 409,
+  // note the fresh rev, and broadcast so every client catches up — the
+  // caller retries against current state instead of silently overwriting.
+  const guardWrite = (res) => {
+    const diskRev = store.load().meta.rev;
+    if (diskRev > (store.serveSeenRev ?? 0)) {
+      noteSeen(store, diskRev);
+      broadcast(store);
+      send(res, 409, { error: 'E_CONFLICT', message: `another writer advanced the board to rev ${diskRev} — state refreshed, re-read and retry` });
+      return false;
+    }
+    return true;
+  };
+  noteSeen(store, store.load().meta.rev);
+
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
@@ -304,6 +330,7 @@ export function serve(store, port = 7878, open = false) {
           if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: 'nothing agent-workable — board is either empty, blocked on the owner, or done' });
         }
         if (agent && q.get('claim') === '1') {
+          if (!guardWrite(res)) return;
           const { state } = store.mutate((s2) => db.claimCard(s2, card.id, agent));
           s = state;
           card = db.findCard(s, card.id);
@@ -314,6 +341,10 @@ export function serve(store, port = 7878, open = false) {
       // ---- writes ----
       if (req.method === 'POST' && url.pathname === '/api/undo') {
         const p = await jsonBody(req);
+        // #1738: a whole-board replace must prove which rev it thinks it is
+        // undoing — an expectRev-less undo from a stale tab is an overwrite.
+        if (p.expectRev == null) return send(res, 400, { error: 'E_USAGE', message: 'undo requires expectRev — read /api/state and pass its meta.rev' });
+        if (!guardWrite(res)) return;
         const bdir = join(store.dataDir, 'backups');
         const files = existsSync(bdir) ? readdirSync(bdir).filter(f => f.startsWith('tower-')).sort() : [];
         if (!files.length) return send(res, 400, { error: 'E_INVALID', message: 'nothing to undo (no backups yet)' });
@@ -360,6 +391,7 @@ export function serve(store, port = 7878, open = false) {
         if (challenge.outcome !== p.outcome) return reject('owner-verification challenge is bound to another outcome');
         const provenance = { kind: 'owner-ui', session: session.auditId, challenge: challenge.challengeAudit,
           issuedFor: challenge.decisionId, outcome: challenge.outcome, resolvedAt: new Date().toISOString() };
+        if (!guardWrite(res)) return;
         const { result } = store.mutate((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
         broadcast(store);
         return send(res, 200, { ok: true, result, state: projected(store) });
@@ -391,6 +423,7 @@ export function serve(store, port = 7878, open = false) {
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner verification requires the dedicated owner UI action' });
           }
         }
+        if (!guardWrite(res)) return;
         const { result } = store.mutate((s, cfg) => fn(s, p, cfg), { expectRev: p.expectRev });
         broadcast(store);
         return send(res, 200, { ok: true, result, state: projected(store) });

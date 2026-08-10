@@ -14,132 +14,138 @@ use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
+use jet_foundation::Syntax::CoreCallPureRoute;
 
 type EvalResult = Result<CtValue, Diagnostic>;
 
 pub(super) fn evaluate(
-    module: &str,
-    method: &str,
+    row: &jet_foundation::Syntax::CoreCallRecord,
     args: &[CtValue],
     span: Span,
 ) -> Option<EvalResult> {
-    let result = match (module, method) {
-        ("core.mime", "parse") => mime_parse(args, span),
-        ("core.mime", "from_extension") => mime_from_extension(args, span),
-        ("core.mime", "extension") => mime_extension(args, span),
-        ("core.email", method) => return EmailAdapter::evaluate(method, args, span),
-        ("core.encoding.xml", "canonical") => xml_canonical(args, span),
-        ("core.time", "period") => period(args, span),
-        ("core.time", "period_days") => period_unit(args, span, 2),
-        ("core.time", "period_months") => period_unit(args, span, 1),
-        ("core.time", "period_years") => period_unit(args, span, 0),
-        ("core.time", "from_unix_ms") => datetime_from_unix_ms(args, span),
-        ("core.time", "parse_rfc3339") => datetime_parse(args, span),
-        ("core.time", "parse_time") => local_time_parse(args, span),
+    let result = match (row.pure_route, row.member) {
+        (CoreCallPureRoute::Mime, "parse") => mime_parse(args, span),
+        (CoreCallPureRoute::Mime, "from_extension") => mime_from_extension(args, span),
+        (CoreCallPureRoute::Mime, "extension") => mime_extension(args, span),
+        (CoreCallPureRoute::Email, "address") => return EmailAdapter::evaluate("address", args, span),
+        (CoreCallPureRoute::Email, "attachment") => {
+            return EmailAdapter::evaluate("attachment", args, span)
+        }
+        (CoreCallPureRoute::Email, "message") => return EmailAdapter::evaluate("message", args, span),
+        (CoreCallPureRoute::Email, "envelope") => return EmailAdapter::evaluate("envelope", args, span),
+        (CoreCallPureRoute::Email, "serialize") => return EmailAdapter::evaluate("serialize", args, span),
+        (CoreCallPureRoute::EncodingXml, "canonical") => xml_canonical(args, span),
+        (CoreCallPureRoute::Time, "period") => period(args, span),
+        (CoreCallPureRoute::Time, "period_days") => period_unit(args, span, 2),
+        (CoreCallPureRoute::Time, "period_months") => period_unit(args, span, 1),
+        (CoreCallPureRoute::Time, "period_years") => period_unit(args, span, 0),
+        (CoreCallPureRoute::Time, "from_unix_ms") => datetime_from_unix_ms(args, span),
+        (CoreCallPureRoute::Time, "parse_rfc3339") => datetime_parse(args, span),
+        (CoreCallPureRoute::Time, "parse_time") => local_time_parse(args, span),
         // Pure zone constructors: UTC is deterministic. Named IANA zones need a
         // host TZif database (filesystem), so comptime keeps UTC aliases only and
         // returns `Err` for everything else — same shape as AOT without tzdb.
-        ("core.time", "utc") => Ok(zone_utc()),
-        ("core.time", "zone") => zone_named(args, span),
-        ("core.time", "zoned") => zoned_from_datetime(args, span),
-        ("core.time", "zoned_local") => zoned_from_local(args, span),
-        ("core.time", "instant") => Ok(structure("Instant", vec![("start_ns", CtValue::Int(0))])),
-        ("core.time", "datetime") => datetime_parts(args, span),
-        ("core.time", "time" | "local_time") => local_time_parts(args, span),
-        ("core.time", "days_in_month") => time_days_in_month(args, span),
-        ("core.time", "is_leap_year") => time_is_leap_year(args, span),
-        ("core.time", "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours") => {
+        (CoreCallPureRoute::Time, "utc") => Ok(zone_utc()),
+        (CoreCallPureRoute::Time, "zone") => zone_named(args, span),
+        (CoreCallPureRoute::Time, "zoned") => zoned_from_datetime(args, span),
+        (CoreCallPureRoute::Time, "zoned_local") => zoned_from_local(args, span),
+        (CoreCallPureRoute::Time, "instant") => Ok(structure("Instant", vec![("start_ns", CtValue::Int(0))])),
+        (CoreCallPureRoute::Time, "datetime") => datetime_parts(args, span),
+        (CoreCallPureRoute::Time, "time" | "local_time") => local_time_parts(args, span),
+        (CoreCallPureRoute::Time, "days_in_month") => time_days_in_month(args, span),
+        (CoreCallPureRoute::Time, "is_leap_year") => time_is_leap_year(args, span),
+        (CoreCallPureRoute::Time, method @ ("nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours")) => {
             duration_ctor(method, args, span)
         }
-        ("core.math", "decimal") => decimal_from_str(args, span),
-        ("core.math", "fraction") => fraction_new(args, span),
-        ("core.science.measurement", "from") => measurement(args, span),
-        ("core.time.date", "new") => date_new_call(args, span),
-        ("core.time.date", "parse") => date_parse_call(args, span),
+        (CoreCallPureRoute::Math, "decimal") => decimal_from_str(args, span),
+        (CoreCallPureRoute::Math, "fraction") => fraction_new(args, span),
+        (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
+        (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
+        (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
         // Wall-clock read — same JetDate::today_utc as AOT/JIT hosts (I9).
-        ("core.time.date", "today") => Ok(Date::today_utc().value()),
-        ("core.time.datetime", "from_timestamp") => datetime_from_timestamp(args, span),
+        (CoreCallPureRoute::Date, "today") => Ok(Date::today_utc().value()),
+        (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
         // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
-        ("core.sketch.hll", "new") => Ok(hll_new()),
-        ("core.sketch.tdigest", "new") => Ok(tdigest_new()),
-        ("core.sketch.cms", "new") => Ok(cms_new()),
-        ("core.sketch.reservoir", "new") => reservoir_new(args, span),
-        ("core.ui", "point") => ui_point(args, span),
-        ("core.ui", "size") => ui_size(args, span),
-        ("core.ui", "rect") => ui_rect(args, span),
-        ("core.ui", "constraint") => ui_constraint(args, span),
-        ("core.ui", "node") => ui_node(args, span, None, None, "Custom"),
-        ("core.ui", "node_role") => ui_node_role(args, span),
-        ("core.ui", "node_color") => ui_node_color(args, span),
-        ("core.ui", "text") => ui_text(args, span),
-        ("core.ui", "button") => ui_button(args, span),
-        ("core.ui", "box") => ui_box(args, span),
-        ("core.ui", "aria_role_button") => Ok(ui_role("Button")),
-        ("core.ui", "aria_role_text_input") => Ok(ui_role("TextInput")),
-        ("core.ui", "aria_role_label") => Ok(ui_role("Label")),
-        ("core.ui", "aria_role_container") => Ok(ui_role("Container")),
-        ("core.ui", "key_event") => ui_key_event(args, span),
-        ("core.ui", "resize_event") => ui_resize_event(args, span),
-        ("core.raylib", "color") => raylib_color(args, span),
-        ("core.io", "style_force") => io_style_force(args, span),
-        ("core.net", "ip_addr") => net_ip_addr(args, span),
-        ("core.net", "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
-        ("core.net", "ip_is_ipv4") => net_ip_is_ipv4(args, span),
-        ("core.net", "socket_addr_parse") => net_socket_addr_parse(args, span),
-        ("core.net", "socket_host") => net_string_field(args, "SocketAddr", "host", span),
-        ("core.net", "socket_port") => net_value_field(args, "SocketAddr", "port", span),
-        ("core.net", "socket_to_string") => net_string_field(args, "SocketAddr", "text", span),
-        ("core.net", "ready_readable") => net_value_field(args, "NetReady", "readable", span),
-        ("core.net", "ready_writable") => net_value_field(args, "NetReady", "writable", span),
-        ("core.net", "error_operation") => net_string_field(args, "NetError", "operation", span),
-        ("core.net", "error_address") => net_value_field(args, "NetError", "address", span),
-        ("core.net", "error_name") => net_value_field(args, "NetError", "name", span),
-        ("core.net", "error_message") => net_string_field(args, "NetError", "message", span),
-        ("core.net", "error_os_code") => net_value_field(args, "NetError", "os_code", span),
-        ("core.net", "dns_srv_target") => net_string_field(args, "DNSSrv", "target", span),
-        ("core.net", "dns_srv_port") => net_value_field(args, "DNSSrv", "port", span),
-        ("core.net", "dns_srv_priority") => net_value_field(args, "DNSSrv", "priority", span),
-        ("core.net", "dns_srv_weight") => net_value_field(args, "DNSSrv", "weight", span),
-        ("core.net", "udp_packet_data") => net_udp_packet_data(args, span),
-        ("core.net", "udp_packet_bytes") => net_value_field(args, "UDPPacket", "data", span),
-        ("core.net", "udp_packet_addr") => net_value_field(args, "UDPPacket", "addr", span),
-        ("core.net", "udp_packet_original_len") => net_value_field(args, "UDPPacket", "original_len", span),
-        ("core.net", "udp_packet_truncated") => net_value_field(args, "UDPPacket", "truncated", span),
-        ("core.crypto.expert", "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
-        ("core.crypto.expert", "ed25519_sign") => crypto_ed25519_sign(args, span),
-        ("core.crypto.expert", "hkdf_sha256_raw") => crypto_hkdf(args, span),
-        ("core.crypto.expert", "x25519_raw") => crypto_x25519(args, span),
-        ("core.crypto.expert", "xchacha20poly1305_seal") => {
+        (CoreCallPureRoute::SketchHll, "new") => Ok(hll_new()),
+        (CoreCallPureRoute::SketchTDigest, "new") => Ok(tdigest_new()),
+        (CoreCallPureRoute::SketchCms, "new") => Ok(cms_new()),
+        (CoreCallPureRoute::SketchReservoir, "new") => reservoir_new(args, span),
+        (CoreCallPureRoute::Ui, "point") => ui_point(args, span),
+        (CoreCallPureRoute::Ui, "size") => ui_size(args, span),
+        (CoreCallPureRoute::Ui, "rect") => ui_rect(args, span),
+        (CoreCallPureRoute::Ui, "constraint") => ui_constraint(args, span),
+        (CoreCallPureRoute::Ui, "node") => ui_node(args, span, None, None, "Custom"),
+        (CoreCallPureRoute::Ui, "node_role") => ui_node_role(args, span),
+        (CoreCallPureRoute::Ui, "node_color") => ui_node_color(args, span),
+        (CoreCallPureRoute::Ui, "text") => ui_text(args, span),
+        (CoreCallPureRoute::Ui, "button") => ui_button(args, span),
+        (CoreCallPureRoute::Ui, "box") => ui_box(args, span),
+        (CoreCallPureRoute::Ui, "aria_role_button") => Ok(ui_role("Button")),
+        (CoreCallPureRoute::Ui, "aria_role_text_input") => Ok(ui_role("TextInput")),
+        (CoreCallPureRoute::Ui, "aria_role_label") => Ok(ui_role("Label")),
+        (CoreCallPureRoute::Ui, "aria_role_container") => Ok(ui_role("Container")),
+        (CoreCallPureRoute::Ui, "key_event") => ui_key_event(args, span),
+        (CoreCallPureRoute::Ui, "resize_event") => ui_resize_event(args, span),
+        (CoreCallPureRoute::Raylib, "color") => raylib_color(args, span),
+        (CoreCallPureRoute::Io, "style_force") => io_style_force(args, span),
+        (CoreCallPureRoute::Net, "ip_addr") => net_ip_addr(args, span),
+        (CoreCallPureRoute::Net, "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
+        (CoreCallPureRoute::Net, "ip_is_ipv4") => net_ip_is_ipv4(args, span),
+        (CoreCallPureRoute::Net, "socket_addr_parse") => net_socket_addr_parse(args, span),
+        (CoreCallPureRoute::Net, "socket_host") => net_string_field(args, "SocketAddr", "host", span),
+        (CoreCallPureRoute::Net, "socket_port") => net_value_field(args, "SocketAddr", "port", span),
+        (CoreCallPureRoute::Net, "socket_to_string") => net_string_field(args, "SocketAddr", "text", span),
+        (CoreCallPureRoute::Net, "ready_readable") => net_value_field(args, "NetReady", "readable", span),
+        (CoreCallPureRoute::Net, "ready_writable") => net_value_field(args, "NetReady", "writable", span),
+        (CoreCallPureRoute::Net, "error_operation") => net_string_field(args, "NetError", "operation", span),
+        (CoreCallPureRoute::Net, "error_address") => net_value_field(args, "NetError", "address", span),
+        (CoreCallPureRoute::Net, "error_name") => net_value_field(args, "NetError", "name", span),
+        (CoreCallPureRoute::Net, "error_message") => net_string_field(args, "NetError", "message", span),
+        (CoreCallPureRoute::Net, "error_os_code") => net_value_field(args, "NetError", "os_code", span),
+        (CoreCallPureRoute::Net, "dns_srv_target") => net_string_field(args, "DNSSrv", "target", span),
+        (CoreCallPureRoute::Net, "dns_srv_port") => net_value_field(args, "DNSSrv", "port", span),
+        (CoreCallPureRoute::Net, "dns_srv_priority") => net_value_field(args, "DNSSrv", "priority", span),
+        (CoreCallPureRoute::Net, "dns_srv_weight") => net_value_field(args, "DNSSrv", "weight", span),
+        (CoreCallPureRoute::Net, "udp_packet_data") => net_udp_packet_data(args, span),
+        (CoreCallPureRoute::Net, "udp_packet_bytes") => net_value_field(args, "UDPPacket", "data", span),
+        (CoreCallPureRoute::Net, "udp_packet_addr") => net_value_field(args, "UDPPacket", "addr", span),
+        (CoreCallPureRoute::Net, "udp_packet_original_len") => net_value_field(args, "UDPPacket", "original_len", span),
+        (CoreCallPureRoute::Net, "udp_packet_truncated") => net_value_field(args, "UDPPacket", "truncated", span),
+        (CoreCallPureRoute::Crypto, "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
+        (CoreCallPureRoute::Crypto, "ed25519_sign") => crypto_ed25519_sign(args, span),
+        (CoreCallPureRoute::Crypto, "hkdf_sha256_raw") => crypto_hkdf(args, span),
+        (CoreCallPureRoute::Crypto, "x25519_raw") => crypto_x25519(args, span),
+        (CoreCallPureRoute::Crypto, "xchacha20poly1305_seal") => {
             crypto_aead_seal(args, span, "expert.xchacha20poly1305_seal", 24, false)
         }
-        ("core.crypto.expert", "xchacha20poly1305_open") => {
+        (CoreCallPureRoute::Crypto, "xchacha20poly1305_open") => {
             crypto_aead_open(args, span, "expert.xchacha20poly1305_open", 24)
         }
-        ("core.crypto.expert", "aes256gcm_seal") => {
+        (CoreCallPureRoute::Crypto, "aes256gcm_seal") => {
             crypto_aead_seal(args, span, "expert.aes256gcm_seal", 12, true)
         }
-        ("core.crypto.expert", "aes256gcm_open") => {
+        (CoreCallPureRoute::Crypto, "aes256gcm_open") => {
             crypto_aead_open(args, span, "expert.aes256gcm_open", 12)
         }
-        ("core.crypto.expert", "argon2id") => crypto_argon2id(args, span),
-        ("core.crypto.expert", "secret_bytes") => crypto_extract(args, 0, "Secret", span),
-        ("core.crypto.expert", "signing_key_bytes") => crypto_extract(args, 0, "SigningKey", span),
-        ("core.crypto.expert", "x25519_secret_bytes") => crypto_extract(args, 0, "X25519SecretKey", span),
-        ("core.crypto.expert", "shared_secret_bytes") => crypto_extract(args, 0, "SharedSecret", span),
+        (CoreCallPureRoute::Crypto, "argon2id") => crypto_argon2id(args, span),
+        (CoreCallPureRoute::Crypto, "secret_bytes") => crypto_extract(args, 0, "Secret", span),
+        (CoreCallPureRoute::Crypto, "signing_key_bytes") => crypto_extract(args, 0, "SigningKey", span),
+        (CoreCallPureRoute::Crypto, "x25519_secret_bytes") => crypto_extract(args, 0, "X25519SecretKey", span),
+        (CoreCallPureRoute::Crypto, "shared_secret_bytes") => crypto_extract(args, 0, "SharedSecret", span),
         // TIR lowers Signature/VerifyKey/… `.bytes()` to core.crypto.__*_bytes;
         // keep those pure field extracts resident so REPL does not hit E1802.
-        ("core.crypto", "__signature_bytes") => crypto_extract(args, 0, "Signature", span),
-        ("core.crypto", "__verify_key_bytes") => crypto_extract(args, 0, "VerifyKey", span),
-        ("core.crypto", "__x25519_public_bytes") => crypto_extract(args, 0, "X25519PublicKey", span),
-        ("core.crypto", "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
-        ("core.crypto", "__digest256_bytes") => crypto_extract(args, 0, "Digest256", span),
-        ("core.crypto", "__digest512_bytes") => crypto_extract(args, 0, "Digest512", span),
+        (CoreCallPureRoute::Crypto, "__signature_bytes") => crypto_extract(args, 0, "Signature", span),
+        (CoreCallPureRoute::Crypto, "__verify_key_bytes") => crypto_extract(args, 0, "VerifyKey", span),
+        (CoreCallPureRoute::Crypto, "__x25519_public_bytes") => crypto_extract(args, 0, "X25519PublicKey", span),
+        (CoreCallPureRoute::Crypto, "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
+        (CoreCallPureRoute::Crypto, "__digest256_bytes") => crypto_extract(args, 0, "Digest256", span),
+        (CoreCallPureRoute::Crypto, "__digest512_bytes") => crypto_extract(args, 0, "Digest512", span),
         // Typed decode/decode_bytes run in eval_method; arms prove inventory coverage.
-        ("core.encoding.xml", "decode") => Err(unsupported(
+        (CoreCallPureRoute::EncodingXml, "decode") => Err(unsupported(
             "core.encoding.xml.decode() requires a type argument",
             span,
         )),
-        ("core.encoding.xml", "decode_bytes") => Err(unsupported(
+        (CoreCallPureRoute::EncodingXml, "decode_bytes") => Err(unsupported(
             "core.encoding.xml.decode_bytes() requires a type argument",
             span,
         )),
@@ -157,6 +163,10 @@ pub(super) fn evaluate_method(
     let CtValue::Struct { type_name, .. } = recv else {
         return None;
     };
+    let row = jet_foundation::Syntax::core_receiver_method(type_name, method)?;
+    if !row.accepts_arity(args.len()) {
+        return None;
+    }
     let result = match (type_name.as_str(), method, args.len()) {
         (
             "Signature"
@@ -391,6 +401,7 @@ pub(super) fn sketch_add(
     let CtValue::Struct { type_name, .. } = recv else {
         return None;
     };
+    jet_foundation::Syntax::core_receiver_method(type_name, "add")?;
     let result = match type_name.as_str() {
         "HyperLogLog" => hll_add(recv, args, span),
         "TDigest" => tdigest_add(recv, args, span),
@@ -413,16 +424,26 @@ pub(super) fn solver_require(
     if type_name != crate::Syntax::SOLVER_TYPE {
         return None;
     }
+    jet_foundation::Syntax::core_receiver_method(type_name, "require")?;
     Some(solver_require_update(recv, args, span).map(|updated| (CtValue::Unit, updated)))
 }
 
 /// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
 pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
+    if jet_foundation::Syntax::core_receiver_method(crate::Syntax::SOLVER_TYPE, "new").is_none() {
+        return Err(unsupported("Solver.new is not in the Core-call registry", span));
+    }
     let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
     Ok(solver_value(super::solver_kernel::jet_solver_new(seed)))
 }
 
 pub(super) fn display(value: &CtValue) -> Option<String> {
+    if let CtValue::Struct { type_name, .. } = value {
+        let type_name = type_name
+            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(type_name.as_str());
+        jet_foundation::Syntax::core_receiver_method(type_name, "__display")?;
+    }
     match value {
         CtValue::Struct { type_name, .. } if type_name == "HyperLogLog" => {
             let CtValue::Int(n) = hll_count(value, Span::new(0, 0)).ok()? else {
@@ -462,19 +483,19 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             ))
         }
         // Match AOT/JIT `DataError::display_text` / JetShow — not Rust Debug
-        // of the mangled `user_DataError { user_kind: … }` shape (#1250).
+        // of the mangled `__jet_DataError { __jet_kind: … }` shape (#1250).
         CtValue::Struct { type_name, fields }
-            if type_name.strip_prefix("user_").unwrap_or(type_name.as_str()) == "DataError" =>
+            if type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name.as_str()) == "DataError" =>
         {
             let get = |name: &str| -> Option<&CtValue> {
                 fields.iter().find_map(|(n, v)| {
-                    let n = n.strip_prefix("user_").unwrap_or(n.as_str());
+                    let n = n.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(n.as_str());
                     (n == name).then_some(v)
                 })
             };
             let kind = match get("kind")? {
                 CtValue::Enum { variant, .. } => {
-                    variant.strip_prefix("user_").unwrap_or(variant).to_string()
+                    variant.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant).to_string()
                 }
                 _ => return None,
             };
@@ -510,10 +531,10 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             Some(out)
         }
         // Core pure structs: REPL/transcript show uses Type(field: jet_show) —
-        // not Rust `user_*` Debug — matching AOT JetShow for these foreign types.
+        // not Rust `__jet_*` Debug — matching AOT JetShow for these foreign types.
         CtValue::Struct { type_name, fields }
             if matches!(
-                type_name.strip_prefix("user_").unwrap_or(type_name.as_str()),
+                type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name.as_str()),
                 "Mime"
                     | "Period"
                     | "LocalDate"
@@ -530,11 +551,11 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                     | "Attachment"
             ) =>
         {
-            let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+            let ty = type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
             let parts: Vec<String> = fields
                 .iter()
                 .map(|(name, v)| {
-                    let field = name.strip_prefix("user_").unwrap_or(name);
+                    let field = name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name);
                     let shown = display(v).unwrap_or_else(|| match v {
                         CtValue::List(xs) => {
                             let inner: Vec<String> = xs

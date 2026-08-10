@@ -1,7 +1,7 @@
 //! Card #392 pass 5: typed `Decode` dispatch at comptime — the machinery
 //! behind `json.decode<T>` / `json.decode_traced<T>` (and the csv/toml/yaml
 //! siblings, plus `core.data.csv<T>`'s row decode). Mirrors AOT's derived
-//! `user_Decode::jet_decode` / `jet_decode_traced` field-by-field walk
+//! `__jet_Decode::jet_decode` / `jet_decode_traced` field-by-field walk
 //! (`Codegen/Items.rs::emit_struct_serde` / `emit_migration_chain_walker`)
 //! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
@@ -236,7 +236,7 @@ fn text_cell(cell: String) -> CtValue {
 }
 
 /// Generic encode of a `CtValue` back into the `JSON`-tagged tree shape —
-/// mirrors the `user_Encode` blanket impls (`EncodingTraits.rs`) used by a
+/// mirrors the `__jet_Encode` blanket impls (`EncodingTraits.rs`) used by a
 /// migration `add`/`change` step to write its new field's value onto the
 /// wire before re-decoding. Struct encoding recurses using the type's own
 /// field wire keys (so a nested-struct `add`/`change` stays consistent with
@@ -278,7 +278,7 @@ fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &Str
     }
 }
 
-// ── decoding primitives (mirrors `EncodingTraits.rs`'s scalar `user_Decode` impls) ─
+// ── decoding primitives (mirrors `EncodingTraits.rs`'s scalar `__jet_Decode` impls) ─
 
 fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {

@@ -343,14 +343,17 @@ impl JetHTTPBody {
         )
     }
 
-    fn from_json<T: user_Encode>(value: T) -> Self {
+    fn from_json<T: __jet_Encode>(value: T) -> Self {
         Self::from_bytes_with_content_type(
             jet_enc_json_to_string(&value).into_bytes(),
             Some("application/json".to_string()),
         )
     }
 
-    fn from_form(values: std::collections::BTreeMap<String, String>) -> Self {
+    fn from_form<I>(values: I) -> Self
+    where
+        for<'a> &'a I: IntoIterator<Item = (&'a String, &'a String)>,
+    {
         fn encode(text: &str) -> String {
             let mut encoded = String::new();
             for byte in text.bytes() {
@@ -364,8 +367,8 @@ impl JetHTTPBody {
             }
             encoded
         }
-        let body = values.into_iter()
-            .map(|(name, value)| format!("{}={}", encode(&name), encode(&value)))
+        let body = (&values).into_iter()
+            .map(|(name, value)| format!("{}={}", encode(name), encode(value)))
             .collect::<Vec<_>>()
             .join("&");
         Self::from_bytes_with_content_type(
@@ -374,11 +377,14 @@ impl JetHTTPBody {
         )
     }
 
-    fn from_multipart(values: std::collections::BTreeMap<String, String>) -> Self {
+    fn from_multipart<I>(values: I) -> Self
+    where
+        for<'a> &'a I: IntoIterator<Item = (&'a String, &'a String)>,
+    {
         const PREFIX: &str = "jet-http-boundary-";
         const LENGTH: usize = PREFIX.len() + 16;
         let mut used = std::collections::HashSet::new();
-        for text in values.iter().flat_map(|(name, value)| [name.as_str(), value.as_str()]) {
+        for text in (&values).into_iter().flat_map(|(name, value)| [name.as_str(), value.as_str()]) {
             for window in text.as_bytes().windows(LENGTH) {
                 let Some(suffix) = window.strip_prefix(PREFIX.as_bytes()) else {
                     continue;
@@ -399,7 +405,7 @@ impl JetHTTPBody {
         }
         let boundary = format!("{PREFIX}{suffix:016x}");
         let mut body = Vec::new();
-        for (name, value) in values {
+        for (name, value) in (&values).into_iter() {
             let name = name.replace('\"', "%22").replace('\r', "%0D").replace('\n', "%0A");
             body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
         }
@@ -666,12 +672,12 @@ fn jet_http_json_decode_error() -> JetHTTPError {
     JetHTTPError::InvalidFraming
 }
 
-fn jet_http_body_json<T: user_Decode>(body: &JetHTTPBody, limit: i64) -> Result<T, JetHTTPError> {
+fn jet_http_body_json<T: __jet_Decode>(body: &JetHTTPBody, limit: i64) -> Result<T, JetHTTPError> {
     let text = jet_http_body_json_text(body, limit)?;
     jet_enc_json_decode(&text).map_err(|_| jet_http_json_decode_error())
 }
 
-fn jet_http_body_json_defaulted<T: user_Decode>(
+fn jet_http_body_json_defaulted<T: __jet_Decode>(
     body: &JetHTTPBody,
     limit: Option<i64>,
 ) -> Result<T, JetHTTPError> {

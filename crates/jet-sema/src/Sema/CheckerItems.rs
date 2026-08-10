@@ -955,6 +955,16 @@ impl<'a> Checker<'a> {
         found
     }
 
+    pub(crate) fn struct_type_name_parts<'b>(
+        &self,
+        type_name: &'b str,
+    ) -> (Option<&'b str>, &'b str) {
+        match type_name.split_once('.') {
+            Some((alias, bare)) if self.imports.contains_key(alias) => (Some(alias), bare),
+            _ => (None, type_name),
+        }
+    }
+
     pub(crate) fn struct_fields_of(
         &self,
         owner_mod: usize,
@@ -1217,6 +1227,9 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = core_lang_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_fact_kind_variants(enum_name) {
             return Some(v);
         }
         if let Some(v) = core_email_variants(enum_name) {

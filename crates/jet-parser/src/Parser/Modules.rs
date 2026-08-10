@@ -577,6 +577,7 @@ impl<'a> Parser<'a> {
                     is_pub,
                     is_package_pub,
                     body: None,
+                    imports: Vec::new(),
                     web_target,
                     instance_identity: None,
                     span: Span::new(start.start, end),
@@ -585,9 +586,30 @@ impl<'a> Parser<'a> {
             TokKind::LBrace => {
                 self.bump(); // consume `{`
                 let mut items = Vec::new();
+                let mut imports = Vec::new();
                 while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                     if matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
+                        continue;
+                    }
+                    if matches!(self.peek().kind, TokKind::KwUse)
+                        || (matches!(self.peek().kind, TokKind::KwPub)
+                            && matches!(self.peek2().kind, TokKind::KwUse))
+                    {
+                        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+                        if is_pub {
+                            self.bump(); // consume `pub`
+                        }
+                        match self.import_decl() {
+                            Ok(mut import) => {
+                                import.is_pub = is_pub;
+                                imports.push(import);
+                            }
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_stmt();
+                            }
+                        }
                         continue;
                     }
                     match self.top_level_item_in_code_module() {
@@ -606,6 +628,7 @@ impl<'a> Parser<'a> {
                     is_pub,
                     is_package_pub,
                     body: Some(items),
+                    imports,
                     web_target,
                     instance_identity: None,
                     span: Span::new(start.start, end),
@@ -654,9 +677,30 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Gt, "to close the generic module parameter list")?;
         self.expect(TokKind::LBrace, "to open the generic module body")?;
         let mut body = Vec::new();
+        let mut imports = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if matches!(self.peek().kind, TokKind::KwUse)
+                || (matches!(self.peek().kind, TokKind::KwPub)
+                    && matches!(self.peek2().kind, TokKind::KwUse))
+            {
+                let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+                if is_pub {
+                    self.bump(); // consume `pub`
+                }
+                match self.import_decl() {
+                    Ok(mut import) => {
+                        import.is_pub = is_pub;
+                        imports.push(import);
+                    }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_stmt();
+                    }
+                }
                 continue;
             }
             match self.top_level_item_in_code_module() {
@@ -675,6 +719,7 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             params,
+            imports,
             body,
             span: Span::new(start.start, end),
         }))

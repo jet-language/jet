@@ -101,7 +101,7 @@ pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
 ///     correct Rust receiver (`&self`/`&mut self`/`self`).
 ///   - **static methods** — no `self` parameter; an associated function on the
 ///     type (`Type.make(x) -> Type`). The body + every static call site
-///     (`Type.make(x)` → `user_Type::user_make(x)`) are covered.
+///     (`Type.make(x)` → `__jet_Type::__jet_make(x)`) are covered.
 ///
 /// The owning `type_name` must itself be a covered struct or enum (so the receiver
 /// place + field reads emit exactly as `emit_method` does). The rule is the same

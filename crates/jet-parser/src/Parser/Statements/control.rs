@@ -176,7 +176,7 @@ impl<'a> Parser<'a> {
                     span: start,
                 }];
             }
-            let result_label = format!("__jet_value_loop_{}", start.start);
+            let result_label = Syntax::generated_name(&format!("value_loop_{}", start.start));
             rewrite_collect_root_exits(&mut body, &result_label, 0);
             let loop_stmt = if let Some((init, cond, step)) = counted {
                 Stmt::CountedLoop {
@@ -282,7 +282,7 @@ impl<'a> Parser<'a> {
         // `break` exits the comprehension as one control construct. Give the
         // generated root a private label and retarget only exits owned by the
         // user body; exits inside an explicitly nested user loop remain local.
-        let collect_label = format!("__jet_collect_loop_{}", start.start);
+        let collect_label = Syntax::generated_name(&format!("collect_loop_{}", start.start));
         rewrite_collect_root_exits(&mut body, &collect_label, 0);
 
         let loop_stmt = if let Some((init, cond, step)) = counted {
@@ -1542,7 +1542,7 @@ impl<'a> Parser<'a> {
         body
     }
 
-    pub(super) fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
+    pub(crate) fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
             TokKind::Hash if self.at_stdlib_dsl_block() => self.at_stdlib_dsl_block_stmt(),
             // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
@@ -2144,20 +2144,48 @@ impl<'a> Parser<'a> {
                     Some(t.span),
                 ))
             }
-            // D-TASKSCOPE1=A: `taskgroup g { … }` — structured task scope.
+            // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }` — structured task scope.
             TokKind::Ident(n)
-                if n == Syntax::KW_TASKGROUP
-                    && matches!(&self.peek2().kind, TokKind::Ident(_))
-                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+                if n == Syntax::KW_CONC_TASK
+                    && matches!(self.peek2().kind, TokKind::Dot)
+                    && matches!(&self.peek3().kind, TokKind::Ident(selector) if selector == "group")
+                    && matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(_)))
+                    && matches!(
+                        self.toks.get(self.pos + 4).map(|t| &t.kind),
+                        Some(TokKind::LBrace | TokKind::LParen)
+                    ) =>
             {
-                let start = self.bump().span; // `taskgroup`
+                let start = self.bump().span; // `task`
+                self.expect(TokKind::Dot, "after `task`")?;
+                self.expect_ident("for the `group` selector")?;
                 let (name, name_span) = self.expect_ident("for the task group name")?;
+                let limit = if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump();
+                    let (label, label_span) = self.expect_ident("for the group limit label")?;
+                    if label != "limit" {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            format!("task-group parameter `{label}` is not supported"),
+                            "the group parameter names the maximum number of active children"
+                                .to_string(),
+                            "write `limit: n`".to_string(),
+                            Some(label_span),
+                        ));
+                    }
+                    self.expect(TokKind::Colon, "after `limit`")?;
+                    let value = self.expr()?;
+                    self.expect(TokKind::RParen, "after the task-group limit")?;
+                    Some(value)
+                } else {
+                    None
+                };
                 self.expect(TokKind::LBrace, "after the task group name")?;
                 let body = self.block_stmts();
                 let end = self.toks[self.pos - 1].span.end;
                 return Ok(Stmt::TaskGroup {
                     name,
                     name_span,
+                    limit,
                     body,
                     span: Span::new(start.start, end),
                 });

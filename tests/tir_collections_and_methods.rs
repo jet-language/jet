@@ -149,7 +149,7 @@ fn run() {
 }
 
 /// A user-defined instance method with scalar args on a covered struct. The
-/// caller `run` routes through the TIR; `(c).user_add(10i64, 20i64)` is emitted
+/// caller `run` routes through the TIR; `(c).__jet_add(10i64, 20i64)` is emitted
 /// from the resolved `method_sigs` conventions; the method body with `self`
 /// also routes through executable TIR.
 #[test]
@@ -209,7 +209,7 @@ fn run() {
 }
 
 /// A trait-impl method call. `(d).label()` is emitted with the BARE method name
-/// (the trait impl owns it — no `user_` mangle), decided at lowering from
+/// (the trait impl owns it — no generated mangle), decided at lowering from
 /// `cx.trait_methods`. The caller `describe` routes through the TIR.
 #[test]
 fn trait_impl_method_call_no_mangle() {
@@ -298,7 +298,7 @@ fn run() {
 // c109 Phase 7: method bodies + static methods. The method body (with a `self`
 // param) and static (associated) methods + their call sites now route through
 // the TIR. These prove the lowered method definitions compile (I2) and run, and
-// that static dispatch (`Type.make(x)` → `user_T::user_make(x)`) is correct.
+// that static dispatch (`Type.make(x)` → `__jet_T::__jet_make(x)`) is correct.
 // ---------------------------------------------------------------------------
 
 /// A static constructor returning the owning type, plus a `self` getter that is

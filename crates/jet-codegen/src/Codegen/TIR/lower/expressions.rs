@@ -209,6 +209,60 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     out
 }
 
+/// D-BOUND-HEAD1=A: comptime can lower a typed head before sema has rewritten
+/// it to the ordinary alternating literal/hole call. Keep that early path on
+/// the same TIR host node used after sema.
+fn lower_boundary_typed_lit(
+    type_name: &str,
+    body: &TypedLitBody,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    let TypedLitBody::Value(inner) = body else {
+        return None;
+    };
+    let Expr::Str(parts, _) = inner.as_ref() else {
+        return None;
+    };
+    let mut literals = Vec::new();
+    let mut holes = Vec::new();
+    for part in parts {
+        match part {
+            StrPart::Lit(text) => literals.push(text.clone()),
+            StrPart::Interp(expr, _) => {
+                if literals.len() == holes.len() {
+                    literals.push(String::new());
+                }
+                holes.push(lower_expr(expr, cx, env));
+            }
+        }
+    }
+    if literals.len() == holes.len() {
+        literals.push(String::new());
+    }
+    let kind = match type_name {
+        Syntax::TYPE_URL => crate::Codegen::TIR::TTypedTextInterpKind::URL,
+        Syntax::TYPE_PATH => crate::Codegen::TIR::TTypedTextInterpKind::Path,
+        Syntax::TYPE_DATETIME => crate::Codegen::TIR::TTypedTextInterpKind::DateTime,
+        _ => return None,
+    };
+    let ty = if type_name == Syntax::TYPE_URL {
+        Type::Named("Url".to_string())
+    } else {
+        Type::Named(type_name.to_string())
+    };
+    Some(TExpr {
+        ty,
+        kind: TExprKind::HostCall(Box::new(
+            crate::Codegen::TIR::THostCall::TypedTextInterp {
+                kind,
+                literals,
+                holes,
+            },
+        )),
+    })
+}
+
 fn expr_tag(e: &Expr) -> &'static str {
     match e {
         Expr::Str(..) => "Str",
@@ -1042,14 +1096,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::Close(Box::new(resource)),
                 };
             }
-            // D-TYPEDTEXT1=D: the synthetic `SQL`/`HTML` call sema rewrote a typed
+            // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call sema rewrote a typed
             // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
             // alternate literal-segment, hole, literal-segment, ..., always closing
             // on a literal (`literals.len() == holes.len() + 1`) — even index is a
             // compile-time-known literal segment, odd index is a hole value. A hole
             // never re-enters the template text: `SQL` keeps it as a separate bound
             // param, `HTML` HTML-escapes it before joining.
-            if (call.name == "SQL" || call.name == "HTML" || call.name == "Sh")
+            if (call.name == "SQL"
+                || call.name == "HTML"
+                || call.name == "Sh"
+                || call.name == Syntax::TYPE_URL
+                || call.name == Syntax::TYPE_PATH
+                || call.name == Syntax::TYPE_DATETIME)
                 && !cx.sigs.contains_key(&call.name)
             {
                 let mut literals: Vec<String> = Vec::new();
@@ -1071,10 +1130,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let kind = match call.name.as_str() {
                     "SQL" => crate::Codegen::TIR::TTypedTextInterpKind::SQL,
                     "Sh" => crate::Codegen::TIR::TTypedTextInterpKind::Sh,
-                    _ => crate::Codegen::TIR::TTypedTextInterpKind::HTML,
+                    "HTML" => crate::Codegen::TIR::TTypedTextInterpKind::HTML,
+                    Syntax::TYPE_URL => crate::Codegen::TIR::TTypedTextInterpKind::URL,
+                    Syntax::TYPE_PATH => crate::Codegen::TIR::TTypedTextInterpKind::Path,
+                    Syntax::TYPE_DATETIME => crate::Codegen::TIR::TTypedTextInterpKind::DateTime,
+                    _ => unreachable!("typed-head lowering guard and kind table disagree"),
+                };
+                let ty = if call.name == Syntax::TYPE_URL {
+                    Type::Named("Url".to_string())
+                } else {
+                    Type::Named(call.name.clone())
                 };
                 return TExpr {
-                    ty: Type::Named(call.name.clone()),
+                    ty,
                     kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
                         kind,
                         literals,
@@ -1283,8 +1351,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 // c109 Phase 14: unqualified inline-module import (`emit_call`'s
-                // `unqualified_inline` arm) → `{root}user_{mangled}(args)`.
-                if let Some(mangled_key) = cx.unqualified_inline.get(&call.name).cloned() {
+                // `unqualified_inline` arm) → `{root}__jet_{mangled}(args)`.
+                let inline_mangled = cx
+                    .inline_unqualified
+                    .get(&env.fn_name)
+                    .and_then(|scope| scope.get(&call.name))
+                    .or_else(|| cx.unqualified_inline.get(&call.name))
+                    .cloned();
+                if let Some(mangled_key) = inline_mangled
+                {
                     let sig = cx.sigs.get(&mangled_key).cloned();
                     let args: Vec<_> = call
                         .args
@@ -1317,7 +1392,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // c109 Phase 14: unqualified file-module import (`emit_call`'s
                 // `unqualified_file` arm) → `{root}{rust_mod}::{mangle(fn)}(args)`. The
                 // AST looks up the sig under `(call.name, fn_name)`.
-                if let Some((rust_mod, fn_name)) = cx.unqualified_file.get(&call.name).cloned() {
+                let inline_file = cx
+                    .inline_unqualified_file
+                    .get(&env.fn_name)
+                    .and_then(|scope| scope.get(&call.name))
+                    .or_else(|| cx.unqualified_file.get(&call.name))
+                    .cloned();
+                if let Some((rust_mod, fn_name)) = inline_file
+                {
                     let sig = cx
                         .import_sigs
                         .get(&(call.name.clone(), fn_name.clone()))
@@ -1582,7 +1664,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         // c109 Phase 3: a struct literal. The gate already proved the type is a
         // plain covered user struct (no trait coercion, no import namespace, no
-        // generic args), so the Rust head is `user_<name>` and field names mangle.
+        // generic args), so the Rust head is `__jet_<name>` and field names mangle.
         // Field values are lowered as-is — no clone/coercion at the literal site
         // (mirrors the AST path; a value's own move/clone facts live in itself).
         Expr::StructLit {
@@ -1829,10 +1911,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
-            // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
-            // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.
+            // The Rust head is the turbofish `__jet_<Name>::<args>` (`user_type_apply_rust`),
+            // resolved at lowering; fields mangle. A non-generic literal renders `__jet_<Name>`.
             // c109: an UNqualified FOREIGN struct (`Note { … }`, no `import_ns`) prefixes its
-            // module head (`{root}user_<mod>::user_<Note>`), exactly as `user_type_apply_rust`
+            // module head (`{root}__jet_<mod>::__jet_<Note>`), exactly as `user_type_apply_rust`
             // — or rustc can't find the type (E0422). A local struct keeps the plain head.
             // Struct head spelling comes from `TExpr.ty` at emit (`cx.rust_type`).
             // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
@@ -2903,6 +2985,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             };
+            if let Type::Named(type_name) = &head {
+                if let Some(lowered) = lower_boundary_typed_lit(type_name, body, cx, env) {
+                    return lowered;
+                }
+            }
             if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
                 if let TypedLitBody::Value(pattern) = body {
                     return TExpr {

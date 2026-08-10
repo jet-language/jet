@@ -369,7 +369,7 @@ fn tag_erases_in_codegen() {
         "tag must erase, found SingleUse in output"
     );
     assert!(
-        out.rust.contains("struct user_Lock"),
+        out.rust.contains("struct __jet_Lock"),
         "Lock should lower to a plain struct"
     );
 }

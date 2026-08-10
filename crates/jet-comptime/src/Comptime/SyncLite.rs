@@ -14,12 +14,12 @@ trait JetShow {
 }
 
 #[allow(non_camel_case_types)]
-trait user_Encode {
+trait __jet_Encode {
     fn jet_encode(&self) -> jet_std::DataTree;
 }
 
 #[allow(non_camel_case_types)]
-trait user_Decode: Sized {
+trait __jet_Decode: Sized {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 
@@ -132,37 +132,37 @@ mod jet_std {
     }
 }
 
-impl user_Encode for String {
+impl __jet_Encode for String {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Text(self.clone())
     }
 }
 
-impl user_Decode for String {
+impl __jet_Decode for String {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_string(tree)
     }
 }
 
-impl user_Encode for i64 {
+impl __jet_Encode for i64 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Int(*self)
     }
 }
 
-impl user_Decode for i64 {
+impl __jet_Decode for i64 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_int(tree)
     }
 }
 
-impl user_Encode for u64 {
+impl __jet_Encode for u64 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Int(*self as i64)
     }
 }
 
-impl user_Decode for u64 {
+impl __jet_Decode for u64 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_int(tree).and_then(|value| {
             u64::try_from(value).map_err(|_| jet_std::FieldError::one("expected non-negative integer"))
@@ -170,25 +170,25 @@ impl user_Decode for u64 {
     }
 }
 
-impl user_Encode for bool {
+impl __jet_Encode for bool {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Bool(*self)
     }
 }
 
-impl user_Decode for bool {
+impl __jet_Decode for bool {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_bool(tree)
     }
 }
 
-impl user_Encode for f64 {
+impl __jet_Encode for f64 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Float(*self)
     }
 }
 
-impl user_Decode for f64 {
+impl __jet_Decode for f64 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_float(tree)
     }

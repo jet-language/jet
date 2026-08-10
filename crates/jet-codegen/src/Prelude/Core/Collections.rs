@@ -181,6 +181,21 @@ where
 {
     xs.into_iter().product()
 }
+fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
+    xs.to_vec()
+}
+fn jet_list_min<T: Ord, I>(xs: I) -> JetOutcome<T, JetAbsent>
+where
+    I: IntoIterator<Item = T>,
+{
+    jet_outcome_of(xs.into_iter().min())
+}
+fn jet_list_max<T: Ord, I>(xs: I) -> JetOutcome<T, JetAbsent>
+where
+    I: IntoIterator<Item = T>,
+{
+    jet_outcome_of(xs.into_iter().max())
+}
 fn jet_list_flatten<T>(xs: Vec<Vec<T>>) -> Vec<T> {
     xs.into_iter().flatten().collect()
 }
@@ -206,6 +221,130 @@ where
     }
     m
 }
+
+fn jet_map_copy_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> {
+    m.clone()
+}
+
+fn jet_map_equal_kernel<K: Ord + PartialEq, V: PartialEq>(
+    left: &JetMap<K, V>,
+    right: &JetMap<K, V>,
+) -> bool {
+    left == right
+}
+
+fn jet_map_first_key_kernel<K: Ord + Clone, V>(
+    m: &JetMap<K, V>,
+) -> JetOutcome<K, JetAbsent> {
+    jet_outcome_of(m.keys().next().cloned())
+}
+
+fn jet_map_entries_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> Vec<(K, V)> {
+    m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn jet_map_min_value_kernel<K: Ord, V: Ord + Clone>(
+    m: &JetMap<K, V>,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(m.values().min().cloned())
+}
+
+fn jet_map_max_value_kernel<K: Ord, V: Ord + Clone>(
+    m: &JetMap<K, V>,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(m.values().max().cloned())
+}
+
+fn jet_map_intersection_kernel<K: Ord + Clone, V: Clone>(
+    left: &JetMap<K, V>,
+    right: &JetMap<K, V>,
+) -> JetMap<K, V> {
+    left.iter()
+        .filter(|(key, _)| right.contains_key(key))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn jet_map_slice_keys_kernel<K: Ord + Clone, V: Clone>(
+    m: &JetMap<K, V>,
+    keys: Vec<K>,
+) -> JetMap<K, V> {
+    keys.into_iter()
+        .filter_map(|key| m.get(&key).cloned().map(|value| (key, value)))
+        .collect()
+}
+
+fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(
+    keys: Vec<K>,
+    default: V,
+) -> JetMap<K, V> {
+    keys.into_iter()
+        .map(|key| (key, default.clone()))
+        .collect()
+}
+
+fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(
+    m: &JetMap<K, V>,
+    needle: &V,
+) -> bool {
+    m.values().any(|value| value == needle)
+}
+
+fn jet_map_remove_kernel<K: Ord + Clone, V: Clone>(
+    m: &mut JetMap<K, V>,
+    key: &K,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(m.remove(key))
+}
+
+fn jet_map_pop_first_kernel<K: Ord + Clone, V: Clone>(
+    m: &mut JetMap<K, V>,
+) -> JetOutcome<V, JetAbsent> {
+    let Some(key) = m.keys().next().cloned() else {
+        return Err(JetAbsent);
+    };
+    jet_outcome_of(m.remove(&key))
+}
+
+/// Build resident rows from homogeneous scalar columns. `mode`: 0 = short,
+/// 1 = strict, 2 = pad. Strict length mismatch returns `None` so each engine
+/// can keep its own trap boundary while sharing row-count and fill semantics.
+fn jet_iter_zip_many<T: Clone, F>(
+    columns: Vec<Vec<T>>,
+    mode: u8,
+    mut fill: F,
+) -> Option<Vec<Vec<T>>>
+where
+    F: FnMut(usize) -> T,
+{
+    if columns.is_empty() {
+        return Some(Vec::new());
+    }
+    if mode == 1 && columns.iter().any(|column| column.len() != columns[0].len()) {
+        return None;
+    }
+    let row_count = match mode {
+        2 => columns.iter().map(Vec::len).max().unwrap_or(0),
+        _ => columns.iter().map(Vec::len).min().unwrap_or(0),
+    };
+    Some(
+        (0..row_count)
+            .map(|row| {
+                columns
+                    .iter()
+                    .enumerate()
+                    .map(|(column, values)| {
+                        values
+                            .get(row)
+                            .cloned()
+                            .unwrap_or_else(|| fill(column))
+                    })
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
 // ── D-ITER1 / D-ITERTOOLS1=A: true lazy iterator fusion ──────────────────────
 // Adapters return `JetIter<T>` = boxed `dyn Iterator`. No intermediate Vec until
 // `to_list` / `collect` / a terminal reducer. Closures are `'static` (Jet emits
@@ -893,3 +1032,60 @@ where F: FnMut(&T) -> K {
     }
 }
 
+fn jet_list_starts_with<T: PartialEq>(xs: &[T], prefix: &[T]) -> bool {
+    xs.starts_with(prefix)
+}
+
+fn jet_list_ends_with<T: PartialEq>(xs: &[T], suffix: &[T]) -> bool {
+    xs.ends_with(suffix)
+}
+
+fn jet_list_equal<T: PartialEq>(left: &[T], right: &[T]) -> bool {
+    left == right
+}
+
+fn jet_list_unzip<T, U, I>(xs: I) -> (Vec<T>, Vec<U>)
+where
+    I: IntoIterator<Item = (T, U)>,
+{
+    xs.into_iter().unzip()
+}
+
+// D-LISTREMOVE1/F: PriorityQueue removal uses the same canonical
+// highest-first order as `peek` and `to_sorted_list`.  Keep the mutation and
+// selector semantics in this shared Prelude kernel so AOT and resident JIT
+// adapters cannot drift.
+fn jet_priority_queue_remove_value_kernel<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    value: T,
+) -> JetOutcome<T, JetAbsent> {
+    let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
+    items.reverse();
+    let found = items
+        .iter()
+        .position(|item| *item == value)
+        .map(|index| items.remove(index));
+    *pq = items.into_iter().collect();
+    jet_outcome_of(found)
+}
+
+fn jet_priority_queue_remove_slot_kernel<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    i: i64,
+    _file: &str,
+    _line: u32,
+) -> Result<JetOutcome<T, JetAbsent>, String> {
+    let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
+    items.reverse();
+    let len = items.len() as i64;
+    if i < 0 || i >= len {
+        *pq = items.into_iter().collect();
+        return Err(format!(
+            "the priority queue has {} items, so position {} doesn't exist",
+            len, i
+        ));
+    }
+    let removed = items.remove(i as usize);
+    *pq = items.into_iter().collect();
+    Ok(jet_present(removed))
+}

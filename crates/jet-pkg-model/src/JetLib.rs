@@ -18,10 +18,10 @@
 //! claimed effects is trusted (`check_before_map`).
 //!
 //! The package manifest owns the `Library.{ loadable: true }` field used to
-//! request this artifact. Deliberately out of scope here (card #1421 criteria
-//! 5-6, later slices): the `Mod.load` Jet-level call surface and native export
-//! (D-LIB-EXPORT1). This module is the artifact-format and check machinery
-//! those slices wire up — nothing here assumes their user-facing spelling.
+//! request this artifact. The artifact payload is the native shared object
+//! produced by the library build. The load site parses and checks this prefix
+//! before it writes or maps the payload, so the compiler pin is a real pre-map
+//! gate rather than a diagnostic-only helper.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Manifest::COMPILER_VERSION;
@@ -37,6 +37,31 @@ const MAGIC: &[u8] = b"jet-jetlib-v1\0";
 pub struct JetLibStamp {
     pub compiler_version: String,
     pub declared_effects: EffectSet,
+}
+
+/// A complete `.jetlib`: the checked stamp followed by the native payload.
+/// The payload is intentionally opaque here; the driver owns production and
+/// the embedded Prelude owns the host mapping adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JetLibArtifact {
+    pub stamp: JetLibStamp,
+    pub payload: Vec<u8>,
+}
+
+impl JetLibArtifact {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = self.stamp.encode();
+        out.extend_from_slice(&self.payload);
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        let (stamp, consumed) = JetLibStamp::decode_prefix(bytes)?;
+        Ok(Self {
+            stamp,
+            payload: bytes[consumed..].to_vec(),
+        })
+    }
 }
 
 impl JetLibStamp {
@@ -66,6 +91,14 @@ impl JetLibStamp {
     /// buffer, or non-UTF8 text fails closed — a malformed artifact is
     /// never partially trusted.
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        let (stamp, consumed) = Self::decode_prefix(bytes)?;
+        if consumed != bytes.len() {
+            return Err("unexpected payload after .jetlib stamp".to_string());
+        }
+        Ok(stamp)
+    }
+
+    fn decode_prefix(bytes: &[u8]) -> Result<(Self, usize), String> {
         let cur = bytes
             .strip_prefix(MAGIC)
             .ok_or_else(|| "not a .jetlib artifact (bad magic)".to_string())?;
@@ -85,10 +118,13 @@ impl JetLibStamp {
                 String::from_utf8(effect).map_err(|_| "effect name is not UTF-8".to_string())?,
             );
         }
-        Ok(JetLibStamp {
-            compiler_version,
-            declared_effects,
-        })
+        Ok((
+            JetLibStamp {
+                compiler_version,
+                declared_effects,
+            },
+            bytes.len() - cur.len(),
+        ))
     }
 }
 
@@ -207,6 +243,15 @@ mod tests {
         let stamp = JetLibStamp::for_this_compiler(EffectSet::new());
         let bytes = stamp.encode();
         assert_eq!(JetLibStamp::decode(&bytes).unwrap(), stamp);
+    }
+
+    #[test]
+    fn artifact_round_trip_keeps_native_payload_opaque() {
+        let artifact = JetLibArtifact {
+            stamp: JetLibStamp::for_this_compiler(EffectSet::new()),
+            payload: b"native-shared-object".to_vec(),
+        };
+        assert_eq!(JetLibArtifact::decode(&artifact.encode()).unwrap(), artifact);
     }
 
     #[test]

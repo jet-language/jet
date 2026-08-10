@@ -182,7 +182,7 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n)
         if matches!(
             n.as_str(),
-            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer"
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant"
         ))
     {
         return Some(types::I64);
@@ -353,7 +353,8 @@ pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
 }
 
 pub(crate) fn jit_fn_name(name: &str) -> String {
-    format!("jet_jit_fn_{}", name.replace("::", "__"))
+    let suffix = jet_foundation::Syntax::generated_suffix(name);
+    jet_foundation::Syntax::generated_name(&format!("jit_fn_{}", suffix.replace("::", "__")))
 }
 
 pub(crate) struct JitMeta<'a> {
@@ -459,7 +460,11 @@ impl<'a> JitMeta<'a> {
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
         }
-        let key = format!("user_{enum_name}::user_{variant}");
+        let key = format!(
+            "{}::{}",
+            jet_foundation::Syntax::generated_path(enum_name),
+            jet_foundation::Syntax::generated_path(variant)
+        );
         self.enum_variant_payload_types
             .get(&key)
             .map(|types| types.as_slice())
@@ -483,7 +488,9 @@ impl<'a> JitMeta<'a> {
                     return false;
                 };
                 variants.iter().all(|variant| {
-                    let variant = variant.strip_prefix("user_").unwrap_or(variant);
+                    let variant = variant
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(variant);
                     self.enum_variant_payload_types(name, variant)
                         .is_some_and(|payloads| {
                             payloads.is_empty()
@@ -496,14 +503,24 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn int_constant(&self, rust_name: &str) -> Option<i64> {
-        self.int_constants.get(rust_name.strip_prefix("user_").unwrap_or(rust_name)).copied()
+        self.int_constants
+            .get(
+                rust_name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(rust_name),
+            )
+            .copied()
     }
     pub(crate) fn constant(
         &self,
         rust_name: &str,
     ) -> Option<&jet_foundation::AST::CtValue> {
         self.constants
-            .get(rust_name.strip_prefix("user_").unwrap_or(rust_name))
+            .get(
+                rust_name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(rust_name),
+            )
     }
     pub(crate) fn has_generic_instances(&self) -> bool { self.has_generic_instances }
     pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
@@ -515,9 +532,12 @@ impl<'a> JitMeta<'a> {
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
         if let Some(fields) = self.struct_fields.get(type_name) {
-            let mangled = format!("user_{field}");
+            let mangled = jet_foundation::Syntax::generated_name(field);
             if let Some(i) = fields.iter().position(|f| {
-                f == field || f == &mangled || f.strip_prefix("user_") == Some(field)
+                f == field
+                    || f == &mangled
+                    || f.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        == Some(field)
             }) {
                 return Some(i);
             }
@@ -527,7 +547,7 @@ impl<'a> JitMeta<'a> {
         core_struct_field_index(type_name, field)
     }
 
-    /// Mangled field names + parallel types for `user_Type { user_f: … }` Debug show.
+    /// Mangled field names + parallel types for `__jet_Type { __jet_f: … }` Debug show.
     pub(crate) fn struct_layout(&self, type_name: &str) -> Option<(&[String], &[Type])> {
         let names = self.struct_fields.get(type_name)?;
         let tys = self.struct_field_types.get(type_name)?;
@@ -741,10 +761,16 @@ impl<'a> JitMeta<'a> {
             };
         }
         let variants = self.enum_variants.get(enum_name)?;
-        let mangled = format!("user_{variant}");
+        let mangled = jet_foundation::Syntax::generated_path(variant);
+        let flat = jet_foundation::Syntax::generated_suffix(&mangled);
         variants
             .iter()
-            .position(|v| v == variant || v == &mangled || v.strip_prefix("user_") == Some(variant))
+            .position(|v| {
+                v == variant
+                    || v == &mangled
+                    || jet_foundation::Syntax::generated_suffix(v) == variant
+                    || jet_foundation::Syntax::generated_suffix(v) == flat
+            })
             .map(|i| i as i64)
     }
 
@@ -752,17 +778,19 @@ impl<'a> JitMeta<'a> {
         if let Some(index) = self.enum_variant_index(enum_name, variant) {
             return vec![index];
         }
-        let prefix = format!("{variant}.");
+        let source_prefix = format!("{variant}.");
+        let generated_prefix = jet_foundation::Syntax::generated_path(&source_prefix);
         self.enum_variants
             .get(enum_name)
             .into_iter()
             .flatten()
             .enumerate()
             .filter_map(|(index, candidate)| {
-                candidate
-                    .strip_prefix("user_")
-                    .unwrap_or(candidate)
-                    .starts_with(&prefix)
+                (candidate.starts_with(&generated_prefix)
+                    || candidate
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(candidate)
+                        .starts_with(&source_prefix))
                     .then_some(index as i64)
             })
             .collect()
@@ -801,7 +829,9 @@ impl<'a> JitMeta<'a> {
             return false;
         };
         for variant in variants {
-            let vname = variant.strip_prefix("user_").unwrap_or(variant.as_str());
+            let vname = variant
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(variant.as_str());
             let payloads = self.enum_variant_payload_types(name, vname).unwrap_or(&[]);
             match payloads {
                 [] => {}
@@ -854,6 +884,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
         "TerminalSize" => &["cols", "rows"],
         "TerminalPolicy" => &["size", "mode"],
+        "ModGrant" => &["read"],
         // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
         "EncodingLimits" => &[
             "buffer_bytes",
@@ -983,6 +1014,10 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         "TerminalPolicy" => match field {
             "size" => Some(Type::Named("TerminalSize".into())),
             "mode" => Some(Type::Named("TerminalMode".into())),
+            _ => None,
+        },
+        "ModGrant" => match field {
+            "read" => Some(Type::List(Box::new(Type::String))),
             _ => None,
         },
         // D-LSDIR1 / D-FSOPS1 — CORE FS records omitted from TIR ProgramBundle.

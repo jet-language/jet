@@ -1090,7 +1090,7 @@ pub fn completions_for_program(
         "bash" => {
             if schema.commands.is_empty() {
                 return Some(format!(
-                    "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F _jet_program_completion -- {}\n",
+                    "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- {}\n",
                     jet_foundation::CLISchema::RECORD_VERSION,
                     shell_single_quote(&root_words.join(" ")),
                     shell_single_quote(command_name),
@@ -1102,7 +1102,7 @@ pub fn completions_for_program(
                 shell_single_quote(&input_words(&command.inputs).join(" ")),
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
-                "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F _jet_program_completion -- {}\n",
+                "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {}\n",
                 jet_foundation::CLISchema::RECORD_VERSION,
                 shell_single_quote(&root_words.join(" ")),
                 shell_single_quote(&input_words(&schema.inputs).join(" ")),

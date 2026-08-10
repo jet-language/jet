@@ -1,6 +1,7 @@
 # Error index
 
-Stable diagnostic codes with examples from `tests/ui/`. Pages are generated.
+Stable diagnostic codes with examples from `tests/ui/`. Pages are generated
+from the typed rows in `crates/jet-codegen/src/Prelude/Diagnostics.jet`.
 After reviewing the snapshot change, regenerate with:
 
 ```
@@ -23,4 +24,4 @@ nix develop -c env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages --
 | [E0120](E0120.md) | returning a borrowed value |
 | [E0356](E0356.md) | inferred constructor without a receiver type |
 
-Full registry: [diagnostics.md](../../spec/diagnostics.md).
+Full generated registry: [diagnostics.md](../../spec/diagnostics.md).

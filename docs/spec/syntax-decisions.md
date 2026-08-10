@@ -156,6 +156,16 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
+**D-ENTRY-SCRIPT1=B / D-ENTRY-ORDER1=B — script entry sugar** *(ratified
+2026-08-08, card #1808)*: bare top-level statements in a direct entry file
+are the body of one implicit fallible `fn run()`. Top-level declarations stay
+file-wide declarations; loose statements keep written execution order and
+their bindings are local to that body. `jet run`, `jet dev`, and `jet test`
+use the same entry law. An explicit `fn run` alongside loose statements is
+E0621 with the `jet fix` auto-wrap; an imported file with loose statements is
+E0620 and never executes as an import. `fn dev`, `fn build`, and `#Test`
+declarations remain legal beside script statements.
+
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
 bare argv in declaration order. Boolean flags and optional/defaulted fields stay
@@ -1076,6 +1086,15 @@ One-shot `core.regex` calls take `Regex` and return their match value directly.
 A bare `String` is E0152. Runtime text remains fallible through
 `core.regex.compile` or `compile_with`.
 
+**D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(ratified
+2026-08-07)*: `URL.{"…"}`, `Path.{"…"}`, and `DateTime.{"…"}` are checked
+typed values, not fallible runtime constructors. Sema validates the complete
+literal skeleton and emits E0155 for an invalid head. A URL hole is percent
+encoded; a Path hole is one encoded component, including `.` and `..`; a
+DateTime head cannot contain holes. Runtime strings keep the existing
+fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
+and D-CORE-PATH1; no compatibility spelling is retained.
+
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
@@ -1260,13 +1279,19 @@ use "./lib"                      // file path, namespace lib
 use "grades/scoring" as g        // file path, alias
 module math                      // finds math.jet, then math/module.jet (E0607)
 use math.clamp                   // selective import
-use math.{sin, cos as c}         // grouped + aliased selective import
+use math.[sin, cos as c]         // grouped + aliased selective import
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
 Re-export is `pub use` (D-MOD4); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
+
+`.[ ]` has one prefix-member law. In expression position, entries remain
+members and produce their values (`point.[x, y]`); after `use`, entries produce
+aliases (`use math.[sin, cos as c]`). The expression grammar keeps member
+entries, while the import grammar additionally permits `as` aliases and dotted
+paths.
 
 **S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
 default; `pub` exports. `#PubFile` flips a file to public-by-default with
@@ -2265,8 +2290,8 @@ evaluation cannot complete. A bare mark opens the execution block (`$ { … }`,
 the Jai `#run` analog) and precedes the compile-time verbs `$if` and
 `$loop`. Sema treats the mark as part of the identifier, so a plain name and
 a marked name can never denote the same binding, and codegen keeps them apart:
-a marked name spells `userct_<name>` in generated Rust where a plain name
-spells `user_<name>`.
+a marked name spells `__jet_ct_<name>` in generated Rust where a plain name
+spells `__jet_<name>`.
 
 Because the name is the same name inside and outside a compile-time block,
 there is nothing to carry out. **D-CTMARKER1 retires outright** — the splice
@@ -2356,6 +2381,16 @@ Address-of is `mem.address_of(x)`. `mem.cast_ptr<T>(p)` is the cast primitive
 (D-CASTPTR1); no compact pointer-chain syntax (D-POINTERCHAIN1).
 Generated `unsafe` appears only inside user-gated regions + vetted internals
 (I1). Onboarding never mentions any of it.
+
+The tier rule is simple: use the import gate when sema can prove that an item
+stays within Jet's safe ownership and value model; use the audit gate when use
+can create, dereference, or access raw or foreign memory. Owning allocators and
+address-stable pins are import-gated because they cannot corrupt memory by
+existing. Raw-pointer construction, raw-pointer dereference, and MMIO are
+audit-gated because their use can. The canonical named-item table is
+`CORE_MEM_GATE_TIERS` in `crates/jet-foundation/src/Syntax/core_surface.rs`.
+The `jet-sema` gate test requires every current `core.mem` export to have one
+tier.
 
 **D-UNSAFE-OBLIG1=A — gate-only default with optional typed obligations and
 per-site control**
@@ -5543,6 +5578,15 @@ every source-written double-underscore identifier is rejected. The namespace is
 reserved for compiler-generated binders, debugger and serializer metadata, and
 tools; user code has no escape spelling.
 
+**D-NAME-SIGIL1=A — one underscore ladder and `__jet` machine names**
+*(ratified 2026-08-07)*: zero leading underscores is an ordinary name; one
+leading underscore is the human-facing discard/internal rung; two leading
+underscores are machine space and have no user meaning. Dunder and sunder
+shapes are intentionally meaningless. Every compiler-generated symbol visible
+to generated-code review, diagnostics, traces, debuggers, serializers, or other
+tools begins with the single reserved `__jet_` prefix (for example,
+`__jet_lambda_7`). There is no source escape for that namespace.
+
 **D-ECO-JETOS2=A — Systems and Fleets are Outputs of the Package graph**
 *(ratified 2026-07-15)*: Package, environment, image, System, and Fleet share
 locked identity, policy, cache, explanation, and receipts. JetOS consumes that
@@ -6115,6 +6159,64 @@ their UI or formatter snapshots are owed to #1556. No standalone `i` keyword row
 is added because it remains an ordinary identifier.
 
 Amends: none.
+
+**2026-08-06 — D-AUTHORITY-MODEL1=A / D-AUTHORITY-ROOTS1=A /
+D-AUTHORITY-MEM1=B / D-AUTHORITY-NAME1=A / D-AUTHORITY-SCOPE1=A /
+D-AUTHORITY-MANIFEST1=A / D-AUTHORITY-GATE1=A / D-AUTHORITY-WORD1=A /
+D-AUTHORITY-MEM2=A** *(card #1500, proposal
+`docs/proposals/authority-one-model.md`)*. The authority slate records one
+relation: a scope holds rights, nested scopes only shrink them, and every
+widening is written and audited.
+
+- **D-AUTHORITY-MODEL1=A**: effects, caps, policy, budgets, trust, sandbox,
+  REPL, build and boundary checks read one rights tree, holds relation,
+  tighten rule and gate record. No user-facing spelling changes in the
+  substrate slice. Implementation: #1566.
+- **D-AUTHORITY-ROOTS1=A**: the closed table has thirteen roots — the ratified
+  ten plus `FFI`, `Browser` and `Secret`. FFI languages are leaves such as
+  `FFI.Go`; flat language roots are deleted. This amends D-EFF4/D-EFF5 and the
+  FFI effect clauses. Implementation: #1567.
+- **D-AUTHORITY-MEM1=B**: memory floors leave `#Policy` and become effect
+  denials such as `=[!Mem.Alloc]=>` and manifest `deny: [Mem.Alloc]`.
+  `#Policy` keeps non-memory arguments. This amends D-MEM-FACTS1 and
+  D-POLICY-WORD1. Implementation: #1568.
+- **D-AUTHORITY-MEM2=A**: denial rows accept an optional `above: Bytes`
+  argument, for example `=[!Mem.Alloc(above: 65536)]=>` and manifest
+  `deny: [Mem.Alloc(above: 65536)]`. Record-only outcome; it closes the
+  bounded-arena gate in #1568 criterion 4.
+- **D-AUTHORITY-NAME1=A**: `Authority` is the one nameable rights value at
+  process, plugin and session boundaries; `ProcessAuthority` becomes
+  `Authority`, while `ProcessPlan` and `ProcessReceipt` stay. Implementation:
+  #1569.
+- **D-AUTHORITY-SCOPE1=A**: `#Caps` is the one block marker. A bare list
+  narrows (`#Caps(FS, Net)`); a name-before-list head binds the handle
+  (`#Caps(g: FS, Net)`). `#Grant` is deleted, and its error points to
+  `#Caps`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
+  #1573.
+- **D-AUTHORITY-MANIFEST1=A**: one `authority:` block holds package bounds,
+  dependency grants, trust defaults and provider bounds; replaced keys are
+  migrated and deleted. This amends D-EFFBUDGET1,
+  D-JPK-POLICYSURFACE1 and D-JPK-GRANTSCHEMA1. Implementation: #1570.
+- **D-AUTHORITY-GATE1=A**: every authority gate records in one provenance-
+  carrying ledger; `jet inspect authority` reads the rights view and existing
+  views remain filters. Implementation: #1571.
+- **D-AUTHORITY-WORD1=A**: `capability` leaves user-facing surfaces; borrow
+  diagnostics say `write access`, the rights value is `Authority`, and the
+  product claim surface is `feature claims`. Implementation: #1572.
+
+Outcome-to-card map:
+
+| Decision | Outcome | Delivery |
+| --- | --- | --- |
+| D-AUTHORITY-MODEL1 | A | #1566 |
+| D-AUTHORITY-ROOTS1 | A | #1567 |
+| D-AUTHORITY-MEM1 | B | #1568 |
+| D-AUTHORITY-MEM2 | A | record-only; #1568 criterion 4 |
+| D-AUTHORITY-NAME1 | A | #1569 |
+| D-AUTHORITY-MANIFEST1 | A | #1570 |
+| D-AUTHORITY-GATE1 | A | #1571 |
+| D-AUTHORITY-WORD1 | A | #1572 |
+| D-AUTHORITY-SCOPE1 | A | #1573 |
 
 **D-VERDICT-1455-1 — Mandatory registration (law zero)** *(ratified
 2026-08-05, card #1455)*: a marker exists if and only if it is a row in

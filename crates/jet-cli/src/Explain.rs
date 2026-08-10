@@ -1,16 +1,12 @@
 //! `jet explain <CODE>` — offline terminal essays for every diagnostic code.
 //!
-//! The index is built from the spec itself: `docs/spec/diagnostics.md` is
-//! embedded at compile time (`include_str!`), so `explain` works with no
-//! network and no files on disk. Every code in the registry table gets an
+//! The index is built from the typed compile-time diagnostic rows, so
+//! `explain` works with no network and no files on disk. Every row gets an
 //! entry by construction (invariant I4: no code without an explain), and any
-//! code that also has a detailed *what/why/fix* block gets the richer essay.
+//! row that has a detailed *what/why/fix* template gets the richer essay.
 
 use jet_foundation::Terminal::Theme;
 use std::collections::BTreeMap;
-
-/// The embedded diagnostics spec — the single source of truth for codes.
-const DIAGNOSTICS_MD: &str = include_str!("../../../docs/spec/diagnostics.md");
 
 /// One explainable diagnostic code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,57 +29,19 @@ pub struct Explanation {
 /// Build the full code → explanation index from the embedded spec.
 pub fn index() -> BTreeMap<String, Explanation> {
     let mut out: BTreeMap<String, Explanation> = BTreeMap::new();
-
-    // Pass 1: the registry table (`| Code | Stage | Meaning |`) gives every
-    // code its stage + one-line meaning.
-    for row in table_rows(DIAGNOSTICS_MD) {
-        if row.len() != 3 {
-            continue;
-        }
-        let code = row[0].trim();
-        if !is_code(code) {
-            continue;
-        }
-        let meaning = row[2].trim().to_string();
-        let retired = meaning.contains("retired");
+    for row in jet_foundation::Registry::diagnostic_rows() {
         out.insert(
-            code.to_string(),
+            row.code.to_string(),
             Explanation {
-                code: code.to_string(),
-                stage: row[1].trim().to_string(),
-                meaning,
-                what: None,
-                why: None,
-                fix: None,
-                retired,
+                code: row.code.to_string(),
+                stage: row.stage.to_string(),
+                meaning: row.meaning.to_string(),
+                what: row.detail.then(|| row.what.to_string()),
+                why: row.detail.then(|| row.why.to_string()),
+                fix: row.detail.then(|| row.fix.to_string()),
+                retired: row.status == jet_foundation::Registry::DiagnosticStatus::Retired,
             },
         );
-    }
-
-    // Pass 2: detailed tables (`| Code | What | Why | Fix |`) enrich entries.
-    for row in table_rows(DIAGNOSTICS_MD) {
-        if row.len() != 4 {
-            continue;
-        }
-        let code = row[0].trim();
-        if !is_code(code) {
-            continue;
-        }
-        let what = row[1].trim().to_string();
-        let why = row[2].trim().to_string();
-        let fix = row[3].trim().to_string();
-        let entry = out.entry(code.to_string()).or_insert_with(|| Explanation {
-            code: code.to_string(),
-            stage: String::new(),
-            meaning: what.clone(),
-            what: None,
-            why: None,
-            fix: None,
-            retired: false,
-        });
-        entry.what = Some(what);
-        entry.why = Some(why);
-        entry.fix = Some(fix);
     }
 
     out
@@ -97,6 +55,44 @@ pub fn live_codes() -> Vec<String> {
         .filter(|e| !e.retired)
         .map(|e| e.code)
         .collect()
+}
+
+/// Render the generated diagnostic-row reference. The committed Markdown is a
+/// checked artifact; this function is its only producer.
+pub fn diagnostics_reference_markdown() -> String {
+    let mut out = String::from(
+        "# Typed diagnostic rows\n\nGenerated from `crates/jet-codegen/src/Prelude/Diagnostics.jet`.\n\n| Code | Stage | Severity | Moment | Status | Meaning | What | Why | Fix |\n|---|---|---|---|---|---|---|---|---|\n",
+    );
+    for row in jet_foundation::Registry::diagnostic_rows() {
+        let severity = match row.severity {
+            jet_foundation::Diagnostics::Severity::Error => "error",
+            jet_foundation::Diagnostics::Severity::Lint => "lint",
+        };
+        let cells = [
+            row.code,
+            row.stage,
+            severity,
+            row.moment.as_str(),
+            row.status.name(),
+            row.meaning,
+            row.what,
+            row.why,
+            row.fix,
+        ];
+        out.push('|');
+        for cell in cells {
+            out.push(' ');
+            out.push_str(&escape_markdown_cell(cell));
+            out.push(' ');
+            out.push('|');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn escape_markdown_cell(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('|', "\\|")
 }
 
 /// Look up one code (case-insensitive).
@@ -174,6 +170,7 @@ fn explain_fact_row(row: &jet_foundation::Registry::RegistryRow) -> Explanation 
         RowTarget::Scope => "a scope",
         RowTarget::Build => "the build",
         RowTarget::Corpus => "the compiler's own source",
+        RowTarget::Report => "the diagnostic report",
     };
     // D-ONCE-LAW1=A: a corpus truth answers with its home, its renderers, and
     // the guard that proves there is no second copy.
@@ -301,7 +298,7 @@ pub fn render(ex: &Explanation, color: bool) -> String {
             out.push_str(&format!("Stage: {}\n\n", ex.stage));
         }
         out.push_str(
-            "A longer explanation will land with the detailed entry in docs/spec/diagnostics.md.\n\n",
+            "A longer explanation will land with the detailed typed row.\n\n",
         );
     }
     out.push_str(&format!(
@@ -328,11 +325,9 @@ fn normalize(code: &str) -> String {
 
 pub fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
-    if b.len() == 5
-        && (b[0] == b'E' || b[0] == b'L')
-        && b[1..].iter().all(|c| c.is_ascii_digit())
-    {
-        return true;
+    if b.len() == 5 && b[1..].iter().all(|c| c.is_ascii_digit()) {
+        return matches!(b[0], b'E' | b'L')
+            || (b[0] == b'W' && b[1..] == *b"0410");
     }
     let Some(rest) = s.strip_prefix("E-").or_else(|| s.strip_prefix("L-")) else {
         return false;
@@ -349,63 +344,6 @@ pub fn is_code(s: &str) -> bool {
         && words.all(valid)
 }
 
-/// Yield each markdown table row as a vector of trimmed cells. Separator rows
-/// (`|---|---|`) and code-fenced blocks are skipped.
-fn table_rows(md: &str) -> Vec<Vec<String>> {
-    let mut rows = Vec::new();
-    let mut in_fence = false;
-    for line in md.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_fence = !in_fence;
-            continue;
-        }
-        if in_fence {
-            continue;
-        }
-        if !trimmed.starts_with('|') {
-            continue;
-        }
-        let stripped: String = trimmed
-            .chars()
-            .filter(|c| !matches!(c, '|' | '-' | ':' | ' '))
-            .collect();
-        if stripped.is_empty() {
-            continue;
-        }
-        let inner = trimmed.trim_matches('|');
-        let cells: Vec<String> = split_cells(inner);
-        rows.push(cells);
-    }
-    rows
-}
-
-/// Split a table row on `|`, honoring `\|` escapes inside backtick spans.
-fn split_cells(s: &str) -> Vec<String> {
-    let mut cells = Vec::new();
-    let mut cur = String::new();
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(&next) = chars.peek() {
-                if next == '|' {
-                    cur.push('|');
-                    chars.next();
-                    continue;
-                }
-            }
-            cur.push('\\');
-        } else if c == '|' {
-            cells.push(cur.trim().to_string());
-            cur = String::new();
-        } else {
-            cur.push(c);
-        }
-    }
-    cells.push(cur.trim().to_string());
-    cells
-}
-
 /// D-ONCE-LAW1=A: `jet inspect facts` reads the one registration table. Every
 /// registered row is listed, and a corpus truth also shows its home, everything
 /// that renders it, and the guard that proves there is no second copy.
@@ -419,6 +357,7 @@ pub fn facts_report_text() -> String {
         RowKind::Right,
         RowKind::Fact,
         RowKind::Marker,
+        RowKind::Diagnostic,
     ] {
         let rows: Vec<_> = Registry::rows()
             .iter()

@@ -11,7 +11,7 @@ use tir_support::{build_and_run, have_rustc};
 /// c109 (builtin-name collision): a user method whose name collides with a builtin
 /// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not
 /// receiver-typed) → `b.get()` emitted garbage, `b.len()` → E0599. The fix dispatches
-/// to the USER method (`user_<method>`) when `recv_type == Some(T)` and `(T, method) ∈
+/// to the USER method (`__jet_<method>`) when `recv_type == Some(T)` and `(T, method) ∈
 /// cx.method_sigs`. `main` and both methods route through the TIR.
 #[test]
 fn user_method_shadowing_builtin_name() {
@@ -147,7 +147,7 @@ fn run() {
 
 /// c109 (borrowed struct-lit value clone): a struct literal whose field value is a
 /// bare borrowed-in-env non-Copy ident (`Person.{ name: n }` where `n: String` is a
-/// `read` param → `&String`) emitted `user_name: (*user_n)` → rustc E0507 ("cannot
+/// `read` param → `&String`) emitted `__jet_name: (*__jet_n)` → rustc E0507 ("cannot
 /// move out of `*user_n`"). `field_read_to_clone` clones owning field READS but not a
 /// bare borrowed ident used as a struct-lit value; the fix clones it in sema's
 /// elaboration. `make` (struct lit + the sema-inserted clone) routes through the TIR.
@@ -333,7 +333,7 @@ fn run() {
 }
 
 /// c109 (B1): a mixed-switch over a NON-IDENT subject (a call) with unit-variant arm
-/// heads. Previously the AST emitted a bare unqualified `(subj == (user_Red))` and
+/// heads. Previously the AST emitted a bare unqualified `(subj == (__jet_Red))` and
 /// re-evaluated the call per arm (E0425); now it routes through the Rust `match` over
 /// the qualified variants, subject evaluated once.
 #[test]
@@ -364,7 +364,7 @@ fn run() {
 
 /// c109 (S57/M9.5): a comptime LOCAL `$name :: expr` in a function body. Sema
 /// evaluates `build()` at compile time and codegen emits the result as literal data
-/// (`let user_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
+/// (`let __jet_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
 /// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors
 /// `tests/comptime_diff.rs::local_comptime_is_literal_data`.
 #[test]
@@ -436,14 +436,14 @@ fn run() {
     // own `Clone` impl is a cheap handle clone, so plain `.clone()` replaces the
     // old `Arc::clone(&…)` text.)
     assert!(
-        out.rust.contains("user_noop(&(((*user_h)).clone()));"),
+        out.rust.contains("__jet_noop(&(((*__jet_h)).clone()));"),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );
     // The receiving param signature is the shared `rust_param_type` form.
     assert!(
         out.rust
-            .contains("pub fn user_noop(user_h: &jet_std::JetShared<i64>)"),
+            .contains("pub fn __jet_noop(__jet_h: &jet_std::JetShared<i64>)"),
         "Shared<Int> param signature not byte-exact:\n{}",
         out.rust
     );
@@ -470,7 +470,7 @@ fn run() {
 
 /// c109: an owning field read of a NON-SCALAR field (`s :: p.name`, `name:
 /// String`). Sema rewrites the read in owning position to `(p.name).clone()`;
-/// the TIR emits `((user_p).user_name).clone()`. The single-uppercase-letter
+/// the TIR emits `((__jet_p).__jet_name).clone()`. The single-uppercase-letter
 /// struct name `P` is a concrete declared type (not a type var), so `main`
 /// routes through the TIR. Runs (the two clones print independently) and is
 /// byte-exact on the owning-clone emit.
@@ -495,7 +495,7 @@ fn run() {
     let out = jet::compile(src).expect("should compile");
     assert!(
         out.rust
-            .contains("let user_s: String = ((user_p).user_name).clone();"),
+            .contains("let __jet_s: String = ((__jet_p).__jet_name).clone();"),
         "owning non-scalar field-read clone not byte-exact:\n{}",
         out.rust
     );
@@ -528,7 +528,7 @@ fn run() {
     let out = jet::compile(src).expect("should compile");
     assert!(
         out.rust
-            .contains("jet_map_insert(&mut ((user_s).user_scores),"),
+            .contains("jet_map_insert(&mut ((__jet_s).__jet_scores),"),
         "map-assign through field not byte-exact:\n{}",
         out.rust
     );
@@ -541,7 +541,7 @@ fn run() {
 /// (`s.scores.len()`), where the field came from an empty-map struct-literal
 /// field (`scores: []` takes its type from the struct field). The builtin gate
 /// admits a field-read receiver; `main` routes through the TIR and emits
-/// `((user_s).user_scores).len() as i64` byte-for-byte. Runs (empty map → 0).
+/// `((__jet_s).__jet_scores).len() as i64` byte-for-byte. Runs (empty map → 0).
 #[test]
 fn map_builtin_on_struct_field_receiver() {
     if !have_rustc() {
@@ -559,7 +559,7 @@ fn run() {
 ";
     let out = jet::compile(src).expect("empty map literal in field position should typecheck");
     assert!(
-        out.rust.contains("((user_s).user_scores).len() as i64"),
+        out.rust.contains("((__jet_s).__jet_scores).len() as i64"),
         "map builtin on field receiver not byte-exact:\n{}",
         out.rust
     );
@@ -607,7 +607,7 @@ fn run() {
     // Byte-exact: `pair_value.left` reads a field off the inlined struct literal.
     assert!(
         out.rust.contains(
-            "(user_Pair { user_left: 7i64, user_right: \"seven\".to_string() }).user_left"
+            "(__jet_Pair { __jet_left: 7i64, __jet_right: \"seven\".to_string() }).__jet_left"
         ),
         "comptime struct field read not byte-exact:\n{}",
         out.rust
@@ -615,7 +615,7 @@ fn run() {
     // Byte-exact: `light_value == Light.Green` compares the inlined enum value.
     assert!(
         out.rust
-            .contains("(user_Light::user_Green) == (user_Light::user_Green)"),
+            .contains("(__jet_Light::__jet_Green) == (__jet_Light::__jet_Green)"),
         "comptime enum `==` not byte-exact:\n{}",
         out.rust
     );
@@ -626,7 +626,7 @@ fn run() {
 
 /// c109 (D-PATW): a user-enum variant if-let condition with a WILDCARD payload
 /// slot (`if w == Some(_)`). The `_` binds nothing; the if-let head renders
-/// `if let user_Wrapper::user_Some(_) = user_w` byte-for-byte. `main` routes
+/// `if let __jet_Wrapper::__jet_Some(_) = __jet_w` byte-for-byte. `main` routes
 /// through the TIR; runs (the `Some(42)` value matches the wildcard).
 #[test]
 fn wildcard_enum_payload_if_let() {
@@ -648,7 +648,7 @@ fn run() {
     let out = jet::compile(src).expect("should compile");
     assert!(
         out.rust
-            .contains("if let user_Wrapper::user_Some(_) = user_w"),
+            .contains("if let __jet_Wrapper::__jet_Some(_) = __jet_w"),
         "wildcard enum-payload if-let not byte-exact:\n{}",
         out.rust
     );
@@ -723,21 +723,21 @@ fn run() {
     let out = jet::compile(src).expect("should compile");
     assert!(
         out.rust.contains(
-            "{ let __jet_v = 11i64; (user_points)[0i64 as usize].user_x = __jet_v; }"
+            "{ let __jet_v = 11i64; (__jet_points)[0i64 as usize].__jet_x = __jet_v; }"
         ),
         "plain indexed field assignment did not mutate the list element:\n{}",
         out.rust
     );
     assert!(
-        out.rust.contains(").user_x).jet_add((1i64)")
+        out.rust.contains(").__jet_x).jet_add((1i64)")
             && out
                 .rust
-                .contains("(user_points)[0i64 as usize].user_x = __jet_v;"),
+                .contains("(__jet_points)[0i64 as usize].__jet_x = __jet_v;"),
         "compound indexed field assignment did not use the checked add spine:\n{}",
         out.rust
     );
     assert!(
-        !out.rust.contains(".user_x +="),
+        !out.rust.contains(".__jet_x +="),
         "indexed field compound assignment leaked to Rust +=:\n{}",
         out.rust
     );

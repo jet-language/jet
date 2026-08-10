@@ -129,9 +129,9 @@ fn run() {
 "#,
     );
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("impl JetShow for user_Mixed"));
-    assert!(!rust.contains("impl JetDebug for user_Mixed"));
-    assert!(!rust.contains("impl user_Equatable for user_Mixed"));
+    assert!(rust.contains("impl JetShow for __jet_Mixed"));
+    assert!(!rust.contains("impl JetDebug for __jet_Mixed"));
+    assert!(!rust.contains("impl __jet_Equatable for __jet_Mixed"));
 
     let mut backend = jet_jit::CraneliftBackend::new();
     let outcome = backend.run(&bundle, false);
@@ -170,20 +170,20 @@ fn run() {
     );
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
     for implementation in [
-        "impl JetShow for user_Enabled",
-        "impl JetDebug for user_Enabled",
-        "impl user_Equatable for user_Enabled",
+        "impl JetShow for __jet_Enabled",
+        "impl JetDebug for __jet_Enabled",
+        "impl __jet_Equatable for __jet_Enabled",
     ] {
         assert!(rust.contains(implementation), "{implementation}");
     }
     for implementation in [
-        "impl JetShow for user_Missing",
-        "impl JetDebug for user_Missing",
-        "impl user_Equatable for user_Missing",
+        "impl JetShow for __jet_Missing",
+        "impl JetDebug for __jet_Missing",
+        "impl __jet_Equatable for __jet_Missing",
     ] {
         assert!(!rust.contains(implementation), "{implementation}");
     }
-    assert_eq!(rust.matches("impl JetDebug for user_Manual").count(), 1);
+    assert_eq!(rust.matches("impl JetDebug for __jet_Manual").count(), 1);
 
     let mut backend = jet_jit::CraneliftBackend::new();
     let outcome = backend.run(&bundle, false);

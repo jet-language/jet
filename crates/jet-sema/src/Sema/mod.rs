@@ -249,7 +249,7 @@ impl TypeRegistry {
         self.types.contains_key(name)
     }
 
-    /// A struct the user declared, so codegen emits a `user_<Name>` Rust type
+    /// A struct the user declared, so codegen emits a `__jet_<Name>` Rust type
     /// for it. False for a builtin the comptime evaluator merely models as a
     /// struct, which has no such Rust type.
     pub(crate) fn is_user_struct(&self, name: &str) -> bool {
@@ -753,6 +753,11 @@ pub(crate) struct LocalInfo {
     /// Whether this local can cross a task/channel boundary. For ordinary
     /// values this follows the type; for lambdas it also includes captures.
     sendable: bool,
+    /// Whether a function value has the thread-safe representation required by
+    /// `core.os.on_interrupt`. Ordinary `fn` values use `Rc`; only named
+    /// functions and already-proven callback-safe aliases may cross that
+    /// boundary.
+    interrupt_sendable: bool,
     /// D-DATARACE1=C: `#Local` pin on a reactive binding.
     reactive_local: bool,
     /// D-DATARACE1=C: `#Shared` pin on a reactive binding.
@@ -1174,6 +1179,7 @@ pub(crate) enum SendCrossing {
     TaskCapture,
     TaskResult,
     ChannelSend,
+    InterruptCallback,
 }
 
 /// What the driver is compiling — affects `run` / test requirements (M6).
@@ -1226,7 +1232,7 @@ pub(crate) struct ModuleState {
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
-    /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
+    /// `math.double(x)` resolves to `__jet_math__double(x)` when `math` is in here.
     code_modules: HashMap<String, String>,
     /// Inline module spelling -> compiler semantic identity. Ordinary modules
     /// use their module identity; generic instances use `instance:<digest>`.
@@ -1242,6 +1248,20 @@ pub(crate) struct ModuleState {
     /// exported name → (target_function_name, target_module_idx). A caller doing
     /// `thismod.Item` resolves through here to the real definition.
     reexports: HashMap<String, (String, usize)>,
+    /// D-NAME-WALK1=A: unqualified imports declared inside an inline module.
+    /// The first key is the inline module name; the second is the local item
+    /// name. Inline bodies inherit the enclosing file's maps and overlay these
+    /// entries for their own scope only.
+    inline_unqualified: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: file-module items imported inside an inline module.
+    inline_unqualified_file: HashMap<(String, String), (String, usize)>,
+    /// D-NAME-WALK1=A: core modules imported by item name inside an inline
+    /// module. Kept separate from the file-level map for scope safety.
+    inline_core_imports: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: inline-module `pub use` of another inline function.
+    inline_reexport_inline: HashMap<(String, String), (String, String)>,
+    /// D-NAME-WALK1=A: inline-module `pub use` of a file-module function.
+    inline_reexport_file: HashMap<(String, String), (String, usize)>,
 }
 
 pub(crate) struct Checker<'a> {
@@ -1260,6 +1280,13 @@ pub(crate) struct Checker<'a> {
     unqualified: &'a HashMap<String, String>,
     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
     unqualified_file: &'a HashMap<String, (String, usize)>,
+    /// D-NAME-WALK1=A: imports scoped to one inline-module body.
+    inline_unqualified: &'a HashMap<(String, String), String>,
+    inline_unqualified_file: &'a HashMap<(String, String), (String, usize)>,
+    inline_module: Option<String>,
+    /// D-NAME-WALK1=A: public re-exports declared inside inline modules.
+    inline_reexport_inline: &'a HashMap<(String, String), (String, String)>,
+    inline_reexport_file: &'a HashMap<(String, String), (String, usize)>,
     /// D-MOD2: pub flags for this module's functions, including inline-module
     /// items mangled as `M__item`. Used to reject `M.private()` from outside.
     func_pub: &'a HashMap<String, bool>,
@@ -1429,6 +1456,10 @@ pub(crate) struct Checker<'a> {
     lambda_params_are_lending_views: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
+    /// True while checking the callback stored by `core.os.on_interrupt`.
+    /// This boundary retains a callback for asynchronous signal delivery and
+    /// therefore needs stricter capture facts than an ordinary higher-order call.
+    interrupt_callback_depth: usize,
     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
     /// closure parameter — grants it write access with no `&` sigil (the API
     /// contract IS the exclusive lock; `check_lambda` reads this once, at bind
@@ -1983,7 +2014,7 @@ pub use Bundle::{
     bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    specialize_function_types,
+    prepare_script_entries, specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{DefinitionAnchorFact, EffectSummary, SemIndexEffectFacts};

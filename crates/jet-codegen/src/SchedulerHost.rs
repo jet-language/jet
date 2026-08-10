@@ -33,6 +33,11 @@ fn jet_scheduler_panic_should_unwind() -> bool {
     JET_IN_SCHEDULER_TASK.with(|c| c.get())
 }
 
+fn jet_runtime_diagnostic(rendered: String) -> ! {
+    eprintln!("{rendered}");
+    std::process::exit(70);
+}
+
 // ---------------------------------------------------------------------------
 // `#Para` deferred failure. AOT source: Prelude/Core.rs.
 // Inside a `#Para` region a failure is carried to the collection point instead
@@ -81,9 +86,7 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     {
         std::panic::panic_any(JetDeadlineUnwind { rendered });
     }
-    // Same tail as the emitted `jet_runtime_diagnostic`: report and exit 70.
-    eprintln!("{rendered}");
-    std::process::exit(70);
+    jet_runtime_diagnostic(rendered);
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +268,7 @@ mod scheduler_host_tests {
     fn race_uses_completion_order_when_results_are_already_ready() {
         assert_eq!(
             jet_scheduler_race(ready_entries_in_reverse_completion_order()),
-            42
+            Ok(42)
         );
     }
 
@@ -273,7 +276,7 @@ mod scheduler_host_tests {
     fn any_uses_completion_order_when_results_are_already_ready() {
         assert_eq!(
             jet_scheduler_any(ready_entries_in_reverse_completion_order()),
-            42
+            Ok(42)
         );
     }
 

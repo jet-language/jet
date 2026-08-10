@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc};
 use crate::AST::Type;
+use crate::Codegen::mangle;
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{CtReport, CtValue};
@@ -189,6 +190,7 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         loop {
+            self.dispatch_pending_interrupts(scope)?;
             self.burn()?;
             match self.exec_stmts(body, scope)? {
                 Flow::Normal | Flow::Continue => {}
@@ -218,6 +220,7 @@ impl<'a> EvalCtx<'a> {
         let defer_mark = self.deferred_closes.len();
         let guard_mark = self.shared_guards.len();
         for stmt in stmts {
+            self.dispatch_pending_interrupts(scope)?;
             let flow = match self.exec_stmt(stmt, scope) {
                 Ok(flow) => flow,
                 Err(error) => {
@@ -489,9 +492,9 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            TStmt::TaskGroup { group, body } => {
+            TStmt::TaskGroup { group, limit, body } => {
                 let mut run_body = |this: &mut Self| {
-                    let value = this.new_taskgroup();
+                    let value = this.new_taskgroup(limit.as_ref(), scope)?;
                     let index = Self::taskgroup_index(&value)
                         .expect("new taskgroup always carries an evaluator index");
                     scope.insert(group.name.clone(), value);
@@ -553,6 +556,7 @@ impl<'a> EvalCtx<'a> {
             TStmt::Loop { body, label } => self.exec_infinite(label.as_deref(), body, scope),
             TStmt::While { cond, body, label } => {
                 loop {
+                    self.dispatch_pending_interrupts(scope)?;
                     self.burn()?;
                     std::thread::yield_now();
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
@@ -580,6 +584,7 @@ impl<'a> EvalCtx<'a> {
                     other => return Ok(other),
                 }
                 loop {
+                    self.dispatch_pending_interrupts(scope)?;
                     self.burn()?;
                     std::thread::yield_now();
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
@@ -655,6 +660,7 @@ impl<'a> EvalCtx<'a> {
                     }
                 };
                 while in_range(i) {
+                    self.dispatch_pending_interrupts(scope)?;
                     self.burn()?;
                     scope.insert(var.clone(), CtValue::Int(i));
                     match self.exec_stmts(body, scope)? {
@@ -1521,7 +1527,7 @@ impl<'a> EvalCtx<'a> {
                         .get(&key)
                         .cloned()
                         .or_else(|| {
-                            let mangled = format!("user_{key}");
+                            let mangled = mangle(&key);
                             scope.get(&mangled).cloned()
                         })
                         .unwrap_or(CtValue::Unit);
@@ -1603,7 +1609,7 @@ impl<'a> EvalCtx<'a> {
                             if scope.contains_key(&place) {
                                 scope.insert(place, snap);
                             } else {
-                                let mangled = format!("user_{place}");
+                                let mangled = mangle(&place);
                                 if scope.contains_key(&mangled) {
                                     scope.insert(mangled, snap);
                                 }
@@ -1687,6 +1693,7 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         loop {
+            self.dispatch_pending_interrupts(scope)?;
             self.burn()?;
             match self.exec_stmts(body, scope)? {
                 Flow::Normal | Flow::Continue => {}
@@ -1752,7 +1759,7 @@ fn returned_shared_guards(flow: &Flow) -> Vec<usize> {
 }
 
 fn strip_user(name: &str) -> String {
-    name.strip_prefix("user_").unwrap_or(name).to_string()
+    name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name).to_string()
 }
 
 /// Bind a match-arm pattern against `value`. Returns `true` when the arm matches

@@ -7,6 +7,30 @@ use std::fs;
 
 use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
 
+/// D-BOUND-HEAD1=A: one typed-head hole law across AOT, `jet run`, and the
+/// interpreter path behind it. Runtime constructors remain ordinary parsers;
+/// only the typed head supplies URL/Path interpolation policy.
+#[test]
+fn boundary_typed_heads_keep_one_meaning_across_tiers() {
+    let src = r#"
+fn run() {
+    name :: "ada lovelace"
+    path_part :: "ada/../etc"
+    endpoint :: URL.{"https://api.example.com/v2/{name}"}
+    log_path :: Path.{"/var/log/{path_part}.log"}
+    stamp :: DateTime.{"2026-08-07T12:00:00Z"}
+    print(endpoint.to_string())
+    print(log_path.to_string())
+    print(stamp.to_string())
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "boundary_typed_heads",
+        src,
+        "https://api.example.com/v2/ada%20lovelace\n/var/log/ada%2F..%2Fetc.log\n2026-08-07 12:00:00 UTC\n",
+    );
+}
+
 /// D-SHAPE3a=A: inferred fresh construction rewrites to the ordinary static
 /// method call before TIR lowering. Expected types flow through bindings,
 /// returns, fields, and call arguments; explicit `Type.new` remains valid.
@@ -213,19 +237,27 @@ fn named_args() {
 fn area(width: Int, height: Int) => Int {
     return (width * height)
 }
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String {
+    return \"{host} t={seconds} tls={tls}\"
+}
 fn run() {
     print(area(width: 4, height: 3))
     print(area(4, height: 3))
+    print(connect(\"db\", tls: false, timeout: 5))
+    print(connect(\"db\", tls: false))
 }
 ";
     let (code, stdout) = build_and_run("tir_named_args", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "12\n12\n");
+    assert_eq!(
+        stdout,
+        "12\n12\ndb t=5 tls=false\ndb t=30 tls=false\n"
+    );
 }
 
 /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
 /// `Name.from_kind(x)` → newtype
-/// `user_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
+/// `__jet_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
 /// operator. A distinct value type passes/returns/binds byte-identically.
 #[test]
 fn distinct_types() {
@@ -363,7 +395,7 @@ fn run() {
 }
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
-/// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).user_x`;
+/// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).__jet_x`;
 /// destructure `(a, b) :: ~p` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
@@ -471,14 +503,14 @@ fn run() {
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).expect("front end rejected regex fixture");
-    // The `if let Some(user_mat)` if-let binds the `Match`; `.group(0)` reads it.
+    // The `if let Some(__jet_mat)` if-let binds the `Match`; `.group(0)` reads it.
     assert!(
-        out.rust.contains("if let Some(user_mat) ="),
+        out.rust.contains("if let Some(__jet_mat) ="),
         "Match value not bound via if-let:\n{}",
         out.rust
     );
     assert!(
-        out.rust.contains("(user_mat).group(0i64)"),
+        out.rust.contains("(__jet_mat).group(0i64)"),
         "Match.group lowering not byte-exact:\n{}",
         out.rust
     );
@@ -619,7 +651,7 @@ fn run() {
 /// c109 Phase 25: a STATIC constructor `Type.new(args)` (D-NARG1, 63_named_args). `new`
 /// is in `is_intercepted_method_name` (the instance-method intercept stays), but the
 /// STATIC shape (`recv_type == None`, type-name receiver, `(Type, "new") ∈ method_sigs`)
-/// is the Phase-7 `user_<Type>::user_new(args)` form — not a builtin intercept — so it
+/// is the Phase-7 `__jet_<Type>::__jet_new(args)` form — not a builtin intercept — so it
 /// now routes. The instance method named `area` still routes too.
 #[test]
 fn static_new_constructor() {

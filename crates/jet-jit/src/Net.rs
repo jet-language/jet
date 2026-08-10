@@ -12,6 +12,8 @@ use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 mod runtime {
     use crate::JetShow;
 
+    include!("../../jet-foundation/src/TypedHeads.rs");
+
     pub mod jet_std {
         #[derive(Clone, Debug, PartialEq)]
         pub struct JetURL {
@@ -214,6 +216,19 @@ fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R>
             .get(index)
             .and_then(|slot| slot.as_ref())
             .and_then(f)
+    })
+}
+
+pub(crate) fn mime_parts(
+    handle: i64,
+) -> Option<(String, String, Vec<(String, String)>)> {
+    with_net(handle, |value| match value {
+        NetValue::Mime(mime) => Some((
+            mime.top.clone(),
+            mime.sub.clone(),
+            mime.params.clone(),
+        )),
+        _ => None,
     })
 }
 
@@ -918,8 +933,6 @@ host_fns! {
     email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
     email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
 }
-
-
 
 
 

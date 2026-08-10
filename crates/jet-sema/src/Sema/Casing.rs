@@ -87,7 +87,7 @@ fn trait_method_names(m: &TraitMethodSig, out: &mut Vec<Diagnostic>) {
 
 fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) {
     match item {
-        Item::EffectDecl(_) | Item::MarkerDecl(_) => {}
+        Item::EffectDecl(_) | Item::MarkerDecl(_) | Item::FactDecl(_) => {}
         Item::Func(f) => func_names(f, "function", out),
         Item::Struct(s) => {
             pascal(&s.name, s.name_span, "struct", out);

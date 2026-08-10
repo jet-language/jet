@@ -91,6 +91,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.scope",
     // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing builder.
     "core.args",
+    // D-LIB-CALLGRANT1=A: pinned loadable Jet libraries.
+    CORE_MOD_MODULE,
     // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
     "core.term",
     // D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): runtime reflection floor —
@@ -399,7 +401,30 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     }
     prev[b.len()]
 }
-use super::{CORE_EMAIL_MODULE, STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER};
+use super::{
+    CORE_EMAIL_MODULE, CORE_MOD_MODULE, STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER,
+};
+
+/// D-NAME-SIGIL1=A: every compiler-visible generated symbol uses one reserved
+/// machine prefix. Keep this helper below the syntax surface so sema, engines,
+/// tools, and generated Rust share one naming law.
+pub const GENERATED_NAME_PREFIX: &str = "__jet_";
+
+pub fn generated_name(name: &str) -> String {
+    if name.starts_with(GENERATED_NAME_PREFIX) {
+        name.to_string()
+    } else {
+        format!("{GENERATED_NAME_PREFIX}{name}")
+    }
+}
+
+pub fn generated_path(name: &str) -> String {
+    generated_name(&name.replace('.', "__"))
+}
+
+pub fn generated_suffix(name: &str) -> &str {
+    name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(name)
+}
 
 /// D-SHAPE-INTERNAL1 / D-SHAPE-DUNDER2: the one prefix classification used by
 /// the lexer, sema, publishing, and tools. Bare `_` remains the pattern/binding
@@ -418,5 +443,20 @@ pub fn classify_identifier(name: &str) -> IdentifierClass {
         IdentifierClass::SoftPublic
     } else {
         IdentifierClass::Ordinary
+    }
+}
+
+#[cfg(test)]
+mod generated_name_tests {
+    use super::{generated_name, generated_path, generated_suffix};
+
+    #[test]
+    fn generated_names_have_one_machine_prefix() {
+        assert_eq!(generated_name("run"), "__jet_run");
+        assert_eq!(generated_name("__jet_run"), "__jet_run");
+        assert_eq!(generated_path("grades.curve"), "__jet_grades__curve");
+        assert_eq!(generated_path("__jet_grades__curve"), "__jet_grades__curve");
+        assert_eq!(generated_path("__jet_grades.curve"), "__jet_grades__curve");
+        assert_eq!(generated_suffix("__jet_run"), "run");
     }
 }

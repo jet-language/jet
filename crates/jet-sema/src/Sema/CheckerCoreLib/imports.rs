@@ -17,6 +17,42 @@ impl<'a> Checker<'a> {
             type_args: &[Type],
             args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
+            // D-NAME-WALK1=A: a qualified call through an inline module's
+            // `pub use` follows the exported item to its real owner. Keep this
+            // before the ordinary mangled-signature lookup because the inline
+            // module itself does not emit a forwarding function.
+            let item = mangled
+                .strip_prefix(&format!("{alias}__"))
+                .unwrap_or(mangled)
+                .to_string();
+            if let Some((real_alias, real_mangled)) = self
+                .inline_reexport_inline
+                .get(&(alias.to_string(), item.clone()))
+                .cloned()
+            {
+                return self.infer_code_module_call(
+                    &real_alias,
+                    &real_mangled,
+                    alias_span,
+                    span,
+                    type_args,
+                    args,
+                );
+            }
+            if let Some((real_name, real_idx)) = self
+                .inline_reexport_file
+                .get(&(alias.to_string(), item))
+                .cloned()
+            {
+                return self.infer_import_call(
+                    real_idx,
+                    &real_name,
+                    alias_span,
+                    span,
+                    type_args,
+                    args,
+                );
+            }
             let Some(sig) = self.funcs.get(mangled).cloned() else {
                 self.diags.push(Diagnostic::error(
                     "E0608",

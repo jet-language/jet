@@ -54,6 +54,20 @@ pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Spa
                 _ => None,
             }
         }
+        Expr::Binary(BinOp::Eq, left, right, span) => {
+            let subject = if expr_is_absent_none(right) {
+                left.as_ref()
+            } else if expr_is_absent_none(left) {
+                right.as_ref()
+            } else {
+                return None;
+            };
+            match subject {
+                Expr::Ident(name, name_span) => Some((name.clone(), *name_span, *span)),
+                _ => None,
+            }
+        }
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => atomic_absent_optional_subject(inner),
         _ => None,
     }
 }
@@ -208,6 +222,7 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
+                    interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
                     task_lint_span: None,
@@ -238,6 +253,7 @@ impl<'a> Checker<'a> {
                         param_conv: None,
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
+                        interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
                         task_lint_span: None,
@@ -347,6 +363,7 @@ impl<'a> Checker<'a> {
             pattern: &Pattern,
             st: &Type,
             covered: &mut HashSet<String>,
+            multi_head: bool,
         ) {
             let pspan = pattern.span();
             // D-PATO: or-patterns cover multiple variants; insert all of them.
@@ -365,12 +382,27 @@ impl<'a> Checker<'a> {
                     .iter()
                     .any(|c| jet_foundation::Facts::fact_covers(c, &variant));
                 if already {
-                    let what = format!(
-                        "arm `{}` is unreachable — that case is already handled",
-                        variant
-                    );
-                    let why = "every earlier arm already covers this pattern".to_string();
-                    let fix = "remove this arm or merge it with the one above".to_string();
+                    let what = if multi_head {
+                        format!(
+                            "head `{}` is unreachable — an earlier head already handles it",
+                            variant
+                        )
+                    } else {
+                        format!(
+                            "arm `{}` is unreachable — that case is already handled",
+                            variant
+                        )
+                    };
+                    let why = if multi_head {
+                        "multi-head declaration order selects the first matching head".to_string()
+                    } else {
+                        "every earlier arm already covers this pattern".to_string()
+                    };
+                    let fix = if multi_head {
+                        "remove this head or merge it with the earlier head".to_string()
+                    } else {
+                        "remove this arm or merge it with the one above".to_string()
+                    };
                     if matches!(st, Type::Union(_)) {
                         self.diags.push(Diagnostic::error("E0365", what, why, fix, Some(pspan)));
                     } else {
@@ -397,6 +429,7 @@ impl<'a> Checker<'a> {
             if has_else {
                 return;
             }
+            let multi_head = subj_name == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT);
             // D-PATR: Int/Char are open scalar types — range arms can never
             // prove totality, so an `else` (or wildcard) is always required.
             // `missing_pattern_coverage` returns None for Int/Char (infinite
@@ -426,22 +459,40 @@ impl<'a> Checker<'a> {
             if let Some(missing) = missing_pattern_coverage(st, covered, self.registry) {
                 let mut diag = Diagnostic::error(
                     "E0307",
-                    format!(
-                        "this `{}` doesn't cover every case — missing: {}",
-                        Syntax::KW_IF,
-                        missing.join(", ")
-                    ),
-                    "every arm here is a pattern test, so each variant must appear once"
-                        .to_string(),
-                    format!("add an arm for: {}", missing.join(", ")),
+                    if multi_head {
+                        format!(
+                            "this multi-head function doesn't cover every case — missing: {}",
+                            missing.join(", ")
+                        )
+                    } else {
+                        format!(
+                            "this `{}` doesn't cover every case — missing: {}",
+                            Syntax::KW_IF,
+                            missing.join(", ")
+                        )
+                    },
+                    if multi_head {
+                        "each multi-head head covers one argument shape, so every variant must appear once"
+                            .to_string()
+                    } else {
+                        "every arm here is a pattern test, so each variant must appear once"
+                            .to_string()
+                    },
+                    if multi_head {
+                        format!("add a head for: {}", missing.join(", "))
+                    } else {
+                        format!("add an arm for: {}", missing.join(", "))
+                    },
                     Some(span),
                 );
                 // Attach a structured insert so LSP/CLI can add compilable arms.
-                if let Some(at) = insert_at {
-                    diag.edit = Some(TextEdit {
-                        span: at,
-                        new_text: missing_arms_text(st, &missing, subj_name),
-                    });
+                if !multi_head {
+                    if let Some(at) = insert_at {
+                        diag.edit = Some(TextEdit {
+                            span: at,
+                            new_text: missing_arms_text(st, &missing, subj_name),
+                        });
+                    }
                 }
                 self.diags.push(diag);
             }
@@ -520,7 +571,7 @@ impl<'a> Checker<'a> {
             }
             let mut covered = HashSet::new();
             for p in &resolved {
-                self.note_pattern_coverage(p, &st, &mut covered);
+                self.note_pattern_coverage(p, &st, &mut covered, false);
             }
             let insert_at = last_arm_end.map(|e| Span::new(e, e));
             self.check_pattern_coverage_complete(
@@ -541,6 +592,39 @@ impl<'a> Checker<'a> {
             span: Span,
         ) {
             let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
+            // D-FLOWTYPE1=A: statement `if x == None { … } else { … }` uses
+            // the same canonical Present-pattern fact as value `if`. Swap the
+            // two branches before checking so the proven unwrap is retained in
+            // the AST/TIR path; a sema-only narrowed scope would leave codegen
+            // with the original Optional value.
+            if subjectless_guard && arms.len() == 1 {
+                self.rewrite_optional_flow_ne_none(&mut arms[0].cond);
+                if let Some((name, name_span, cond_span)) =
+                    atomic_absent_optional_subject(&arms[0].cond)
+                {
+                    if else_body.is_some()
+                        && self.flow_narrowable_optional_inner(&name).is_some()
+                    {
+                        let original_else = else_body.take().expect("checked above");
+                        let original_then = std::mem::replace(&mut arms[0].body, Vec::new());
+                        arms[0].body = original_else;
+                        *else_body = Some(original_then);
+                        arms[0].cond = Expr::PatternTest {
+                            subject: Box::new(Expr::Ident(name.clone(), name_span)),
+                            pattern: Pattern::Present {
+                                binding: name,
+                                binding_span: name_span,
+                                span: cond_span,
+                            },
+                            span: cond_span,
+                        };
+                    }
+                }
+            } else {
+                for arm in arms.iter_mut() {
+                    self.rewrite_optional_flow_ne_none(&mut arm.cond);
+                }
+            }
             let subj_ty = self.infer(subject);
             let subj_name = match &*subject {
                 Expr::Ident(n, _) => Some(n.clone()),
@@ -563,6 +647,7 @@ impl<'a> Checker<'a> {
                             param_conv: None,
                             decl_loop_depth: self.loop_depth,
                             sendable: true,
+                            interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
                             task_lint_span: None,
@@ -608,7 +693,12 @@ impl<'a> Checker<'a> {
                             continue;
                         };
                         let pspan = pattern.span();
-                        self.note_pattern_coverage(&pattern, st, &mut covered);
+                        self.note_pattern_coverage(
+                            &pattern,
+                            st,
+                            &mut covered,
+                            subj_name.as_deref() == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT),
+                        );
                         let bindings = self.validate_pattern(st, &pattern, pspan);
                         self.mark_pattern_subject_moved(subject, &bindings);
                         self.push_scope();
@@ -669,7 +759,13 @@ impl<'a> Checker<'a> {
             let mut can_skip_every_arm = else_body.is_none();
             if all_pattern {
                 if let Some(st) = subj_ty {
-                    let insert_at = arms.last().map(|a| Span::new(a.span.end, a.span.end));
+                    let insert_at = if subj_name.as_deref()
+                        == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT)
+                    {
+                        None
+                    } else {
+                        arms.last().map(|a| Span::new(a.span.end, a.span.end))
+                    };
                     let reported = self.diags.len();
                     self.check_pattern_coverage_complete(
                         &st,
@@ -793,9 +889,27 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            let else_narrow = else_body.as_ref().and_then(|_| {
+                arms.iter().find_map(|arm| {
+                    let (name, name_span, cond_span) =
+                        atomic_absent_optional_subject(&arm.cond)?;
+                    let inner = self.flow_narrowable_optional_inner(&name)?;
+                    Some((name, name_span, cond_span, inner))
+                })
+            });
             if let Some(body) = else_body {
                 self.flow = outside_table.clone();
-                self.check_block(body, true);
+                if let Some((name, _name_span, cond_span, inner)) = else_narrow {
+                    self.push_scope();
+                    let restore_moved = self.declare_condition_binding(&name, cond_span, inner);
+                    self.check_block(body, true);
+                    self.pop_scope();
+                    if let Some((name, at)) = restore_moved {
+                        self.flow.moved.set(&name, at);
+                    }
+                } else {
+                    self.check_block(body, true);
+                }
                 paths.push(self.flow.clone());
             } else if can_skip_every_arm {
                 // Skipping every arm is itself a path through here.

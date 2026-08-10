@@ -496,14 +496,14 @@ fn jet_sync_map_metadata(map: &JetSyncMap) -> String {
     format!("LWWMap({parts})")
 }
 
-fn jet_sync_value_id<T: user_Encode>(value: &T) -> String {
+fn jet_sync_value_id<T: __jet_Encode>(value: &T) -> String {
     // Canonical DataTree JSON is the wire identity.  It is deterministic for
     // primitive, collection, and user-derived Codable values, so map keys do
     // not need an invented Rust `Ord` requirement.
     jet_std::render_datatree_json(&value.jet_encode(), true, 0)
 }
 
-fn jet_sync_value_show<T: user_Encode>(value: &T) -> String {
+fn jet_sync_value_show<T: __jet_Encode>(value: &T) -> String {
     jet_std::render_datatree_json(&value.jet_encode(), false, 0)
 }
 
@@ -518,8 +518,8 @@ fn jet_sync_map_set_generic<K, V>(
     value: V,
 ) -> JetSyncMapGeneric<K, V>
 where
-    K: user_Encode,
-    V: user_Encode,
+    K: __jet_Encode,
+    V: __jet_Encode,
 {
     if !jet_sync_token_is_valid(&replica) {
         return map;
@@ -555,7 +555,7 @@ where
 
 fn jet_sync_map_get_generic<K, V>(map: &JetSyncMapGeneric<K, V>, key: &K) -> Option<V>
 where
-    K: user_Encode,
+    K: __jet_Encode,
     V: Clone,
 {
     let key_id = jet_sync_value_id(key);
@@ -570,8 +570,8 @@ fn jet_sync_map_merge_generic<K, V>(
     b: &JetSyncMapGeneric<K, V>,
 ) -> JetSyncMapGeneric<K, V>
 where
-    K: Clone + user_Encode,
-    V: Clone + user_Encode,
+    K: Clone + __jet_Encode,
+    V: Clone + __jet_Encode,
 {
     let mut merged = std::collections::BTreeMap::<String, (K, V, u64, String)>::new();
     for (key, value, clock, writer) in a.entries.iter().chain(&b.entries) {
@@ -597,8 +597,8 @@ where
 
 fn jet_sync_map_show_generic<K, V>(map: &JetSyncMapGeneric<K, V>) -> String
 where
-    K: user_Encode,
-    V: user_Encode,
+    K: __jet_Encode,
+    V: __jet_Encode,
 {
     let parts = map
         .entries
@@ -613,7 +613,7 @@ where
 
 fn jet_sync_map_metadata_generic<K, V>(map: &JetSyncMapGeneric<K, V>) -> String
 where
-    K: user_Encode,
+    K: __jet_Encode,
 {
     let parts = map
         .entries
@@ -742,7 +742,7 @@ fn jet_sync_list_push_generic<T>(
     item: T,
 ) -> JetSyncListGeneric<T>
 where
-    T: user_Encode,
+    T: __jet_Encode,
 {
     if !jet_sync_token_is_valid(&replica) {
         return list;
@@ -771,7 +771,7 @@ fn jet_sync_list_merge_generic<T>(
     b: &JetSyncListGeneric<T>,
 ) -> JetSyncListGeneric<T>
 where
-    T: Clone + user_Encode,
+    T: Clone + __jet_Encode,
 {
     let mut out = a.clone();
     for (replica, item) in &b.items {
@@ -792,7 +792,7 @@ where
 
 fn jet_sync_list_show_generic<T>(list: &JetSyncListGeneric<T>) -> String
 where
-    T: user_Encode,
+    T: __jet_Encode,
 {
     let parts = list
         .items
@@ -821,8 +821,8 @@ impl JetShow for JetSyncMap {
 
 impl<K, V> JetShow for JetSyncMapGeneric<K, V>
 where
-    K: user_Encode,
-    V: user_Encode,
+    K: __jet_Encode,
+    V: __jet_Encode,
 {
     fn jet_show(&self) -> String { jet_sync_map_show_generic(self) }
 }
@@ -833,7 +833,7 @@ impl JetShow for JetSyncList {
 
 impl<T> JetShow for JetSyncListGeneric<T>
 where
-    T: user_Encode,
+    T: __jet_Encode,
 {
     fn jet_show(&self) -> String { jet_sync_list_show_generic(self) }
 }
@@ -948,7 +948,7 @@ fn jet_sync_frame_entry(
     ));
 }
 
-impl user_Encode for JetSyncText {
+impl __jet_Encode for JetSyncText {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![(
             "atoms".to_string(),
@@ -985,7 +985,7 @@ impl user_Encode for JetSyncText {
     }
 }
 
-impl user_Decode for JetSyncText {
+impl __jet_Decode for JetSyncText {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["atoms"], "SyncText")?;
         let values = jet_sync_decode_array(
@@ -1125,7 +1125,7 @@ impl user_Decode for JetSyncText {
     }
 }
 
-impl user_Encode for JetSyncCounter {
+impl __jet_Encode for JetSyncCounter {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![
             (
@@ -1147,7 +1147,7 @@ impl user_Encode for JetSyncCounter {
     }
 }
 
-impl user_Decode for JetSyncCounter {
+impl __jet_Decode for JetSyncCounter {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["counts"], "SyncCounter")?;
         let values = jet_sync_decode_array(
@@ -1217,7 +1217,7 @@ impl user_Decode for JetSyncCounter {
     }
 }
 
-impl user_Encode for JetSyncMap {
+impl __jet_Encode for JetSyncMap {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![
             (
@@ -1240,7 +1240,7 @@ impl user_Encode for JetSyncMap {
     }
 }
 
-impl user_Decode for JetSyncMap {
+impl __jet_Decode for JetSyncMap {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
         let values = jet_sync_decode_array(
@@ -1322,7 +1322,7 @@ impl user_Decode for JetSyncMap {
     }
 }
 
-impl user_Encode for JetSyncList {
+impl __jet_Encode for JetSyncList {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![
             (
@@ -1343,7 +1343,7 @@ impl user_Encode for JetSyncList {
     }
 }
 
-impl user_Decode for JetSyncList {
+impl __jet_Decode for JetSyncList {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
         let values = jet_sync_decode_array(
@@ -1401,10 +1401,10 @@ impl user_Decode for JetSyncList {
     }
 }
 
-impl<K, V> user_Encode for JetSyncMapGeneric<K, V>
+impl<K, V> __jet_Encode for JetSyncMapGeneric<K, V>
 where
-    K: user_Encode,
-    V: user_Encode,
+    K: __jet_Encode,
+    V: __jet_Encode,
 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![
@@ -1428,10 +1428,10 @@ where
     }
 }
 
-impl<K, V> user_Decode for JetSyncMapGeneric<K, V>
+impl<K, V> __jet_Decode for JetSyncMapGeneric<K, V>
 where
-    K: user_Decode + user_Encode,
-    V: user_Decode + user_Encode,
+    K: __jet_Decode + __jet_Encode,
+    V: __jet_Decode + __jet_Encode,
 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
@@ -1518,9 +1518,9 @@ where
     }
 }
 
-impl<T> user_Encode for JetSyncListGeneric<T>
+impl<T> __jet_Encode for JetSyncListGeneric<T>
 where
-    T: user_Encode,
+    T: __jet_Encode,
 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![
@@ -1542,9 +1542,9 @@ where
     }
 }
 
-impl<T> user_Decode for JetSyncListGeneric<T>
+impl<T> __jet_Decode for JetSyncListGeneric<T>
 where
-    T: user_Decode + user_Encode,
+    T: __jet_Decode + __jet_Encode,
 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["items"], "SyncList")?;

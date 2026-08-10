@@ -1726,6 +1726,7 @@ fn expand_alias(
             is_pub: alias.is_pub,
             is_package_pub: alias.is_package_pub,
             body: Some(body),
+            imports: template.imports.clone(),
             web_target: None,
             instance_identity: None,
             span: alias.span,

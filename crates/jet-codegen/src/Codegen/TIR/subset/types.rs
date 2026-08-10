@@ -386,6 +386,17 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
             || cx.current_type_params.borrow().contains(n.as_str()))
 }
 
+/// Resolve a user nominal through the one codegen import map. A sema type may
+/// be bare (`Note`) in a declaration or qualified (`note.Note`) at a literal;
+/// both spellings must consult the same foreign module entry.
+pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
+    let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
+    cx.foreign_types
+        .get(name)
+        .or_else(|| cx.foreign_types.get(leaf))
+        .map(String::as_str)
+}
+
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
 /// These all render through `cx.rust_type` already (a prelude handle/core struct → its
 /// `Jet…`/`jet_std::…` Rust name), so passing/binding/returning one is byte-identical to
@@ -402,13 +413,13 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         return false;
     };
     // c109 Phase 19: a FOREIGN (imported user) struct/enum used as a value type. It
-    // renders via `cx.rust_type` to `{root}{mod}::user_<Name>` (Context.rs), and a field
+    // renders via `cx.rust_type` to `{root}{mod}::__jet_<Name>` (Context.rs), and a field
     // read on it mangles (`(n).user_title`) exactly as `mangle` produces — byte-identical
     // to the AST path with no new emit. Construction (`alias.Note { … }`) routes via the
     // `import_ns` StructLit shape; a method on it is still out of subset, so a fn that
     // calls one is excluded by that call (the recurring "cover the value type, let the next
     // uncovered node exclude its fn" seam).
-    if cx.foreign_types.contains_key(name) {
+    if foreign_type_module(name, cx).is_some() {
         return true;
     }
     // D-REGEXENGINE1=A: a regex `Match` value (`if m == value(mat)` binds
@@ -498,7 +509,7 @@ pub(crate) fn foreign_struct_lit_in_subset(
     if !cx.import_mods.contains_key(alias) {
         return false;
     }
-    if !cx.foreign_types.contains_key(type_name) {
+    if foreign_type_module(type_name, cx).is_none() {
         return false;
     }
     type_args

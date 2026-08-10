@@ -60,7 +60,7 @@ impl LineMap {
     }
 
     /// The first marked rust line AT OR AFTER `rust_line` — used to place the
-    /// initial breakpoint at the generated `user_run` body's first real
+    /// initial breakpoint at the generated `__jet_run` body's first real
     /// statement by `-f -l` (line-based) rather than `-n main` (name-based,
     /// which can resolve to more than one symbol and land with no source line
     /// at all).
@@ -68,15 +68,15 @@ impl LineMap {
         self.rust_to_jet.range(rust_line..).next().map(|(k, _)| *k)
     }
 
-    /// The rust line to set the INITIAL breakpoint on: `user_run`'s first real
+    /// The rust line to set the INITIAL breakpoint on: `__jet_run`'s first real
     /// statement. Rust still has a tiny `fn main` wrapper, but the Jet user's
-    /// code lives in `user_run`, which carries the line markers. Shared by the terminal session
+    /// code lives in `__jet_run`, which carries the line markers. Shared by the terminal session
     /// (`Native.rs`) and the DAP `launch` handler (`Dap.rs`) so both use the
     /// same file:line breakpoint, never the ambiguous `-n main`.
     pub(crate) fn main_entry_line(&self, rust_src: &str) -> Option<usize> {
         let entry_header = rust_src
             .lines()
-            .position(|l| l.trim_start().starts_with("pub fn user_run("))
+            .position(|l| l.trim_start().starts_with("pub fn __jet_run("))
             .or_else(|| {
                 rust_src
                     .lines()

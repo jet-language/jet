@@ -55,7 +55,7 @@ fn bind_resource_param(
         env.bind(source_name, ordinary_slot, Some(local_ty));
         return;
     }
-    let guard_name = format!("__jet_resource_param_{source_name}");
+    let guard_name = Syntax::generated_name(&format!("resource_param_{source_name}"));
     guards.push(TStmt::Let {
         name: guard_name.clone(),
         kw: "let mut",
@@ -221,7 +221,13 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     }
     let mut body = resource_param_guards;
     body.extend(lower_stmts(&f.body, cx, &mut env));
-    let clone_types = env.cloned_types.borrow().clone();
+    let mut clone_types = env.cloned_types.borrow().clone();
+    for param in &f.params {
+        collect_signature_clone_types(&param.ty, cx, &mut clone_types);
+    }
+    if let Some(return_type) = &f.return_type {
+        collect_signature_clone_types(return_type, cx, &mut clone_types);
+    }
     let generics = render_generics(&f.type_params, &clone_types);
     let (pre_contracts, post_contracts) = lower_contracts(f, cx);
     TFunc {
@@ -345,9 +351,9 @@ pub(crate) fn emit_tir_property_test_body(
 /// c109: lower + emit an error-conversion `impl Old => New { … }` body through the TIR,
 /// reproducing `emit_error_conv`'s `emit_stmts(cx, body, &mut env, out, 1, false)`
 /// byte-for-byte. `emit_error_conv` already emitted the signature + opening brace and set
-/// `cx.current_fn` to the conversion fn name; it binds `self` to `user_self` (Move, the
-/// Old named type — Slot `{rust_name:"user_self", deref:false}`), so the env's `self`
-/// place is the bare `user_self`. The body's `return <e>` lowers the expr as-is (sema
+/// `cx.current_fn` to the conversion fn name; it binds `self` to `__jet_self` (Move, the
+/// Old named type — Slot `{rust_name:"__jet_self", deref:false}`), so the env's `self`
+/// place is the bare `__jet_self`. The body's `return <e>` lowers the expr as-is (sema
 /// already inserted any wrapping); emitted at indent 1, the closing brace is the caller's.
 pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
@@ -381,6 +387,51 @@ pub(crate) fn render_generics(
         .map(|name| (name, vec!["Clone".to_string()]))
         .collect();
     crate::Generics::rust_type_param_list(type_params, &extra)
+}
+
+fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
+    match ty {
+        Type::Apply { name, args } => {
+            let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+            if cx.cloneable.contains(name) || cx.cloneable.contains(leaf) {
+                out.push(ty.clone());
+            }
+            for arg in args {
+                collect_signature_clone_types(arg, cx, out);
+            }
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::Quantity { base: inner, .. }
+        | Type::FixedList { elem: inner, .. } => {
+            collect_signature_clone_types(inner, cx, out);
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            collect_signature_clone_types(key, cx, out);
+            collect_signature_clone_types(value, cx, out);
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                collect_signature_clone_types(param, cx, out);
+            }
+            if let Some(ret) = ret {
+                collect_signature_clone_types(ret, cx, out);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                collect_signature_clone_types(field, cx, out);
+            }
+        }
+        Type::Union(members) => {
+            for member in members {
+                collect_signature_clone_types(member, cx, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// c109 Phase 17: `param_place` for a (possibly generic) free function.
@@ -642,7 +693,7 @@ pub(crate) fn tir_covers_delegation_method(_f: &Func, _field: &str, _cx: &Cx) ->
 /// reproducing `emit_delegation_method` (Source/Codegen/Items.rs) byte-for-byte: the
 /// signature line (incl. its quirky two-space `  {`), and the forwarding call. There is
 /// no body — the method only forwards to the delegated field with the BARE trait method
-/// name (no `user_` mangle, as the trait owns it in Rust).
+/// name (no `__jet_` mangle, as the trait owns it in Rust).
 pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
     let ret = f
         .return_type

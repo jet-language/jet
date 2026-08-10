@@ -13,3 +13,19 @@ Error [E0076]: this loop breaks with String (text), but another exit uses Int (a
     |               ^^^^^^^
  Why: an ordinary loop has one final result type
  Fix: make every break payload use the same type
+
+Error [E0076]: this result loop exits without a value
+  --> tests/ui/result_loop_break_payloads.jet:21:14
+    |
+ 21 |         } ?? break(result)
+    |              ^^^^^^^^^^^^^
+ Why: every exit from a loop used as a value must provide the same result type
+ Fix: add a break payload, or target an inner effect-only loop
+
+Error [E0076]: this result loop exits without a value
+  --> tests/ui/result_loop_break_payloads.jet:33:23
+    |
+ 33 |         fallible() ?? break(result)
+    |                       ^^^^^^^^^^^^^
+ Why: every exit from a loop used as a value must provide the same result type
+ Fix: add a break payload, or target an inner effect-only loop

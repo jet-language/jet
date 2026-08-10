@@ -17,6 +17,9 @@ pub enum SymKind {
     Module,
     Function {
         params: Vec<(String, AST::Type)>,
+        /// Public call labels and zones, kept separately from local body names.
+        /// D-APILABEL1=A: LSP consumers must show the callable contract.
+        param_contract: Vec<(String, String, AST::ParamZone)>,
         ret: Option<AST::Type>,
         effects: Option<Vec<(String, Span)>>,
         effect_via: Option<(String, Span)>,
@@ -337,6 +340,55 @@ fn method_params(f: &AST::Func) -> Vec<(String, AST::Type)> {
         .collect()
 }
 
+fn method_parameter_contract(f: &AST::Func) -> Vec<(String, String, AST::ParamZone)> {
+    parameter_contract(&f.params)
+}
+
+fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZone)> {
+    params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| (p.name.clone(), p.call_label().to_string(), p.zone))
+        .collect()
+}
+
+/// Render the public call surface for LSP completion/signature help. Separators
+/// are part of the displayed signature; callers only use the actual parameter
+/// entries when constructing LSP parameter objects.
+pub fn function_parameter_parts(
+    params: &[(String, AST::Type)],
+    contract: &[(String, String, AST::ParamZone)],
+) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut star_done = false;
+    for (index, (local, ty)) in params.iter().enumerate() {
+        let (contract_local, label, zone) = contract
+            .get(index)
+            .map(|(local, label, zone)| (local.as_str(), label.as_str(), *zone))
+            .unwrap_or((local.as_str(), local.as_str(), AST::ParamZone::Either));
+        if zone == AST::ParamZone::LabelOnly && !star_done {
+            star_done = true;
+            parts.push(Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+        }
+        let shown = if zone == AST::ParamZone::PositionalOnly {
+            contract_local.to_string()
+        } else if label == contract_local {
+            label.to_string()
+        } else {
+            format!("{label} {contract_local}")
+        };
+        parts.push(format!("{shown}: {}", ty.name()));
+        if zone == AST::ParamZone::PositionalOnly
+            && contract
+                .get(index + 1)
+                .is_none_or(|(_, _, next)| *next != AST::ParamZone::PositionalOnly)
+        {
+            parts.push(Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+        }
+    }
+    parts
+}
+
 fn method_fact(
     scope: &str,
     owner: &str,
@@ -515,6 +567,7 @@ fn item_span(item: &AST::Item) -> Span {
     match item {
         AST::Item::EffectDecl(x) => x.span,
         AST::Item::MarkerDecl(x) => x.span,
+        AST::Item::FactDecl(x) => x.span,
         AST::Item::Func(x) => x.span,
         AST::Item::Struct(x) => x.span,
         AST::Item::Enum(x) => x.span,
@@ -657,6 +710,7 @@ fn apply_inferred_effect_rows(
             ret,
             effects,
             effect_via,
+            ..
         } = &mut def.kind
         else {
             continue;
@@ -894,7 +948,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
     );
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match item {
-        Item::EffectDecl(_) | Item::MarkerDecl(_) => {}
+        Item::EffectDecl(_) | Item::MarkerDecl(_) | Item::FactDecl(_) => {}
         Item::Func(f) => {
             record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
@@ -911,6 +965,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 kind: SymKind::Function {
                     params: params.clone(),
+                    param_contract: method_parameter_contract(f),
                     ret: f.return_type.clone(),
                     effects: f.declared_effects.clone(),
                     effect_via: f.effect_via.clone(),
@@ -1077,6 +1132,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
+                        param_contract: method_parameter_contract(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1134,6 +1190,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         module_path: mp.to_string(),
                         kind: SymKind::Function {
                             params: method_params(meth),
+                            param_contract: method_parameter_contract(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
@@ -1232,6 +1289,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
+                        param_contract: method_parameter_contract(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1270,6 +1328,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         module_path: mp.to_string(),
                         kind: SymKind::Function {
                             params: method_params(meth),
+                            param_contract: method_parameter_contract(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
@@ -1316,6 +1375,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     module_path: mp.to_string(),
                     kind: SymKind::Function {
                         params: params.clone(),
+                        param_contract: parameter_contract(&sig.params),
                         ret: sig.return_type.clone(),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
@@ -1379,6 +1439,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
+                        param_contract: method_parameter_contract(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),

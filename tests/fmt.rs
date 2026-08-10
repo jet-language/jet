@@ -105,6 +105,16 @@ fn repr_c_enum_surface_is_stable() {
 }
 
 #[test]
+fn multi_head_function_surface_round_trips() {
+    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float = r * r\nfn area(Rect(w: Float, h: Float)) => Float = w * h\n";
+    let once = jet::format_source(src).expect("multi-head functions should format");
+    assert!(once.contains("fn area(Circle(r: Float)) => Float = r * r"));
+    assert!(once.contains("fn area(Rect(w: Float, h: Float)) => Float = w * h"));
+    let twice = jet::format_source(&once).expect("formatted multi-head functions should parse");
+    assert_eq!(once, twice, "multi-head formatting must be stable");
+}
+
+#[test]
 fn alternatives_only_bar_formatting_is_stable() {
     let src = "enum State { Ready Waiting }\n\nfn run() {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> print(\"known\")\n    }\n}\n";
     let once = jet::format_source(src).expect("choice alternatives should format");
@@ -2110,6 +2120,10 @@ fn run() {
     let once = jet::format_source(src).expect("fmt should accept loop values");
     let twice = jet::format_source(&once).expect("second loop-value fmt should succeed");
     assert_eq!(once, twice, "loop-value fmt must be idempotent");
+    assert!(
+        !once.contains("__jet_"),
+        "formatter must hide compiler-generated machine labels: {once}"
+    );
 }
 
 #[test]
@@ -2233,7 +2247,7 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
 
 #[test]
 fn fmt_selective_import_d_selimport1_stability() {
-    // D-SELIMPORT1=A: `use mod.{a, b as c}` must survive fmt unchanged.
+    // D-SELIMPORT1=A: `use mod.[a, b as c]` must survive fmt unchanged.
     let src = "\
 module math {
     pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
@@ -2243,7 +2257,7 @@ module math {
     }
 }
 
-use math.{clamp, clamp as c2}
+use math.[clamp, clamp as c2]
 
 fn run() {
     print(clamp(15, 0, 10))
@@ -2252,7 +2266,7 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["use math.{clamp, clamp as c2}"],
+        &["use math.[clamp, clamp as c2]"],
         "selective import with alias",
     );
     let once = jet::format_source(src).expect("fmt should accept selective imports");
@@ -2516,6 +2530,9 @@ fn run() {
     arg :: \"two words;*.jet\"
     expected :: Sh.{\"printf <%s> {arg}\"}
     audited_cmd :: Sh.raw(\"printf raw\")
+    endpoint :: URL.{\"https://api.example.com/v2/{name}\"}
+    log_path :: Path.{\"/var/log/{name}.log\"}
+    stamp :: DateTime.{\"2026-08-07T12:00:00Z\"}
 }
 ";
     assert_fmt_stable(src, "typed text");

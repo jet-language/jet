@@ -265,6 +265,15 @@ pub(crate) fn jit_map_string_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String))
 }
 
+fn jit_map_string_int_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Map { key, value, .. }
+            if matches!(key.as_ref(), Type::String)
+                && matches!(value.as_ref(), Type::Int)
+    )
+}
+
 /// `Map<Int, V>` with scalar/handle values — Int keys share the i64 map heap ABI.
 pub(crate) fn jit_map_int_type(ty: &Type) -> bool {
     matches!(
@@ -785,7 +794,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr_list(args, callees)
         }
         TExprKind::CoreClosureCall { kind } => match kind {
-            TCoreClosureKind::Spawn { .. } | TCoreClosureKind::SpawnGroup { .. } => true,
+            TCoreClosureKind::Spawn { .. } => true,
+            TCoreClosureKind::OnInterrupt { callback } => {
+                resident_safe_expr(callback, callees)
+            }
             TCoreClosureKind::UiButtonOnClick {
                 label,
                 executable,
@@ -1142,6 +1154,15 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ResourceNew(inner) => resident_safe_expr(inner, callees),
         TExprKind::ResourceTake(_) => jit_value_type(&expr.ty),
         TExprKind::Close(_) => true,
+        // List/Iter locals are marshalled by the resident string/print
+        // lowerers. Keep this before the scalar-value gate so interpolation of
+        // a materialized collection does not force an otherwise resident
+        // collection program to tier0.
+        TExprKind::Local(_)
+            if jit_list_native_type(&expr.ty) || jit_list_iter_elem_type(&expr.ty).is_some() =>
+        {
+            true
+        }
         _ if !jit_value_type(&expr.ty) => false,
         TExprKind::IntLit(_, _)
         | TExprKind::FloatLit(_)
@@ -1606,6 +1627,52 @@ fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool
         )
 }
 
+fn resident_safe_binary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
+    args.len() == 1
+        && matches!(
+            &args[0].kind,
+            TExprKind::Lambda(lam)
+                if lam.prep.is_empty()
+                    && lam.source_params.len() == 2
+                    && matches!(
+                        &lam.executable,
+                        TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
+                    )
+        )
+}
+
+fn resident_safe_map_callback(args: &[TExpr], index: usize, callees: &HashSet<String>) -> bool {
+    matches!(
+        args.get(index).map(|arg| &arg.kind),
+        Some(TExprKind::Lambda(lam))
+            if lam.prep.is_empty()
+                && lam.source_params.len() == 2
+                && match &lam.executable {
+                    TIR::TLambdaBody::Expr(body) => resident_safe_expr(body, callees),
+                    TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                    }
+                }
+    )
+}
+
+fn resident_safe_map_expr_callback<'a>(
+    args: &'a [TExpr],
+    index: usize,
+    callees: &HashSet<String>,
+) -> Option<&'a TExpr> {
+    let TExprKind::Lambda(lam) = &args.get(index)?.kind else {
+        return None;
+    };
+    if !lam.prep.is_empty() || lam.source_params.len() != 2 {
+        return None;
+    }
+    let TIR::TLambdaBody::Expr(body) = &lam.executable else {
+        return None;
+    };
+    resident_safe_expr(body, callees).then_some(body.as_ref())
+}
+
 fn resident_safe_each_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
     args.len() == 1
         && matches!(
@@ -1766,13 +1833,101 @@ fn resident_safe_closure_method(
         TIR::TClosureOp::MinBy | TIR::TClosureOp::MaxBy => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
                 && resident_safe_unary_lambda(args, callees)
+                && matches!(
+                    args.first().and_then(|arg| match &arg.kind {
+                        TExprKind::Lambda(lam) => match &lam.executable {
+                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
+                            TIR::TLambdaBody::Block(_) => None,
+                        },
+                        _ => None,
+                    }),
+                    Some(Type::Int)
+                )
         }
         TIR::TClosureOp::FlatMap => {
             jit_list_of_int_list_type(&recv.ty) && resident_safe_unary_lambda(args, callees)
         }
+        TIR::TClosureOp::DedupBy | TIR::TClosureOp::IsSortedBy => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_unary_lambda(args, callees)
+                && matches!(
+                    args.first().and_then(|arg| match &arg.kind {
+                        TExprKind::Lambda(lam) => match &lam.executable {
+                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
+                            TIR::TLambdaBody::Block(_) => None,
+                        },
+                        _ => None,
+                    }),
+                    Some(Type::Int)
+                )
+        }
+        TIR::TClosureOp::ChunkWhile => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_binary_lambda(args, callees)
+                && matches!(
+                    args.first().and_then(|arg| match &arg.kind {
+                        TExprKind::Lambda(lam) => match &lam.executable {
+                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
+                            TIR::TLambdaBody::Block(_) => None,
+                        },
+                        _ => None,
+                    }),
+                    Some(Type::Bool)
+                )
+        }
         TIR::TClosureOp::CountBy => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
                 && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::EachMap
+        | TIR::TClosureOp::MapAny
+        | TIR::TClosureOp::MapAll
+        | TIR::TClosureOp::MapFilter
+        | TIR::TClosureOp::MapMap
+        | TIR::TClosureOp::MapFold
+        | TIR::TClosureOp::MapFlatMap => {
+            let map_ok = matches!(
+                erase_runtime_qualifiers(&recv.ty),
+                Type::Map { key, value, .. }
+                    if matches!(key.as_ref(), Type::String)
+                        && matches!(value.as_ref(), Type::Int)
+            );
+            if !map_ok {
+                return false;
+            }
+            match op {
+                TIR::TClosureOp::EachMap => resident_safe_map_callback(args, 0, callees),
+                TIR::TClosureOp::MapAny | TIR::TClosureOp::MapAll => {
+                    resident_safe_map_expr_callback(args, 0, callees)
+                        .is_some_and(|body| matches!(&body.ty, Type::Bool))
+                }
+                TIR::TClosureOp::MapFilter => {
+                    resident_safe_map_expr_callback(args, 0, callees)
+                        .is_some_and(|body| matches!(&body.ty, Type::Bool))
+                }
+                TIR::TClosureOp::MapMap => {
+                    resident_safe_map_expr_callback(args, 0, callees)
+                        .is_some_and(|body| matches!(&body.ty, Type::Int))
+                }
+                TIR::TClosureOp::MapFold => {
+                    args.len() == 2
+                        && matches!(&args[0].ty, Type::Int)
+                        && resident_safe_expr(&args[0], callees)
+                        && resident_safe_map_expr_callback(args, 1, callees)
+                            .is_some_and(|body| matches!(&body.ty, Type::Int))
+                }
+                TIR::TClosureOp::MapFlatMap => {
+                    resident_safe_map_expr_callback(args, 0, callees).is_some_and(|body| {
+                        matches!(
+                            &body.ty,
+                            Type::Map { key, value, .. }
+                                if matches!(key.as_ref(), Type::String)
+                                    && matches!(value.as_ref(), Type::Int)
+                        )
+                    })
+                }
+                _ => unreachable!("map closure arm checked above"),
+            }
         }
         _ => false,
     }
@@ -1867,6 +2022,7 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_closure_elem_type(recv_ty).is_some()
+                || jit_map_resident_type(recv_ty)
                 || matches!(
                     recv_ty,
                     Type::Apply { name, .. }
@@ -1920,6 +2076,49 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
+        TBuiltinOp::RemoveMap => {
+            jit_map_string_int_type(recv_ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::MapCopy => jit_map_resident_type(recv_ty) && args.is_empty(),
+        TBuiltinOp::MapFirst | TBuiltinOp::MapToList { .. } => {
+            jit_map_string_int_type(recv_ty) && args.is_empty()
+        }
+        TBuiltinOp::MapEqual | TBuiltinOp::MapIntersection => {
+            jit_map_string_int_type(recv_ty)
+                && args.len() == 1
+                && jit_map_string_int_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::MapMin | TBuiltinOp::MapMax => {
+            jit_map_string_int_type(recv_ty) && args.is_empty()
+        }
+        TBuiltinOp::MapSliceKeys => {
+            jit_map_string_int_type(recv_ty)
+                && args.len() == 1
+                && jit_list_string_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::MapNew => {
+            matches!(recv_ty, Type::Map { .. }) && args.is_empty()
+        }
+        TBuiltinOp::MapFromKeys => {
+            jit_list_string_type(recv_ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::MapContainsValue => {
+            jit_map_string_int_type(recv_ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::MapPopFirst => {
+            jit_map_string_int_type(recv_ty) && args.is_empty()
+        }
         TBuiltinOp::JoinSep => {
             (jit_list_native_type(recv_ty) || jit_list_iter_elem_type(recv_ty).is_some())
                 && args.len() == 1
@@ -1930,6 +2129,7 @@ fn resident_safe_builtin_op(
             (jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_list_record_type(recv_ty)
+                || jit_map_resident_type(recv_ty)
                 || matches!(recv_ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))
                 || matches!(
                     recv_ty,
@@ -2000,14 +2200,21 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Zip { mode, input_count, .. } => {
-            // The resident host ABI is the old two-Int short zip. All other
+            // The resident host ABI is the two-input short zip for scalar list
+            // handles. All other
             // policies/shapes deopt to the canonical TIR evaluator, which
             // owns heterogeneous rows and fill values.
             *mode == TIR::TZipMode::Short
                 && *input_count == 2
-                && matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
+                && matches!(
+                    jit_list_iter_elem_type(recv_ty),
+                    Some(Type::Int | Type::String)
+                )
                 && args.len() == 1
-                && matches!(jit_list_iter_elem_type(&args[0].ty), Some(Type::Int))
+                && matches!(
+                    jit_list_iter_elem_type(&args[0].ty),
+                    Some(Type::Int | Type::String)
+                )
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Unzip { .. } => args.is_empty(),
@@ -2081,6 +2288,11 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SetToList => {
+            matches!(recv_ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && args.is_empty()
+        }
+        TBuiltinOp::SetSort | TBuiltinOp::SetShuffle => {
             matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
@@ -2255,9 +2467,96 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
-            matches!(recv_ty, Type::String)
+            (matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
+                || jit_list_int_type(recv_ty)
+                    && args.len() == 1
+                    && jit_list_int_type(&args[0].ty))
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::IterRepeat | TBuiltinOp::IterCycle | TBuiltinOp::IterDropLast => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::IterShuffle | TBuiltinOp::IterIsSorted => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int)) && args.is_empty()
+        }
+        TBuiltinOp::IterLastIndexOf => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::IterAverage { float: false } => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int)) && args.is_empty()
+        }
+        TBuiltinOp::IterAverage { float: true } => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Float)) && args.is_empty()
+        }
+        TBuiltinOp::IterCompare => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
+                && args.len() == 1
+                && jit_list_int_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::IterSplit { .. } => {
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ListSlice => {
+            jit_list_int_type(recv_ty)
+                && args.len() == 2
+                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[1].ty, Type::Int)
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        TBuiltinOp::ListCopy => jit_list_int_type(recv_ty) && args.is_empty(),
+        TBuiltinOp::ListEqual => {
+            jit_list_int_type(recv_ty)
+                && args.len() == 1
+                && jit_list_int_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ListBinarySearch => {
+            jit_list_int_type(recv_ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ListUnion | TBuiltinOp::ListIntersection | TBuiltinOp::ListDifference => {
+            jit_list_int_type(recv_ty)
+                && args.len() == 1
+                && jit_list_int_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ListRandom | TBuiltinOp::ListMinMax { .. } => {
+            jit_list_int_type(recv_ty) && args.is_empty()
+        }
+        TBuiltinOp::ListReplace => {
+            jit_list_int_type(recv_ty)
+                && args.len() == 2
+                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[1].ty, Type::Int)
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        TBuiltinOp::PriorityQueueRemove { mode, .. } => {
+            matches!(
+                mode,
+                TIR::ListRemoveMode::Value | TIR::ListRemoveMode::Slot
+            )
+                && matches!(
+                    recv_ty,
+                    Type::Apply { name, args: targs }
+                        if name == "PriorityQueue"
+                            && matches!(targs.as_slice(), [Type::Int])
+                )
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::MatchGroup => {
@@ -2685,6 +2984,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let file_lines_ok = matches!(method_kind, Some(TForInMethod::LinesFile)) && var2.is_none();
             let stdin_lines_ok =
                 matches!(method_kind, Some(TForInMethod::LinesStdin)) && var2.is_none();
+            let encoding_reader_ok = matches!(
+                method_kind,
+                Some(TForInMethod::EncodingReader { reader_type })
+                    if var2.is_none()
+                        && matches!(&collection.ty, Type::Named(name) if name == reader_type)
+                        && matches!(
+                            reader_type.as_str(),
+                            "JSONReader" | "JSONLReader" | "CSVReader" | "XMLReader" | "CBORReader"
+                        )
+            );
             // TIR leaves `.lines()` MethodCall as Unit and the loop var unbound;
             // lower hardcodes String elems. Don't demand collection/body types.
             if process_lines_ok || file_lines_ok || stdin_lines_ok {
@@ -2694,6 +3003,19 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         .as_ref()
                         .is_none_or(|step| resident_safe_expr(step, callees))
                     && body.iter().all(|s| resident_safe_process_lines_body(s, callees));
+            }
+            // Encoding readers pull through the same bounded Prelude codec host
+            // used by `HandleMethod::JSON*ReaderNext` and friends. The resident
+            // lowering keeps that pull/error/EOF contract while materializing each
+            // yielded item into the loop binding; it never re-parses the stream.
+            if encoding_reader_ok {
+                return !columnar
+                    && resident_safe_expr(source, callees)
+                    && resident_safe_expr(collection, callees)
+                    && step
+                        .as_ref()
+                        .is_none_or(|step| resident_safe_expr(step, callees))
+                    && body.iter().all(|s| resident_safe_stmt(s, callees));
             }
             let list_ok = method_kind.is_none()
                 && var2.is_none()
@@ -2952,6 +3274,7 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
             TCoreClosureKind::UiReactiveRender { .. } => "CoreClosure:UiRender",
             TCoreClosureKind::UiButtonOnClick { .. } => "CoreClosure:UiButtonOnClick",
             TCoreClosureKind::Spawn { .. } => "CoreClosure:Spawn",
+            TCoreClosureKind::OnInterrupt { .. } => "CoreClosure:OnInterrupt",
             _ => "CoreClosure:Other",
         },
         TExprKind::HandleMethod { op, .. } => "HandleMethod",
@@ -3466,6 +3789,7 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "HookOutcome"
                 | "EventConfigError"
                 | "Layout"
+                | "Mod"
                 | "GameScene"
                 | "GameFrame"
                 | "GameBackend"
@@ -3485,6 +3809,11 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "HTTPResponse"
                 | "HTTPBody"
                 | "HTTPHeaders"
+                | "HTTPMethod"
+                | "HTTPStatus"
+                | "HTTPVersion"
+                | "HTTPHeaderName"
+                | "HTTPHeaderValue"
                 | "HTTPCorsPolicy"
                 | "WsConn"
                 | "WsMessage"
@@ -4003,7 +4332,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
             ("HTTPResponse", "header") if args.len() == 1 => true,
             ("HTTPResponse", "json") if args.len() <= 1 => true,
-            ("HTTPBody", "text" | "json") if args.len() == 1 => true,
+            ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
+            ("HTTPBody", "copy_to") if args.len() == 2 => true,
             ("HTTPRequest", "body") if args.len() == 1 => true,
             ("HTTPRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
             ("HTTPRequest", "redirects" | "connect_timeout" | "read_timeout")
@@ -4031,7 +4361,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 true
             }
             ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
-            ("HTTPBody", "text" | "json") if args.len() == 1 => true,
+            ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
+            ("HTTPBody", "copy_to") if args.len() == 2 => true,
             ("HTTPResponse", "status" | "body") if args.is_empty() => true,
             ("HTTPResponse", "trailers") if args.len() == 1 => true,
             ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,

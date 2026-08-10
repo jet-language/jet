@@ -14,7 +14,7 @@
 //!
 //! `UPDATE_EXPECT=1` remains the explicit bless-all mode for a reviewed sweep.
 //!
-//! Never bless a snapshot you haven't read against docs/spec/diagnostics.md.
+//! Never bless a snapshot you haven't read against the typed diagnostic row.
 //! These files are the product: the error messages ARE the language's UX.
 
 use std::fs;
@@ -259,18 +259,22 @@ fn ui_snapshots() {
             .lines()
             .any(|line| line.trim() == "// @workspace_lock_e1202");
         // Card #1421 c2 / D-LIB-REUSE1=B / E1338: a `.jetlib` artifact's
-        // compiler-identity stamp is checked before mapping. The build path
-        // that emits the stamp is a later slice (#1421 c4-6), so this drives
-        // the check directly against a fixture stamp.
+        // compiler-identity stamp is checked before mapping. This fixture
+        // drives the shared stamp check directly against a fixture stamp.
         let jetlib_version_mismatch = src
             .lines()
             .any(|line| line.trim() == "// @jetlib_version_mismatch");
         // Card #1421 c3 / D-LIB-DYNTRUST1=A / E1339: a `.jetlib` artifact's
         // declared effects are checked against the load site's grant before
-        // mapping. Same deferred-build-path note as above.
+        // mapping. This fixture drives the shared grant check directly.
         let jetlib_effect_refused = src
             .lines()
             .any(|line| line.trim() == "// @jetlib_effect_refused");
+        // Card #1421 / E1341: the Library resolver must reject an unknown
+        // binding instead of silently dropping it during code generation.
+        let library_invalid_binding = src
+            .lines()
+            .any(|line| line.trim() == "// @library_invalid_binding");
         // D-DX5-HOOK1 / Tower #549: `// @compiler_extension <repo-relative.wasm>`
         // sets JET_COMPILER_EXTENSION for this fixture only (no user syntax).
         let compiler_extension = src.lines().find_map(|line| {
@@ -312,6 +316,11 @@ fn ui_snapshots() {
             let diagnostics = jetpack::JetLib::check_effect_grant("skyhawk", &stamp, &grant)
                 .expect_err("an effect outside the grant must be refused before mapping");
             jet::render_diagnostics(&shown_path, &src, &diagnostics)
+        } else if library_invalid_binding {
+            match jet::compile_library(&file_arg, None) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
         } else if programmable_build {
             let result = if build_locked {
                 jet::compile_programmable_build_opts(
@@ -336,6 +345,11 @@ fn ui_snapshots() {
                 jet::Interpreter::RunOutcome::Problems(diags) => {
                     jet::render_diagnostics(&shown_path, &src, &diags)
                 }
+                jet::Interpreter::RunOutcome::Ran {
+                    stderr,
+                    exit_code,
+                    ..
+                } if exit_code != 0 => stderr,
                 jet::Interpreter::RunOutcome::Ran { .. } => "(no errors)\n".to_string(),
             }
         } else if repl_deny {

@@ -109,10 +109,14 @@ export function openStore(dataDir) {
   // write from another agent can never be silently reverted. Undo touches
   // ONLY tower.json — history.json is append-only and never rolled back
   // (see test/history.test.mjs for the duplicate-tolerance this buys).
+  // #1738: expectRev is mandatory — a whole-board replace with no rev proof
+  // is exactly the overwrite class that once deleted 112 cards.
   const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
     recoverPendingRepairLocked(dataDir);
     const cur = loadRaw();
-    if (expectRev != null && Number(expectRev) !== cur.meta.rev)
+    if (expectRev == null)
+      fail('E_USAGE', `restore requires expectRev — read the board first and pass its meta.rev (currently ${cur.meta.rev})`);
+    if (Number(expectRev) !== cur.meta.rev)
       fail('E_CONFLICT', `undo refused: board changed since (rev ${cur.meta.rev} ≠ ${expectRev})`);
     const s = normalize(prevState);
     s.meta.rev = cur.meta.rev + 1;

@@ -6,6 +6,12 @@ snapshot in tests/ui/.
 
 ## The contract
 
+The complete typed row projection is generated at
+[`docs/spec/diagnostic-rows.md`](diagnostic-rows.md) from
+`crates/jet-codegen/src/Prelude/Diagnostics.jet`. This chapter keeps the
+language contract and voice guidance; row code, severity, moment, templates,
+and structured fixes live in that source.
+
 Every diagnostic has four parts:
 
 - **code** — stable ID (`E0102`). Never reuse or renumber.
@@ -36,9 +42,10 @@ coverage checks accept both.
 1. Prove the rejection belongs in the Jet front end, not rustc or codegen, and
    reuse an existing code when it is the same rule. New semantics or syntax must
    already be ratified.
-2. Reserve a unique `E`/`L` code in the registry below. Write what/why/fix in the
-   product voice here before implementing it; never ship a generic fallback for
-   a known case.
+2. Add one typed row to `crates/jet-codegen/src/Prelude/Diagnostics.jet`. The
+   row owns the unique code, severity, moment, What/Why/Fix templates, named
+   holes, and any structured fix. The registry and this reference are generated
+   projections; never ship a generic fallback for a known case.
 3. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
    recoverable errors, and includes no raw rustc text.
@@ -47,8 +54,8 @@ coverage checks accept both.
 5. Run the focused snapshot test without update mode, review the diff, then use
    the blessing procedure in `.claude/skills/verify/SKILL.md`. Re-run without
    update mode.
-6. Add `jet explain` coverage and regenerate `docs/reference/errors/` when the
-   code is part of that generated representative set. Update relevant spec/docs,
+6. Add `jet explain` coverage and regenerate `docs/reference/errors/` from the
+   typed rows when the code is part of that generated representative set. Update relevant spec/docs,
    then run `scripts/agent/jet-env cargo test --test diagnostics_coverage` and
    the feature's focused test. `tests/diagnostic_snapshots.rs` and
    `tests/diagnostics_coverage.rs` are the executable proof.
@@ -178,7 +185,7 @@ renumbered, and no new `W` code may be allocated.
 | E0063 | parse | teaching: applied rules use `#`, not the location/address/source sigil `@` (D-VERDICT-732-1) |
 | E0064 | parse | `#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1) |
 | E0066 | parse | retired function effect syntax; use exact `=[Effects]=>` or `=[]=>` (D-SHAPE8, D-ARROW-CONTROL1) |
-| E0067 | lex | source-written `__name` is reserved for Jet and generated tooling (D-SHAPE-DUNDER2=A) |
+| E0067 | lex | source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_` (D-SHAPE-DUNDER2=A, D-NAME-SIGIL1=A) |
 | E0070 | parse | a callable result uses retired `->`; use `=>` (D-ARROW-CONTROL1) |
 | E0071 | parse/sema | an effect-only `if` or loop uses a result arrow (D-ARROW-CONTROL1) |
 | E0072 | sema | a non-finite loop uses a yield arrow (D-LOOPEVAL1) |
@@ -252,6 +259,7 @@ renumbered, and no new `W` code may be allocated.
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0152 | sema  | a bare `String`, interpolated pattern, or invalid pattern is used as a typed `Regex` literal (D-REGEX-LIT1) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
+| E0155 | sema  | DateTime typed literal is invalid or contains interpolation (D-BOUND-HEAD1) |
 | E0160 | sema  | `++`/`--` operand is not an assignable lvalue (D-INCR1) |
 | E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |
 | E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
@@ -298,7 +306,7 @@ renumbered, and no new `W` code may be allocated.
 | E0304 | sema  | unknown enum variant (with suggestion)    |
 | E0305 | sema  | pattern doesn't belong to value's type    |
 | E0306 | sema  | pattern binding count mismatch            |
-| E0307 | sema  | `if` dispatch not exhaustive (lists missing)   |
+| E0307 | sema  | `if`/multi-head dispatch not exhaustive (lists missing) |
 | E0308 | sema  | bare `None` needs a known `T?` type       |
 | E0309 | sema  | nested `T??` rejected                     |
 | E0310 | sema  | `T?` used where plain `T` expected        |
@@ -439,6 +447,8 @@ renumbered, and no new `W` code may be allocated.
 | E0616 | sema  | `.setup` is not the first statement in the test (D-DOTSCOPE1) |
 | E0617 | sema  | a scope member has the wrong argument shape (D-DOTSCOPE1) |
 | E0618 | sema  | a scope member is nested instead of a top-level statement of the marker block (D-DOTSCOPE1) |
+| E0620 | sema  | imported script has executable top-level statements (D-ENTRY-SCRIPT1) |
+| E0621 | sema  | script has loose statements and an explicit `fn run` (D-ENTRY-SCRIPT1) |
 | E0631 | sema  | an arena `view` escapes its region — returned, stored, given away, or captured (D-ALLOC2/D-REGION1) |
 | E0632 | sema  | an arena `view` is read after its arena was reset (D-ALLOC2) |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
@@ -750,6 +760,7 @@ renumbered, and no new `W` code may be allocated.
 | E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
 | E1338 | jet   | a loadable `.jetlib` artifact's compiler-identity stamp doesn't match the running compiler — refused before mapping (D-LIB-REUSE1=B) |
 | E1339 | jet   | a loaded library declares an effect the load site's grant doesn't cover — refused before mapping (D-LIB-DYNTRUST1=A) |
+| E1341 | jet   | a selected `Library` output requests an invalid target, binding, or export shape (D-LIB-EXPORT1=C) |
 | E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
 | E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
@@ -1265,6 +1276,16 @@ Inside an applied-rule block a statement-position `.name { … }` / `.name(args)
 | E0617 | this scope member has the wrong arguments. | Each member has a fixed shape: `.timeout(500ms)` takes one duration, `.setup`/`.expect_fail` take none, `.skip` takes an optional reason string. | Match the member's shape, e.g. `.timeout(500ms) { … }` or `.skip("reason") { … }`. |
 | E0618 | scope members can't be nested. | Each member is a top-level region of the marker block; nesting one inside another member or a control block has no meaning. | Move the member out to the top level of the block. |
 
+## Script entry diagnostics (D-ENTRY-SCRIPT1)
+
+A script's loose top-level statements belong to the entry file only. They
+become one implicit fallible `fn run`; imported files remain declaration-only.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0620 | imported script `{file}` has executable top-level statements | Only the entry file owns the implicit `run`; importing a script would execute a dependency as a hidden side effect. | Move the statements into the entry file's `fn run`, or import a declaration-only file. |
+| E0621 | a script cannot have loose statements and an explicit `fn run` | The loose statements already define the script's one entry body, so a second entry would make execution order ambiguous. | Run `jet fix` to move the loose statements into `fn run`, or remove the explicit function. |
+
 ## Accessibility diagnostics (D-A11YGATE1=B, c134 Phase 6)
 
 `jet lint --a11y <file>` is the opt-in surface for accessibility issues.
@@ -1596,6 +1617,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 |------|------|-----|-----|
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
+| E0155 | a `DateTime` literal is invalid or contains interpolation. | DateTime heads are complete RFC3339 values checked before the program runs; interpolation would move validation to runtime. | Write a complete `DateTime.{"…"}` literal, or parse a runtime `String` explicitly. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
 | E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-capability marker `&` if the function should change it. |
@@ -1797,6 +1819,7 @@ front-end `.jet` diagnostics).
 | E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `after`, `before_start`, `sockets`, `restart`, `watch`), or remove it. |
 | E1338 | This loadable library was built by Jet `{artifact_version}`, but the loading program uses Jet `{host_version}`. | A `.jetlib` artifact pins the exact compiler identity that built it (D-LIB-REUSE1=B) — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped, never linked with stale layout assumptions. | Rebuild the library with the loading program's Jet version, or install a matching Jet toolchain. |
 | E1339 | Library `{name}` declares the `{effect}` effect, which this load site doesn't grant. | A loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped. Compiler identity is verified first, so this check only runs against an artifact already proven to come from this compiler. | Widen the grant at the load site to include `{effect}`, or remove the effect from the library. |
+| E1341 | This `Library` output requests an invalid target, binding, or export shape. | D-LIB-EXPORT1=C is a closed native projection: a Library emits only the checked static/shared, C-header, and named binding surfaces. Unknown bindings and backend combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; otherwise remove the invalid field. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
 | E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no `#Impure` or `--allow-impure` escape hatch because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |

@@ -6,7 +6,7 @@
 //!   - scalar params (Int/Float/Bool) pass by value, String by `&String`;
 //!     `mut` params are `&mut T`; `take` params are `T` by value
 //!   - a name bound to a `&T`/`&mut T` parameter is always emitted as the
-//!     place `(*user_x)`, so every name has its plain Jet type
+//!     place `(*__jet_x)`, so every name has its plain Jet type
 //!   - every printed/interpolated value goes through the `JetShow` trait
 //!     in the prelude (Float keeps its decimal part there, S21)
 //!   - every operator result is fully parenthesized
@@ -25,6 +25,7 @@ mod CModule;
 mod Context;
 mod Imports;
 mod Items;
+pub mod Library;
 pub mod Plugin;
 mod Statement;
 pub mod TIR;
@@ -47,6 +48,7 @@ pub use Plugin::{emit_plugin, plugin_export_shape, PluginArtifacts, PluginScalar
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
+pub use Library::{emit_library, library_export_shape, LibraryArtifacts, LibraryExport, LibraryScalar};
 pub use Web::{
     build_wasm_jet_source_map, emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupported,
 };
@@ -75,6 +77,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-FLOORDIV1=A: `/%`. Shared the same way, so every tier rounds down
     // identically.
     include_str!("../Prelude/Core/Division.rs"),
+    include_str!("../../../jet-foundation/src/TypedHeads.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/ByteBuffer.rs"),
@@ -125,16 +128,16 @@ fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
 /// Imported Jet modules keep their module-local traits; the root imports these
 /// from the cached runtime rlib after the native builder splits the source.
 fn push_cached_runtime_traits(out: &mut String) {
-    out.push_str("pub trait user_Display {\n");
+    out.push_str("pub trait __jet_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
     out.push_str("}\n\n");
-    out.push_str("pub trait user_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
+    out.push_str("pub trait __jet_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
     for ty in [
         "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
         "bool", "char", "String",
     ] {
         out.push_str(&format!(
-            "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+            "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
         ));
     }
     out.push('\n');
@@ -885,6 +888,17 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
+    let needs_mod = core_usage_matches(used_core, &["core.mod"]);
+    if needs_mod {
+        // The generated loader must compare against the compiler that emitted
+        // this program. Keep the value in the shared Prelude, not in a host.
+        out.push_str(&format!(
+            "\nconst __JET_COMPILER_VERSION: &str = {:?};\n",
+            env!("CARGO_PKG_VERSION")
+        ));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Mod.rs"));
+        out.push('\n');
+    }
 
     // Kernel closure: JetStd brace-chain files name these Top symbols
     // (FileReader, text fold, JSON frames, TCPStream, deadlines, TLS entropy).
@@ -939,6 +953,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_fs_runtime {
@@ -1248,8 +1263,8 @@ fn strip_unused_gc_prelude(out: String) -> String {
 /// Programs that never call `core.raylib` must not inherit that unsafe prelude.
 fn strip_unused_raylib_prelude(out: String) -> String {
     let prelude_end = [
-        out.find("fn user_"),
-        out.find("pub fn user_"),
+        out.find("fn __jet_"),
+        out.find("pub fn __jet_"),
         out.find("fn main()"),
     ]
     .into_iter()
@@ -1327,8 +1342,8 @@ fn strip_unused_term_prelude(out: String) -> String {
     // Fast path: if the term dispatchers are referenced in user code (after the
     // prelude), keep the whole term section.
     let prelude_end = [
-        out.find("fn user_"),
-        out.find("pub fn user_"),
+        out.find("fn __jet_"),
+        out.find("pub fn __jet_"),
         out.find("fn main()"),
     ]
     .into_iter()
@@ -1389,8 +1404,8 @@ fn strip_unused_term_prelude(out: String) -> String {
 /// unless generated user code actually calls it.
 fn strip_unused_os_signal_prelude(out: String) -> String {
     let prelude_end = [
-        out.find("fn user_"),
-        out.find("pub fn user_"),
+        out.find("fn __jet_"),
+        out.find("pub fn __jet_"),
         out.find("fn main()"),
     ]
     .into_iter()
@@ -1445,58 +1460,59 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
 /// ratified text requires: a plain name and a marked name can never denote the
 /// same binding, so they can never mangle to the same Rust place either.
 pub(crate) fn mangle(name: &str) -> String {
-    match name.strip_prefix(crate::Syntax::COMPTIME_MARK) {
-        Some(rest) => format!("userct_{}", rest),
-        None => format!("user_{}", name),
-    }
+    let name = match name.strip_prefix(crate::Syntax::COMPTIME_MARK) {
+        Some(rest) => format!("ct_{rest}"),
+        None => name.to_string(),
+    };
+    crate::Syntax::generated_name(&name)
 }
 
 /// D-TAG1: Rust identifier for an enum variant. A grouped leaf's Jet name is a
 /// dotted path (`Fire.Burn`); Rust variant names can't dot, so segments join
-/// with `__` (`user_Fire__Burn`). Flat variants mangle exactly as before.
+/// with `__` (`__jet_Fire__Burn`). Flat variants mangle exactly as before.
 /// Sema rejects two paths that would flatten identically (E0105), so this is
 /// injective over a checked program.
 pub(crate) fn mangle_variant(name: &str) -> String {
-    format!("user_{}", name.replace('.', "__"))
+    crate::Syntax::generated_path(name)
 }
 
-/// Rust identifier for a Jet user type (`Payment.Client` → `user_Payment__Client`).
+/// Rust identifier for a Jet user type (`Payment.Client` → `__jet_Payment__Client`).
 pub(crate) fn user_type_rust(name: &str) -> String {
-    format!("user_{}", name.replace('.', "__"))
+    crate::Syntax::generated_path(name)
 }
 
 pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_owned: bool) {
     if include_runtime_owned {
-        out.push_str("pub trait user_Display {\n");
+        out.push_str("pub trait __jet_Display {\n");
         out.push_str("    fn display(&self) -> String;\n");
         out.push_str("}\n\n");
     }
-    out.push_str("pub trait user_Debug {\n");
+    out.push_str("pub trait __jet_Debug {\n");
     out.push_str("    fn debug(&self) -> String;\n");
     out.push_str("}\n\n");
 }
 
 pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_owned: bool) {
     out.push_str("#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n");
-    out.push_str("pub enum user_Ordering { user_Less, user_Equal, user_Greater }\n\n");
+    out.push_str("pub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n");
     for (name, method, ret) in [
         ("Add", "add", "Self"),
         ("Sub", "sub", "Self"),
         ("Mul", "mul", "Self"),
         ("Div", "div", "Self"),
         ("Equatable", "equal", "bool"),
-        ("Comparable", "compare", "user_Ordering"),
+        ("Comparable", "compare", "__jet_Ordering"),
     ] {
         if name == "Equatable" && !include_runtime_owned {
             continue;
         }
         if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
             out.push_str(&format!(
-                "pub trait user_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
+                "pub trait __jet_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
             ));
         } else {
             out.push_str(&format!(
-                "pub trait user_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
+                "pub trait __jet_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
             ));
         }
     }
@@ -1508,7 +1524,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Div", "div", "jet_div"),
         ] {
             out.push_str(&format!(
-                "impl user_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
+                "impl __jet_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
             ));
         }
     }
@@ -1520,7 +1536,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Div", "div", "/"),
         ] {
             out.push_str(&format!(
-                "impl user_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
+                "impl __jet_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
             ));
         }
     }
@@ -1530,7 +1546,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             "bool", "char", "String",
         ] {
             out.push_str(&format!(
-                "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+                "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
             ));
         }
     }
@@ -1539,7 +1555,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
         "String",
     ] {
         out.push_str(&format!(
-            "impl user_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n"
+            "impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n"
         ));
     }
     out.push('\n');
@@ -1547,14 +1563,14 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
 
 /// D-SHAPE-RESOURCE2=A: the one nominal consuming, infallible cleanup trait.
 pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
-    out.push_str("pub trait user_Close {\n");
+    out.push_str("pub trait __jet_Close {\n");
     out.push_str("    fn close(self);\n");
     out.push_str("}\n\n");
-    out.push_str("struct JetResource<T: user_Close>(Option<T>);\n");
-    out.push_str("impl<T: user_Close> JetResource<T> { fn new(value: T) -> Self { Self(Some(value)) } fn take(&mut self) -> T { self.0.take().expect(\"resource already consumed\") } fn close(&mut self) { if let Some(value) = self.0.take() { user_Close::close(value); } } }\n");
-    out.push_str("impl<T: user_Close> std::ops::Deref for JetResource<T> { type Target = T; fn deref(&self) -> &T { self.0.as_ref().expect(\"resource already consumed\") } }\n");
-    out.push_str("impl<T: user_Close> std::ops::DerefMut for JetResource<T> { fn deref_mut(&mut self) -> &mut T { self.0.as_mut().expect(\"resource already consumed\") } }\n");
-    out.push_str("impl<T: user_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
+    out.push_str("struct JetResource<T: __jet_Close>(Option<T>);\n");
+    out.push_str("impl<T: __jet_Close> JetResource<T> { fn new(value: T) -> Self { Self(Some(value)) } fn take(&mut self) -> T { self.0.take().expect(\"resource already consumed\") } fn close(&mut self) { if let Some(value) = self.0.take() { __jet_Close::close(value); } } }\n");
+    out.push_str("impl<T: __jet_Close> std::ops::Deref for JetResource<T> { type Target = T; fn deref(&self) -> &T { self.0.as_ref().expect(\"resource already consumed\") } }\n");
+    out.push_str("impl<T: __jet_Close> std::ops::DerefMut for JetResource<T> { fn deref_mut(&mut self) -> &mut T { self.0.as_mut().expect(\"resource already consumed\") } }\n");
+    out.push_str("impl<T: __jet_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
 }
 
 fn collect_allocator_constructors(
@@ -1732,18 +1748,18 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             format!("{root}jet_std::FileLock"),
         ] {
             out.push_str(&format!(
-                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }
     if uses("core.net") {
         for ty in [format!("{root}JetTCPStream"), format!("{root}JetUnixStream")] {
             out.push_str(&format!(
-                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
         out.push_str(&format!(
-            "impl user_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
+            "impl __jet_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
         ));
     }
     let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE)
@@ -1757,7 +1773,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
     ] {
         if uses_mem || constructed_allocators.contains(name) {
             out.push_str(&format!(
-                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }
@@ -1767,8 +1783,8 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         // concrete `DBScope` calls.
         out.push_str(&format!(
             "trait JetDBDriver {{\n\
-             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
-             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
+             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError>;\n\
+             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError>;\n\
              \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError>;\n\
              \tfn begin(&mut self) -> bool;\n\
              \tfn commit(&mut self) -> bool;\n\
@@ -1778,11 +1794,11 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         if let Some(ffi) = &cx.ffi_crate {
             out.push_str(&format!(
                 "impl JetDBDriver for {root}JetDbScope {{\n\
-                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
                  \t\tjet_db_scope_query(self, &sql, &params)\n\
                  \t}}\n\
-                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_query(self, &sql, &params).map(|__rows| __rows.into_iter().next())\n\
+                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError> {{\n\
+                 \t\tjet_db_scope_query(self, &sql, &params).map({root}jet_std::jet_db_first_row)\n\
                  \t}}\n\
                  \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
                  \t\tjet_db_scope_execute(self, &sql, &params)\n\
@@ -1797,7 +1813,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
 let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
-fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
 let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n"
@@ -1807,7 +1823,7 @@ let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.p
 let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
-fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
 let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n"
@@ -1822,7 +1838,7 @@ fn execute(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_
 let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }};\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
-fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
 let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }};\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
@@ -1839,14 +1855,14 @@ let mut backend = JetDbScopeBackend {{ scope }};\n\
 }}\n"
             ));
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
+                "impl __jet_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbScope {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
+                "impl __jet_Close for {root}JetDbScope {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));
         } else {
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\nimpl user_Close for {root}JetDbScope {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\nimpl __jet_Close for {root}JetDbScope {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }
@@ -1869,27 +1885,27 @@ pub(crate) fn emit_synthetic_iter_index_traits(
     has_index_mut: bool,
 ) {
     if has_iterable {
-        out.push_str("pub trait user_Iterable {\n");
+        out.push_str("pub trait __jet_Iterable {\n");
         out.push_str("    type Iter;\n");
         out.push_str("    fn iter(self) -> Self::Iter;\n");
         out.push_str("}\n\n");
     }
     if has_iterator {
-        out.push_str("pub trait user_Iterator {\n");
+        out.push_str("pub trait __jet_Iterator {\n");
         out.push_str("    type Item;\n");
         out.push_str("    fn next(&mut self) -> JetOutcome<Self::Item, JetAbsent>;\n");
         out.push_str("}\n\n");
     }
     if has_index {
-        out.push_str("pub trait user_Index {\n");
+        out.push_str("pub trait __jet_Index {\n");
         out.push_str("    type Key;\n");
         out.push_str("    type Value;\n");
         out.push_str("    fn get(&self, k: Self::Key) -> JetOutcome<Self::Value, JetAbsent>;\n");
         out.push_str("}\n\n");
     }
     if has_index_mut {
-        out.push_str("pub trait user_IndexMut: user_Index {\n");
-        out.push_str("    fn set(&mut self, k: <Self as user_Index>::Key, v: <Self as user_Index>::Value);\n");
+        out.push_str("pub trait __jet_IndexMut: __jet_Index {\n");
+        out.push_str("    fn set(&mut self, k: <Self as __jet_Index>::Key, v: <Self as __jet_Index>::Value);\n");
         out.push_str("}\n\n");
     }
 }
@@ -1936,11 +1952,11 @@ pub(crate) fn program_iter_index_usage(items: &[Item]) -> (bool, bool, bool, boo
     (has_iterable, has_iterator, has_index, has_index_mut)
 }
 
-/// D-TXN-ROLLBACK layer 2: emit the `trait user_Rollback { … }` Rust trait
+/// D-TXN-ROLLBACK layer 2: emit the `trait __jet_Rollback { … }` Rust trait
 /// declaration when any impl block in the program references `Rollback`. Programs
 /// with no `Rollback` impl produce zero output here (byte-identical to before).
 pub(crate) fn emit_synthetic_rollback_trait(out: &mut String) {
-    out.push_str("pub trait user_Rollback {\n");
+    out.push_str("pub trait __jet_Rollback {\n");
     out.push_str("    type Snapshot;\n");
     out.push_str("    fn snapshot(&self) -> Self::Snapshot;\n");
     out.push_str("    fn restore(&mut self, _snap: Self::Snapshot);\n");
@@ -2028,6 +2044,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
@@ -2243,6 +2260,8 @@ mod tests {
         let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
         let division =
             std::fs::read_to_string(root.join("src/Prelude/Core/Division.rs")).unwrap();
+        let typed_heads =
+            std::fs::read_to_string(root.join("../jet-foundation/src/TypedHeads.rs")).unwrap();
         let typed_text =
             std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
         let progress =
@@ -2283,6 +2302,7 @@ mod tests {
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
             ("src/Prelude/Core/Division.rs", division.as_str()),
+            ("../jet-foundation/src/TypedHeads.rs", typed_heads.as_str()),
             ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Progress.rs", progress.as_str()),
             ("src/Prelude/Core/ByteBuffer.rs", byte_buffer.as_str()),
@@ -2412,6 +2432,7 @@ mod tests {
                 core.as_str(),
                 power.as_str(),
                 division.as_str(),
+                typed_heads.as_str(),
                 typed_text.as_str(),
                 progress.as_str(),
                 byte_buffer.as_str(),
@@ -2444,6 +2465,7 @@ mod tests {
             core.as_str(),
             power.as_str(),
             division.as_str(),
+            typed_heads.as_str(),
             typed_text.as_str(),
             progress.as_str(),
             byte_buffer.as_str(),
@@ -2518,7 +2540,7 @@ mod tests {
             project_root: PathBuf::from(root),
             modules: vec![crate::AST::LoadedModule {
                 path: PathBuf::from(root).join("main.jet"), display: "main.jet".into(), source: src.into(), alias: "main".into(),
-                imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items),
+                imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
                 no_prelude: program.no_prelude, html_path: program.html_path,
@@ -2591,6 +2613,7 @@ mod tests {
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut prog.imports),
                 items: std::mem::take(&mut prog.items),
+                script_body: std::mem::take(&mut prog.script_body),
                 block_spans: std::mem::take(&mut prog.block_spans),
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
@@ -2626,7 +2649,7 @@ mod tests {
         let rust = emit_bundle(&bundle, CompileMode::Run, None);
         assert!(rust.contains("fn main()"), "generated Rust has no main");
         assert!(rust.contains("jet_raylib_window_open"));
-        assert!(rust.contains("let user_window: RaylibWindow"));
+        assert!(rust.contains("let __jet_window: RaylibWindow"));
         assert!(
             !rust.contains("jet_std::Raylib"),
             "raylib bridge handles must lower to top-level prelude types"
@@ -2640,7 +2663,7 @@ mod tests {
         assert!(rust.contains("dlopen"));
         assert!(rust.contains("JET_RAYLIB_DISPLAY"));
         assert!(
-            !rust.contains("unsafe fn user_"),
+            !rust.contains("unsafe fn __jet_"),
             "raylib user functions must stay safe; unsafe is confined to the vetted bridge"
         );
     }
@@ -2714,6 +2737,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
@@ -3137,7 +3161,7 @@ pub fn emit_bundle_dbg(
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3169,6 +3193,11 @@ pub fn emit_bundle_dbg(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
         emit_program_items(&cx, &module.items, &mut out, true, true);
         out.push_str("}\n\n");
     }
@@ -3224,13 +3253,18 @@ pub fn emit_bundle_dbg(
             continue;
         }
         out.push_str(&format!(
-            "use user_{}::user_Display as _;\n",
-            imported.alias
+            "use {}::__jet_Display as _;\n",
+            mangle(&imported.alias)
         ));
     }
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
     emit_program_items(&cx, &entry.items, &mut out, true, false);
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
@@ -3321,7 +3355,7 @@ pub fn emit_bundle_tests_cov(
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3350,6 +3384,11 @@ pub fn emit_bundle_tests_cov(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3380,6 +3419,11 @@ pub fn emit_bundle_tests_cov(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     emit_test_fns(&cx, &tests, &mut out);
@@ -3523,7 +3567,7 @@ pub fn emit_bundle_fuzz(
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3551,6 +3595,11 @@ pub fn emit_bundle_fuzz(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3580,6 +3629,11 @@ pub fn emit_bundle_fuzz(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     emit_test_fns(&cx, &tests, &mut out);
@@ -3783,7 +3837,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3812,6 +3866,11 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3842,6 +3901,11 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     out.push_str(

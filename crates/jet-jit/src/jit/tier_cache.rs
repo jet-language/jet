@@ -68,7 +68,7 @@ pub(crate) fn abort_capture() {
 
 pub(crate) fn take_capture() -> Option<Vec<CapturedFn>> {
     let fns = CAPTURE.with(|slot| slot.borrow_mut().take())?;
-    if fns.is_empty() || !fns.iter().any(|f| f.export_name == "jet_jit_main") {
+    if fns.is_empty() || !fns.iter().any(|f| f.export_name == "__jet_jit_main") {
         return None;
     }
     Some(fns)
@@ -421,7 +421,7 @@ fn decode_module(data: &[u8]) -> Option<(Vec<(usize, String)>, Vec<CapturedFn>)>
     Some((strings, fns))
 }
 
-/// Load a previously captured tier-1 module and invoke `jet_jit_main`.
+/// Load a previously captured tier-1 module and invoke `__jet_jit_main`.
 pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
     if !super::api_debug::cranelift_host_supported() {
         return Err("cranelift host unsupported".into());
@@ -482,8 +482,8 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
 
     module.finalize_definitions().map_err(|e| e.to_string())?;
     let main_id = *ids
-        .get("jet_jit_main")
-        .ok_or("tier-cache: missing jet_jit_main")?;
+        .get("__jet_jit_main")
+        .ok_or("tier-cache: missing __jet_jit_main")?;
     RESIDENT_MODULE.with(|slot| {
         *slot.borrow_mut() = Some(ResidentModule {
             module,

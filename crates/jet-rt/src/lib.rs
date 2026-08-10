@@ -228,6 +228,14 @@ impl JetArena {
         }
     }
 
+    pub fn map_remove(&mut self, map: i64, key_id: i64) -> Option<i64> {
+        let key = self.clone_string(key_id)?;
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => entries.remove(&key),
+            _ => None,
+        }
+    }
+
     pub fn map_len(&self, map: i64) -> Option<i64> {
         match self.values.get(map as usize) {
             Some(JetVal::Map(entries)) => Some(entries.len() as i64),

@@ -27,6 +27,7 @@ fn err_codes(src: &str) -> Vec<String> {
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
+            script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,

@@ -320,7 +320,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         }
     } else if stem == "game/raylib_window" {
         assert!(
-            !user_code.contains("unsafe fn user_"),
+            !user_code.contains("unsafe fn __jet_"),
             "raylib user functions must stay safe; bridge unsafe stays in vetted prelude"
         );
     } else {
@@ -865,9 +865,9 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// jet:shared-guard-internal-begin",
         "// jet:shared-guard-internal-end",
     );
-    while s.contains("mod user___c_") {
+    while s.contains("mod __jet___c_") {
         let before = s.clone();
-        s = strip_mod(&s, "user___c_");
+        s = strip_mod(&s, "__jet___c_");
         if s == before {
             break;
         }

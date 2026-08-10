@@ -182,13 +182,13 @@ fn run() {
 fn local_cell_split_keeps_projected_tuple_type_in_tir() {
     let rust = compile("local_cell_split_type", SOURCE);
     assert!(
-        rust.contains("let user_left = (__jet_d")
-            && rust.contains(".user_first;")
-            && rust.contains(".user_second;"),
+        rust.contains("let __jet_left = (__jet_d")
+            && rust.contains(".__jet_first;")
+            && rust.contains(".__jet_second;"),
         "split TIR lost its exact projected tuple fields:\n{rust}"
     );
     assert!(
-        !rust.contains("#[derive(Clone, PartialEq)]\nstruct JetTup_d9655a63806bd711"),
+        !rust.contains("#[derive(Clone, PartialEq)]\nstruct __jet_JetTup_d9655a63806bd711"),
         "the read-guard tuple must stay move-only"
     );
 }

@@ -1,12 +1,9 @@
 //! Diagnostics registry per-entry format validator (card #447 / durability W2).
 //!
-//! docs/spec/diagnostics.md's "Adding a diagnostic" procedure requires every
-//! diagnostic to carry What/Why/Fix prose (step 2), not just a one-line
-//! registry-table "Meaning" cell. Section tables shaped
-//! `| Code | What | Why | Fix |` are where that prose lives. This test fails
-//! if any such row ships with an empty What, Why, or Fix cell — the coverage
-//! test (tests/diagnostics_coverage.rs) only checks that a row/snapshot
-//! *exists*, not that the body says anything.
+//! D-REPORT-HOME1=A requires every typed diagnostic row to carry What/Why/Fix
+//! prose, not just a code and severity. The coverage test
+//! (tests/diagnostics_coverage.rs) checks reachability; this test checks the
+//! row payload itself.
 //!
 //! Run: `cargo test --test diagnostics_format`
 
@@ -18,14 +15,40 @@ fn root() -> PathBuf {
 }
 
 #[test]
-fn every_what_why_fix_table_row_is_complete() {
-    let root = root();
-    let text = fs::read_to_string(root.join("docs/spec/diagnostics.md"))
-        .expect("docs/spec/diagnostics.md missing");
-    let violations = diagnostic_body_violations(&text);
+fn diagnostic_row_reference_is_generated() {
+    let expected = jet::Explain::diagnostics_reference_markdown();
+    let path = root().join("docs/spec/diagnostic-rows.md");
+    if std::env::var_os("UPDATE_DIAGNOSTICS").is_some() {
+        fs::write(&path, &expected).expect("write generated diagnostic-row reference");
+    }
+    let actual = fs::read_to_string(&path)
+        .expect("docs/spec/diagnostic-rows.md missing; run with UPDATE_DIAGNOSTICS=1");
+    assert_eq!(actual, expected, "typed diagnostic reference is stale");
+}
+
+#[test]
+fn every_typed_diagnostic_row_is_complete() {
+    let rows = jet_foundation::Registry::diagnostic_rows();
+    let violations: Vec<String> = rows
+        .iter()
+        .flat_map(|row| {
+            [
+                ("What", row.what),
+                ("Why", row.why),
+                ("Fix", row.fix),
+            ]
+            .into_iter()
+            .filter_map(move |(part, value)| {
+                value
+                    .trim()
+                    .is_empty()
+                    .then(|| format!("{}: {} is empty", row.code, part))
+            })
+        })
+        .collect();
     assert!(
         violations.is_empty(),
-        "docs/spec/diagnostics.md has malformed or incomplete What/Why/Fix table rows \
+        "typed diagnostic rows have malformed or incomplete What/Why/Fix templates \
          (I4 — every diagnostic needs what/why/fix, not just a code):\n{}",
         violations.join("\n")
     );

@@ -52,7 +52,7 @@ fn soft_public_reexports_warn_on_the_exported_spelling_once() {
     fs::create_dir_all(dir.join("api")).unwrap();
     fs::write(
         dir.join("api/module.jet"),
-        "pub use implementation.{_raw as stable, supported as _preview}\nmodule implementation\n",
+        "pub use implementation.[_raw as stable, supported as _preview]\nmodule implementation\n",
     )
     .unwrap();
     fs::write(
@@ -208,7 +208,7 @@ fn explicit_internal_project_module_alias_runs() {
 }
 
 /// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
-/// `main` routes through the TIR (`ModuleCall::InlineMangled` → `user_math__double`),
+/// `main` routes through the TIR (`ModuleCall::InlineMangled` → `__jet_math__double`),
 /// as do the module's own functions. rustc accepting proves byte-parity.
 #[test]
 fn inline_code_module_qualified_call() {
@@ -258,8 +258,125 @@ fn run() {
     assert_eq!(stdout, "14\n");
 }
 
+/// D-NAME-WALK1=A: imports inside an inline module use that module's scope.
+/// The grouped list, alias, public re-export, AOT, default `jet run`, and the
+/// forced interpreter all exercise the same source meaning.
+#[test]
+fn inline_module_use_list_and_pub_reexport_match_all_tiers() {
+    let src = "\
+module math {
+    pub fn double(n: Int) => Int {
+        return (n * 2)
+    }
+}
+module api {
+    use math.[double as twice]
+    pub use math.[double as exported]
+    pub fn local(n: Int) => Int {
+        return twice(n)
+    }
+}
+fn run() {
+    print(api.local(4))
+    print(api.exported(5))
+}
+";
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_inline_use_list", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "8\n10\n");
+    }
+    let (code, stdout, stderr) = run_default_multi(
+        "inline_use_list",
+        "main.jet",
+        &[("main.jet", src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "8\n10\n");
+    assert!(stderr.contains("tier1 native"), "{stderr}");
+    assert!(!stderr.contains("tier0 interp"), "{stderr}");
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_inline_use_interp_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stdout, "8\n10\n");
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected inline imports: {diags:?}")
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// The same body-local import law applies when the prefix is a file module.
+/// This catches codegen's local signature/return maps, not only sema lookup.
+#[test]
+fn inline_module_file_use_list_matches_all_tiers() {
+    let main_src = r#"
+module math
+module api {
+    use math.[label as decorate]
+    pub use math.[label as exported]
+    pub fn local(n: Int) => String {
+        return decorate("x", n)
+    }
+}
+fn run() {
+    print(api.local(7))
+    print(api.exported("y", 8))
+}
+"#;
+    let math_src = r#"
+pub fn label(prefix: String, n: Int) => String {
+    return "{prefix}:{n}"
+}
+"#;
+    let files = [("main.jet", main_src), ("math.jet", math_src)];
+    if have_rustc() {
+        let (code, stdout) = build_and_run_multi("tir_inline_file_use", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "x:7\ny:8\n");
+    }
+    let (code, stdout, stderr) = run_default_multi("inline_file_use", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "x:7\ny:8\n");
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_inline_file_interp_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("main.jet"), main_src).unwrap();
+    fs::write(dir.join("math.jet"), math_src).unwrap();
+    let outcome = jet::Interpreter::dev_iteration(
+        dir.join("main.jet").to_str().unwrap(),
+        false,
+        true,
+    );
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stdout, "x:7\ny:8\n");
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected inline file imports: {diags:?}")
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// c109 Phase 14: a qualified file-module call `math.clamp(...)` (D-MOD1). `main`
-/// routes through the TIR (`ModuleCall::Qualified` → `user_math::user_clamp`); the
+/// routes through the TIR (`ModuleCall::Qualified` → `__jet_math::__jet_clamp`); the
 /// imported module's `clamp` routes too. A String-arg module call also exercises the
 /// `&(...)` Read-borrow arg form.
 #[test]
@@ -359,9 +476,9 @@ fn message(value: Int) => String {
     assert!(!stderr.contains("E0956"), "{stderr}");
 }
 
-/// c109 Phase 14: an unqualified file-module import `use mathlib.{clamp, lo, hi}`
+/// c109 Phase 14: an unqualified file-module import `use mathlib.[clamp, lo, hi]`
 /// (D-MOD3). The bare calls lower via `emit_call`'s `unqualified_file` arm
-/// (`ModuleCall::Qualified` → `user_mathlib::user_*`). `main` routes through the TIR.
+/// (`ModuleCall::Qualified` → `__jet_mathlib::__jet_*`). `main` routes through the TIR.
 #[test]
 fn unqualified_file_module_call() {
     if !have_rustc() {
@@ -369,7 +486,7 @@ fn unqualified_file_module_call() {
     }
     let main_src = "\
 use mathlib.clamp
-use mathlib.{lo, hi}
+use mathlib.[lo, hi]
 module mathlib
 fn run() {
     print(clamp(200, lo(), hi()))
@@ -403,7 +520,7 @@ pub fn hi() => Int {
 
 /// c109 Phase 14: a `pub use` re-export (D-MOD4). `text.wrap(...)` resolves through
 /// the directory module's `pub use wrap.wrap` and lowers via `reexport_calls`
-/// (`ModuleCall::Qualified` → `user_wrap::user_wrap`). The String arg exercises the
+/// (`ModuleCall::Qualified` → `__jet_wrap::__jet_wrap`). The String arg exercises the
 /// Read-borrow form (`&(...)`). `main` + the submodule fns route through the TIR.
 #[test]
 fn reexport_module_call() {
@@ -705,7 +822,7 @@ fn run() {
 
 /// c109 Phase 17: a GENERIC free function. The `<T: Clone>` clause renders at lowering
 /// (every type param carries an extra `Clone` bound, exactly `emit_func`), a type-var
-/// param/return is by-value (`user_x: T`), and the body returns the type-var value. A
+/// param/return is by-value (`__jet_x: T`), and the body returns the type-var value. A
 /// generic `[T]` list param/return is covered too (`Vec<T>`).
 #[test]
 fn generic_free_fns() {
@@ -779,7 +896,7 @@ fn run() {
     // `params`. The `…` root prefix varies by emit layout — assert the prefix-independent
     // construction body.
     assert!(
-        out.rust.contains("JetHTTPResponse { status: \"200 OK\".to_string(), body: (*user_body), headers: std::collections::BTreeMap::new() }"),
+        out.rust.contains("JetHTTPResponse { status: \"200 OK\".to_string(), body: (*__jet_body), headers: std::collections::BTreeMap::new() }"),
         "HTTPResponse construction not byte-exact:\n{}",
         out.rust
     );

@@ -62,6 +62,46 @@ fn run() {
 }
 
 #[test]
+fn boundary_typed_heads_validate_and_compile() {
+    let source = r#"
+fn run() {
+    service :: "ada/../etc"
+    endpoint :: URL.{"https://api.example.com/v2/{service}"}
+    log_path :: Path.{"/var/log/{service}.log"}
+    stamp :: DateTime.{"2026-08-07T12:00:00Z"}
+}
+"#;
+    jet::compile(source).expect("URL, Path, and DateTime heads should compile");
+
+    let invalid_url = jet::compile(
+        r#"fn run() {
+    bad :: URL.{"https://[bad"}
+}
+"#,
+    )
+    .expect_err("an invalid URL head must fail in sema");
+    assert!(
+        invalid_url.iter().any(|diagnostic| diagnostic.code == "E0155"),
+        "invalid URL head should use E0155: {invalid_url:?}"
+    );
+
+    let datetime_hole = jet::compile(
+        r#"fn run() {
+    hour :: "12"
+    bad :: DateTime.{"2026-08-07T{hour}:00:00Z"}
+}
+"#,
+    )
+    .expect_err("DateTime heads must reject interpolation");
+    assert!(
+        datetime_hole
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0155"),
+        "DateTime interpolation should use E0155: {datetime_hole:?}"
+    );
+}
+
+#[test]
 fn sql_row_header_is_a_real_declared_type_position() {
     let error = jet::compile("fn run() { #SQL<MissingRow> {} }\n").unwrap_err();
     assert!(

@@ -203,7 +203,7 @@ impl DapServer {
                     .and_then(|inf| inf.locals().ok())
                     .map(|out_text| Inferior::parse_locals(&out_text))
                     .unwrap_or_default();
-                // I2: only `user_`-mangled bindings are Jet locals; a
+                // I2: only `__jet_`-mangled bindings are Jet locals; a
                 // compiler-internal temp (no prefix) is filtered, never shown.
                 let entries: Vec<String> = pairs
                     .iter()

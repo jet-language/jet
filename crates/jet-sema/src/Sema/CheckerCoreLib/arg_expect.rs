@@ -197,6 +197,7 @@ impl<'a> Checker<'a> {
             let got = self.infer(&mut arg.expr);
             self.expected_type = saved_expected;
             if let Some(mut got) = got {
+                self.check_interrupt_callback_expr(&arg.expr, &got);
                 if got != *param_ty && got.numeric_widening_to(param_ty).is_some() {
                     self.widen_numeric_expr(&mut arg.expr, &got, param_ty);
                     got = param_ty.clone();

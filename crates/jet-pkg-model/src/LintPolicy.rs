@@ -72,7 +72,7 @@ version: "1"
             r#"
 name: "x"
 version: "1"
-policy: .{ lints: .{ deny: [L0504] } }
+policy: .{ lints: .{ deny: [float_money] } }
 "#,
             "test",
         )
@@ -89,7 +89,7 @@ policy: .{ lints: .{ deny: [L0504] } }
             r#"
 name: "x"
 version: "1"
-policy: .{ lints: .{ deny: [L0504] } }
+policy: .{ lints: .{ deny: [same_enum_guard_table] } }
 "#,
             "test",
         )

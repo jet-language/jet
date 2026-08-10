@@ -554,7 +554,7 @@ fn build_and_run_with_cwd(
 
 /// Remove every audited generated-prelude module (jet_mem, jet_txn, the
 /// per-platform jet_term/jet_os/jet_atomic shims, jet_gtk, and any
-/// user___c_* CFFI overlay module) before checking generated Rust for I1
+/// __jet___c_* CFFI overlay module) before checking generated Rust for I1
 /// violations. Mirrors `golden.rs::strip_vetted_prelude_modules` — kept as a
 /// second, independent implementation so a sema-soundness corpus check does
 /// not depend on golden.rs internals.
@@ -607,9 +607,9 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     // D-TASKBORROW1=A: scoped taskgroup lifetime erasure (mirrors golden.rs).
     s = strip_vetted_module(&s, "jet_taskgroup_scoped");
     s = strip_vetted_module(&s, "ffi_reporter");
-    while s.contains("mod user___c_") {
+    while s.contains("mod __jet___c_") {
         let before = s.clone();
-        s = strip_mod(&s, "user___c_");
+        s = strip_mod(&s, "__jet___c_");
         if s == before {
             break;
         }

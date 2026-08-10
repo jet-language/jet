@@ -6,6 +6,9 @@ pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// D-ENTRY-SCRIPT1=B: top-level statements remain separate until sema
+    /// materializes the entry file's implicit `fn run`.
+    pub script_body: Vec<Stmt>,
     /// Parser-owned inner boundaries for statement blocks. Each span starts
     /// immediately after `{` and ends immediately before `}`.
     pub block_spans: Vec<Span>,
@@ -379,6 +382,9 @@ pub struct LoadedModule {
     pub alias: String,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// D-ENTRY-SCRIPT1=B: raw top-level statements from a script file. Sema
+    /// consumes these only for the entry module; imported scripts are errors.
+    pub script_body: Vec<Stmt>,
     /// Checked parser-owned inner boundaries for statement blocks.
     pub block_spans: Vec<Span>,
     /// D-WASM1: optional file-level web bucket ceiling.

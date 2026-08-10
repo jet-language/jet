@@ -185,7 +185,7 @@ fn run() {{
         )
     });
     assert!(!out.rust.contains("/* unsupported"));
-    assert!(out.rust.contains("extern \"C\" fn user_increment"));
+    assert!(out.rust.contains("extern \"C\" fn __jet_increment"));
     assert!(out.rust.contains("#[repr(C, u8)]"));
     assert!(out.rust.contains(&format!("extern \"{}\"", if abi == "default" { "C" } else { &abi })));
 

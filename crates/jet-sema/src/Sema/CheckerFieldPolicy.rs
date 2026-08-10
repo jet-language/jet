@@ -367,6 +367,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         name_span: span,
         meta: None,
                     type_params: vec![],
+        head_pattern: None,
         params: vec![self_param],
         return_type: Some(f.ty.clone()),
         return_type_span: Some(f.ty_span),

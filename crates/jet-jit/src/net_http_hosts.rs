@@ -3,7 +3,8 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_codegen::AST::CtValue;
+use jet_codegen::AST::{CtKey, CtValue};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::Concurrency;
@@ -25,6 +26,11 @@ enum NetHttpHandle {
     HTTPResponse(JetHTTPResponse),
     HTTPBody(JetHTTPBody),
     HTTPHeaders(JetHTTPHeaders),
+    HTTPMethod(JetHTTPMethod),
+    HTTPStatus(JetHTTPStatus),
+    HTTPVersion(JetHTTPVersion),
+    HTTPHeaderName(JetHTTPHeaderName),
+    HTTPHeaderValue(JetHTTPHeaderValue),
     HTTPHandler(JetHTTPHandler),
     HTTPServer(Arc<JetHTTPServer>),
     HTTPShutdownReport(JetHTTPShutdownReport),
@@ -146,6 +152,19 @@ fn clone_bytes(handle: i64) -> Vec<u8> {
             out.push(rt.heap.list_get_int(handle, i).unwrap_or(0) as u8);
         }
         out
+    })
+}
+
+fn clone_string_map(handle: i64) -> Option<BTreeMap<String, String>> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.map_len(handle)?;
+        let mut out = BTreeMap::new();
+        for index in 0..len {
+            let key = rt.heap.map_key_at(handle, index)?;
+            let value = rt.heap.map_value_at(handle, index)?;
+            out.insert(rt.heap.clone_string(key)?, rt.heap.clone_string(value)?);
+        }
+        Some(out)
     })
 }
 
@@ -819,6 +838,17 @@ extern "C" fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_http_body_bytes(body: i64, limit: i64) -> i64 {
+    match with_handle(body, |h| match h {
+        NetHttpHandle::HTTPBody(b) => Some(jet_http_body_bytes(b, limit)),
+        _ => None,
+    }) {
+        Some(Ok(bytes)) => result_ok_handle(alloc_bytes(&bytes)),
+        Some(Err(e)) => http_err(e),
+        None => result_err("invalid HTTPBody".into()),
+    }
+}
+
 extern "C" fn jet_jit_http_body_json_text(body: i64, has_limit: i64, limit: i64) -> i64 {
     match with_handle(body, |h| match h {
         NetHttpHandle::HTTPBody(b) => Some(jet_http_body_json_text_defaulted(
@@ -831,6 +861,181 @@ extern "C" fn jet_jit_http_body_json_text(body: i64, has_limit: i64, limit: i64)
         Some(Err(e)) => http_err(e),
         None => result_err("invalid HTTPBody".into()),
     }
+}
+
+fn http_file_reader_read(handle: i64, max: usize) -> Result<Option<Vec<u8>>, JetHTTPError> {
+    Concurrency::with_runtime_mut(|rt| {
+        let index = handle.saturating_sub(1) as usize;
+        let Some(crate::enc_stream::FileReaderSlot::Live(reader)) =
+            rt.file_readers.get_mut(index)
+        else {
+            return Some(Err(JetHTTPError::IO {
+                operation: "read body".to_string(),
+            }));
+        };
+        let mut bytes = vec![0; max];
+        let result = match std::io::Read::read(&mut reader.inner, &mut bytes) {
+            Ok(0) => Ok(None),
+            Ok(read) => {
+                bytes.truncate(read);
+                Ok(Some(bytes))
+            }
+            Err(_) => Err(JetHTTPError::IO {
+                operation: "read body".to_string(),
+            }),
+        };
+        Some(result)
+    })
+    .unwrap_or_else(|| {
+        Err(JetHTTPError::IO {
+            operation: "read body".to_string(),
+        })
+    })
+}
+
+fn http_file_reader_close(handle: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let index = handle.saturating_sub(1) as usize;
+        if let Some(slot) = rt.file_readers.get_mut(index) {
+            *slot = crate::enc_stream::FileReaderSlot::Taken;
+        }
+    });
+}
+
+fn http_file_writer_write(handle: i64, bytes: &[u8]) -> Result<(), JetHTTPError> {
+    Concurrency::with_runtime_mut(|rt| {
+        let index = handle.saturating_sub(1) as usize;
+        let Some(crate::enc_stream::FileWriterSlot::Live(writer)) =
+            rt.file_writers.get_mut(index)
+        else {
+            return Some(Err(JetHTTPError::IO {
+                operation: "copy body".to_string(),
+            }));
+        };
+        let result = std::io::Write::write_all(&mut writer.inner, bytes).map_err(|_| JetHTTPError::IO {
+            operation: "copy body".to_string(),
+        });
+        Some(result)
+    })
+    .unwrap_or_else(|| {
+        Err(JetHTTPError::IO {
+            operation: "copy body".to_string(),
+        })
+    })
+}
+
+extern "C" fn jet_jit_http_body_copy_to(body: i64, writer: i64, limit: i64) -> i64 {
+    let result = with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_bytes(body, limit)),
+        _ => None,
+    });
+    match result {
+        Some(Ok(bytes)) => match http_file_writer_write(writer, &bytes) {
+            Ok(()) => result_ok_handle(bytes.len() as i64),
+            Err(error) => http_err(error),
+        },
+        Some(Err(error)) => http_err(error),
+        None => result_err("invalid HTTPBody".into()),
+    }
+}
+
+/// D-HTTP-NOMINAL1: resident JIT marshals nominal HTTP constructors through
+/// the same Prelude functions that AOT emits. The op is a closed compiler
+/// mapping; arguments are already carrier handles and unused slots are zero.
+extern "C" fn jet_jit_http_nominal_static(
+    op: i64,
+    arg0: i64,
+    arg1: i64,
+    _arg2: i64,
+    _arg3: i64,
+    _arg4: i64,
+    _arg5: i64,
+) -> i64 {
+    match op {
+        1 => map_http_ok(JetHTTPMethod::custom(clone_string(arg0)), |value| {
+            push_handle(NetHttpHandle::HTTPMethod(value))
+        }),
+        2 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::get())),
+        3 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::head())),
+        4 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::post())),
+        5 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::put())),
+        6 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::delete())),
+        7 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::connect())),
+        8 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::options())),
+        9 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::trace())),
+        10 => push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::patch())),
+        11 => map_http_ok(JetHTTPStatus::new(arg0), |value| {
+            push_handle(NetHttpHandle::HTTPStatus(value))
+        }),
+        12 => push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_1_0())),
+        13 => push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_1_1())),
+        14 => push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_2())),
+        15 => map_http_ok(JetHTTPHeaderName::new(clone_string(arg0)), |value| {
+            push_handle(NetHttpHandle::HTTPHeaderName(value))
+        }),
+        16 => map_http_ok(JetHTTPHeaderValue::new(clone_string(arg0)), |value| {
+            push_handle(NetHttpHandle::HTTPHeaderValue(value))
+        }),
+        17 => push_handle(NetHttpHandle::HTTPHeaders(JetHTTPHeaders::new())),
+        18 => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::empty())),
+        19 => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_bytes(
+            clone_bytes(arg0),
+        ))),
+        20 => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text(
+            clone_string(arg0),
+        ))),
+        21 => {
+            let Some((top, sub, params)) = crate::Net::mime_parts(arg1) else {
+                return result_err("invalid MIME".into());
+            };
+            push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text_with_mime(
+                clone_string(arg0),
+                jet_std::JetMIME { top, sub, params },
+            )))
+        }
+        22 => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_json(arg0))),
+        23 => {
+            let Some(values) = clone_string_map(arg0) else {
+                return result_err("invalid HTTP form map".into());
+            };
+            push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_form(values)))
+        }
+        24 => {
+            let Some(values) = clone_string_map(arg0) else {
+                return result_err("invalid HTTP multipart map".into());
+            };
+            push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_multipart(values)))
+        }
+        25 => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::bridge(
+            arg0,
+            None,
+            http_file_reader_read,
+            http_file_reader_close,
+        ))),
+        26 => match jet_http_consume_limit(arg1) {
+            Ok(length) => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::bridge(
+                arg0,
+                Some(length),
+                http_file_reader_read,
+                http_file_reader_close,
+            ))),
+            Err(error) => http_err(error),
+        },
+        _ => result_err(format!("unknown HTTP nominal operation {op}")),
+    }
+}
+
+extern "C" fn jet_jit_http_nominal_show(handle: i64) -> i64 {
+    let shown = with_handle(handle, |value| match value {
+        NetHttpHandle::HTTPMethod(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPStatus(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPVersion(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPHeaderName(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPHeaderValue(value) => Some(value.jet_show()),
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(shown)
 }
 
 /// D-HTTP-JSON1=A: `server.json(status, body)` — body is already JSON text.
@@ -1771,7 +1976,11 @@ host_fns! {
     http_req_param: "jet_jit_http_req_param" => jet_jit_http_req_param: sig2;
     http_req_header: "jet_jit_http_req_header" => jet_jit_http_req_header: sig2;
     http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
+    http_body_bytes: "jet_jit_http_body_bytes" => jet_jit_http_body_bytes: sig2;
     http_body_json_text: "jet_jit_http_body_json_text" => jet_jit_http_body_json_text: sig3;
+    http_body_copy_to: "jet_jit_http_body_copy_to" => jet_jit_http_body_copy_to: sig3;
+    http_nominal_static: "jet_jit_http_nominal_static" => jet_jit_http_nominal_static: sig7;
+    http_nominal_show: "jet_jit_http_nominal_show" => jet_jit_http_nominal_show: sig1;
     http_json_response: "jet_jit_http_json_response" => jet_jit_http_json_response: sig2;
     http_static_files: "jet_jit_http_static_files" => jet_jit_http_static_files: sig6;
     http_cors_policy: "jet_jit_http_cors_policy" => jet_jit_http_cors_policy: sig7;
@@ -1945,6 +2154,296 @@ fn marshal_http_error(error: JetHTTPError) -> (i64, CtValue) {
 
 fn http_error_value(error: JetHTTPError) -> CtValue {
     marshal_http_error(error).1
+}
+
+fn http_ct_handle(type_name: &str, handle: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+    }
+}
+
+fn http_ct_outcome<T>(
+    type_name: &str,
+    result: Result<T, JetHTTPError>,
+    store: impl FnOnce(T) -> i64,
+) -> CtValue {
+    match result {
+        Ok(value) => CtValue::Present(Box::new(http_ct_handle(type_name, store(value)))),
+        Err(error) => CtValue::failed(Box::new(http_error_value(error))),
+    }
+}
+
+fn http_ct_string(value: &CtValue) -> Option<String> {
+    match value {
+        CtValue::Str(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn http_ct_bytes(value: &CtValue) -> Option<Vec<u8>> {
+    match value {
+        CtValue::Bytes(value) => Some(value.clone()),
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Int(value) if (0..=255).contains(value) => Some(*value as u8),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+fn http_ct_string_map(value: &CtValue) -> Option<BTreeMap<String, String>> {
+    let CtValue::Map(values) = value else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|(key, value)| match (key, value) {
+            (CtKey::Str(key), CtValue::Str(value)) => Some((key.clone(), value.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn http_ct_mime(value: &CtValue) -> Option<jet_std::JetMIME> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Mime" {
+        return None;
+    }
+    let field = |wanted: &str| fields.iter().find_map(|(name, value)| {
+        (name == wanted).then_some(value)
+    });
+    let CtValue::Str(top) = field("top")? else {
+        return None;
+    };
+    let CtValue::Str(sub) = field("sub")? else {
+        return None;
+    };
+    let CtValue::List(params) = field("params")? else {
+        return None;
+    };
+    let params = params
+        .iter()
+        .map(|param| match param {
+            CtValue::List(pair) => match pair.as_slice() {
+                [CtValue::Str(key), CtValue::Str(value)] => Some((key.clone(), value.clone())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(jet_std::JetMIME {
+        top: top.clone(),
+        sub: sub.clone(),
+        params,
+    })
+}
+
+fn http_ct_reader(reader: crate::enc_stream::runtime::JetFileReader) -> JetFileReader {
+    JetFileReader {
+        inner: reader.inner,
+        path: reader.path,
+    }
+}
+
+fn http_ct_writer(writer: crate::enc_stream::runtime::JetFileWriter) -> JetFileWriter {
+    JetFileWriter {
+        inner: writer.inner,
+        path: writer.path,
+    }
+}
+
+/// Whole-program interpreter adapter for the nominal HTTP constructors. The
+/// constructors and their validation remain in the included HTTP Prelude;
+/// this function only turns CtValue arguments into the Prelude's carriers.
+pub(crate) fn runtime_http_nominal_static(
+    path: &str,
+    method: &str,
+    args: &[CtValue],
+) -> Result<CtValue, String> {
+    let type_name = path.rsplit("::").next().unwrap_or(path);
+    let value = match (type_name, method, args.len()) {
+        ("JetHTTPMethod", "custom", 1) => {
+            let token = http_ct_string(&args[0]).ok_or_else(|| "HTTPMethod.custom text".to_string())?;
+            http_ct_outcome("HTTPMethod", JetHTTPMethod::custom(token), |value| {
+                push_handle(NetHttpHandle::HTTPMethod(value))
+            })
+        }
+        ("JetHTTPMethod", "get", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::get())))
+        }
+        ("JetHTTPMethod", "head", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::head())))
+        }
+        ("JetHTTPMethod", "post", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::post())))
+        }
+        ("JetHTTPMethod", "put", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::put())))
+        }
+        ("JetHTTPMethod", "delete", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::delete())))
+        }
+        ("JetHTTPMethod", "connect", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::connect())))
+        }
+        ("JetHTTPMethod", "options", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::options())))
+        }
+        ("JetHTTPMethod", "trace", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::trace())))
+        }
+        ("JetHTTPMethod", "patch", 0) => {
+            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::patch())))
+        }
+        ("JetHTTPStatus", "new", 1) => {
+            let CtValue::Int(code) = args[0] else {
+                return Err("HTTPStatus.new integer".to_string());
+            };
+            http_ct_outcome("HTTPStatus", JetHTTPStatus::new(code), |value| {
+                push_handle(NetHttpHandle::HTTPStatus(value))
+            })
+        }
+        ("JetHTTPVersion", "http_1_0", 0) => {
+            http_ct_handle("HTTPVersion", push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_1_0())))
+        }
+        ("JetHTTPVersion", "http_1_1", 0) => {
+            http_ct_handle("HTTPVersion", push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_1_1())))
+        }
+        ("JetHTTPVersion", "http_2", 0) => {
+            http_ct_handle("HTTPVersion", push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_2())))
+        }
+        ("JetHTTPHeaderName", "new", 1) => {
+            let name = http_ct_string(&args[0]).ok_or_else(|| "HTTPHeaderName.new text".to_string())?;
+            http_ct_outcome("HTTPHeaderName", JetHTTPHeaderName::new(name), |value| {
+                push_handle(NetHttpHandle::HTTPHeaderName(value))
+            })
+        }
+        ("JetHTTPHeaderValue", "new", 1) => {
+            let value = http_ct_string(&args[0]).ok_or_else(|| "HTTPHeaderValue.new text".to_string())?;
+            http_ct_outcome("HTTPHeaderValue", JetHTTPHeaderValue::new(value), |value| {
+                push_handle(NetHttpHandle::HTTPHeaderValue(value))
+            })
+        }
+        ("JetHTTPHeaders", "new", 0) => {
+            http_ct_handle("HTTPHeaders", push_handle(NetHttpHandle::HTTPHeaders(JetHTTPHeaders::new())))
+        }
+        ("JetHTTPBody", "empty", 0) => {
+            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::empty())))
+        }
+        ("JetHTTPBody", "bytes", 1) => {
+            let bytes = http_ct_bytes(&args[0]).ok_or_else(|| "HTTPBody.bytes bytes".to_string())?;
+            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_bytes(bytes))))
+        }
+        ("JetHTTPBody", "text", 1) => {
+            let text = http_ct_string(&args[0]).ok_or_else(|| "HTTPBody.text text".to_string())?;
+            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text(text))))
+        }
+        ("JetHTTPBody", "text", 2) => {
+            let text = http_ct_string(&args[0]).ok_or_else(|| "HTTPBody.text text".to_string())?;
+            let mime = http_ct_mime(&args[1]).ok_or_else(|| "HTTPBody.text MIME".to_string())?;
+            http_ct_handle(
+                "HTTPBody",
+                push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text_with_mime(text, mime))),
+            )
+        }
+        ("JetHTTPBody", "json", 1) => {
+            let text = jet_codegen::Comptime::render_datatree_for_tir(&args[0]);
+            http_ct_handle(
+                "HTTPBody",
+                push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_bytes_with_content_type(
+                    text.into_bytes(),
+                    Some("application/json".to_string()),
+                ))),
+            )
+        }
+        ("JetHTTPBody", "form", 1) => {
+            let values = http_ct_string_map(&args[0]).ok_or_else(|| "HTTPBody.form map".to_string())?;
+            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_form(values))))
+        }
+        ("JetHTTPBody", "multipart", 1) => {
+            let values = http_ct_string_map(&args[0]).ok_or_else(|| "HTTPBody.multipart map".to_string())?;
+            http_ct_handle(
+                "HTTPBody",
+                push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_multipart(values))),
+            )
+        }
+        ("JetHTTPBody", "reader", 1 | 2) => {
+            let CtValue::Int(file) = args[0] else {
+                return Err("HTTPBody.reader FileReader".to_string());
+            };
+            let reader = crate::enc_stream::take_file_reader_for_http(file)
+                .map_err(|error| format!("HTTPBody.reader: {error}"))?;
+            let reader = http_ct_reader(reader);
+            let result = if args.len() == 1 {
+                JetHTTPBody::from_reader(reader)
+            } else {
+                let CtValue::Int(limit) = args[1] else {
+                    return Err("HTTPBody.reader length".to_string());
+                };
+                JetHTTPBody::from_reader_with_length(reader, limit)
+            };
+            http_ct_outcome("HTTPBody", result, |value| {
+                push_handle(NetHttpHandle::HTTPBody(value))
+            })
+        }
+        _ => return Err(format!("unsupported HTTP nominal static {type_name}.{method}")),
+    };
+    Ok(value)
+}
+
+pub(crate) fn runtime_http_nominal_show(handle: i64) -> Result<String, String> {
+    with_handle(handle, |value| match value {
+        NetHttpHandle::HTTPMethod(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPStatus(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPVersion(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPHeaderName(value) => Some(value.jet_show()),
+        NetHttpHandle::HTTPHeaderValue(value) => Some(value.jet_show()),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTP nominal handle".to_string())
+}
+
+pub(crate) fn runtime_http_body_bytes(
+    body: i64,
+    limit: i64,
+) -> Result<Result<Vec<u8>, CtValue>, String> {
+    with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_bytes(body, limit).map_err(http_error_value)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPBody".to_string())
+}
+
+pub(crate) fn runtime_http_body_text(
+    body: i64,
+    limit: i64,
+) -> Result<Result<String, CtValue>, String> {
+    with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_text(body, limit).map_err(http_error_value)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPBody".to_string())
+}
+
+pub(crate) fn runtime_http_body_copy_to(
+    body: i64,
+    writer: crate::enc_stream::runtime::JetFileWriter,
+    limit: i64,
+) -> Result<Result<i64, CtValue>, String> {
+    let mut writer = http_ct_writer(writer);
+    with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => {
+            Some(jet_http_body_copy_to(body, &mut writer, limit).map_err(http_error_value))
+        }
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPBody".to_string())
 }
 
 pub(crate) fn runtime_http_req_body(request: i64) -> Result<i64, String> {
