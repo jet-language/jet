@@ -2487,8 +2487,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             format!("{}::{}(vec![{}])", prefix, variant, pairs)
                         } else {
                             format!(
-                                "{}::{}(({}).into_iter().collect())",
-                                prefix, variant, arg_str
+                                "{}::{}({}jet_map_into_entries({}))",
+                                prefix,
+                                variant,
+                                cx.root_prefix,
+                                arg_str,
                             )
                         }
                     } else {
