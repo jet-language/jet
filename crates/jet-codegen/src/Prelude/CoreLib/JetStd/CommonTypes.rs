@@ -1327,6 +1327,42 @@
         Object(std::collections::BTreeMap<String, JSON>),
     }
 
+    impl super::JetDebug for IOContext {
+        fn jet_debug(&self) -> String {
+            crate::jet_debug_record(
+                "IOContext",
+                [
+                    (
+                        "operation".to_string(),
+                        match self.operation {
+                            IOOperation::Read => "Read",
+                            IOOperation::Write => "Write",
+                            IOOperation::Flush => "Flush",
+                            IOOperation::Connect => "Connect",
+                            IOOperation::Accept => "Accept",
+                            IOOperation::Close => "Close",
+                            IOOperation::Resolve => "Resolve",
+                            IOOperation::Codec => "Codec",
+                        }
+                        .to_string(),
+                    ),
+                    (
+                        "resource".to_string(),
+                        super::JetDebug::jet_debug(&self.resource),
+                    ),
+                    (
+                        "os_code".to_string(),
+                        super::JetDebug::jet_debug(&self.os_code),
+                    ),
+                    (
+                        "cause".to_string(),
+                        super::JetDebug::jet_debug(&self.cause),
+                    ),
+                ],
+            )
+        }
+    }
+
     impl super::JetShow for IOError {
         fn jet_show(&self) -> String {
             let (kind, context) = match self {
@@ -1353,7 +1389,17 @@
     }
     impl super::JetDebug for IOError {
         fn jet_debug(&self) -> String {
-            format!("{:?}", self)
+            let (variant, context) = match self {
+                IOError::InvalidInput(context) => ("InvalidInput", context),
+                IOError::NotFound(context) => ("NotFound", context),
+                IOError::PermissionDenied(context) => ("PermissionDenied", context),
+                IOError::TimedOut(context) => ("TimedOut", context),
+                IOError::Cancelled(context) => ("Cancelled", context),
+                IOError::Closed(context) => ("Closed", context),
+                IOError::Protocol(context) => ("Protocol", context),
+                IOError::Other(context) => ("Other", context),
+            };
+            crate::jet_debug_variant(variant, super::JetDebug::jet_debug(context))
         }
     }
     impl super::JetShow for EnvError {

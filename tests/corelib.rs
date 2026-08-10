@@ -5258,8 +5258,8 @@ fn run() {
 }
 "#;
     let expected_aot = concat!(
-        "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Some(\"debug\") })\n",
-        "Other(IOContext { operation: Write, resource: Some(\"out.txt\"), os_code: Some(13), cause: Some(\"denied\") })\n",
+        "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Val(\"debug\") })\n",
+        "Other(IOContext { operation: Write, resource: Val(\"out.txt\"), os_code: Val(13), cause: Val(\"denied\") })\n",
     );
     let expected_dev = expected_aot;
     let (code, stdout, stderr) = build_and_run(

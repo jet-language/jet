@@ -816,14 +816,22 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             Some(crate::Comptime::MathLayout::integer_show(*value, signed))
         }
         (CtValue::Present(value), Type::Option(inner)) => {
-            Some(show_typed_value(value, inner, debug).unwrap_or_else(|| {
+            let rendered = show_typed_value(value, inner, debug).unwrap_or_else(|| {
                 if debug {
                     value.debug_rust()
                 } else {
                     value.jet_show()
                 }
-            }))
+            });
+            Some(if debug {
+                jet_foundation::StructuralDebug::jet_debug_optional(Some(rendered))
+            } else {
+                rendered
+            })
         }
+        (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) if debug => Some(
+            jet_foundation::StructuralDebug::jet_debug_optional(None),
+        ),
         (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => Some("null".to_string()),
         (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
             let parts = values
@@ -2022,11 +2030,10 @@ impl<'a> EvalCtx<'a> {
                                         child.insert("self".to_string(), v.clone());
                                         match self.run_func(func, Vec::new(), &mut child)? {
                                             CtValue::Str(text) => text,
-                                            _ => self.debug_value(&v),
+                                            _ => self.debug_value_typed(&v, &e.ty),
                                         }
                                     } else {
-                                        show_typed_value(&v, &e.ty, true)
-                                            .unwrap_or_else(|| self.debug_value(&v))
+                                        self.debug_value_typed(&v, &e.ty)
                                     }
                                 }
                                 crate::AST::StrFormat::Display => {
@@ -6337,6 +6344,49 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
+    fn debug_value_typed(&self, v: &CtValue, ty: &Type) -> String {
+        match (v, ty) {
+            (CtValue::Present(value), Type::Option(inner)) => {
+                jet_foundation::StructuralDebug::jet_debug_optional(Some(
+                    self.debug_value_typed(value, inner),
+                ))
+            }
+            (CtValue::Present(value), Type::Result { ok, .. }) => {
+                format!("Ok({})", self.debug_value_typed(value, ok))
+            }
+            (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => {
+                jet_foundation::StructuralDebug::jet_debug_optional(None)
+            }
+            (CtValue::Failed(CtReport::Told(value)), Type::Result { err, .. }) => {
+                format!("Err({})", self.debug_value_typed(value, err))
+            }
+            (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+                let parts = values
+                    .iter()
+                    .map(|value| self.debug_value_typed(value, inner))
+                    .collect::<Vec<_>>();
+                format!("[{}]", parts.join(", "))
+            }
+            (
+                CtValue::Map(entries),
+                Type::Map {
+                    key,
+                    value: value_ty,
+                    ..
+                },
+            ) => jet_foundation::StructuralDebug::jet_debug_map(entries.iter().map(
+                |(key_value, value)| {
+                    (
+                        self.debug_value_typed(&key_value.to_value(), key),
+                        self.debug_value_typed(value, value_ty),
+                    )
+                },
+            )),
+            (value, Type::Tagged { inner, .. }) => self.debug_value_typed(value, inner),
+            _ => show_typed_value(v, ty, true).unwrap_or_else(|| self.debug_value(v)),
+        }
+    }
+
     pub(super) fn debug_value(&self, v: &CtValue) -> String {
         match v {
             CtValue::Struct { type_name, fields } => {
@@ -6350,6 +6400,22 @@ impl<'a> EvalCtx<'a> {
                         );
                     }
                 }
+                let field_types = self
+                    .struct_field_types
+                    .get(ty)
+                    .or_else(|| self.struct_field_types.get(type_name));
+                let render_field = |name: &str, value: &CtValue| {
+                    field_types
+                        .and_then(|types| {
+                            types.iter().find(|(field, _)| {
+                                field.as_str() == name
+                                    || field.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                        == Some(name)
+                            })
+                        })
+                        .map(|(_, field_ty)| self.debug_value_typed(value, field_ty))
+                        .unwrap_or_else(|| self.debug_value(value))
+                };
                 let Some(defs) = self.struct_fields.get(ty) else {
                     // Builtin struct with no declared fields on hand (Vec3, …).
                     // Adapt its fields to the same record assembler AOT uses.
@@ -6357,7 +6423,7 @@ impl<'a> EvalCtx<'a> {
                         .iter()
                         .map(|(name, value)| {
                             let name = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name);
-                            (name.to_string(), self.debug_value(value))
+                            (name.to_string(), render_field(name, value))
                         })
                         .collect::<Vec<_>>();
                     return jet_foundation::StructuralDebug::jet_debug_record(ty, fields);
@@ -6371,11 +6437,11 @@ impl<'a> EvalCtx<'a> {
                             let rendered = fields
                                 .iter()
                                 .find(|(n, _)| {
-                                    n == name
+                                        n == name
                                         || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(name.as_str())
                                 })
-                                .map(|(_, value)| self.debug_value(value))
-                                .unwrap_or_else(|| self.debug_value(&CtValue::Unit));
+                                .map(|(_, value)| render_field(name, value))
+                                .unwrap_or_else(|| render_field(name, &CtValue::Unit));
                             (name.clone(), rendered)
                         }
                     })
@@ -6396,73 +6462,25 @@ impl<'a> EvalCtx<'a> {
                         .unwrap_or_default();
                     return jet_foundation::StructuralDebug::jet_debug_union(payload);
                 }
-                if ty == "IOError" {
-                    let parts: Vec<String> = args
-                        .iter()
-                        .map(|(_, value)| match value {
-                            CtValue::Struct { type_name, fields }
-                                if type_name
-                                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                    .unwrap_or(type_name)
-                                    == "IOContext" =>
-                            {
-                                let fields: Vec<String> =
-                                    ["operation", "resource", "os_code", "cause"]
-                                    .iter()
-                                    .map(|wanted| {
-                                        let value = fields.iter().find_map(|(name, value)| {
-                                            (name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name)
-                                                == *wanted)
-                                                .then_some(value)
-                                        });
-                                        let value = match value {
-                                            Some(CtValue::Enum { variant, args, .. })
-                                                if args.is_empty() =>
-                                            {
-                                                variant
-                                                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                                    .unwrap_or(variant)
-                                                    .to_string()
-                                            }
-                                            Some(value) => value.debug_rust(),
-                                            None => CtValue::Unit.debug_rust(),
-                                        };
-                                        format!("{wanted}: {value}")
-                                    })
-                                    .collect();
-                                format!("IOContext {{ {} }}", fields.join(", "))
-                            }
-                            _ => value.debug_rust(),
-                        })
-                        .collect();
-                    return if parts.is_empty() {
-                        var.to_string()
-                    } else {
-                        format!("{var}({})", parts.join(", "))
-                    };
-                }
                 // Bare variant, matching AOT `JetShow`/`JetDebug` for enums.
-                let _ = ty;
                 if args.is_empty() {
                     var.to_string()
                 } else if args.iter().all(|(label, _)| label.is_some()) {
-                    let parts: Vec<String> = args
-                        .iter()
-                        .map(|(label, val)| {
-                            format!(
-                                "{}: {}",
-                                label.as_deref().unwrap_or(""),
-                                self.debug_value(val)
+                    jet_foundation::StructuralDebug::jet_debug_record(
+                        var,
+                        args.iter().map(|(label, val)| {
+                            (
+                                label.as_deref().unwrap_or_default().to_string(),
+                                self.debug_value(val),
                             )
-                        })
-                        .collect();
-                    format!("{var} {{ {} }}", parts.join(", "))
+                        }),
+                    )
                 } else {
                     let parts: Vec<String> = args
                         .iter()
                         .map(|(_, val)| self.debug_value(val))
                         .collect();
-                    format!("{var}({})", parts.join(", "))
+                    jet_foundation::StructuralDebug::jet_debug_variant(var, parts.join(", "))
                 }
             }
             CtValue::Map(entries) => jet_foundation::StructuralDebug::jet_debug_map(

@@ -23,6 +23,7 @@ use super::runtime_host::{
     INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR, INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_MUL,
     INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
+use super::Collections::{OPTION_DEBUG_LIST, OPTION_DEBUG_RESULT_ABI};
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
     jit_list_int_type, jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type,
@@ -7250,6 +7251,49 @@ impl LowerCtx<'_, '_> {
                         // other Options use 0 = None, bits+1 = Some.
                         let uses_result = matches!(inner.as_ref(), Type::IntN { .. })
                             || Self::uses_result_option_abi(e);
+                        if matches!(fmt, StrFormat::Debug) {
+                            let mut kind = match inner.as_ref() {
+                                Type::Int => 0,
+                                Type::String => 1,
+                                Type::Float | Type::Float32 => 2,
+                                Type::IntN { signed: true, .. } => 3,
+                                Type::IntN { signed: false, .. } => 4,
+                                Type::Bool => 5,
+                                Type::Char => 6,
+                                Type::List(elem) => {
+                                    let elem_kind = match elem.as_ref() {
+                                        Type::Int => 0,
+                                        Type::String => 1,
+                                        Type::IntN { signed: true, .. } => 2,
+                                        Type::IntN { signed: false, .. } => 3,
+                                        Type::Float | Type::Float32 => 4,
+                                        Type::Bool => 5,
+                                        Type::Char => 6,
+                                        other => {
+                                            return Err(format!(
+                                                "jit string interp type unsupported: Option(List({other:?}))"
+                                            ));
+                                        }
+                                    };
+                                    OPTION_DEBUG_LIST + elem_kind
+                                }
+                                other => {
+                                    return Err(format!(
+                                        "jit string interp type unsupported: Option({other:?})"
+                                    ));
+                                }
+                            };
+                            if uses_result {
+                                kind += OPTION_DEBUG_RESULT_ABI;
+                            }
+                            let kind = self.b.ins().iconst(types::I64, kind);
+                            let push = self.module.declare_func_in_func(
+                                self.host.coll.str_push_opt_debug,
+                                self.b.func,
+                            );
+                            self.b.ins().call(push, &[buf_id, val, kind]);
+                            continue;
+                        }
                         let is_none = if uses_result {
                             let ok = self.call_host(self.host.result_is_ok, &[val]);
                             let ok_wide = self.b.ins().uextend(types::I64, ok);

@@ -1578,7 +1578,7 @@ extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     });
 }
 
-fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
     if kind == 4 {
         let len = rt.heap.list_len(list).unwrap_or(0);
         let mut parts = Vec::with_capacity(len as usize);
@@ -1595,17 +1595,28 @@ fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
     let mut parts = Vec::with_capacity(xs.len());
     if kind == 1 {
         for id in xs {
-            parts.push(rt.heap.clone_string(id).unwrap_or_default());
+            let text = rt.heap.clone_string(id).unwrap_or_default();
+            parts.push(if debug { format!("{text:?}") } else { text });
         }
     } else {
         for v in xs {
             parts.push(match kind {
                 2 | 3 => jet_codegen::Comptime::MathLayout::integer_show(v, kind == 2),
+                5 if debug => (v != 0).to_string(),
+                6 if debug => char::from_u32(v as u32).unwrap_or('?').to_string(),
                 _ => v.to_string(),
             });
         }
     }
     format!("[{}]", parts.join(", "))
+}
+
+fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+    list_text(rt, list, kind, false)
+}
+
+fn list_debug_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+    list_text(rt, list, kind, true)
 }
 
 /// JetShow `[T]` as a string handle for `{list}` interpolation.
@@ -1614,6 +1625,54 @@ extern "C" fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
         let text = list_show_text(rt, list, kind);
         rt.heap.alloc_string(text)
     })
+}
+
+pub(crate) const OPTION_DEBUG_RESULT_ABI: i64 = 100;
+pub(crate) const OPTION_DEBUG_LIST: i64 = 10;
+
+fn option_debug_text(rt: &crate::JitRuntime, packed: i64, kind: i64) -> String {
+    let result_abi = kind >= OPTION_DEBUG_RESULT_ABI;
+    let kind = if result_abi {
+        kind - OPTION_DEBUG_RESULT_ABI
+    } else {
+        kind
+    };
+    let present = if result_abi {
+        crate::runtime_host::jit_result_is_ok(rt, packed).unwrap_or(false)
+    } else {
+        packed != 0
+    };
+    if !present {
+        return jet_foundation::StructuralDebug::jet_debug_optional(None);
+    }
+    let payload = if result_abi {
+        crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
+    } else {
+        packed - 1
+    };
+    let rendered = match kind {
+        0 => payload.to_string(),
+        1 => format!("{:?}", rt.heap.clone_string(payload).unwrap_or_default()),
+        2 => jet_rt::display_f64(f64::from_bits(payload as u64)),
+        3 | 4 => jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
+        5 => (payload != 0).to_string(),
+        6 => char::from_u32(payload as u32).unwrap_or('?').to_string(),
+        list_kind if list_kind >= OPTION_DEBUG_LIST => {
+            list_debug_text(rt, payload, list_kind - OPTION_DEBUG_LIST)
+        }
+        _ => payload.to_string(),
+    };
+    jet_foundation::StructuralDebug::jet_debug_optional(Some(rendered))
+}
+
+/// Append `T?` Debug text through the shared Prelude optional formatter.
+extern "C" fn jet_jit_str_push_opt_debug(buf_id: i64, packed: i64, kind: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = option_debug_text(rt, packed, kind);
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
 }
 
 /// Print `T?` using its JIT Option carrier.
@@ -3385,6 +3444,10 @@ host_fns! {
             .push(AbiParam::new(types::I8));
         let mut sig_get_opt = sig_len.clone();
         sig_get_opt.params.push(AbiParam::new(types::I64));
+        let mut sig_push_opt_debug = Signature::new(cc);
+        sig_push_opt_debug
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
         let mut sig_set_from = sig_len.clone();
         sig_set_from.params.push(AbiParam::new(types::I64));
         let mut sig_list_eq = Signature::new(cc);
@@ -3567,6 +3630,7 @@ host_fns! {
     print_opt: "jet_jit_print_opt" => jet_jit_print_opt: sig_print_list;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
     list_show: "jet_jit_list_show" => jet_jit_list_show: sig_get_opt;
+    str_push_opt_debug: "jet_jit_str_push_opt_debug" => jet_jit_str_push_opt_debug: sig_push_opt_debug;
     list_remove: "jet_jit_list_remove" => jet_jit_list_remove: sig_get_opt;
     list_pop: "jet_jit_list_pop" => jet_jit_list_pop: sig_len;
     list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;

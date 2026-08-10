@@ -28,6 +28,19 @@ pub fn jet_debug_union(payload: String) -> String {
     payload
 }
 
+/// Assemble the canonical Jet positional-variant shape from its payload.
+pub fn jet_debug_variant(variant: &str, payload: String) -> String {
+    format!("{variant}({payload})")
+}
+
+/// Assemble the canonical Jet optional Debug shape from a rendered payload.
+pub fn jet_debug_optional(payload: Option<String>) -> String {
+    match payload {
+        Some(payload) => format!("Val({payload})"),
+        None => "None".to_string(),
+    }
+}
+
 /// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
 /// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
 pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
