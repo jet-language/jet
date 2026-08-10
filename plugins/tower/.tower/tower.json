@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1857,
-    "rev": 33130,
+    "nextNum": 1860,
+    "rev": 33163,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16934,6 +16934,16 @@
       "assignee": "codex",
       "log": [
         {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "Correction: the mailer E0596 bug card is #1859 (not 1857)."
+        },
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "Verify-sweep 2026-08-10: the crypto-nominal-collision fix itself holds (crypto_secret UI filter green; display_no_impl, no_alloc_policy_violation, single_use_consume_unaudited, taint_credential_leak all pass). Closure blocked by external reds in its cited evidence: 4 core-module-list snapshots drifted (tracked on card 1856 — core.mod entry added to fix list) and core_email mailer E0596 codegen bug (new card 1857). Re-verify after those close."
+        },
+        {
           "at": "2026-08-08",
           "by": "bd18-luna-triage",
           "text": "bd18-luna-triage triage: KEEP. Read full log and criteria. Criteria 1-4 already have concrete independent verification by luna-623-final-reviewer, so no duplicate verification write. Criterion 5 stays unverified: the full-suite gate is carried by the end-of-scope verify-full closeout per D-VERDICT-675-1; current reds are unrelated ProveReplay time integer leading zero and ProveSolver affine fact reuse. Card remains in verify and closes with that closeout."
@@ -17105,9 +17115,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T03:17:36.064Z",
-      "updated": "2026-08-08T17:22:07.669Z",
+      "updated": "2026-08-10T11:36:11.379Z",
       "workOrder": 1400,
-      "updatedBy": "bd18-luna-triage",
+      "updatedBy": "fable",
       "tags": [],
       "parentId": null,
       "claimedAt": "2026-08-04T13:33:26.823Z"
@@ -112266,7 +112276,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Full 'cargo test --test diagnostic_snapshots ui_snapshots' (unfiltered) fails: tests/ui/secret_in_build.jet now also emits E1265 ('core.vault.get() can't be reached from a build-time context') ahead of the expected E1264, but the checked-in stderr fixture only has E1264. Not touched by, or related to, #1421/#1790 — pre-existing on master HEAD (0aa39f2f5), confirmed via git diff (fixture untouched on this branch). Needs a reviewed bless (UPDATE_EXPECT=tests/ui/secret_in_build.jet) by whoever owns E1265/vault build-time gating.",
       "blockedBy": [],
@@ -112303,28 +112313,28 @@
           "n": 1,
           "text": "secret_in_build.stderr includes current E1265 output before E1264 for the $cfg :: vault.get source.",
           "status": "verified",
-          "metBy": "bd19-luna-pkgtest",
-          "verifiedBy": "fable-burndown",
-          "evidence": "batch5c: secret_in_build green; snapshot mismatches 4 (all #1601/#1543 expected)",
-          "at": "2026-08-08T18:03:39.062Z"
+          "metBy": "luna-verify-sweep",
+          "verifiedBy": "fable",
+          "evidence": "Independent read-only sweep rerun, orchestrator-reviewed",
+          "at": "2026-08-10T11:35:18.411Z"
         },
         {
           "n": 2,
           "text": "E1265 bless is supported by current diagnostics.md law and master history independent of unlanded #1543.",
-          "status": "met",
-          "metBy": "bd19-luna-pkgtest",
-          "verifiedBy": null,
-          "evidence": "docs/spec/diagnostics.md lists E1265 as ratified D-JPK-SECRETCRYPTO1 law; git history traces E1265 to master commit 289742399 and current implementation to 2b46301e8, while 411de9940 remains only on bd3/effect.",
-          "at": "2026-08-08T17:56:06.710Z"
+          "status": "verified",
+          "metBy": "luna-verify-sweep",
+          "verifiedBy": "fable",
+          "evidence": "Sweep-confirmed",
+          "at": "2026-08-10T11:35:18.779Z"
         },
         {
           "n": 3,
           "text": "proven green by orchestrator batch proof",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T18:03:34.627Z"
+          "status": "verified",
+          "metBy": "luna-verify-sweep",
+          "verifiedBy": "fable",
+          "evidence": "Batch-level targeted proof per D-VERDICT-675-1",
+          "at": "2026-08-10T11:35:19.140Z"
         }
       ],
       "refs": [],
@@ -112332,8 +112342,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T17:39:22.410Z",
-      "updated": "2026-08-09T18:09:11.127Z",
-      "updatedBy": "luna-1791"
+      "updated": "2026-08-10T11:35:19.599Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T11:35:19.599Z"
     },
     {
       "id": "c0gbnr2q",
@@ -112575,11 +112586,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "codex",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-09",
@@ -112626,20 +112637,20 @@
         {
           "n": 1,
           "text": "Filtered golden proof passes: JET_GOLDEN_FILTER=web/app_hello cargo test --test golden examples_compile_and_run.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T18:04:05.814Z"
+          "status": "verified",
+          "metBy": "luna-verify-sweep",
+          "verifiedBy": "fable",
+          "evidence": "Independent sweep rerun, orchestrator-reviewed",
+          "at": "2026-08-10T11:35:32.715Z"
         },
         {
           "n": 2,
           "text": "WebApp handler values at the Send+Sync boundary use Arc<dyn Fn ... + Send + Sync>; ordinary Jet function values retain Rc.",
-          "status": "met",
-          "metBy": "bd19-luna-web",
-          "verifiedBy": null,
-          "evidence": "Codegen/Statement.rs:356-390 centralizes named-function storage selection; Codegen/TIR/emit/expressions.rs:3070-3082 uses the Arc/Send+Sync form for WebApp named functions and lambdas, while ordinary emission still delegates with false.",
-          "at": "2026-08-08T18:04:22.167Z"
+          "status": "verified",
+          "metBy": "luna-verify-sweep",
+          "verifiedBy": "fable",
+          "evidence": "Sweep-confirmed via golden execution",
+          "at": "2026-08-10T11:35:33.087Z"
         }
       ],
       "refs": [],
@@ -112647,9 +112658,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T17:47:22.609Z",
-      "updated": "2026-08-09T18:09:47.376Z",
-      "updatedBy": "codex",
-      "claimedAt": "2026-08-09T18:09:47.376Z"
+      "updated": "2026-08-10T11:35:33.518Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T11:35:33.518Z"
     },
     {
       "id": "c0ro2ome",
@@ -113012,13 +113023,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-once-b",
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "Delete module-body rejects and state the shared .[ ] rule for expression and use positions. I9: same namespace walk on every tier.",
       "blockedBy": [],
       "workOrder": 252,
       "assignee": "e3-1803-review",
       "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "Verify-sweep 2026-08-10: named criteria tests pass (tir_modules_and_enums inline_module_ 3 passed; fmt stability 1 passed) but three e3-1803-review blockers reproduce on master: (1) syntax-decisions.md:1386 still claims inline use is excluded, contradicting D-NAME-WALK1=A; (2) checked-in selective-import fixtures (examples/features/modules/selective_imports.jet, tests/ui/selective_import_alias.jet) fail E0003 — .{} retired but fixtures not migrated; (3) dotted-prefix .[ ] does not parse: use core.math.[abs,min] gives E0003, only single-segment paths work (imports_policy.rs eats every dot as identifier before checking [). Back to building."
+        },
         {
           "at": "2026-08-09",
           "by": "e3-1803-review",
@@ -113089,8 +113105,8 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:56.255Z",
-      "updated": "2026-08-09T21:08:55.523Z",
-      "updatedBy": "e3-1803-review",
+      "updated": "2026-08-10T11:35:49.658Z",
+      "updatedBy": "fable",
       "claimedAt": "2026-08-09T21:08:55.523Z"
     },
     {
@@ -114930,7 +114946,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -114951,11 +114967,11 @@
         {
           "n": 1,
           "text": "Subset green (orchestrator only): scripts/agent/jet-env cargo test --test corelib -- core_http_nominal_message_and_body_surface_is_executable",
-          "status": "met",
-          "metBy": "codex",
-          "verifiedBy": null,
-          "evidence": "Pinned fallback exact proof passed: CARGO_TARGET_DIR=/home/nate/Projects/Github/jet/target RUSTC=/nix/store/780x05ayqxz76pml1gi5jkar1pg0vk0g-rustc-1.97.1/bin/rustc /nix/store/k72ws5y5hqp187dasmnfikm0hz5xy432-cargo-1.97.1/bin/cargo test --test corelib -- core_http_nominal_message_and_body_surface_is_executable --nocapture => 1 passed, 0 failed, 194 filtered out. scripts/agent/jet-env remains unavailable because the Nix daemon socket is not permitted.",
-          "at": "2026-08-09T18:28:39.694Z"
+          "status": "verified",
+          "metBy": "luna-verify-sweep",
+          "verifiedBy": "fable",
+          "evidence": "Independent sweep rerun, orchestrator-reviewed",
+          "at": "2026-08-10T11:35:34.275Z"
         }
       ],
       "refs": [],
@@ -114963,8 +114979,9 @@
       "parentId": "c0tgpphh",
       "needsAcceptance": false,
       "created": "2026-08-08T19:47:04.956Z",
-      "updated": "2026-08-09T18:28:52.773Z",
-      "updatedBy": "codex"
+      "updated": "2026-08-10T11:35:34.744Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T11:35:34.744Z"
     },
     {
       "id": "c0x20ruo",
@@ -115926,6 +115943,185 @@
       "needsAcceptance": false,
       "created": "2026-08-10T11:19:41.772Z",
       "updated": "2026-08-10T11:27:21.886Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0gt5noy",
+      "num": 1857,
+      "title": "CLI help speaks for the program: description, examples, subcommand summaries",
+      "body": "",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "#Doc on the #CLI struct (or entry enum) renders as the program description at the top of --help; multi-line text renders verbatim so worked example invocations can live in it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:57.375Z"
+        },
+        {
+          "n": 2,
+          "text": "#Doc on an enum variant renders as that subcommand's one-line summary in the root command list and at the top of the variant's own --help",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:57.767Z"
+        },
+        {
+          "n": 3,
+          "text": "core.args ArgsSpec gains one program-description builder method rendered at the top of .help(); docs/reference/core-library.md table updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:58.151Z"
+        },
+        {
+          "n": 4,
+          "text": "Missing #Doc keeps today's output byte-identical: no placeholder prose invented",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:58.525Z"
+        },
+        {
+          "n": 5,
+          "text": "examples/features/cli/ example shows description + variant summaries; golden output proves the same help text on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:58.903Z"
+        },
+        {
+          "n": 6,
+          "text": "Dossier command_schema and embedded JetCommandSchema carry the new description fields; completion output unchanged",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:59.301Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "cli",
+        "surface"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T11:32:41.264Z",
+      "updated": "2026-08-10T11:32:59.302Z",
+      "updatedBy": "fable-mine-video"
+    },
+    {
+      "id": "c0n8zb5c",
+      "num": 1858,
+      "title": "Shared flags across subcommands (persistent-flag ergonomic)",
+      "body": "",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ballot D-CLI-GLOBAL1 ratified; implementation follows the ratified outcome exactly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:32:59.677Z"
+        },
+        {
+          "n": 2,
+          "text": "A shared flag works on every subcommand from one declaration, with precedence (command input > env > default) unchanged",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:33:00.054Z"
+        },
+        {
+          "n": 3,
+          "text": "spec.md subcommand clause ('no flag namespace is shared across variants') amended to the ratified law; syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:33:00.433Z"
+        },
+        {
+          "n": 4,
+          "text": "Help, dossier, embedded schema, and shell completions all show shared flags once at root scope",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:33:00.793Z"
+        },
+        {
+          "n": 5,
+          "text": "examples/features/cli/ example + golden proves shared-flag parse on AOT and jet run (I9); unknown-flag suggestions still work",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:33:01.162Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "cli",
+        "surface"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T11:32:41.653Z",
+      "updated": "2026-08-10T11:33:57.658Z",
+      "updatedBy": "fable-mine-video"
+    },
+    {
+      "id": "c06xbujy",
+      "num": 1859,
+      "title": "Generated mailer AOT code rustc-rejected: .send() on non-mut local (E0596)",
+      "body": "corelib test core_email_mailer_surface_constructs_with_real_secret fails: generated email_mailer_surface.rs calls .send() on a jet_email::Mailer local not declared mut; rustc E0596 at generated line ~43789. rustc rejecting generated code is an I2 violation. Found by verify-sweep 2026-08-10 on master a901ae943; not covered by cards 1854-1856. Repro: scripts/agent/jet-env cargo test --test corelib core_email_mailer_surface_constructs_with_real_secret.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T11:35:50.046Z",
+      "updated": "2026-08-10T11:35:50.047Z",
       "updatedBy": "fable"
     }
   ],
@@ -154681,6 +154877,98 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-10T10:51:56.357Z"
+    },
+    {
+      "id": "D-CLI-GLOBAL1",
+      "cardId": "c0n8zb5c",
+      "group": "syntax",
+      "title": "Shared flags across CLI subcommands",
+      "gist": "How one flag can work on every subcommand of a program.",
+      "lesson": "A program with subcommands often wants one flag, such as --verbose, to work everywhere. Today each subcommand owns its whole flag list. A flag wanted everywhere must be typed again in every subcommand struct. A flag placed before the subcommand word is an error. This choice decides where a shared flag is declared and where a user may type it.",
+      "explainer": "",
+      "story": "Priya builds a deploy tool with subcommands: plan, apply, rollback. She wants --verbose and --config on all three. She types the two fields into three structs and they drift: rollback forgets --config. A teammate runs `deploy --verbose apply` and gets an unknown-subcommand error, because flags cannot appear before the subcommand word.",
+      "inWild": "#CLI\nstruct PlanArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    target: String\n}\n\n#CLI\nstruct ApplyArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    target: String\n}\n\n// RollbackArgs forgot verbose and config — nothing catches the drift.\n#CLI\nstruct RollbackArgs {\n    target: String\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n    Rollback(RollbackArgs)\n}\n\nfn run(cmd: Cmd) { ... }\n\n// $ deploy --verbose apply\n// error: unknown subcommand `--verbose`",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Each subcommand declares its own",
+          "detail": "Keep today's law. Every subcommand struct lists every flag it accepts, including repeated ones. Nothing is shared, so nothing is hidden. The cost is real duplication: the same field, doc text, and short name typed in every struct, with silent drift when one struct forgets.",
+          "technical": "No change. D-CLIFLAG1 stands: the enum entry has no root flag namespace; argv before the subcommand token must be the subcommand name.",
+          "code": "#CLI\nstruct PlanArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    target: String\n}\n\n#CLI\nstruct ApplyArgs {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    target: String\n}\n\n// $ deploy apply --verbose     works\n// $ deploy --verbose apply     error: unknown subcommand `--verbose`"
+        },
+        {
+          "key": "B",
+          "name": "One app struct holds shared flags and the command",
+          "detail": "The entry takes one #CLI struct. Its scalar fields are the shared flags. One enum-typed field is the subcommand. The whole command surface reads top to bottom in one place. A shared flag may be typed before or after the subcommand word. Help prints shared flags once, at the root.",
+          "technical": "E1308 extends: the one entry parameter may be a #CLI struct containing exactly one enum-of-#CLI field. Shared scalars parse from anywhere in argv; variant fields parse after the token. A name collision between a shared flag and a variant flag is a compile-time error (new code). Precedence stays: command input beats env beats default.",
+          "code": "#CLI\nstruct Deploy {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n    cmd: Cmd\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n    Rollback(RollbackArgs)\n}\n\nfn run(app: Deploy) {\n    if app.verbose { log.level(.Debug) }\n    if app.cmd == {\n        .Apply(a) -> apply(a, app.config)\n        ...\n    }\n}\n\n// $ deploy --verbose apply --target prod   works\n// $ deploy apply --verbose --target prod   also works"
+        },
+        {
+          "key": "C",
+          "name": "Two entry parameters: shared struct, then command enum",
+          "detail": "The entry takes two parameters: a #CLI struct of shared flags and the subcommand enum. Sharing is visible in the signature itself. The body receives two separate values, so shared state never travels inside the command value. The cost is a second entry shape to learn and document.",
+          "technical": "E1308 extends to a two-parameter form: fn run(globals: G, cmd: E) with G a #CLI struct and E an enum of #CLI payloads. Parse rules match option B. Single-parameter forms keep today's meaning.",
+          "code": "#CLI\nstruct Globals {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n}\n\nenum Cmd {\n    Plan(PlanArgs)\n    Apply(ApplyArgs)\n}\n\nfn run(globals: Globals, cmd: Cmd) {\n    if globals.verbose { log.level(.Debug) }\n    ...\n}\n\n// $ deploy --verbose apply --target prod   works"
+        },
+        {
+          "key": "D",
+          "name": "Write once, embed in every subcommand",
+          "detail": "A plain struct holds the shared fields. Each subcommand struct embeds it with one field. The flags belong to each subcommand, typed after its name, and help repeats them per subcommand. Nothing is global: each command still owns its full surface, but the declaration is written once.",
+          "technical": "Rides the deferred nested-#CLI design (spec: scoped out of v1). An embedded #CLI struct's fields join the host's flag namespace unprefixed. Flags parse only after the subcommand token. Root-position flags stay errors.",
+          "code": "#CLI\nstruct Common {\n    #[Doc(\"print extra detail\"), Short(\"v\")] verbose: Bool\n    config: String?\n}\n\n#CLI\nstruct ApplyArgs {\n    shared: Common\n    target: String\n}\n\n// $ deploy apply --verbose --target prod   works\n// $ deploy --verbose apply                 still an error"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go / Cobra",
+          "note": "PersistentFlags on a parent command are inherited by every child command.",
+          "code": "rootCmd.PersistentFlags().BoolVarP(&verbose, \"verbose\", \"v\", false, \"verbose output\")"
+        },
+        {
+          "lang": "Rust / clap",
+          "note": "One derive struct holds global args plus a subcommand field — the shape option B proposes.",
+          "code": "#[derive(Parser)]\nstruct Cli {\n    #[arg(short, long, global = true)]\n    verbose: bool,\n    #[command(subcommand)]\n    cmd: Commands,\n}"
+        },
+        {
+          "lang": "Python / argparse",
+          "note": "A parents=[shared] parser re-embeds shared flags per subparser — the shape option D proposes.",
+          "code": "shared = argparse.ArgumentParser(add_help=False)\nshared.add_argument('-v', '--verbose', action='store_true')\nsub.add_parser('apply', parents=[shared])"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "One struct is the whole command surface, readable top to bottom, and it stays one entry parameter. Shared flags are declared once, print once in help, and work before or after the subcommand word. It matches how the typed entry already thinks: the parameter type IS the spec.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Duplication drifts silently: a struct that forgets a shared flag ships a hole no check catches, which is what the story shows."
+          },
+          {
+            "key": "C",
+            "reason": "It adds a second entry signature shape for the same result option B gets inside the existing one-parameter rule."
+          },
+          {
+            "key": "D",
+            "reason": "Flags still fail before the subcommand word, help repeats them per subcommand, and it waits on the unshipped nested-struct design."
+          }
+        ],
+        "tradeoff": "The derive must special-case one enum-typed field inside a #CLI struct, and a shared-versus-variant flag-name collision needs a new compile-time diagnostic. That is accepted: the check is static and the beginner surface stays one struct."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the status quo, a root app struct, a two-parameter entry, and per-variant embedding, and recommended the root struct for one-place declaration and root-position parsing.",
+        "boilOcean": "The breadth review tested a #Persistent field marker, an implicit always-on --verbose set, and env-only sharing. All were folded away: markers and implicit sets hide the surface the struct already states, and env-only sharing changes precedence.",
+        "hybrid": "The hybrid review tested B plus D together: a root struct now, embedding later for per-command grouping. They compose without conflict, so D stays a separate future design and B stands alone.",
+        "cooperative": "The cooperative review strengthened A with a proposed drift lint and strengthened D with unprefixed field joining. A's lint still cannot make root-position flags parse; D still repeats help per subcommand.",
+        "adversarial": "The adversarial review attacked B with flag-name collisions, a struct holding two enum fields, and positional ambiguity before the token. The collision diagnostic, the exactly-one-enum-field rule in E1308, and named-value-wins cover those, so B survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-10T11:33:57.657Z"
     }
   ],
   "questions": [
@@ -156278,6 +156566,237 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-10T11:36:11.380Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0mwjrp1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:35:50.512Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0mwjrp1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:35:50.047Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c06xbujy",
+      "note": "Generated mailer AOT code rustc-rejected: .send() on non-mut local (E0596)"
+    },
+    {
+      "at": "2026-08-10T11:35:49.658Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vw1da8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-10T11:35:34.744Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0jysr0p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T11:35:34.276Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0jysr0p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:35:33.886Z",
+      "by": "luna-verify-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0jysr0p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:35:33.518Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c012yfzn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T11:35:33.087Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c012yfzn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:35:32.715Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c012yfzn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:35:32.346Z",
+      "by": "luna-verify-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c012yfzn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:35:31.936Z",
+      "by": "luna-verify-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c012yfzn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:35:19.600Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fgwxlh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T11:35:19.141Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0fgwxlh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-10T11:35:18.779Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0fgwxlh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:35:18.411Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0fgwxlh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:35:18.031Z",
+      "by": "luna-verify-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0fgwxlh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-10T11:35:17.651Z",
+      "by": "luna-verify-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0fgwxlh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:35:17.259Z",
+      "by": "luna-verify-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0fgwxlh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:33:57.658Z",
+      "by": "fable-mine-video",
+      "action": "decision.add",
+      "ref": "D-CLI-GLOBAL1",
+      "note": "Shared flags across CLI subcommands"
+    },
+    {
+      "at": "2026-08-10T11:33:01.163Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#5 examples/features/cli/ example + golden proves shared-flag p"
+    },
+    {
+      "at": "2026-08-10T11:33:00.794Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#4 Help, dossier, embedded schema, and shell completions all sh"
+    },
+    {
+      "at": "2026-08-10T11:33:00.434Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#3 spec.md subcommand clause ('no flag namespace is shared acro"
+    },
+    {
+      "at": "2026-08-10T11:33:00.055Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#2 A shared flag works on every subcommand from one declaration"
+    },
+    {
+      "at": "2026-08-10T11:32:59.677Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0n8zb5c",
+      "note": "#1 Ballot D-CLI-GLOBAL1 ratified; implementation follows the ra"
+    },
+    {
+      "at": "2026-08-10T11:32:59.302Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0gt5noy",
+      "note": "#6 Dossier command_schema and embedded JetCommandSchema carry t"
+    },
+    {
+      "at": "2026-08-10T11:32:58.903Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0gt5noy",
+      "note": "#5 examples/features/cli/ example shows description + variant s"
+    },
+    {
+      "at": "2026-08-10T11:32:58.525Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0gt5noy",
+      "note": "#4 Missing #Doc keeps today's output byte-identical: no placeho"
+    },
+    {
+      "at": "2026-08-10T11:32:58.151Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0gt5noy",
+      "note": "#3 core.args ArgsSpec gains one program-description builder met"
+    },
+    {
+      "at": "2026-08-10T11:32:57.767Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0gt5noy",
+      "note": "#2 #Doc on an enum variant renders as that subcommand's one-lin"
+    },
+    {
+      "at": "2026-08-10T11:32:57.376Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0gt5noy",
+      "note": "#1 #Doc on the #CLI struct (or entry enum) renders as the progr"
+    },
+    {
+      "at": "2026-08-10T11:32:41.654Z",
+      "by": "fable-mine-video",
+      "action": "card.add",
+      "ref": "c0n8zb5c",
+      "note": "Shared flags across subcommands (persistent-flag ergonomic)"
+    },
+    {
+      "at": "2026-08-10T11:32:41.264Z",
+      "by": "fable-mine-video",
+      "action": "card.add",
+      "ref": "c0gt5noy",
+      "note": "CLI help speaks for the program: description, examples, subcommand summaries"
+    },
     {
       "at": "2026-08-10T11:32:28.331Z",
       "by": "fable",
@@ -159546,237 +160065,6 @@
       "action": "card.update",
       "ref": "c0p3j74r",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T13:24:05.573Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0v33o38",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-09T13:24:02.499Z",
-      "by": "dewey-1810-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v33o38",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T13:24:02.140Z",
-      "by": "dewey-1810-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v33o38",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T13:24:01.776Z",
-      "by": "dewey-1810-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v33o38",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T13:23:56.858Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0v33o38",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T13:23:53.367Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0v33o38",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T13:23:49.253Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0v33o38",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T13:13:07.265Z",
-      "by": "Sol",
-      "action": "card.claim",
-      "ref": "c0p3j74r",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T13:11:42.337Z",
-      "by": "Codex",
-      "action": "card.claim",
-      "ref": "c08qvoft",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T12:53:59.067Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-09T12:53:59.067Z"
-    },
-    {
-      "at": "2026-08-09T12:26:10.515Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0jdw5y1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T12:26:10.103Z",
-      "by": "Erdos",
-      "action": "card.criteria-verify",
-      "ref": "c0jdw5y1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T12:26:09.746Z",
-      "by": "Erdos",
-      "action": "card.criteria-verify",
-      "ref": "c0jdw5y1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T12:26:09.379Z",
-      "by": "Erdos",
-      "action": "card.criteria-verify",
-      "ref": "c0jdw5y1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T12:22:19.694Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-09T12:22:19.694Z"
-    },
-    {
-      "at": "2026-08-09T12:20:47.156Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c08qvoft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T12:20:43.305Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0p3j74r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T12:19:28.894Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0p3j74r",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T12:16:53.247Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0qb09i6",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T12:16:52.789Z",
-      "by": "Erdos",
-      "action": "card.criteria-verify",
-      "ref": "c0qb09i6",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T12:16:52.425Z",
-      "by": "Erdos",
-      "action": "card.criteria-verify",
-      "ref": "c0qb09i6",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T12:16:52.062Z",
-      "by": "Erdos",
-      "action": "card.criteria-verify",
-      "ref": "c0qb09i6",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T12:15:36.121Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c08qvoft",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T12:06:13.856Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0q9x5ds",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T12:06:12.945Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0q9x5ds",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T12:06:03.194Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0q9x5ds",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T12:04:26.154Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jdw5y1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T12:04:25.774Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jdw5y1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T12:04:25.390Z",
-      "by": "e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jdw5y1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T12:01:41.353Z",
-      "by": "e3-final5-rescue",
-      "action": "card.criteria-meet",
-      "ref": "c0qb09i6",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T12:01:40.991Z",
-      "by": "e3-final5-rescue",
-      "action": "card.criteria-meet",
-      "ref": "c0qb09i6",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T12:01:40.615Z",
-      "by": "e3-final5-rescue",
-      "action": "card.criteria-meet",
-      "ref": "c0qb09i6",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:54:23.956Z",
-      "by": "e3-burndown",
-      "action": "papercut.add",
-      "ref": "pc0aw7d63",
-      "note": ""
     }
   ],
   "nextNum": 368,
