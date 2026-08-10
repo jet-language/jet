@@ -1418,6 +1418,11 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
             ))),
             err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
         })),
+        (Syntax::METHOD_TASK_SCOPE_JOIN, 0) => {
+            Some(Some(args.first().cloned().unwrap_or(Type::Named(
+                Syntax::TYPE_UNIT.to_string(),
+            ))))
+        }
         // D-DETACH1: fire-and-forget — consumes the Task handle, returns unit.
         (Syntax::TASK_DETACH, 0) => Some(None),
         // D-COROUTINE1=A: task handle control-plane hooks over the internal coroutine substrate.

@@ -8525,14 +8525,14 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
 fn run() {
     (sender, ch) := tasks.channel<Int>()
     (ack_sender, ack) := tasks.channel<Int>()
-    slow := tasks.spawn(() => {
+    slow := task {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
                    ack_sender.send(1)
                }
                print(99)
-       })
+       }
     slow.cancel()
     sender.send(42)
     ack.receive() ?? panic("closed")
@@ -8554,11 +8554,11 @@ fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
     (sender, ch) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    slow :: task {
         ready_sender.send(1)
         ch.receive() ?? panic("closed")
         print(99)
-    })
+    }
     ready.receive() ?? panic("closed")
     slow.cancel()
     sender.send(42)
@@ -8576,11 +8576,11 @@ fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
 use core.time as time
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    slow :: task {
         ready_sender.send(1)
         time.sleep(200)
         print(99)
-    })
+    }
     ready.receive() ?? panic("closed")
     slow.cancel()
 }
@@ -8598,11 +8598,11 @@ fn run() {
     task.group g {
         (ready_sender, ready) :: tasks.channel<Int>()
         (_sender, ch) :: tasks.channel<Int>()
-        slow :: tasks.spawn(() => {
+        slow :: task {
             ready_sender.send(1)
             g.select().recv(ch).wait()
             print(99)
-        })
+        }
         ready.receive() ?? panic("closed")
         slow.cancel()
     }
@@ -8618,9 +8618,9 @@ fn cranelift_wait_failures_return_compiler_diagnostics_not_process_exit() {
     let join_cancelled = r#"use core.tasks as tasks
 use core.time as time
 fn run() {
-    child :: tasks.spawn(() => {
+    child :: task {
         time.sleep(200)
-    })
+    }
     child.cancel()
     child.join()
 }

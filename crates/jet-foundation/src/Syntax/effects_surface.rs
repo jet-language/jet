@@ -184,6 +184,10 @@ pub const SELECT_WAIT_METHOD: &str = "wait";
 
 /// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
 pub const METHOD_TASK_WAIT: &str = "wait";
+/// Compiler-private consuming join used by task-group scope cleanup. Unlike
+/// user `.join()`, it unwraps `TaskFailure` so a child panic cannot vanish when
+/// the generated cleanup expression's value is discarded.
+pub const METHOD_TASK_SCOPE_JOIN: &str = "\0jet.task.scope_join";
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 pub const METHOD_TASK_PAUSE: &str = "pause";
 /// D-COROUTINE1=A: clear the paused marker in the control plane.

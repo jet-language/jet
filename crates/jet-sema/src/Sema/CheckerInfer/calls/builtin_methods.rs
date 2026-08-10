@@ -573,7 +573,9 @@ impl<'a> Checker<'a> {
             }
             if let Type::Apply { name, .. } = recv_ty {
                 match (name.as_str(), method) {
-                    ("Task", "join") | ("Task", "wait") => {
+                    ("Task", "join")
+                    | ("Task", "wait")
+                    | ("Task", Syntax::METHOD_TASK_SCOPE_JOIN) => {
                         if let Expr::Ident(name, _) = receiver {
                             self.mark_taskgroup_spawn_consumed(name);
                         }

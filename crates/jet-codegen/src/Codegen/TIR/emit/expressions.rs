@@ -3826,6 +3826,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
+                THandleOp::TaskScopeJoin => format!(
+                    "{}jet_std::jet_task_outcome_unwrap(({recv}).join())",
+                    cx.root_prefix
+                ),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => {
                     if args.is_empty() {

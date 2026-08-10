@@ -1058,7 +1058,7 @@ fn cancel_call(name: &str, span: Span) -> Expr {
 fn join_call(name: &str, span: Span) -> Expr {
     Expr::MethodCall {
         receiver: Box::new(Expr::Ident(name.to_string(), span)),
-        method: "join".to_string(),
+        method: Syntax::METHOD_TASK_SCOPE_JOIN.to_string(),
         method_span: span,
         owner_type_args: Vec::new(),
         type_args: Vec::new(),

@@ -6,6 +6,7 @@ use crate::Codegen::rust_return_type;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower::prepare_interrupt_callback_locals;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::SerdeCodec;
@@ -111,6 +112,7 @@ pub(crate) fn lower_error_conv(
         TLocal::user(Syntax::KW_SELF),
         Some(from_ty.clone()),
     );
+    prepare_interrupt_callback_locals(&conversion.body, cx, &mut env);
     TFunc {
         name,
         source_span: conversion.from_span,
@@ -220,6 +222,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         params.push((rust_name, param_ty, p.convention));
     }
     let mut body = resource_param_guards;
+    prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
     let mut clone_types = env.cloned_types.borrow().clone();
     for param in &f.params {
@@ -325,6 +328,7 @@ pub(crate) fn lower_contracts(f: &Func, cx: &Cx) -> (Vec<TContract>, Vec<TContra
 /// both paths embed the same trailing function name in any `?`/panic frame).
 pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
 }
@@ -344,6 +348,7 @@ pub(crate) fn emit_tir_property_test_body(
     for p in params {
         env.bind(&p.name, TLocal::user(&p.name), Some(p.ty.clone()));
     }
+    prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
 }
@@ -362,6 +367,7 @@ pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, ou
         TLocal::user(Syntax::KW_SELF),
         Some(Type::Named(from_ty.to_string())),
     );
+    prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
 }
@@ -524,6 +530,7 @@ pub(crate) fn lower_method_for_owner(
         params.push((rust_name, pty, p.convention));
     }
     let mut body = resource_param_guards;
+    prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
     let generics = render_generics(&f.type_params, &clone_types);
@@ -640,6 +647,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         params.push((rust_name, pty, p.convention));
     }
     let mut body = resource_param_guards;
+    prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
     TFunc {

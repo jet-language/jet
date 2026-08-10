@@ -4569,6 +4569,10 @@ pub enum THandleOp {
     /// built-in method `join` arm — shared with list no-arg join, but here it's the
     /// JetTask method. Returns the task's value `T`.
     TaskJoin,
+    /// Compiler-generated task-group scope join. It consumes the task and
+    /// unwraps `TaskFailure` instead of exposing the explicit `.join()` Result
+    /// rail to a discarded cleanup expression.
+    TaskScopeJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.
     TaskDetach,

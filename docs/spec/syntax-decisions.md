@@ -2074,9 +2074,16 @@ ordered commit law of D-CONC-STM1=A.
 card #1505)*: the surface is `task f()`, `task.all { … }`, `task.race { … }`,
 `task.any { … }`, and `task.group g(limit: n) { … }`. Only `task` is reserved;
 `all`, `race`, `any`, and `group` remain free identifiers. Scope-end joins,
-fail-fast, cancel-losers, and first-`Ok` laws stay. It respells the surfaces of
-D-TASKSCOPE1, D-NURSERY1, D-CONCCOMB1, and D-TASKGROUP-PARAM1 without changing
-their lifetime laws. This is the final spelling for the spawn surface.
+fail-fast, cancel-losers, first-`Ok`, and same-completion source-order
+tie-break laws stay. It respells the surfaces of D-TASKSCOPE1, D-NURSERY1,
+D-CONCCOMB1, and D-TASKGROUP-PARAM1 without changing their lifetime laws. The
+parser recognizes a spawn only at the complete `task` surface shape; otherwise
+a local named `task` keeps ordinary identifier syntax. In particular, `task`
+followed by `(`, `[`, `.`, or an operator is a local call, index, member, or
+ordinary expression; the bare-spawn operand form starts with an atom or control
+expression instead. A parenthesized or list operand can use `task { … }` or a
+named function when a local named `task` must remain visible. This is the final
+spelling for the spawn surface.
 
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:

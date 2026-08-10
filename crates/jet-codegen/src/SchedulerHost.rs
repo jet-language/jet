@@ -29,6 +29,14 @@ pub fn jet_scheduler_task_panic_leave() {
     JET_IN_SCHEDULER_TASK.with(|c| c.set(false));
 }
 
+/// Whether the current JIT frame belongs to a scheduler task. The JIT uses
+/// this only to keep a task's runtime trap local until its join boundary has
+/// converted it into a `TaskFailure`; a sibling must not observe that trap at
+/// its next loop header.
+pub fn jet_scheduler_in_task() -> bool {
+    JET_IN_SCHEDULER_TASK.with(|c| c.get())
+}
+
 fn jet_scheduler_panic_should_unwind() -> bool {
     JET_IN_SCHEDULER_TASK.with(|c| c.get())
 }
