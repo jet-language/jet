@@ -9,7 +9,6 @@ fn expiring_secret_lends_then_zeroizes_on_expiry() {
 
     let src = r#"
 use core.crypto as crypto
-use core.tasks as tasks
 use core.time as time
 use core.vault as vault
 
@@ -38,12 +37,15 @@ fn run() {
 
     thread_key := crypto.SigningKey.new_random() ?? panic("thread key")
     threaded := vault.ExpiringSecret.new(^thread_key, ttl, clock)
-    task := tasks.spawn(() => {
-        if threaded.with((borrowed) => borrowed.public_key()) == .Ok(_) {
-            print("threaded")
+    threaded_ref :: &threaded
+    task.group group {
+        handle :: task {
+            if threaded_ref.with((borrowed) => borrowed.public_key()) == .Ok(_) {
+                print("threaded")
+            }
         }
-    })
-    task.join()
+        handle.join().drop("waits for the task body to complete")
+    }
 }
 "#;
     let (code, stdout, stderr) =

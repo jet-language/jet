@@ -4307,7 +4307,8 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
-            let method_name = format!("{type_name}.{method}");
+            let (_, method_type_name) = self.struct_type_name_parts(&type_name);
+            let method_name = format!("{method_type_name}.{method}");
             if owner_mod != self.module_idx
                 && !self
                     .name_ledger
@@ -4327,7 +4328,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(args) = applied_args {
-                self.instantiate_method_sig(&type_name, &mut msig, args);
+                self.instantiate_method_sig(owner_mod, &type_name, &mut msig, args);
             }
             // D-APILABEL1=A: bind before inference — see `bind_method_args`.
             if !self.bind_method_args(method, &msig, args, span) {

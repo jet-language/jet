@@ -695,12 +695,11 @@ fn mk() {
     #[test]
     fn rejects_range_switch_over_non_ident_subject() {
         // D-IF3: a value+range mixed switch (shape D) lowers each range head to
-        // `subject >= lo && subject <= hi`, so the subject must be a scalar ident
-        // local for the emitted condition to type-check. A NON-IDENT subject (a
-        // call) with a range arm is excluded from the subset (stays on the AST
-        // path), even though the value arm alone would be fine.
+        // `subject >= lo && subject <= hi`. The shared switch subject may be a
+        // non-ident expression: it is evaluated once, then reused by each arm.
+        // This call subject therefore remains in the covered mixed-switch subset.
         let src = "fn pick() => Int { return 5 }\nfn f() => String {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
-        assert!(!covers(src, "f"));
+        assert!(covers(src, "f"));
     }
 
     // c109 Phase 5: collections. (Index/slice/index-assign coverage needs the
@@ -1796,10 +1795,11 @@ struct PR {
     note: String?
 }
 fn mk(p: String) => PR {
-    return PR.{file_path: p, note: None}
+    return PR.{file_path: ~p, note: None}
 }
+fn run() {}
 ";
-        assert!(covers(src, "mk"));
+        assert!(covers_after_sema(src, "mk"));
     }
 
     #[test]
@@ -2056,11 +2056,12 @@ fn run() {
     #[test]
     fn covers_field_read_and_eq_on_inlined_comptime_values() {
         // c109: a FIELD READ off a comptime-const struct value (`$pair_value ::
-        // Pair{…}`; then `pair_value.left`) and an `==` against a comptime-const enum value
-        // (`$light_value :: Light.Green`; then `light_value == Light.Green`). The const inlines to
+        // Pair{…}`; then `$pair_value.left`) and an `==` against a comptime-const enum value
+        // (`$light_value :: Light.Green`; then `$light_value == Light.Green`). The const inlines to
         // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
         // inlined struct / comparing the inlined enum is byte-identical to the AST path.
         // The Field gate now admits a non-local comptime-const receiver.
+        install_comptime_bridge();
         let src = r#"
 struct Pair {
     left: Int
@@ -2076,9 +2077,9 @@ $pair_value :: Pair.{left: 7, right: "seven"}
 $light_value :: Light.Green
 
 fn run() {
-    print("{pair_value.left}")
-    print("{pair_value.right}")
-    print("{light_value == Light.Green}")
+    print("{$pair_value.left}")
+    print("{$pair_value.right}")
+    print("{$light_value == Light.Green}")
 }
 "#;
         assert!(

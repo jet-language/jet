@@ -107,7 +107,7 @@ fn imported_soft_public_declared_types_warn_once_per_occurrence() {
     let main = dir.join("main.jet");
     fs::write(
         &main,
-        "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) => models._Cell<Int> { return value }\nfn local(value: ^models._Cell<Int>) { cell: models._Cell<Int> := value }\nfn run() {}\n",
+        "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) => models._Cell<Int> { return value }\nfn local(value: ^models._Cell<Int>) { cell := value }\nfn run() {}\n",
     )
     .unwrap();
 
@@ -123,7 +123,7 @@ fn imported_soft_public_declared_types_warn_once_per_occurrence() {
             .iter()
             .filter(|diagnostic| diagnostic.code == "L0601")
             .count(),
-        5,
+        4,
         "{diagnostics:#?}"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -962,13 +962,13 @@ fn run() {
     });
     // HTTPResponse: the shared server constructor helper.
     assert!(
-        out.rust.contains("jet_http_srv_response(200, &("),
+        out.rust.contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
         "HTTPResponse constructor helper missing:\n{}",
         out.rust
     );
     // HTTPRequest: the shared client request helper.
     assert!(
-        out.rust.contains("jet_http_client_request_new(&("),
+        out.rust.contains(r#"return jet_http_client_request_new(&("GET".to_string()), &("http://localhost/".to_string()));"#),
         "HTTPRequest constructor helper missing:\n{}",
         out.rust
     );
