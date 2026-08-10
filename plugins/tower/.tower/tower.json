@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1851,
-    "rev": 33092,
+    "nextNum": 1857,
+    "rev": 33116,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19,7 +19,8 @@
         "radar-remaining",
         "radar-frozen",
         "radar:e5",
-        "radar-sq"
+        "radar-sq",
+        "board-ideas"
       ]
     },
     "completionCursor": "2026-08-09T19:15:13.111Z"
@@ -112868,13 +112869,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-once-b",
-      "phase": "done",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implement attach/alias law, ledger consumers, and pub(package) parity. I9: AOT, jet run and interpreter read same ledger.",
       "blockedBy": [],
       "workOrder": 250,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "Recovery audit 2026-08-10: board said done/verified post-merge, but master has no crates/jet-foundation/src/Names.rs and still uses the split reference_anchors/import_targets stores. The integration merge was lost in the overnight OOM crashes. Branch sweep/bd1801 holds the work (2 commits, 80 files, ~25 conflicts vs master). Reopened to building; needs re-integration + fresh review."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -112914,9 +112921,8 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:54.516Z",
-      "updated": "2026-08-09T08:09:28.429Z",
-      "updatedBy": "fable-burndown",
-      "completedAt": "2026-08-09T08:09:28.429Z"
+      "updated": "2026-08-10T10:49:28.768Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0hlveo8",
@@ -115620,7 +115626,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
@@ -115630,20 +115636,20 @@
         {
           "n": 1,
           "text": "Root cause of unbounded TIR-eval allocation identified and fixed; no engine-side re-encoding of semantics (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "luna-1849",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T10:36:41.455Z"
+          "evidence": "Root cause: crates/jet-parser/src/Parser/Items/imports_policy.rs:1359 (script-body fallback arm added in fef006684). stmt() fails on a top-level '}', sync_stmt (crates/jet-parser/src/Parser/mod.rs:361) returns without consuming a '}' at brace depth 0, the item loop continues, and the same token is re-reported forever, pushing a Diagnostic each pass. Abort trace under ASLR-off showed RawVec<Diagnostic>::grow_one requesting 4563402752 bytes from Parser::program via ProjectParts::scan_with_diagnostics. Not TIR eval: the parser hangs while the loader scans sibling .jet files, so any entry in a directory holding a stray-brace file OOMs. Minimal repro found by bisecting 1847 stray /tmp/*.jet files down to one file containing only '    }'. Fix: record self.pos before the arm and bump when nothing consumed a token; no semantics touched, so I9 does not apply. Commit 87119c3cb.",
+          "at": "2026-08-10T11:18:53.305Z"
         },
         {
           "n": 2,
           "text": "timeout-bounded runs of taskgroup_params, task_control_tiers, diagnostic_snapshots, encoding_parity, dev pass with normal memory",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "luna-1849",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T10:36:41.854Z"
+          "evidence": "All five suites now terminate under a 600s timeout with sane memory (peak RSS sampled every 0.5s over the process tree): task_control_tiers exit 0, 3 passed, peak 48 MB. taskgroup_params completed in 3.6s, peak 31 MB, 5 passed / 7 failed. diagnostic_snapshots completed in 5.1s, peak 57 MB, 2 passed / 2 failed. encoding_parity completed in 0.3s, peak 30 MB, 16 passed / 1 failed. dev no longer allocates (peak under 5 MB) but aborts on separate stack overflows. Before the fix the same binaries grew to a single 4.5 GB allocation and had to be capped with ulimit -v. New regression test tests/run_entry.rs::script_top_level_recovery_always_consumes_a_token passes. Remaining failures are unrelated in-flight debt from the same checkpoint, filed as cards #1854 (unmigrated taskgroup surface), #1855 (dev stack overflows in TIR lowering), #1856 (snapshot and encoding-parity failures).",
+          "at": "2026-08-10T11:19:49.982Z"
         }
       ],
       "refs": [],
@@ -115651,8 +115657,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T10:36:31.119Z",
-      "updated": "2026-08-10T10:36:41.854Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-10T11:19:49.982Z",
+      "updatedBy": "luna-1849"
     },
     {
       "id": "c0l88t71",
@@ -115660,6 +115666,149 @@
       "title": "Test-suite guard rails: in-process allocation cap and wall-clock watchdog for every test binary",
       "body": "A hung test binary can eat all RAM and swap over hours; the kernel OOM kill then tears down the whole agent session scope. Add harness-owned guards, no system-level limits: a capped global allocator plus a deadline watchdog in tests/common, wired into every tests/*.rs binary, env-tunable, abort with a clear message naming the guard.",
       "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/common guard: capped global allocator (JET_TEST_ALLOC_CAP_GB, default well under machine RAM) aborts with clear message",
+          "status": "met",
+          "metBy": "luna-1850",
+          "verifiedBy": null,
+          "evidence": "tests/common/mod.rs:22-64 GuardedAlloc (#[global_allocator] wrapping System, AtomicI64 live-byte counter, JET_TEST_ALLOC_CAP_GB default 10, lazy one-time env read via CAP_INIT_STARTED flag). Tripped explicitly: JET_TEST_ALLOC_CAP_GB=1 timeout 120 scripts/agent/jet-env cargo test --test guard_selftest -- --ignored alloc_cap --test-threads=1 -> 'jet test guard: allocation cap 1 GB exceeded' + SIGABRT.",
+          "at": "2026-08-10T10:53:59.892Z"
+        },
+        {
+          "n": 2,
+          "text": "wall-clock watchdog (JET_TEST_DEADLINE_SECS) aborts hung binaries; both guards wired into every tests/*.rs binary",
+          "status": "met",
+          "metBy": "luna-1850",
+          "verifiedBy": null,
+          "evidence": "tests/common/mod.rs:66-100 lazily-spawned watchdog thread (JET_TEST_DEADLINE_SECS, default 900s/15min per owner correction 2026-08-10 - suite budget, not raiseable). Wired mod common; into all 226 tests/*.rs binaries (138 were missing it; 4 needed reordering after a leading #![cfg]/#![allow] inner attribute). Tripped explicitly: JET_TEST_DEADLINE_SECS=3 timeout 60 scripts/agent/jet-env cargo test --test guard_selftest -- --ignored deadline --test-threads=1 -> 'jet test guard: exceeded the 3s suite budget - aborting; this suite must be split or sped up, not given a longer deadline' + SIGABRT.",
+          "at": "2026-08-10T10:54:04.906Z"
+        },
+        {
+          "n": 3,
+          "text": "guard self-test proves both trip; full targeted proof run stays green",
+          "status": "met",
+          "metBy": "luna-1850",
+          "verifiedBy": null,
+          "evidence": "tests/guard_selftest.rs: alloc_cap_guard_trips + deadline_guard_trips (#[ignore]d, both proven above) and guards_stay_quiet_on_a_healthy_run (passes clean, default caps). Bounded normal-suite proof: timeout 200 scripts/agent/jet-env cargo test --test bitwise_not -> 7 passed; timeout 200 ... --test power_and_exclusive_or -> 10 passed; guards silent, no false trips. Branch bd1850/guards commit c3dbb9e6e in .claude/worktrees/agent-a70856dfe205e1bff (builder worktree was unreachable to a worktree-isolated agent for git ops; released its claim immediately).",
+          "at": "2026-08-10T10:54:10.808Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T10:36:34.049Z",
+      "updated": "2026-08-10T10:54:10.808Z",
+      "updatedBy": "luna-1850"
+    },
+    {
+      "id": "c07zh827",
+      "num": 1851,
+      "title": "Suite time budget: no test binary runs longer than 15 minutes",
+      "body": "Owner law 2026-08-10: a suite that needs more than 15-20 minutes is itself defective — the wall-clock watchdog (card 1850) is only a backstop at 900s. Inventory per-binary wall time across tests/, then split or speed every offender: share compiled fixtures, cut redundant end-to-end compiles, split giant binaries into focused ones.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Timing inventory: wall time per tests/*.rs binary recorded (one bounded full pass), offenders over 900s listed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:49:41.146Z"
+        },
+        {
+          "n": 2,
+          "text": "Every binary over 15 min split or sped; whole suite green with watchdog default 900s",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:49:41.540Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T10:49:34.713Z",
+      "updated": "2026-08-10T10:49:41.540Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0e3zbdu",
+      "num": 1852,
+      "title": "Orphaned scheduler experiment (sched2): evaluate or reject",
+      "body": "Recovery audit found .claude/recovery/sched2-adjacent: an Aug 7 rewrite of Prelude/Scheduler.rs (1878-line diff) replacing the work-stealing pool and wait-boundary machinery with a simplified panic-hook design, citing D-CANCELMODEL1=C and D-SHIELDNAME1=A, with real test suites and an AOT/JIT/interpreter parity script. Never applied; no card, no branch, no owner. Decide: port it behind a card, or reject explicitly and record why. Unrelated to closed card 1637 (different fork).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T10:49:35.083Z",
+      "updated": "2026-08-10T10:49:35.083Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c053e5jw",
+      "num": 1853,
+      "title": "Program allocator: one way to swap or wrap the whole program's memory allocator",
+      "body": "Owner ask 2026-08-10: Jet needs the equivalent of Rust's global allocator — a way to make every allocation in a program go through an allocator you name, such as a counting or capping wrapper. Jet already has scoped allocators (arenas, fixed) and freestanding profiles already declare an allocator as a typed fact (D-TARGET-ALLOC1). This card carries the ballot for how hosted programs name theirs.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T10:50:33.311Z",
+      "updated": "2026-08-10T10:51:56.357Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0inuw9a",
+      "num": 1854,
+      "title": "taskgroup surface is unmigrated: old taskgroup and g.task spellings no longer parse",
+      "body": "The checkpoint fef006684 moved the concurrency surface to D-CONC-SPAWN1=D (INTERNAL_TASK_RECEIVER / task.group in crates/jet-foundation/src/Syntax/effects_surface.rs) but did not migrate the old spellings. Every taskgroup example and test still writes the retired form and now fails with E0003 (\"this line computes a value but doesn't do anything with it\" on `taskgroup`, and \"something unexpected appeared after this line, found `=>`\" on `g.task => …`). Confirmed on examples/features/concurrency/taskgroup.jet and 7 of 12 tests in tests/taskgroup_params.rs. Greenfield law: migrate every in-repo consumer and delete the replaced form.",
+      "kind": "bug",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
@@ -115672,39 +115821,78 @@
       "criteria": [
         {
           "n": 1,
-          "text": "tests/common guard: capped global allocator (JET_TEST_ALLOC_CAP_GB, default well under machine RAM) aborts with clear message",
+          "text": "Every in-repo consumer of the retired taskgroup/g.task spelling migrates to the ratified surface; the retired form is deleted",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-10T10:36:42.236Z"
+          "at": "2026-08-10T11:19:31.184Z"
         },
         {
           "n": 2,
-          "text": "wall-clock watchdog (JET_TEST_DEADLINE_SECS) aborts hung binaries; both guards wired into every tests/*.rs binary",
+          "text": "tests/taskgroup_params.rs and examples/features/concurrency/*.jet pass on every applicable tier (I9)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-10T10:36:42.598Z"
-        },
-        {
-          "n": 3,
-          "text": "guard self-test proves both trip; full targeted proof run stays green",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T10:36:42.970Z"
+          "at": "2026-08-10T11:19:31.570Z"
         }
       ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
-      "created": "2026-08-10T10:36:34.049Z",
-      "updated": "2026-08-10T10:36:42.970Z",
-      "updatedBy": "fable"
+      "created": "2026-08-10T11:19:22.497Z",
+      "updated": "2026-08-10T11:19:31.570Z",
+      "updatedBy": "luna-1849"
+    },
+    {
+      "id": "c06xk3eb",
+      "num": 1855,
+      "title": "dev suite aborts on stack overflow in TIR lowering",
+      "body": "With the parser OOM fixed, tests/dev.rs no longer allocates (peak RSS under 5 MB) but aborts the whole binary on stack overflow, first in array_of_structs_field_mutation_three_way and, after skipping that one, in body_only_edit_is_type_stable. Suspect: checkpoint fef006684 added prepare_interrupt_callback_locals at the top of lower_stmts (crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:445), so every nested statement list re-walks its whole subtree while lowering is already deep. That roughly doubles peak lowering stack, which the default 2 MiB test thread cannot absorb. Hoist the interrupt-callback scan to one pass per function instead of one per statement list.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T11:19:41.379Z",
+      "updated": "2026-08-10T11:19:41.379Z",
+      "updatedBy": "luna-1849"
+    },
+    {
+      "id": "c0dg1d4b",
+      "num": 1856,
+      "title": "diagnostic_snapshots and encoding_parity fail after the TIR-eval checkpoint",
+      "body": "Bounded runs after the parser OOM fix: diagnostic_snapshots fails ui_snapshots and lint_snapshots; encoding_parity fails json_stream_reader_writer_matches_aot_and_default_dev; tests/dev.rs fails all_failfast_jit_stderr_matches_aot_golden. These are content failures from the in-flight batch in fef006684, not memory failures. Rebless or fix per the verify skill.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T11:19:41.772Z",
+      "updated": "2026-08-10T11:19:41.773Z",
+      "updatedBy": "luna-1849"
     }
   ],
   "decisions": [
@@ -154362,6 +154550,103 @@
       "created": "2026-08-09T01:01:01.433Z",
       "outcome": "D",
       "ratifiedAt": "2026-08-09"
+    },
+    {
+      "id": "D-ALLOC-PROGRAM1",
+      "cardId": "c053e5jw",
+      "group": "runtime",
+      "title": "Program allocator: how a program swaps or wraps its memory allocator",
+      "gist": "How a Jet program names the allocator that serves every allocation in it.",
+      "lesson": "Every program needs memory while it runs. An allocator is the part that hands out that memory. Most programs never think about it and use a hidden default. Sometimes you want to swap it or wrap it: count every byte, cap total use, trace leaks, or use a faster allocator for a game. Rust calls this the global allocator. Jet has scoped allocators (arenas, fixed buffers) but no way to change the allocator for a whole program.",
+      "explainer": "",
+      "story": "Last night a test program looped and quietly ate 34 gigabytes. The machine ran out of memory and the kernel killed every agent session on it. Overnight work was lost. A capped wrapping allocator would have stopped that program in seconds with a clear error. Nate wants every Jet program to be able to name such an allocator — the same power Rust's global allocator gives, in one clean Jet spelling.",
+      "inWild": "// A test harness wants a hard memory cap.\n// With a capped program allocator, a runaway test dies fast and clean:\n//\n//   error: allocation cap 2 GB exceeded\n//   the program asked for more memory than its cap allows\n//   fix: raise the cap in package.jet, or find the leak\n//\n// Without one, the same bug eats all RAM and the kernel kills the machine's sessions.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Profile fact in package.jet",
+          "detail": "The package file names the program allocator, the same way freestanding targets already name theirs. Code does not change. Beginners never see it. The build dossier shows it, so audits see exactly which allocator shipped.",
+          "technical": "Extends the ratified D-TARGET-ALLOC1 typed profile fact from freestanding profiles to hosted programs. The fact names any value whose type implements the core allocator trait. Sema validates it; codegen routes the program heap through it on every tier (I9). Absent fact = hidden default, unchanged.",
+          "code": "// package.jet\npackage.{\n  name: \"game_server\",\n  allocator: mem.Counting.over(mem.Heap, cap: 2.gb),\n}\n\n// main.jet — nothing changes\nfn run() {\n  players :: List.new()   // every allocation now counts against 2 GB\n}"
+        },
+        {
+          "key": "B",
+          "name": "Marker on one binding in the entry file",
+          "detail": "A marker names one binding as the program allocator, like Rust. The choice lives in code, so it travels with the source and needs no package file. Sema rejects two markers or a marker outside the entry file.",
+          "technical": "New ratified marker (I7) valid on one top-level binding in the entry module. Duplicate marker and wrong-placement diagnostics required. Same allocator trait and tier-parity rules as option A.",
+          "code": "// main.jet (entry file)\n#Allocator\nguard :: mem.Counting.over(mem.Heap, cap: 2.gb)\n\nfn run() {\n  players :: List.new()   // allocates through guard\n}"
+        },
+        {
+          "key": "C",
+          "name": "Scoped allocator block",
+          "detail": "A block makes everything inside it allocate through a named allocator, like Jai and Odin contexts. Wrapping run() covers the whole program. Fine control, but the ambient rule must answer hard questions: what happens across task boundaries, stored values, and returns.",
+          "technical": "Ambient allocator as dynamic scope. Needs defined behavior for values that outlive the block, task spawn inheritance, and interaction with arenas and #Region. Highest semantic surface of the four.",
+          "code": "fn run() {\n  guard :: mem.Counting.over(mem.Heap, cap: 2.gb)\n  #Alloc(guard) {\n    players :: List.new()   // inside the block, allocations go through guard\n  }\n}"
+        },
+        {
+          "key": "D",
+          "name": "No program allocator — scoped only",
+          "detail": "Keep today's surface: hidden default plus explicit arenas and fixed buffers where you choose them, like Zig's explicit style. Honest and simple, but there is no way to wrap every allocation, so caps, counting, and leak tracing stay impossible program-wide.",
+          "technical": "Status quo. D-REGION1 arenas and D-FIXED-BACKING1 fixed buffers remain the only user-facing allocators.",
+          "code": "fn run() {\n  arena :: mem.Arena.new(capacity: 4096)\n  players :: arena.alloc(List.new())   // per-value choice; the default heap stays hidden\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "One attribute on one static swaps the program allocator.",
+          "code": "#[global_allocator]\nstatic A: MyAlloc = MyAlloc;"
+        },
+        {
+          "lang": "Zig",
+          "note": "No global. Every function takes an allocator argument; maximum honesty, maximum ceremony.",
+          "code": "var list = std.ArrayList(u8).init(allocator);"
+        },
+        {
+          "lang": "Odin / Jai",
+          "note": "An implicit context carries the allocator; blocks override it in scope.",
+          "code": "context.allocator = pool_allocator\nthing := new(Thing)"
+        },
+        {
+          "lang": "C++",
+          "note": "Replace global operator new and delete anywhere in the program; powerful and famously easy to get wrong.",
+          "code": "void* operator new(std::size_t n) { return my_alloc(n); }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Freestanding Jet already names its allocator as a typed profile fact (D-TARGET-ALLOC1, ratified). Extending that one fact to hosted programs keeps one mechanism for every target (I8). The allocator is a whole-program shipping fact, so it belongs beside the program's other shipping facts, visible in the audit dossier. Beginners never touch it; experts get swap, wrap, cap, and trace with one line.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It hides a whole-program fact inside one source file and adds a new marker plus placement diagnostics. Once freestanding uses profile facts, a marker is a second mechanism for the same fact."
+          },
+          {
+            "key": "C",
+            "reason": "An ambient scoped allocator must answer escape, storage, and task-boundary questions that arenas and #Region already answer. It duplicates Jet's existing scoped tier at high semantic cost."
+          },
+          {
+            "key": "D",
+            "reason": "It leaves counting, capping, and tracing impossible program-wide. Last night's crash is the direct cost of that gap."
+          }
+        ],
+        "tradeoff": "Swapping allocators means editing package.jet, not just code. A quick experiment touches configuration. That is one clear named line, and the choice stays where audits can see it."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a package profile fact, a Rust-style entry marker, a scoped ambient block, and the status quo. It recommended the profile fact because freestanding targets already ratified exactly that shape.",
+        "boilOcean": "The breadth pass also weighed a build flag, linker-level interposition, and per-package allocators. The first two folded into option A as spellings of the same fact; per-package allocators were dropped for creating two heaps in one program.",
+        "hybrid": "The hybrid pass tested profile fact plus scoped block together, but arenas and #Region already are Jet's scoped tier, so it collapsed back to option A. Wrapper composition (mem.Counting.over) was kept so one fact also covers wrapping.",
+        "cooperative": "The cooperative pass strengthened each option: the marker is greppable and mirrors Rust habits, the block matches Odin and Jai practice, and the status quo is Zig's honest explicitness. Each option now shows its best real form.",
+        "adversarial": "The adversarial pass attacked option A on custom allocators, test harnesses, and config friction. The fact accepts any user allocator value, tests set it in their env profile, and the recommendation survived unchanged."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-10T10:51:56.357Z"
     }
   ],
   "questions": [
@@ -155938,9 +156223,179 @@
       "status": "tagged",
       "created": "2026-08-05T19:47:55.297Z",
       "cardId": "c06k75xs"
+    },
+    {
+      "id": "b02bgft8",
+      "text": "Ensure we can support == operator for all primitives out of the box and consider an autoderive for it",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-10T10:57:46.323Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-10T11:19:49.982Z",
+      "by": "luna-1849",
+      "action": "card.criteria-meet",
+      "ref": "c08s2exr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:19:41.773Z",
+      "by": "luna-1849",
+      "action": "card.add",
+      "ref": "c0dg1d4b",
+      "note": "diagnostic_snapshots and encoding_parity fail after the TIR-eval checkpoint"
+    },
+    {
+      "at": "2026-08-10T11:19:41.379Z",
+      "by": "luna-1849",
+      "action": "card.add",
+      "ref": "c06xk3eb",
+      "note": "dev suite aborts on stack overflow in TIR lowering"
+    },
+    {
+      "at": "2026-08-10T11:19:31.570Z",
+      "by": "luna-1849",
+      "action": "card.criteria-add",
+      "ref": "c0inuw9a",
+      "note": "#2 tests/taskgroup_params.rs and examples/features/concurrency/"
+    },
+    {
+      "at": "2026-08-10T11:19:31.185Z",
+      "by": "luna-1849",
+      "action": "card.criteria-add",
+      "ref": "c0inuw9a",
+      "note": "#1 Every in-repo consumer of the retired taskgroup/g.task spell"
+    },
+    {
+      "at": "2026-08-10T11:19:30.814Z",
+      "by": "luna-1849",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "title"
+    },
+    {
+      "at": "2026-08-10T11:19:22.497Z",
+      "by": "luna-1849",
+      "action": "card.add",
+      "ref": "c0inuw9a",
+      "note": "taskgroup surface is unmigrated:  and  no longer parse"
+    },
+    {
+      "at": "2026-08-10T11:19:02.574Z",
+      "by": "luna-1849",
+      "action": "card.criteria-meet",
+      "ref": "c08s2exr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:18:53.305Z",
+      "by": "luna-1849",
+      "action": "card.criteria-meet",
+      "ref": "c08s2exr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T10:57:46.323Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b02bgft8",
+      "note": "Ensure we can support == operator for all primitives out of "
+    },
+    {
+      "at": "2026-08-10T10:54:18.707Z",
+      "by": "luna-1850",
+      "action": "papercut.add",
+      "ref": "pc0opyd3q",
+      "note": ""
+    },
+    {
+      "at": "2026-08-10T10:54:10.808Z",
+      "by": "luna-1850",
+      "action": "card.criteria-meet",
+      "ref": "c0l88t71",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-10T10:54:04.906Z",
+      "by": "luna-1850",
+      "action": "card.criteria-meet",
+      "ref": "c0l88t71",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T10:53:59.892Z",
+      "by": "luna-1850",
+      "action": "card.criteria-meet",
+      "ref": "c0l88t71",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T10:51:56.357Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-ALLOC-PROGRAM1",
+      "note": "Program allocator: how a program swaps or wraps its memory allocator"
+    },
+    {
+      "at": "2026-08-10T10:50:33.311Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c053e5jw",
+      "note": "Program allocator: one way to swap or wrap the whole program's memory allocator"
+    },
+    {
+      "at": "2026-08-10T10:49:41.540Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c07zh827",
+      "note": "#2 Every binary over 15 min split or sped; whole suite green wi"
+    },
+    {
+      "at": "2026-08-10T10:49:41.147Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c07zh827",
+      "note": "#1 Timing inventory: wall time per tests/*.rs binary recorded ("
+    },
+    {
+      "at": "2026-08-10T10:49:35.084Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0e3zbdu",
+      "note": "Orphaned scheduler experiment (sched2): evaluate or reject"
+    },
+    {
+      "at": "2026-08-10T10:49:34.713Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c07zh827",
+      "note": "Suite time budget: no test binary runs longer than 15 minutes"
+    },
+    {
+      "at": "2026-08-10T10:49:28.768Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c034gmb5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-10T10:39:59.086Z",
+      "by": "luna-1850",
+      "action": "card.update",
+      "ref": "c0l88t71",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T10:38:47.500Z",
+      "by": "luna-1849",
+      "action": "card.update",
+      "ref": "c08s2exr",
+      "note": "phase"
+    },
     {
       "at": "2026-08-10T10:36:42.970Z",
       "by": "fable",
@@ -159279,167 +159734,6 @@
       "action": "card.criteria-meet",
       "ref": "c0yapq7b",
       "note": "#5"
-    },
-    {
-      "at": "2026-08-09T11:08:33.042Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0yapq7b",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-09T11:08:32.524Z",
-      "by": "bd26-luna-1711",
-      "action": "card.criteria-meet",
-      "ref": "c0yapq7b",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-09T11:08:32.149Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0yapq7b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:31.771Z",
-      "by": "bd26-luna-1711",
-      "action": "card.criteria-meet",
-      "ref": "c0yapq7b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:31.013Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0yapq7b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:30.196Z",
-      "by": "bd26-luna-1711",
-      "action": "card.criteria-meet",
-      "ref": "c0yapq7b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:29.427Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0yapq7b",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:29.047Z",
-      "by": "bd26-luna-1711",
-      "action": "card.criteria-meet",
-      "ref": "c0yapq7b",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:27.825Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c0n8g5cz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-09T11:08:26.583Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0n8g5cz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:25.621Z",
-      "by": "bd26-luna-1704",
-      "action": "card.criteria-meet",
-      "ref": "c0n8g5cz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:24.768Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0n8g5cz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:23.918Z",
-      "by": "bd26-luna-1704",
-      "action": "card.criteria-meet",
-      "ref": "c0n8g5cz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:23.325Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0n8g5cz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:22.495Z",
-      "by": "bd26-luna-1704",
-      "action": "card.criteria-meet",
-      "ref": "c0n8g5cz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:21.240Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c0zeubzg",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-09T11:08:20.447Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0zeubzg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:19.571Z",
-      "by": "bd26-luna-1700",
-      "action": "card.criteria-meet",
-      "ref": "c0zeubzg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:18.588Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0zeubzg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:18.177Z",
-      "by": "bd26-luna-1700",
-      "action": "card.criteria-meet",
-      "ref": "c0zeubzg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:17.253Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0zeubzg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:16.322Z",
-      "by": "bd26-luna-1700",
-      "action": "card.criteria-meet",
-      "ref": "c0zeubzg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:15.062Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c04y8xqp",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
@@ -159911,6 +160205,14 @@
       "text": "scripts/agent/jet-env cargo check cannot reach the Nix daemon socket under sandbox; local cargo fallback lacks a complete linker/sysroot.",
       "cardId": null,
       "created": "2026-08-09T18:33:47.424Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0opyd3q",
+      "by": "luna-1850",
+      "text": "Worktree-isolated agents (spawned already sandboxed to .claude/worktrees/agent-*) cannot do git ops in the shared builder worktree: any bash command that cd's to .claude/worktrees/builder and runs git is hard-refused by the sandbox ('git operations must target its own worktree'), even for builder-sync.sh --release itself if cd'd there first. builder-sync.sh succeeds (claims the lock) but is then unusable for git in that session. Card #1850: fell back to the agent's own isolated worktree per the exit-75 contingency, and released the builder lock via the script's bare 'rm -f' path (no cd needed) so it didn't sit claimed.",
+      "cardId": null,
+      "created": "2026-08-10T10:54:18.707Z",
       "status": "open"
     }
   ]
