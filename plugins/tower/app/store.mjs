@@ -543,6 +543,59 @@ export function project(s, config = null, history = null) {
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
 }
 
+const timestamp = (value) => {
+  if (!value) return null;
+  const raw = String(value);
+  const parsed = Date.parse(raw.length <= 10 ? `${raw}T00:00:00Z` : raw);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+function cardEventTime(events, card, predicate, after = -Infinity) {
+  const refs = new Set([card.id, `#${card.num}`, String(card.num)]);
+  return events
+    .filter(event => refs.has(String(event.ref)) && predicate(event))
+    .map(event => timestamp(event.at))
+    .filter(at => at != null && at > after)
+    .reduce((latest, at) => Math.max(latest, at), null);
+}
+
+function wasOpenAt(card, cutoff, events) {
+  const created = timestamp(card.created)
+    ?? cardEventTime(events, card, event => event.action === 'card.add');
+  if (created != null && created > cutoff) return false;
+  if (card.phase !== 'done' && card.phase !== 'frozen') return true;
+  const completed = card.phase === 'done'
+    ? timestamp(card.completedAt)
+      ?? cardEventTime(events, card, event => event.action === 'card.update' && /(?:^|,)phase(?:,|$)/.test(event.note || ''), cutoff)
+      ?? timestamp(completionTime(card))
+    : null;
+  return completed != null && completed > cutoff;
+}
+
+// The store already keeps card creation/completion timestamps and archived
+// card snapshots. Reconstruct the window's opening count from those records;
+// no separate counter can drift from the board.
+export function openCountTrend(s, history, days = 7, at = Date.now()) {
+  const windowDays = Math.max(1, Math.floor(Number(days) || 7));
+  const end = Number.isFinite(at) ? at : Date.now();
+  const cutoff = end - windowDays * DAY_MS;
+  const events = [...(history?.events || []), ...(s?.events || [])];
+  const known = new Map();
+  for (const card of [...(s?.cards || []), ...(history?.cards || [])]) {
+    const key = card.id ?? `#${card.num}`;
+    if (!known.has(key)) known.set(key, card);
+  }
+  const openNow = (s?.cards || []).filter(card => card.phase !== 'done' && card.phase !== 'frozen').length;
+  const openAtStart = [...known.values()].filter(card => wasOpenAt(card, cutoff, events)).length;
+  return {
+    windowDays,
+    since: new Date(cutoff).toISOString(),
+    openAtStart,
+    openNow,
+    delta: openNow - openAtStart,
+  };
+}
+
 // ---- resolution helpers ----------------------------------------------------
 
 // Accept a card by id or by tracking number ("#12" or "12").

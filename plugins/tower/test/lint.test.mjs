@@ -10,7 +10,8 @@ import { openStore, empty } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
-  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleBallotDocGaps } from '../app/lint.mjs';
+  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleBallotDocGaps,
+  ruleDuplicateSuspects } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 
@@ -230,7 +231,27 @@ test('ruleBallotDocGaps: no docs/ballots dir is clean, never throws', () => {
   assert.deepEqual(ruleBallotDocGaps(empty('T'), { decisions: [] }, { docsRoot }), []);
 });
 
-// ---- 8. lint() aggregator ------------------------------------------------------------
+// ---- 8. duplicate-suspect -------------------------------------------------------
+
+test('duplicate-suspect: flags shared test references only among open cards', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Parser symptom A', body: 'fails in tests/parser.rs at some_test_name',
+  }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Parser symptom B', body: 'fails in tests/parser.rs at some_test_name',
+  }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Closed parser symptom', phase: 'done', body: 'fails in tests/parser.rs at some_test_name',
+  }, cfg));
+  const findings = ruleDuplicateSuspects(st.load());
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule, 'duplicate-suspect');
+  assert.equal(findings[0].ref, '#1,#2');
+  assert.match(findings[0].msg, /tests\/parser\.rs/);
+});
+
+// ---- 9. lint() aggregator ------------------------------------------------------------
 
 test('lint(): combines core rules; --docs adds the doc-gap rule only when asked', () => {
   const st = fresh();
@@ -253,7 +274,7 @@ test('lint(): combines core rules; --docs adds the doc-gap rule only when asked'
   assert.ok(withDocs.some(f => f.rule === 'ratified-in-open-ballot-doc'));
 });
 
-// ---- 9. burndown scope --------------------------------------------------------------
+// ---- 10. burndown scope --------------------------------------------------------------
 
 test('nextCards burndown scope: current-epoch epoch-track + sidequests, other epochs excluded', () => {
   const st = fresh();
@@ -273,7 +294,7 @@ test('nextCards burndown scope: current-epoch epoch-track + sidequests, other ep
   assert.deepEqual(unscoped, ['In current epoch', 'Other epoch', 'Sidequest'], 'no scope → all agent-lane cards');
 });
 
-// ---- 10. CLI wiring: tower lint + tower next --burndown ------------------------------
+// ---- 11. CLI wiring: tower lint + tower next --burndown ------------------------------
 
 const run = (cwd, args, ok = true) => {
   try {
@@ -300,6 +321,17 @@ test('cli: tower lint exits 1 and reports a finding once one exists', () => {
   const r = run(cwd, ['lint'], false);
   assert.equal(r.code, 1);
   assert.match(r.out, /done-without-evidence\s+#1/);
+});
+
+test('cli: tower lint --json exits 1 for shared open test references', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-lint-duplicate-cli-'));
+  run(cwd, ['init', '--name', 'Lint Duplicate Test']);
+  run(cwd, ['card', 'add', '--title', 'A', '--body', 'fails in tests/shared.rs at shared_test_name']);
+  run(cwd, ['card', 'add', '--title', 'B', '--body', 'fails in tests/shared.rs at shared_test_name']);
+  const r = run(cwd, ['lint', '--json'], false);
+  assert.equal(r.code, 1);
+  const findings = JSON.parse(r.out);
+  assert.ok(findings.some(f => f.rule === 'duplicate-suspect' && f.ref === '#1,#2'));
 });
 
 test('cli: tower lint --docs finds a ratified id in a doc rooted at --docs-root', () => {

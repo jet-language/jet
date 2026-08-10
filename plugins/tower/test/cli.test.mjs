@@ -115,6 +115,62 @@ test('status lists verification before building work', () => {
   assert.ok(out.indexOf('AGENT — verify') < out.indexOf('AGENT — building'));
 });
 
+test('card add probes duplicates, allows separate work, and --force bypasses', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-duplicate-probe-'));
+  run(cwd, ['init', '--name', 'Duplicate Probe']);
+  const first = JSON.parse(run(cwd, [
+    'card', 'add', '--title', 'Fix parser crash on Linux',
+    '--body', 'fails in tests/parser_linux.rs at some_test_name_linux', '--json', '--by', 'tester',
+  ]).out);
+
+  const blocked = run(cwd, [
+    'card', 'add', '--title', 'Fix parser crash on Linux',
+    '--body', 'fails in tests/parser_linux.rs at some_test_name_linux', '--json', '--by', 'tester',
+  ], false);
+  assert.equal(blocked.code, 1);
+  const duplicate = JSON.parse(blocked.out);
+  assert.equal(duplicate.error, 'E_DUPLICATE');
+  assert.deepEqual(duplicate.candidates[0], {
+    id: first.id, num: first.num, title: first.title, phase: first.phase,
+    matches: ['strong title overlap', 'shared tests/parser_linux.rs', 'shared some_test_name_linux'],
+  });
+  assert.equal(JSON.parse(run(cwd, ['card', 'list', '--json']).out).length, 1);
+
+  const separate = JSON.parse(run(cwd, [
+    'card', 'add', '--title', 'Fix parser crash on Windows',
+    '--body', 'fails in tests/parser_windows.rs at some_test_name_windows', '--json', '--by', 'tester',
+  ]).out);
+  assert.equal(separate.num, 2, 'different platform/path is not blocked as a duplicate');
+
+  const forced = JSON.parse(run(cwd, [
+    'card', 'add', '--title', first.title, '--body', first.body,
+    '--force', '--json', '--by', 'tester',
+  ]).out);
+  assert.equal(forced.num, 3, '--force creates despite duplicate candidates');
+});
+
+test('status renders and reports the open-card trend for a chosen window', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-status-trend-'));
+  run(cwd, ['init', '--name', 'Status Trend']);
+  run(cwd, ['card', 'add', '--title', 'Old open card']);
+  const statePath = join(cwd, '.tower', 'tower.json');
+  const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  state.cards[0].created = '2000-01-01T00:00:00.000Z';
+  writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n');
+  run(cwd, ['card', 'add', '--title', 'New open card']);
+
+  const human = run(cwd, ['status', '--days', '7', '--color=never']).out;
+  assert.match(human, /OPEN TREND\s+1 → 2\s+\+1\s+over 7d/);
+  const json = JSON.parse(run(cwd, ['status', '--window', '7', '--json']).out);
+  assert.deepEqual({
+    windowDays: json.trend.windowDays,
+    openAtStart: json.trend.openAtStart,
+    openNow: json.trend.openNow,
+    delta: json.trend.delta,
+  }, { windowDays: 7, openAtStart: 1, openNow: 2, delta: 1 });
+  assert.equal(JSON.parse(run(cwd, ['status', '--json']).out).trend.windowDays, 7);
+});
+
 test('CLI --by owner and --quote cannot resolve acceptance; rejection is audited', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-accept-'));
   run(cwd, ['init', '--name', 'CLI Accept Guard']);

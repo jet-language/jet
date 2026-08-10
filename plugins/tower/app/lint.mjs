@@ -5,6 +5,7 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ballotGaps } from './store.mjs';
+import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 
 // `updated`/`ratifiedAt` are 'YYYY-MM-DD' (today()); `created` on decisions
 // and `at` on events are full ISO timestamps (now()) — handle both.
@@ -129,7 +130,37 @@ export function ruleBlockerUnpopulated(s) {
   return findings;
 }
 
-const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard];
+// ---- rule: duplicate-suspect -----------------------------------------------
+// Two or more open cards naming the same test, fixture, example, or spec
+// reference usually describe one work slice under different symptoms.
+export function ruleDuplicateSuspects(s) {
+  const byReference = new Map();
+  for (const c of s?.cards || []) {
+    if (!isOpenCard(c)) continue;
+    for (const token of referenceTokens(c.body)) {
+      const group = byReference.get(token) || [];
+      group.push(c);
+      byReference.set(token, group);
+    }
+  }
+
+  const groups = new Map();
+  for (const [token, cards] of byReference) {
+    if (cards.length < 2) continue;
+    const key = cards.map(c => c.id ?? `#${c.num}`).join('|');
+    const group = groups.get(key) || { cards, references: [] };
+    group.references.push(referenceLabel(token));
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].map(({ cards, references }) => ({
+    rule: 'duplicate-suspect',
+    ref: cards.map(c => `#${c.num}`).join(','),
+    msg: `open cards share ${references.join(', ')}: ${cards.map(c => `#${c.num} "${c.title ?? '(untitled)'}"`).join('; ')}`,
+  }));
+}
+
+const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleDuplicateSuspects];
 
 // ---- --docs mode: ratified decision id still listed in an open-ballot doc --
 // Precise on purpose: only docs/ballots/*.md (not docs/plans/**), since plans
