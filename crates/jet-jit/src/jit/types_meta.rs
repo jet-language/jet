@@ -200,7 +200,7 @@ pub(crate) fn clif_ty_with_distinct(
                     | "SortedSet"
                     | "PriorityQueue"
                     | "Cache"
-            ))
+            ) || name == jet_foundation::Syntax::TYPE_SHARED_GUARD)
     {
         return Some(types::I64);
     }

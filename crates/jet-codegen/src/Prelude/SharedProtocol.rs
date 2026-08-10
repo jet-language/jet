@@ -178,6 +178,8 @@ pub struct JetConditionProtocol {
         std::collections::VecDeque<(u64, std::sync::Arc<dyn JetConditionWaiter>)>,
     >,
     next_id: std::sync::atomic::AtomicU64,
+    epoch: std::sync::atomic::AtomicU64,
+    pending: std::sync::atomic::AtomicU64,
 }
 
 impl JetConditionProtocol {
@@ -185,6 +187,8 @@ impl JetConditionProtocol {
         std::sync::Arc::new(Self {
             waiters: std::sync::Mutex::new(std::collections::VecDeque::new()),
             next_id: std::sync::atomic::AtomicU64::new(1),
+            epoch: std::sync::atomic::AtomicU64::new(0),
+            pending: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -195,36 +199,72 @@ impl JetConditionProtocol {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.waiters
+        let mut waiters = self
+            .waiters
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .push_back((id, waiter));
+            .unwrap_or_else(|error| error.into_inner());
+        let epoch = self
+            .epoch
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let stale = self
+            .pending
+            .fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |pending| {
+                    if pending > 0 {
+                        Some(pending - 1)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .is_ok();
+        waiters.push_back((id, waiter));
         JetConditionRegistration {
             condition: self.clone(),
             id,
+            epoch,
+            stale,
         }
     }
 
     pub fn notify_one(&self) {
-        let waiter = self
-            .waiters
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .pop_front()
-            .map(|(_, waiter)| waiter);
+        let waiter = {
+            let mut waiters = self
+                .waiters
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            self.epoch
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            let waiter = waiters.pop_front().map(|(_, waiter)| waiter);
+            if waiter.is_none() {
+                self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            waiter
+        };
         if let Some(waiter) = waiter {
             waiter.wake();
         }
     }
 
     pub fn notify_all(&self) {
-        let waiters = self
-            .waiters
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .drain(..)
-            .map(|(_, waiter)| waiter)
-            .collect::<Vec<_>>();
+        let waiters = {
+            let mut registered = self
+                .waiters
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            self.epoch
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            let waiters = registered
+                .drain(..)
+                .map(|(_, waiter)| waiter)
+                .collect::<Vec<_>>();
+            if waiters.is_empty() {
+                self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            waiters
+        };
         for waiter in waiters {
             waiter.wake();
         }
@@ -241,6 +281,19 @@ impl JetConditionProtocol {
 pub struct JetConditionRegistration {
     condition: std::sync::Arc<JetConditionProtocol>,
     id: u64,
+    epoch: u64,
+    stale: bool,
+}
+
+impl JetConditionRegistration {
+    fn saw_notification(&self) -> bool {
+        self.stale
+            || self
+                .condition
+                .epoch
+                .load(std::sync::atomic::Ordering::Acquire)
+                != self.epoch
+    }
 }
 
 impl Drop for JetConditionRegistration {
@@ -276,6 +329,39 @@ impl Drop for JetConditionWaitCleanup<'_> {
     }
 }
 
+fn jet_shared_condition_wait_registered(
+    permit: &JetSharedPermit,
+    registration: JetConditionRegistration,
+    waiter: std::sync::Arc<dyn JetConditionWaiter>,
+) -> Result<(), ()> {
+    let saw_notification = registration.saw_notification();
+    let mut cleanup = JetConditionWaitCleanup {
+        registration: Some(registration),
+        permit,
+        released: false,
+    };
+    cleanup.release();
+    let parked = if saw_notification {
+        Ok(())
+    } else {
+        waiter.park()
+    };
+    drop(cleanup);
+    parked
+}
+
+/// Park one condition-wait iteration after the caller checked its predicate.
+/// The resident engines provide only the waiter adapter; release, registration,
+/// reacquisition, and cleanup remain this Prelude protocol's policy.
+pub fn jet_shared_condition_wait_once(
+    permit: &JetSharedPermit,
+    condition: &std::sync::Arc<JetConditionProtocol>,
+    waiter: std::sync::Arc<dyn JetConditionWaiter>,
+) -> Result<(), ()> {
+    let registration = condition.register(waiter.clone());
+    jet_shared_condition_wait_registered(permit, registration, waiter)
+}
+
 pub fn jet_shared_condition_wait<E>(
     permit: &JetSharedPermit,
     condition: &std::sync::Arc<JetConditionProtocol>,
@@ -292,14 +378,7 @@ pub fn jet_shared_condition_wait<E>(
             drop(registration);
             return Ok(());
         }
-        let mut cleanup = JetConditionWaitCleanup {
-            registration: Some(registration),
-            permit,
-            released: false,
-        };
-        cleanup.release();
-        let parked = waiter.park();
-        drop(cleanup);
+        let parked = jet_shared_condition_wait_registered(permit, registration, waiter);
         if parked.is_err() {
             return Err(JetConditionWaitError::Cancelled);
         }
@@ -428,6 +507,25 @@ mod shared_protocol_tests {
         assert!(permit.held());
         drop(permit);
         assert!(protocol.acquire(true, || false).is_some());
+    }
+
+    #[test]
+    fn notify_before_registration_becomes_a_spurious_wake() {
+        let protocol = JetSharedProtocol::new();
+        let condition = JetConditionProtocol::new();
+        let permit = protocol.acquire(true, || false).unwrap();
+        condition.notify_one();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            jet_shared_condition_wait_once(
+                &permit,
+                &condition,
+                std::sync::Arc::new(PanicWaiter),
+            )
+        }));
+
+        assert!(result.is_ok());
+        assert!(permit.held());
     }
 
     #[test]
