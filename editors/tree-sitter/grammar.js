@@ -148,8 +148,8 @@ module.exports = grammar({
     marker_decl: ($) => seq($.attribute, "{", commaSep($.identifier), "}"),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
-    // `use core.encoding.json as json`, `use "./file.jet"`, or a group
-    // `use math.{double, triple}`.
+    // `use core.encoding.json as json`, `use "./file.jet"`, or a member list
+    // `use math.[double, triple]`.
     use_stmt: ($) =>
       seq(
         optional("pub"),
@@ -159,10 +159,15 @@ module.exports = grammar({
         optional(seq("as", field("alias", $.identifier))),
       ),
 
-    // `.{ a, b }` import-group suffix on a `use` path (D-MOD3). The whole `.{`
-    // is one token so it never competes with a path-extending `.`.
+    // `.[ a, b as c ]` member-list suffix on a `use` path (D-CORE-USELIST1).
+    // The whole `.[` is one token so it never competes with a path-extending
+    // `.`; entries may be dotted paths and may carry an `as` alias.
     use_group: ($) =>
-      seq(alias(token(/\.\s*\{/), "."), commaSep1($.identifier), "}"),
+      seq(
+        alias(token(/\.\s*\[/), "."),
+        commaSep1(seq($.module_path, optional(seq("as", $.identifier)))),
+        "]",
+      ),
 
     module_path: ($) => sep1($.identifier, "."),
 

@@ -105,81 +105,43 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Ident(_) => {
                     // Peek ahead to decide which import form this is:
-                    //   use ident.[A, B]    → Unqualified group
                     //   use ident.ident ;   → Unqualified single (no `as`)
-                    //   use ident.ident.*   → error: wildcard
-                    //   use ident ...       → Module (may have dots + `as alias`)
+                    //   use ident …         → dotted path; `import_decl_module_path`
+                    //                         also owns the `.[…]`, `.{…}`, and `.*`
+                    //                         suffixes, at any path depth
                     let (first, first_span) = self.expect_ident("after `use`")?;
                     if matches!(self.peek().kind, TokKind::Dot) {
                         // Look two tokens ahead (past the dot).
-                        let after_dot = &self.peek2().kind;
-                        match after_dot {
-                            TokKind::LBrace => Err(Diagnostic::error(
-                                "E0003",
-                                "`.{…}` is retired for selective imports".to_string(),
-                                "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
-                                "write `use alias.[item, other as local]`".to_string(),
-                                Some(self.peek2().span),
-                            )),
-                            TokKind::LBracket => {
-                                self.bump(); // consume `.`
-                                self.import_decl_unqualified_list(start, first, first_span)
-                            }
-                            TokKind::Star => {
-                                // use alias.* — wildcard: reject
-                                self.bump(); // consume `.`
-                                let star_span = self.bump().span; // consume `*`
-                                return Err(Diagnostic::error(
-                                    "E0612",
-                                    "wildcard imports are not supported".to_string(),
-                                    "`use math.*` would hide where each name comes from".to_string(),
-                                    "list each item instead: `use math.[clamp, lerp]`".to_string(),
-                                    Some(star_span),
-                                ));
-                            }
-                            TokKind::Ident(_) => {
-                                if first == Syntax::PROJECT_IMPORT_ROOT {
-                                    return self.import_decl_module_path(
-                                        start,
-                                        first,
-                                        first_span,
-                                    );
-                                }
-                                // Check if token after the item ident is `;` (no `as`, no more dots).
-                                // peek3() is 2 positions past current (dot + ident).
-                                let after_item = &self.peek3().kind;
-                                if matches!(after_item, TokKind::Semi | TokKind::Eof) {
-                                    // use alias.item ; — Unqualified single (no alias for single form)
-                                    self.bump(); // consume `.`
-                                    let (item, item_span) =
-                                        self.expect_ident("after `.` in a `use` import")?;
-                                    let items_span = item_span;
-                                    self.expect(TokKind::Semi, "after an import")?;
-                                    let end = self.toks[self.pos - 1].span.end;
-                                    Ok(crate::AST::ImportDecl {
-                                        kind: crate::AST::ImportKind::Unqualified {
-                                            module_alias: first,
-                                            module_alias_span: first_span,
-                                            items: vec![(item.clone(), None)],
-                                            items_span,
-                                            span: Span::new(start.start, end),
-                                        },
-                                        alias: item.clone(),
-                                        alias_span: item_span,
-                                        span: Span::new(start.start, end),
-                                        is_pub: false,
-                                        is_package_pub: false,
-                                        inline_version: None,
-                                    })
-                                } else {
-                                    // use core.files as fs — Module path with dots
-                                    self.import_decl_module_path(start, first, first_span)
-                                }
-                            }
-                            _ => {
-                                // use alias. <something unexpected> — fall through to module path
-                                self.import_decl_module_path(start, first, first_span)
-                            }
+                        if matches!(self.peek2().kind, TokKind::Ident(_))
+                            && first != Syntax::PROJECT_IMPORT_ROOT
+                            // The token after the item ident: `;` means the item
+                            // ended, so this is the single-item form.
+                            && matches!(self.peek3().kind, TokKind::Semi | TokKind::Eof)
+                        {
+                            // use alias.item ; — Unqualified single (no alias for single form)
+                            self.bump(); // consume `.`
+                            let (item, item_span) =
+                                self.expect_ident("after `.` in a `use` import")?;
+                            let items_span = item_span;
+                            self.expect(TokKind::Semi, "after an import")?;
+                            let end = self.toks[self.pos - 1].span.end;
+                            Ok(crate::AST::ImportDecl {
+                                kind: crate::AST::ImportKind::Unqualified {
+                                    module_alias: first,
+                                    module_alias_span: first_span,
+                                    items: vec![(item.clone(), None)],
+                                    items_span,
+                                    span: Span::new(start.start, end),
+                                },
+                                alias: item.clone(),
+                                alias_span: item_span,
+                                span: Span::new(start.start, end),
+                                is_pub: false,
+                                is_package_pub: false,
+                                inline_version: None,
+                            })
+                        } else {
+                            self.import_decl_module_path(start, first, first_span)
                         }
                     } else {
                         // No dot: use module_name (optionally `as alias`)
@@ -258,10 +220,18 @@ impl<'a> Parser<'a> {
             first: String,
             first_span: Span,
         ) -> Result<crate::AST::ImportDecl, Diagnostic> {
-            // Continue eating dots to build the full dotted name.
+            // Continue eating dots to build the full dotted name. A dot that
+            // introduces `[` (the member list), `{` (the retired group), or `*`
+            // (a wildcard) belongs to that suffix, not to the path — otherwise
+            // `use core.math.[abs, min]` would demand a name after the last dot.
             let mut name = first;
             let mut end = first_span.end;
-            while matches!(self.peek().kind, TokKind::Dot) {
+            while matches!(self.peek().kind, TokKind::Dot)
+                && !matches!(
+                    self.peek2().kind,
+                    TokKind::LBracket | TokKind::LBrace | TokKind::Star
+                )
+            {
                 self.bump();
                 let (part, span) = self.expect_ident("after `.` in an import")?;
                 name.push('.');
@@ -269,6 +239,19 @@ impl<'a> Parser<'a> {
                 end = span.end;
             }
             let module_span = Span::new(first_span.start, end);
+            if matches!(self.peek().kind, TokKind::Dot) {
+                self.bump(); // the dot of `.[`, `.{`, or `.*`
+            }
+            if matches!(self.peek().kind, TokKind::Star) {
+                let star_span = self.bump().span;
+                return Err(Diagnostic::error(
+                    "E0612",
+                    "wildcard imports are not supported".to_string(),
+                    format!("`use {name}.*` would hide where each name comes from"),
+                    format!("list each item instead: `use {name}.[item, other]`"),
+                    Some(star_span),
+                ));
+            }
             if matches!(self.peek().kind, TokKind::LBrace) {
                 return Err(Diagnostic::error(
                     "E0003",

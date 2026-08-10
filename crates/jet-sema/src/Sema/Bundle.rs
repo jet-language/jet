@@ -2221,13 +2221,13 @@ fn check_bundle_opts_for_output_inner(
                         }
                     }
                 }
-            } else if module_alias == "core" || module_alias == "jet" {
+            } else if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
                 // Std namespace prefix: `use core.mem` → bind each item as a Core import.
-                // Each item `x` becomes `core.x` in the known-modules table.
+                // Each item `x` becomes `{prefix}.x` in the known-modules table.
                 let st = &mut states[idx];
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let full = format!("core.{}", orig);
+                    let full = format!("{core_prefix}.{orig}");
                     if !crate::Syntax::is_known_core_module(&full) {
                         diags.push(Diagnostic::error(
                             "E1001",
@@ -2254,7 +2254,7 @@ fn check_bundle_opts_for_output_inner(
                                         mod_layer,
                                         ceiling,
                                         Some(*module_alias_span),
-                                        Some(&format!("`use core.{orig}`")),
+                                        Some(&format!("`use {core_prefix}.{orig}`")),
                                     ));
                                     continue;
                                 }
@@ -2392,8 +2392,10 @@ fn check_bundle_opts_for_output_inner(
                                     })
                                 }
                             }
-                        } else if module_alias == "core" || module_alias == "jet" {
-                            let full = format!("core.{orig}");
+                        } else if let Some(core_prefix) =
+                            crate::AST::core_list_prefix(&module_alias)
+                        {
+                            let full = format!("{core_prefix}.{orig}");
                             if !crate::Syntax::is_known_core_module(&full) {
                                 diags.push(Diagnostic::error(
                                     "E1001",

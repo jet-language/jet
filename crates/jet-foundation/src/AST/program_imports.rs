@@ -101,6 +101,19 @@ pub struct InlineVersion {
     pub span: Span,
 }
 
+/// D-CORE-USELIST1=A: the std path prefix a `use <prefix>.[…]` list walks, or
+/// `None` when the prefix names something else. The prefix may be any depth, so
+/// `use core.encoding.[json]` walks to `core.encoding.json` exactly as
+/// `use core.[encoding.json]` does. `jet` is the retired spelling of the same
+/// root and resolves to `core`.
+pub fn core_list_prefix(module_alias: &str) -> Option<String> {
+    let rest = module_alias
+        .strip_prefix(Syntax::CORE_SHORT)
+        .or_else(|| module_alias.strip_prefix("jet"))?;
+    (rest.is_empty() || rest.starts_with('.'))
+        .then(|| format!("{}{rest}", Syntax::CORE_SHORT))
+}
+
 impl ImportDecl {
     /// The effective alias for this import: the user-given alias if present,
     /// otherwise the default derived from the import kind.

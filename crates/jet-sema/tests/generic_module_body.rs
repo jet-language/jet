@@ -174,13 +174,13 @@ pub module other<T, size: Int> { pub struct Box { value: T } }
 "#;
     let first = r#"
 use "./templates" as templates
-use templates.{boxed}
+use templates.[boxed]
 pub module first = boxed<Int, 3>
 fn run() {}
 "#;
     let second = r#"
 use "./templates" as templates
-use templates.{boxed, other}
+use templates.[boxed, other]
 module second = boxed<Int, 3>
 module different_arg = boxed<Int, 4>
 module different_template = other<Int, 3>

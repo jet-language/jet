@@ -255,19 +255,19 @@ pub(crate) fn core_import_map(
             map.insert(imp.import_alias(), core_module);
             continue;
         }
-        // D-MOD3: `use core.item` / `use core.{a,b}` — bind each item name to its
+        // D-MOD3: `use core.item` / `use core.[a, b]` — bind each item name to its
         // full std path so that `item.method(...)` resolves the same way as
-        // `import core.item as item` would.
+        // `use core.item as item` would.
         if let ImportKind::Unqualified {
             module_alias,
             items,
             ..
         } = &imp.kind
         {
-            if module_alias == "core" || module_alias == "jet" {
+            if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let full = format!("core.{}", orig);
+                    let full = format!("{core_prefix}.{orig}");
                     if crate::Syntax::is_known_core_module(&full) {
                         map.insert(local.to_string(), full);
                     }
@@ -311,7 +311,7 @@ pub(crate) fn unqualified_import_maps(
         else {
             continue;
         };
-        if module_alias == "core" || module_alias == "jet" {
+        if crate::AST::core_list_prefix(module_alias).is_some() {
             // Std namespace — handled separately by core_import_map.
             continue;
         }
@@ -391,7 +391,7 @@ pub(crate) fn inline_import_maps(
                         );
                     }
                 }
-            } else if module_alias != "core" && module_alias != "jet" {
+            } else if crate::AST::core_list_prefix(module_alias).is_none() {
                 let target = file_import_target(bundle, module_idx, module_alias);
                 if let Some(target) = target {
                     let rust_mod = mangle(&bundle.modules[target].alias);

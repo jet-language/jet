@@ -1291,7 +1291,14 @@ keyword.
 members and produce their values (`point.[x, y]`); after `use`, entries produce
 aliases (`use math.[sin, cos as c]`). The expression grammar keeps member
 entries, while the import grammar additionally permits `as` aliases and dotted
-paths.
+paths. The prefix itself may be dotted at any depth, so
+`use core.encoding.[json, csv]` walks the same members as
+`use core.[encoding.json, encoding.csv]`.
+
+**D-NAME-WALK1=A** *(ratified 2026-08-07, card #1803)*: a module body is a
+namespace like any other, so `use` and `pub use` are legal inside
+`module name { }`. They resolve in the enclosing file's scope and bind only
+inside that body.
 
 **S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
 default; `pub` exports. `#PubFile` flips a file to public-by-default with
@@ -1383,7 +1390,8 @@ generic nested modules, and aliases. Names outside the template resolve in the
 template's definition-site lexical scope. A specialization gains no additional
 authority from its application site.
 
-Inline `use`/`pub use` remains excluded until ordinary modules admit it.
+Inline `use`/`pub use` is admitted, on the same terms ordinary module bodies
+admit it (D-NAME-WALK1=A).
 File/package/build/FFI/C-module/generated-binding/role-module/policy/protocol/
 state/migration/user-derive/generic-package declarations remain in their
 existing homes. Existing markers apply only to their already-legal declaration

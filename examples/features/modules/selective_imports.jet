@@ -1,7 +1,11 @@
-// D-SELIMPORT1=A: `use mod.{a, b as c}` and `use mod.item as alias`.
+// D-CORE-USELIST1=A: `use mod.[a, b as c]` is the one member-list form after
+// `use`, and `use mod.item as alias` names a single item.
 // Items are brought into scope directly; aliases resolve name conflicts.
 // Grouped: `abs` imported under the local name `absolute`.
-use math.{clamp, abs as absolute}
+use math.[clamp, abs as absolute]
+// The prefix may be a dotted path: `core.encoding.[json]` walks the same
+// members as `core.[encoding.json]`.
+use core.encoding.[json]
 
 module math {
     pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
@@ -18,4 +22,5 @@ module math {
 fn run() {
     print(clamp(15, 0, 10))
     print(absolute(-7))
+    print(json.to_string(DataTree.Text("jet")))
 }

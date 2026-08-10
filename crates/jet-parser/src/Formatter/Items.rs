@@ -1299,7 +1299,15 @@ impl<'a> Fmt<'a> {
                         orig.clone()
                     }
                 };
-                if items.len() == 1 {
+                // The dotless single-item spelling (`use math.clamp`) only means
+                // the same thing when nothing else in the path carries a dot or
+                // an alias: `use core.math.[abs]` and `use math.[abs as a]`
+                // would both re-read as a module import.
+                let collapses = items.len() == 1
+                    && items[0].1.is_none()
+                    && !items[0].0.contains('.')
+                    && !module_alias.contains('.');
+                if collapses {
                     self.write(module_alias);
                     self.write(".");
                     self.write(&fmt_item(&items[0]));
