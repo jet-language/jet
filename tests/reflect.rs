@@ -1,5 +1,7 @@
 //! Integration tests for D-METAREFLECT1 / D-REFLECT1 rich reflection.
 
+mod common;
+
 use jet::Comptime::{build_distinct_type_info, build_struct_type_info, CtReport, CtValue};
 use jet::Diagnostics::Span;
 use jet::AST::{

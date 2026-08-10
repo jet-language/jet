@@ -1,6 +1,8 @@
 //! D-CONC-SPAWN1=D + D-COROUTINE1=A (card #1685): the canonical task surface
 //! means the same thing on every execution tier.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

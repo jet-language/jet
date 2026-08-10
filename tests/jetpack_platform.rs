@@ -4,6 +4,8 @@
 //! in code and that CI has a native lane scaffold for each tier-1 OS without
 //! pretending this Linux run executed macOS or Windows behavior.
 
+mod common;
+
 use jetpack::Platform;
 
 #[test]

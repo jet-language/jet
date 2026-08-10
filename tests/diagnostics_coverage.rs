@@ -15,6 +15,8 @@
 //! Run: `cargo test diagnostics_coverage`
 //! Bless new snapshots: `UPDATE_EXPECT=1 cargo test`
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;

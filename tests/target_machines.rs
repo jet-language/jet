@@ -1,5 +1,7 @@
 //! Card #239: typed target machines — validation, firmware artifacts, QEMU.
 
+mod common;
+
 use jet::Driver::{
     build_target_machine_firmware, qemu_virt_aarch64_smoke, TargetMachineCompileError,
 };

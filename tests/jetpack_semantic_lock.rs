@@ -1,6 +1,8 @@
 //! E4-JP13 — one live semantic lock path: catalogs, overlays, source maps,
 //! input graph, selective update, merge revalidation, atomic `.jet/lock` write.
 
+mod common;
+
 use jetpack::Overlay::{self, OverlayPolicy, OverlaySet, PackageOverride};
 use jetpack::SemanticLock::{
     self, apply_overlay_invalidations, atomic_commit, load, merge, merge_revalidate_commit,

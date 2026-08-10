@@ -1,5 +1,7 @@
 //! M9 generic instantiation soundness — examples must compile under rustc.
 
+mod common;
+
 use std::process::Command;
 
 #[test]

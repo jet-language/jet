@@ -10,6 +10,8 @@
 //! `--target=web --port=<N>`. Same spawn/TCP/rebuild harness, driven through
 //! zero CLI flags — `jet dev app.jet`, no `--target=web`.
 
+mod common;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};

@@ -8,6 +8,8 @@
 //! language. The fact guard checks both law columns against the one registry.
 //! The source scan rejects second Rust copies.
 
+mod common;
+
 use std::collections::BTreeSet;
 
 use jet::AST::{Item, MarkerDecl};

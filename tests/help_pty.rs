@@ -2,6 +2,8 @@
 
 #![cfg(unix)]
 
+mod common;
+
 use std::io::Write;
 use std::process::{Command, Stdio};
 

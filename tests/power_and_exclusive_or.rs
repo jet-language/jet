@@ -1,6 +1,8 @@
 //! D-EXPOP1=A, D-EXPSEM1=A, D-XORSPELL1=A — the power operator `^`, its
 //! grouping and result types, and the `~|` spelling exclusive-or moved to.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

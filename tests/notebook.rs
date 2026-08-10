@@ -1,5 +1,7 @@
 //! #442 notebook kernel — D-NOTEBOOK-SURFACE1/DOC1/TRUST1=D.
 
+mod common;
+
 use jet::REPL::Notebook::{
     decide_render, export_ipynb, export_jet, import_ipynb, merge_by_id, quarantine_outputs,
     run_headless_script, save_jetnb, CellKind, ClientKind, JetNotebook, Kernel, MimeBundle,

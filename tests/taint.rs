@@ -2,6 +2,8 @@
 //! `#Scrub(Input) fn` taint-strip contract, and the tainted→sink error E0721. Taint
 //! is a compile-time proof, erased in codegen (I3).
 
+mod common;
+
 fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),

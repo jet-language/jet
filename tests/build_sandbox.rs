@@ -3,6 +3,8 @@
 //! `BuildRecipe` substrate through the public `jetpack` crate surface so the
 //! diagnostic codes are covered by a `tests/` snapshot (invariant I4).
 
+mod common;
+
 use jetpack::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use jetpack::Toolchain;
 use std::collections::HashMap;

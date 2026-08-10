@@ -1,6 +1,8 @@
 //! D-SHAPE-PLACE1=A: Tensor bracket slices use the same checked window law on
 //! owned copies, AOT views, and mutable write-through places.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

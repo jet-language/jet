@@ -6,10 +6,147 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::OnceLock;
+
+// --- runaway-test guard rails -----------------------------------------------
+//
+// A runaway test binary (unbounded allocation loop, or a hang) can eat all
+// RAM/swap and get the kernel to OOM-kill the whole agent session. Every
+// tests/*.rs binary installs this as its global allocator (via `mod
+// common;`), which caps live allocation and starts a wall-clock watchdog on
+// first use. Plain atomics only: no locks, no deps, nothing allocated on the
+// failure path beyond the one stderr line.
+
+struct GuardedAlloc;
+
+/// Cap in bytes; -1 means "not read from env yet". i64 (not u64) so the tiny,
+/// unavoidable unaccounted allocation from the lazy env read below (see
+/// `guard_on_alloc`) can dip `GUARD_LIVE_BYTES` negative without wrapping.
+static GUARD_CAP_BYTES: AtomicI64 = AtomicI64::new(-1);
+static GUARD_CAP_INIT_STARTED: AtomicBool = AtomicBool::new(false);
+static GUARD_LIVE_BYTES: AtomicI64 = AtomicI64::new(0);
+static GUARD_WATCHDOG_STARTED: AtomicBool = AtomicBool::new(false);
+/// One-shot: only the first tripper prints. A re-entrant trip (e.g. an
+/// allocation made while formatting the message below) or a concurrent
+/// tripper on another thread skips straight to `abort()` instead of
+/// recursing into a second print.
+static GUARD_ABORTING: AtomicBool = AtomicBool::new(false);
+
+/// A cap this large is already indistinguishable from "unbounded" for any
+/// real machine; it exists only so a garbage env value (typo, dropped digit)
+/// can't overflow the `* 1 GiB` multiply below and wrap into a negative or
+/// tiny cap. Real caps are single-digit GB.
+const GUARD_CAP_CEILING_GB: i64 = 1 << 20; // ~1 PB
+
+/// Parse + clamp the raw `JET_TEST_ALLOC_CAP_GB` value. Pure and
+/// env-independent so it's directly unit-testable — see
+/// `garbage_alloc_cap_env_value_clamps_to_a_sane_cap` below.
+fn parsed_cap_gb(raw: Option<&str>) -> i64 {
+    raw.and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(10)
+        .clamp(1, GUARD_CAP_CEILING_GB)
+}
+
+unsafe impl std::alloc::GlobalAlloc for GuardedAlloc {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let ptr = std::alloc::System.alloc(layout);
+        if !ptr.is_null() {
+            guard_on_alloc(layout.size() as i64);
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        std::alloc::System.dealloc(ptr, layout);
+        GUARD_LIVE_BYTES.fetch_sub(layout.size() as i64, Ordering::Relaxed);
+    }
+}
+
+fn guard_on_alloc(size: i64) {
+    let cap = GUARD_CAP_BYTES.load(Ordering::Relaxed);
+    if cap < 0 {
+        // Cap not read yet. Claim the read exactly once; std::env::var itself
+        // allocates, so the nested alloc() call this triggers re-enters here,
+        // sees the flag already set, and just falls through uncounted — a
+        // one-time, few-byte startup blind spot the i64 counter absorbs.
+        if !GUARD_CAP_INIT_STARTED.swap(true, Ordering::AcqRel) {
+            let gb = parsed_cap_gb(std::env::var("JET_TEST_ALLOC_CAP_GB").ok().as_deref());
+            // Both factors are positive and gb is clamped well below any
+            // overflow threshold, but saturating_mul is the boring choice
+            // over "trust the clamp" — it can never produce a negative or
+            // wrapped cap, which would otherwise silently disarm the guard
+            // (see the `cap < 0` branch above).
+            GUARD_CAP_BYTES.store(gb.saturating_mul(1 << 30), Ordering::Relaxed);
+        }
+        return;
+    }
+    let total = GUARD_LIVE_BYTES.fetch_add(size, Ordering::Relaxed) + size;
+    if total > cap {
+        guard_abort(|out| {
+            let _ = writeln!(
+                out,
+                "jet test guard: allocation cap {} GB exceeded — aborting; raise JET_TEST_ALLOC_CAP_GB if legitimate",
+                cap / (1 << 30)
+            );
+        });
+    }
+    guard_start_watchdog();
+}
+
+/// Print (first tripper only) then abort. `print` is a closure so each call
+/// site can format its own message without heap-allocating a `String` first
+/// — `write!` to `Stderr` formats straight into the underlying `write()`
+/// syscall.
+fn guard_abort(print: impl FnOnce(&mut std::io::Stderr)) -> ! {
+    if !GUARD_ABORTING.swap(true, Ordering::AcqRel) {
+        print(&mut std::io::stderr());
+    }
+    std::process::abort();
+}
+
+/// Lazily spawned on first (accounted) allocation, guarded by a one-shot
+/// flag: a plain relaxed load short-circuits the common case (already
+/// started) before paying for the atomic swap.
+fn guard_start_watchdog() {
+    if GUARD_WATCHDOG_STARTED.load(Ordering::Relaxed) {
+        return;
+    }
+    if GUARD_WATCHDOG_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("jet-test-watchdog".into())
+        .spawn(guard_watchdog_main);
+    if spawned.is_err() {
+        // Too early in process startup to spawn a thread (rare) — let a
+        // later allocation retry.
+        GUARD_WATCHDOG_STARTED.store(false, Ordering::Release);
+    }
+}
+
+fn guard_watchdog_main() {
+    // Backstop, not an accommodation: no test suite should run past 15-20
+    // minutes. A suite that hits this is itself defective — split or speed
+    // it up, don't raise the cap.
+    let secs: u64 = std::env::var("JET_TEST_DEADLINE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(900);
+    std::thread::sleep(std::time::Duration::from_secs(secs));
+    guard_abort(|out| {
+        let _ = writeln!(
+            out,
+            "jet test guard: exceeded the {secs}s suite budget — aborting; this suite must be split or sped up, not given a longer deadline"
+        );
+    });
+}
+
+#[global_allocator]
+static JET_TEST_GUARD: GuardedAlloc = GuardedAlloc;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -688,4 +825,21 @@ fn user() { unsafe { user_pointer() } }
     let stripped = strip_vetted_prelude_modules(generated);
     assert!(!stripped.contains("ffi()"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn garbage_alloc_cap_env_value_clamps_to_a_sane_cap() {
+    // Before the fix: `gb * (1 << 30)` on a raw value this large overflows
+    // i64 (panics in debug, wraps toward negative in release) and the
+    // resulting negative cap satisfies `cap < 0` forever, silently disarming
+    // accounting for the rest of the process. It must clamp instead.
+    let gb = parsed_cap_gb(Some("999999999999999999"));
+    assert!((1..=GUARD_CAP_CEILING_GB).contains(&gb), "gb={gb} not clamped");
+    let bytes = gb.saturating_mul(1 << 30);
+    assert!(bytes > 0, "cap bytes must stay positive, got {bytes}");
+
+    // A missing/unparseable value still gets the documented default.
+    assert_eq!(parsed_cap_gb(None), 10);
+    assert_eq!(parsed_cap_gb(Some("not a number")), 10);
+    assert_eq!(parsed_cap_gb(Some("0")), 1, "0 GB must clamp up to the 1 GB floor");
 }

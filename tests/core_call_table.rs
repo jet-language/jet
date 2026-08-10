@@ -1,5 +1,7 @@
 //! D-ONCE-LAW1=A: Core-call rows have one home and engine projections.
 
+mod common;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;

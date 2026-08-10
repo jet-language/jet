@@ -7,6 +7,8 @@
 //!
 //! Run: `cargo test --test diagnostics_format`
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

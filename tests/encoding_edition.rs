@@ -1,5 +1,7 @@
 //! Edition-gated encoding surfaces (card #712 / #715 C5).
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

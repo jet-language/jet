@@ -1,5 +1,7 @@
 //! Focused convergence and fail-closed checks for `core.sync`.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

@@ -1,6 +1,8 @@
 //! E2-M15 cross-compilation and freestanding profile tests.
 //! Tests E3301 (std API in freestanding build).
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

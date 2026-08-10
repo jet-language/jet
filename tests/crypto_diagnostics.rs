@@ -1,3 +1,5 @@
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 

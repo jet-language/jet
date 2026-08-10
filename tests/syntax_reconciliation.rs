@@ -1,6 +1,8 @@
 //! D-CANON-SOURCE1 / D-RECONCILE-SCOPE1: live examples, reference surface,
 //! and agent memory must not reintroduce retired syntax spellings.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -1,6 +1,8 @@
 //! D-WEBTIR1 / #123 criterion 1: web executable bodies use checked TIR only,
 //! with default-deny preflight and `E-WEB-TIR-UNSUPPORTED` honest fallback.
 
+mod common;
+
 use std::fs;
 
 #[test]

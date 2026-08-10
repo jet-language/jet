@@ -1,5 +1,7 @@
 //! D-WASM1=A (c123 M1): web JS/WASM partition sema.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

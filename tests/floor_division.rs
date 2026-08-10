@@ -3,6 +3,8 @@
 //! value, through `seed`, so the arithmetic is genuinely executed rather than
 //! folded away at compile time.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

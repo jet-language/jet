@@ -1,6 +1,8 @@
 //! Card #705: every shipped web example is indexed in docs and has proof output
 //! or an explicit harness-only suffix in `examples/features/expected/web/`.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 

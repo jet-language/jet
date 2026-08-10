@@ -1,3 +1,5 @@
+mod common;
+
 mod tir_support;
 
 use jet::Interpreter::{dev_iteration, RunOutcome};

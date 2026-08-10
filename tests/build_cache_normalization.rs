@@ -8,6 +8,8 @@
 //! + import resolution, *no sema*) and hash it with
 //! `jet::CanonicalAST::ast_cache_key`.
 
+mod common;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 

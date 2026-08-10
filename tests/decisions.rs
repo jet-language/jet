@@ -5,6 +5,8 @@
 //! cannot drift back to "provisional" in code, and open/deferred decisions cannot land in syntax
 //! without owner sign-off.
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 

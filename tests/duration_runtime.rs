@@ -1,3 +1,5 @@
+mod common;
+
 fn checked_bundle(source: &str) -> jet::AST::ProgramBundle {
     let dir = std::env::temp_dir().join(format!(
         "jet_duration_runtime_{}_{}",

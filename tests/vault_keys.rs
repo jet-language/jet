@@ -1,3 +1,5 @@
+mod common;
+
 #[test]
 fn actual_typed_vault_bridge_fixture_compiles_and_runs() {
     let root = std::env::current_dir().unwrap();

@@ -1,5 +1,7 @@
 //! D-CODEMOD1 integration tests for replayable semantic rename codemods.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

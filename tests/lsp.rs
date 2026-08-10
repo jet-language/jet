@@ -9,6 +9,8 @@
 //!
 //! Tests skip gracefully if the `jet` binary is not built.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};

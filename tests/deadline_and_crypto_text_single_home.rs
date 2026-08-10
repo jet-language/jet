@@ -14,6 +14,8 @@
 //!   - `e3003_and_e3001_spell_why_and_fix_identically`: both codes' rendered
 //!     `Why:`/`Fix:` lines use the same one-space-then-label convention.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

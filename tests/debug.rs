@@ -18,6 +18,8 @@
 //! absent or the host sandbox cannot stop a debuggee, so CI without functional
 //! lldb still passes.
 
+mod common;
+
 use std::io::Write;
 
 /// Write `src` to a temp `.jet` file and return its path.

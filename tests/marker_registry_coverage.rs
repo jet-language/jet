@@ -7,6 +7,8 @@
 //! Nothing in this file names a marker, so a new row is covered the moment it
 //! is added and cannot be forgotten.
 
+mod common;
+
 use jet_foundation::Policy::{
     self, AppliedRule, RuleArgType, RuleSite, RuleStatus,
 };

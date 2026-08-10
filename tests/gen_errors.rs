@@ -2,6 +2,8 @@
 //!
 //! Run: `UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

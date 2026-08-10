@@ -1,6 +1,8 @@
 //! D-DEP-HTTP2=B evidence: native HTTP/compression stay free of new external crates.
 //! Ratified TLS bridges (rustls*) remain allowed.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

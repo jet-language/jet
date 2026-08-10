@@ -1,3 +1,5 @@
+mod common;
+
 use jet::Comptime::Build::{
     ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionOutcome, ActionSpec,
     ActionInputSnapshot, ActionKey, ActionOutputRecord, ActionResultRecord, BuildCapability,

@@ -1,5 +1,7 @@
 //! TIR unsafe and runtime integration tests.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

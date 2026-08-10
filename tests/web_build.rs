@@ -1,5 +1,7 @@
 //! D-WEBBACKEND1 M2 (c123): `--target=web` WASM + JS artifact golden runs.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

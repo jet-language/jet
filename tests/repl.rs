@@ -6,6 +6,8 @@
 //!
 //! Test failures show the first diverging expected/actual line.
 
+mod common;
+
 use jet::REPL::{run_transcript, run_transcript_with_flags};
 
 fn run_repl_process(state: &std::path::Path, input: &[u8], limit: Option<&str>) -> std::process::Output {

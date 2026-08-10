@@ -1,5 +1,7 @@
 //! Focused CPU-oracle laws for the production `core.compute` Prelude path.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

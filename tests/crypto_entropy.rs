@@ -1,3 +1,5 @@
+mod common;
+
 mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
