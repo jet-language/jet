@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1849,
-    "rev": 33085,
+    "nextNum": 1851,
+    "rev": 33092,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -115610,6 +115610,101 @@
       "created": "2026-08-09T01:52:34.855Z",
       "updated": "2026-08-09T01:53:38.272Z",
       "updatedBy": "fable-burndown"
+    },
+    {
+      "id": "c08s2exr",
+      "num": 1849,
+      "title": "TIR-eval runaway: task/taskgroup tests allocate unboundedly and hang until OOM",
+      "body": "Overnight runs: taskgroup_params, task_control_tiers, diagnostic_snapshots, encoding_parity, and dev test binaries hang in TIR eval and grow to 26-34GB anon RSS until the kernel OOM killer fires (3 kills 2026-08-09/10). Coredump stack: eval_expr_hook (crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:2892) iterating fragment funcs via find_map. Introduced in the in-flight TIR-eval batch checkpointed on master 2026-08-10.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root cause of unbounded TIR-eval allocation identified and fixed; no engine-side re-encoding of semantics (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:36:41.455Z"
+        },
+        {
+          "n": 2,
+          "text": "timeout-bounded runs of taskgroup_params, task_control_tiers, diagnostic_snapshots, encoding_parity, dev pass with normal memory",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:36:41.854Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T10:36:31.119Z",
+      "updated": "2026-08-10T10:36:41.854Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0l88t71",
+      "num": 1850,
+      "title": "Test-suite guard rails: in-process allocation cap and wall-clock watchdog for every test binary",
+      "body": "A hung test binary can eat all RAM and swap over hours; the kernel OOM kill then tears down the whole agent session scope. Add harness-owned guards, no system-level limits: a capped global allocator plus a deadline watchdog in tests/common, wired into every tests/*.rs binary, env-tunable, abort with a clear message naming the guard.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/common guard: capped global allocator (JET_TEST_ALLOC_CAP_GB, default well under machine RAM) aborts with clear message",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:36:42.236Z"
+        },
+        {
+          "n": 2,
+          "text": "wall-clock watchdog (JET_TEST_DEADLINE_SECS) aborts hung binaries; both guards wired into every tests/*.rs binary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:36:42.598Z"
+        },
+        {
+          "n": 3,
+          "text": "guard self-test proves both trip; full targeted proof run stays green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T10:36:42.970Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-10T10:36:34.049Z",
+      "updated": "2026-08-10T10:36:42.970Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -155847,6 +155942,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-10T10:36:42.970Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0l88t71",
+      "note": "#3 guard self-test proves both trip; full targeted proof run st"
+    },
+    {
+      "at": "2026-08-10T10:36:42.598Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0l88t71",
+      "note": "#2 wall-clock watchdog (JET_TEST_DEADLINE_SECS) aborts hung bin"
+    },
+    {
+      "at": "2026-08-10T10:36:42.236Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0l88t71",
+      "note": "#1 tests/common guard: capped global allocator (JET_TEST_ALLOC_"
+    },
+    {
+      "at": "2026-08-10T10:36:41.854Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c08s2exr",
+      "note": "#2 timeout-bounded runs of taskgroup_params, task_control_tiers"
+    },
+    {
+      "at": "2026-08-10T10:36:41.456Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c08s2exr",
+      "note": "#1 Root cause of unbounded TIR-eval allocation identified and f"
+    },
+    {
+      "at": "2026-08-10T10:36:34.049Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0l88t71",
+      "note": "Test-suite guard rails: in-process allocation cap and wall-clock watchdog for every test binary"
+    },
+    {
+      "at": "2026-08-10T10:36:31.122Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c08s2exr",
+      "note": "TIR-eval runaway: task/taskgroup tests allocate unboundedly and hang until OOM"
+    },
+    {
       "at": "2026-08-10T07:02:24.623Z",
       "by": "e3-1393-verify",
       "action": "card.claim",
@@ -159295,55 +159439,6 @@
       "by": "fable-burndown",
       "action": "card.update",
       "ref": "c04y8xqp",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-09T11:08:13.880Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c04y8xqp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:12.814Z",
-      "by": "bd26-luna-1698",
-      "action": "card.criteria-meet",
-      "ref": "c04y8xqp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:11.719Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c04y8xqp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:10.817Z",
-      "by": "bd26-luna-1698",
-      "action": "card.criteria-meet",
-      "ref": "c04y8xqp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:10.438Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c04y8xqp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:09.631Z",
-      "by": "bd26-luna-1698",
-      "action": "card.criteria-meet",
-      "ref": "c04y8xqp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:08.697Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c087ugou",
       "note": "phase"
     }
   ],
