@@ -984,14 +984,21 @@ mod tests {
         let CtValue::Failed(CtReport::Told(error)) = value else {
             return None;
         };
-        let CtValue::Struct { fields, .. } = *error else {
+        let CtValue::List(errors) = *error else {
             return None;
         };
-        fields
+        errors
             .into_iter()
-            .find_map(|(name, value)| match (name.as_str(), value) {
-                ("reason", CtValue::Str(reason)) => Some(reason),
-                _ => None,
+            .find_map(|error| {
+                let CtValue::Struct { fields, .. } = error else {
+                    return None;
+                };
+                fields
+                    .into_iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("reason", CtValue::Str(reason)) => Some(reason),
+                        _ => None,
+                    })
             })
     }
 

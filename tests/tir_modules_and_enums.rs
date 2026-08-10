@@ -640,7 +640,7 @@ fn comptime_if_selected_branch() {
     let src = "\
 $debug :: false
 fn pick(x: Int) => Int {
-    $if debug {
+    $if $debug {
         return x + 100
     } else {
         return x + 1
@@ -754,9 +754,9 @@ fn run() {
     assert_eq!(stdout, "11\n");
 }
 
-/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(s)` (a borrowed
-/// String param) inserts `((*s)).clone()` at the literal site (`emit_boxed_enum_arg`);
-/// the match binds the payload value and returns it (owning).
+/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(~s)` explicitly
+/// copies the read-only String parameter into the owning payload; the match binds the
+/// payload value and returns it (owning).
 #[test]
 fn string_payload_enum() {
     if !have_rustc() {
@@ -768,12 +768,12 @@ enum Msg {
     Code(Int)
 }
 fn wrap(s: String) => Msg {
-    return Msg.Text(s)
+    return Msg.Text(~s)
 }
 fn render(m: Msg) => String {
     if m == {
-        Text(s) -> { return s }
-        Code(n) -> { return \"code\" }
+        .Text(s) -> { return s }
+        .Code(n) -> { return \"code\" }
     }
     return \"?\"
 }
@@ -787,10 +787,9 @@ fn run() {
     assert_eq!(stdout, "hi\n");
 }
 
-/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(inner)` from a
-/// borrowed `inner: Tree` emits `Box::new(((*inner)).clone())` — the non-scalar
-/// payload borrowed-clone, then the recursive boxed edge. The match traverses it
-/// (Rust auto-derefs the `Box`).
+/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(~inner)` explicitly
+/// copies the read-only `inner: Tree` parameter before the recursive boxed edge. The
+/// match traverses it (Rust auto-derefs the `Box`).
 #[test]
 fn recursive_boxed_enum() {
     if !have_rustc() {
@@ -802,12 +801,12 @@ enum Tree {
     Node(Tree)
 }
 fn wrap(inner: Tree) => Tree {
-    return Tree.Node(inner)
+    return Tree.Node(~inner)
 }
 fn leaf_val(t: Tree) => Int {
     if t == {
-        Leaf(n) -> { return n }
-        Node(inner) -> { return 0 }
+        .Leaf(n) -> { return n }
+        .Node(inner) -> { return 0 }
     }
     return 0
 }
@@ -840,12 +839,12 @@ enum Shape {
     Line(Int)
 }
 fn mk(p: Point) => Shape {
-    return Shape.Dot(p)
+    return Shape.Dot(~p)
 }
 fn first(s: Shape) => Int {
     if s == {
-        Dot(p) -> { return p.x }
-        Line(n) -> { return n }
+        .Dot(p) -> { return p.x }
+        .Line(n) -> { return n }
     }
     return 0
 }
@@ -861,8 +860,8 @@ fn run() {
 }
 
 /// c109 Phase 16: a struct with a covered collection field, and an enum variant
-/// carrying a covered collection payload. Both emit the field/payload value plainly
-/// (`items: vec![…]`, `Holder.Nums(xs)`) against the old emitter baseline.
+/// carrying a covered collection payload. The payload is copied explicitly from
+/// the read-only parameter before it fills the owning enum slot.
 #[test]
 fn collection_field_and_payload() {
     if !have_rustc() {
@@ -878,7 +877,7 @@ enum Holder {
     One(Int)
 }
 fn mk(xs: [Int]) => Holder {
-    return Holder.Nums(xs)
+    return Holder.Nums(~xs)
 }
 fn run() {
     b :: Crate.{ items: [1, 2, 3], label: \"x\" }
@@ -911,7 +910,7 @@ fn pick<T>(a: ^T, b: ^T, first: Bool) => T {
     return b
 }
 fn firstof<T>(xs: ^[T]) => T {
-    return xs[0]
+    return ~xs[0]
 }
 fn wrap<T>(x: ^T) => [T] {
     return [x]
@@ -929,21 +928,19 @@ fn run() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: a PRELUDE struct (HTTPResponse/HTTPRequest) constructed via a struct
-/// literal. The `is_prelude_struct` emit branch renders a `Jet…` Rust head with PLAIN
-/// (unmangled) fields, and HTTPRequest injects a `params: BTreeMap::new()` field. The
-/// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so this
-/// asserts the EMITTED Rust contains the byte-exact construction (the example suite +
-/// the JET_NO_TIR full-suite diff prove it compiles & runs). The type is a covered value
-/// type as a param/return.
+/// c109 Phase 17: prelude HTTP values use their canonical Core constructors. The
+/// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so
+/// this asserts the emitted Rust dispatches through the shared helper symbols.
 #[test]
 fn prelude_struct_construction() {
     let src = "\
+use core.http.client as client
+use core.http.server as server
 fn build_resp(body: String) => HTTPResponse {
-    return HTTPResponse.{status: \"200 OK\", body: body, headers: []}
+    return server.response(200, body)
 }
 fn build_req() => HTTPRequest {
-    return HTTPRequest.{method: \"GET\", path: \"/\", body: \"\", headers: []}
+    return client.request(\"GET\", \"http://localhost/\")
 }
 fn run() {
     r :: build_resp(\"hi\")
@@ -963,18 +960,16 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // HTTPResponse: prelude head (`…JetHTTPResponse`), PLAIN field names, no injected
-    // `params`. The `…` root prefix varies by emit layout — assert the prefix-independent
-    // construction body.
+    // HTTPResponse: the shared server constructor helper.
     assert!(
-        out.rust.contains("JetHTTPResponse { status: \"200 OK\".to_string(), body: (*__jet_body), headers: std::collections::BTreeMap::new() }"),
-        "HTTPResponse construction not byte-exact:\n{}",
+        out.rust.contains("jet_http_srv_response(200, &("),
+        "HTTPResponse constructor helper missing:\n{}",
         out.rust
     );
-    // HTTPRequest: prelude head, plain fields, injected route metadata appended verbatim.
+    // HTTPRequest: the shared client request helper.
     assert!(
-        out.rust.contains("JetHTTPRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new(), route_template: None }"),
-        "HTTPRequest construction not byte-exact:\n{}",
+        out.rust.contains("jet_http_client_request_new(&("),
+        "HTTPRequest constructor helper missing:\n{}",
         out.rust
     );
 }
