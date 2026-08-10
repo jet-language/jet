@@ -33,6 +33,12 @@ fn expr_is_absent_none(expr: &Expr) -> bool {
 /// D-FLOWTYPE1=A: atomic `x == None` / `x == .None` pattern test subject.
 pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Span, Span)> {
     match cond {
+        Expr::Binary(BinOp::Eq, left, right, span) if expr_is_absent_none(right) => {
+            match left.as_ref() {
+                Expr::Ident(name, name_span) => Some((name.clone(), *name_span, *span)),
+                _ => None,
+            }
+        }
         Expr::PatternTest {
             subject,
             pattern,
@@ -795,7 +801,24 @@ impl<'a> Checker<'a> {
             }
             if let Some(body) = else_body {
                 self.flow = outside_table.clone();
-                self.check_block(body, true);
+                let else_narrow = (arms.len() == 1)
+                    .then(|| atomic_absent_optional_subject(&arms[0].cond))
+                    .flatten()
+                    .and_then(|(name, name_span, _)| {
+                        self.flow_narrowable_optional_inner(&name)
+                            .map(|inner| (name, name_span, inner))
+                    });
+                if let Some((name, name_span, inner)) = else_narrow {
+                    self.push_scope();
+                    let restore_moved = self.declare_condition_binding(&name, name_span, inner);
+                    self.check_block(body, false);
+                    self.pop_scope();
+                    if let Some((name, at)) = restore_moved {
+                        self.flow.moved.set(&name, at);
+                    }
+                } else {
+                    self.check_block(body, true);
+                }
                 paths.push(self.flow.clone());
             } else if can_skip_every_arm {
                 // Skipping every arm is itself a path through here.

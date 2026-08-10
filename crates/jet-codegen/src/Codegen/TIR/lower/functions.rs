@@ -221,7 +221,8 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     }
     let mut body = resource_param_guards;
     body.extend(lower_stmts(&f.body, cx, &mut env));
-    let clone_types = env.cloned_types.borrow().clone();
+    let mut clone_types = env.cloned_types.borrow().clone();
+    collect_return_clone_types(f.return_type.as_ref(), cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
     let (pre_contracts, post_contracts) = lower_contracts(f, cx);
     TFunc {
@@ -383,6 +384,70 @@ pub(crate) fn render_generics(
     crate::Generics::rust_type_param_list(type_params, &extra)
 }
 
+/// A generic user struct's derived `Clone` impl carries a bound for each type
+/// parameter. A function returning `Pair<T>` therefore needs `T: Clone` even
+/// when its body never clones a value; collect those return-shape requirements
+/// alongside the body clone facts so the emitted signature is well-formed.
+fn collect_return_clone_types(return_type: Option<&Type>, cx: &Cx, out: &mut Vec<Type>) {
+    let Some(return_type) = return_type else {
+        return;
+    };
+    collect_return_clone_types_from_type(return_type, cx, out);
+}
+
+fn collect_return_clone_types_from_type(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
+    let expanded = cx.expand_type_aliases(ty);
+    match &expanded {
+        Type::Apply { name, args } => {
+            if cx
+                .struct_type_params
+                .get(name)
+                .is_some_and(|params| !params.is_empty())
+                && cx.cloneable.contains(name)
+            {
+                out.extend(args.iter().cloned());
+            }
+            for arg in args {
+                collect_return_clone_types_from_type(arg, cx, out);
+            }
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. } => {
+            collect_return_clone_types_from_type(inner, cx, out);
+        }
+        Type::Map { key, value, .. } => {
+            collect_return_clone_types_from_type(key, cx, out);
+            collect_return_clone_types_from_type(value, cx, out);
+        }
+        Type::Result { ok, err } => {
+            collect_return_clone_types_from_type(ok, cx, out);
+            collect_return_clone_types_from_type(err, cx, out);
+        }
+        Type::Union(members) => {
+            for member in members {
+                collect_return_clone_types_from_type(member, cx, out);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                collect_return_clone_types_from_type(field, cx, out);
+            }
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                collect_return_clone_types_from_type(param, cx, out);
+            }
+            if let Some(ret) = ret {
+                collect_return_clone_types_from_type(ret, cx, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// c109 Phase 17: `param_place` for a (possibly generic) free function.
 /// Generic parameters preserve their declared access convention exactly like
 /// concrete parameters; `&stream: T` therefore dereferences its Rust `&mut T`.
@@ -474,7 +539,8 @@ pub(crate) fn lower_method_for_owner(
     }
     let mut body = resource_param_guards;
     body.extend(lower_stmts(&f.body, cx, &mut env));
-    let clone_types = env.cloned_types.borrow().clone();
+    let mut clone_types = env.cloned_types.borrow().clone();
+    collect_return_clone_types(f.return_type.as_ref(), cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
     cx.current_type_params.replace(previous_type_params);
     // An instance method carries `Some(conv)`; a static method carries `None`.
@@ -590,7 +656,9 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     }
     let mut body = resource_param_guards;
     body.extend(lower_stmts(&f.body, cx, &mut env));
-    let clone_types = env.cloned_types.borrow().clone();
+    let mut clone_types = env.cloned_types.borrow().clone();
+    collect_return_clone_types(f.return_type.as_ref(), cx, &mut clone_types);
+    let generics = render_generics(&f.type_params, &clone_types);
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -602,7 +670,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             .map(|t| resolve_self_ty(t, type_name)),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
-        generics: String::new(),
+        generics,
         clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),

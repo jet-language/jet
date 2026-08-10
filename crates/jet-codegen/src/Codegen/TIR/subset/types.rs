@@ -408,7 +408,7 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     // `import_ns` StructLit shape; a method on it is still out of subset, so a fn that
     // calls one is excluded by that call (the recurring "cover the value type, let the next
     // uncovered node exclude its fn" seam).
-    if cx.foreign_types.contains_key(name) {
+    if is_foreign_type_name(name, cx) {
         return true;
     }
     // D-REGEXENGINE1=A: a regex `Match` value (`if m == value(mat)` binds
@@ -455,6 +455,20 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         // D-LAYOUT1 / D-LAYOUT-GATES1: layout runtime types (opaque handles,
         // no literal form — like the alloc/file/net handles above).
         || layout_handle_rust_type(name).is_some()
+}
+
+/// A foreign type is recorded by leaf name, while a resolved qualified type
+/// keeps its source import alias (`note.Note`). TIR must accept both spellings
+/// for the same imported value. The alias map preserves which imported module
+/// supplied the qualified spelling when multiple modules share the leaf.
+pub(crate) fn is_foreign_type_name(name: &str, cx: &Cx) -> bool {
+    if cx.foreign_types.contains_key(name) {
+        return true;
+    }
+    let Some((alias, leaf)) = name.rsplit_once('.') else {
+        return false;
+    };
+    cx.import_mods.contains_key(alias) && cx.foreign_types.contains_key(leaf)
 }
 
 /// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the

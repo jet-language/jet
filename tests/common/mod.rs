@@ -552,39 +552,262 @@ fn build_and_run_with_cwd(
     )
 }
 
-/// Remove every audited generated-prelude module (jet_mem, jet_txn, the
-/// per-platform jet_term/jet_os/jet_atomic shims, jet_gtk, and any
-/// user___c_* CFFI overlay module) before checking generated Rust for I1
-/// violations. Mirrors `golden.rs::strip_vetted_prelude_modules` — kept as a
-/// second, independent implementation so a sema-soundness corpus check does
-/// not depend on golden.rs internals.
+/// Remove every audited generated-prelude module before checking generated
+/// Rust for I1 violations.
 pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     fn strip_mod(src: &str, name: &str) -> String {
-        let Some(start) = src.find(&format!("mod {name}")) else {
-            return src.to_string();
-        };
-        let bytes = src.as_bytes();
-        let mut depth = 0usize;
-        let mut i = start;
-        let mut end = src.len();
-        let mut seen_brace = false;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'{' => {
-                    depth += 1;
-                    seen_brace = true;
+        fn ident_continue(byte: u8) -> bool {
+            byte.is_ascii_alphanumeric() || byte == b'_'
+        }
+
+        fn raw_string_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
+            let mut i = at;
+            if bytes.get(i) == Some(&b'b') {
+                if bytes.get(i + 1) != Some(&b'r') {
+                    return None;
                 }
-                b'}' => {
-                    depth -= 1;
-                    if seen_brace && depth == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
+                i += 1;
+            } else if bytes.get(i) != Some(&b'r') {
+                return None;
             }
             i += 1;
+            let mut hashes = 0;
+            while bytes.get(i) == Some(&b'#') {
+                hashes += 1;
+                i += 1;
+            }
+            (bytes.get(i) == Some(&b'"')).then_some((i + 1, hashes))
         }
+
+        fn starts_char_literal(bytes: &[u8], at: usize) -> bool {
+            let Some(next) = bytes.get(at + 1).copied() else {
+                return false;
+            };
+            next == b'\\'
+                || !ident_continue(next)
+                || bytes.get(at + 2) == Some(&b'\'')
+        }
+
+        fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
+            #[derive(Clone, Copy)]
+            enum State {
+                Normal,
+                LineComment,
+                BlockComment(usize),
+                String,
+                Char,
+                Raw(usize),
+            }
+
+            let mut state = State::Normal;
+            let mut depth = 0usize;
+            let mut i = opening;
+            while i < bytes.len() {
+                match state {
+                    State::Normal => match bytes[i] {
+                        b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                            state = State::LineComment;
+                            i += 2;
+                        }
+                        b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                            state = State::BlockComment(1);
+                            i += 2;
+                        }
+                        _ if raw_string_start(bytes, i).is_some() => {
+                            let (after_open, hashes) = raw_string_start(bytes, i).unwrap();
+                            state = State::Raw(hashes);
+                            i = after_open;
+                        }
+                        b'"' => {
+                            state = State::String;
+                            i += 1;
+                        }
+                        b'\'' if starts_char_literal(bytes, i) => {
+                            state = State::Char;
+                            i += 1;
+                        }
+                        b'{' => {
+                            depth += 1;
+                            i += 1;
+                        }
+                        b'}' => {
+                            depth = depth.checked_sub(1)?;
+                            i += 1;
+                            if depth == 0 {
+                                return Some(i);
+                            }
+                        }
+                        _ => i += 1,
+                    },
+                    State::LineComment => {
+                        if bytes[i] == b'\n' {
+                            state = State::Normal;
+                        }
+                        i += 1;
+                    }
+                    State::BlockComment(mut nested) => {
+                        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                            nested += 1;
+                            i += 2;
+                        } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                            nested -= 1;
+                            i += 2;
+                            if nested == 0 {
+                                state = State::Normal;
+                            } else {
+                                state = State::BlockComment(nested);
+                            }
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    State::String | State::Char => {
+                        if bytes[i] == b'\\' {
+                            i = (i + 2).min(bytes.len());
+                        } else {
+                            let closing = matches!(state, State::String) && bytes[i] == b'"'
+                                || matches!(state, State::Char) && bytes[i] == b'\'';
+                            i += 1;
+                            if closing {
+                                state = State::Normal;
+                            }
+                        }
+                    }
+                    State::Raw(hashes) => {
+                        if bytes[i] == b'"'
+                            && bytes
+                                .get(i + 1..i + 1 + hashes)
+                                .is_some_and(|tail| tail.iter().all(|&byte| byte == b'#'))
+                        {
+                            i += hashes + 1;
+                            state = State::Normal;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        #[derive(Clone, Copy)]
+        enum State {
+            Normal,
+            LineComment,
+            BlockComment(usize),
+            String,
+            Char,
+            Raw(usize),
+        };
+
+        let bytes = src.as_bytes();
+        let mut state = State::Normal;
+        let mut i = 0usize;
+        let mut module = None;
+        while i < bytes.len() {
+            match state {
+                State::Normal => match bytes[i] {
+                    b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                        state = State::LineComment;
+                        i += 2;
+                    }
+                    b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                        state = State::BlockComment(1);
+                        i += 2;
+                    }
+                    _ if raw_string_start(bytes, i).is_some() => {
+                        let (after_open, hashes) = raw_string_start(bytes, i).unwrap();
+                        state = State::Raw(hashes);
+                        i = after_open;
+                    }
+                    b'"' => {
+                        state = State::String;
+                        i += 1;
+                    }
+                    b'\'' if starts_char_literal(bytes, i) => {
+                        state = State::Char;
+                        i += 1;
+                    }
+                    b'm'
+                        if bytes.get(i + 1..i + 3) == Some(b"od")
+                            && (i == 0 || !ident_continue(bytes[i - 1]))
+                            && bytes.get(i + 3).is_none_or(|byte| !ident_continue(*byte)) =>
+                    {
+                        let mut j = i + 3;
+                        while bytes.get(j).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                            j += 1;
+                        }
+                        let name_start = j;
+                        while bytes.get(j).is_some_and(|byte| ident_continue(*byte)) {
+                            j += 1;
+                        }
+                        if &src[name_start..j] == name {
+                            while bytes.get(j).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                                j += 1;
+                            }
+                            if bytes.get(j) == Some(&b'{') {
+                                module = Some((i, j));
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+                    _ => i += 1,
+                },
+                State::LineComment => {
+                    if bytes[i] == b'\n' {
+                        state = State::Normal;
+                    }
+                    i += 1;
+                }
+                State::BlockComment(mut nested) => {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        nested += 1;
+                        i += 2;
+                    } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        nested -= 1;
+                        i += 2;
+                        if nested == 0 {
+                            state = State::Normal;
+                        } else {
+                            state = State::BlockComment(nested);
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                State::String | State::Char => {
+                    if bytes[i] == b'\\' {
+                        i = (i + 2).min(bytes.len());
+                    } else {
+                        let closing = matches!(state, State::String) && bytes[i] == b'"'
+                            || matches!(state, State::Char) && bytes[i] == b'\'';
+                        i += 1;
+                        if closing {
+                            state = State::Normal;
+                        }
+                    }
+                }
+                State::Raw(hashes) => {
+                    if bytes[i] == b'"'
+                        && bytes
+                            .get(i + 1..i + 1 + hashes)
+                            .is_some_and(|tail| tail.iter().all(|&byte| byte == b'#'))
+                    {
+                        i += hashes + 1;
+                        state = State::Normal;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        let Some((start, opening)) = module else {
+            return src.to_string();
+        };
+        let Some(end) = matching_brace_end(bytes, opening) else {
+            return src.to_string();
+        };
         format!("{}{}", &src[..start], &src[end..])
     }
     let s = strip_mod(rust_code, "jet_uninit_semantics");
@@ -600,6 +823,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
     s = strip_shared_guard_internals(&s);
+    s = strip_vetted_module(&s, "jet_os_extra");
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "jet_atomic_windows");
