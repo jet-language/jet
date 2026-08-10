@@ -149,6 +149,19 @@ pub enum JetTaskFailure {
     Panicked(String),
 }
 
+impl JetTaskFailure {
+    /// One failure message for every runtime adapter. AOT, JIT, and the
+    /// interpreter may marshal this value, but they do not invent separate
+    /// wording or policy for it.
+    pub fn message(&self) -> String {
+        match self {
+            Self::Cancelled => "task cancelled".to_string(),
+            Self::DeadlineBlown => "task deadline exceeded".to_string(),
+            Self::Panicked(reason) => reason.clone(),
+        }
+    }
+}
+
 /// The optional view of the carrier: `T?`.
 ///
 /// Every method here reads the same carrier the fallible view reads. They exist

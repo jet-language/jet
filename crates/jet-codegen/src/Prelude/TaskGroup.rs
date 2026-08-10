@@ -17,27 +17,38 @@ impl<T> JetTaskGroupRuntime<T> {
         self.children.lock().unwrap().push(child);
     }
 
-    pub fn close_with<C, J>(&self, mut cancel: C, mut join: J)
+    pub fn close_with<C, J, E>(&self, mut cancel: C, mut join: J) -> Result<(), E>
     where
         C: FnMut(&T),
-        J: FnMut(T),
+        J: FnMut(T) -> Result<(), E>,
     {
         let children = std::mem::take(&mut *self.children.lock().unwrap());
         for child in &children {
             cancel(child);
         }
         let mut first_panic = None;
+        let mut first_error = None;
         for child in children {
-            if let Err(payload) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| join(child)))
-            {
-                if first_panic.is_none() {
-                    first_panic = Some(payload);
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| join(child))) {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+                Err(payload) => {
+                    if first_panic.is_none() {
+                        first_panic = Some(payload);
+                    }
                 }
             }
         }
         if let Some(payload) = first_panic {
             std::panic::resume_unwind(payload);
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
         }
     }
 }
@@ -110,7 +121,7 @@ pub struct JetTaskSelectPolicy<T, E> {
     mode: JetTaskSelectMode,
     pending: usize,
     values: Vec<Option<T>>,
-    first_error: Option<(u128, E)>,
+    first_error: Option<(u128, usize, E)>,
 }
 
 impl<T, E> JetTaskSelectPolicy<T, E> {
@@ -141,13 +152,15 @@ impl<T, E> JetTaskSelectPolicy<T, E> {
                     if self
                         .first_error
                         .as_ref()
-                        .is_none_or(|(first, _)| order < *first)
+                        .is_none_or(|(first, first_index, _)| {
+                            (order, index) < (*first, *first_index)
+                        })
                     {
-                        self.first_error = Some((order, error));
+                        self.first_error = Some((order, index, error));
                     }
                     if self.pending == 0 {
                         JetTaskDecision::Finish(Err(
-                            self.first_error.take().expect("race recorded an error").1,
+                            self.first_error.take().expect("race recorded an error").2,
                         ))
                     } else {
                         JetTaskDecision::Wait
@@ -246,13 +259,14 @@ mod tests {
         let cancel_events = events.clone();
         let join_events = events.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            group.close_with(
+            let _ = group.close_with(
                 |child| cancel_events.lock().unwrap().push(format!("cancel {child}")),
                 |child| {
                     join_events.lock().unwrap().push(format!("join {child}"));
                     if child != 3 {
                         panic!("failed {child}");
                     }
+                    Ok::<(), ()>(())
                 },
             );
         }));
@@ -286,6 +300,19 @@ mod tests {
         match any.settle(1, 1, Err::<i32, _>("first failed")) {
             JetTaskDecision::Finish(Err(error)) => assert_eq!(error, "first failed"),
             _ => panic!("any did not expose its first completion"),
+        }
+    }
+
+    #[test]
+    fn equal_completion_sequences_use_source_order() {
+        let mut race = JetTaskSelectPolicy::new(JetTaskSelectMode::Race, 2);
+        assert!(matches!(
+            race.settle(9, 1, Err::<i32, _>("higher source")),
+            JetTaskDecision::Wait
+        ));
+        match race.settle(9, 0, Err::<i32, _>("lower source")) {
+            JetTaskDecision::Finish(Err(error)) => assert_eq!(error, "lower source"),
+            _ => panic!("equal completion sequence did not use source order"),
         }
     }
 

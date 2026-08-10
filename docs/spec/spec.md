@@ -2340,7 +2340,12 @@ list is **E0120** and points back at these methods.
 Structured concurrency uses a scoped `task.group` (D-CONC-SPAWN1=D, respelling
 D-TASKSCOPE1=A). Inside `task.group g { … }`, the bare `task expression` or
 `task { … }` spawns a child owned by the innermost active group. Unjoined
-handles at scope exit are cancelled and joined before the block returns.
+handles at scope exit are cancelled and joined before the block returns. The
+scope-exit join is cleanup, not another cancellable wait point: once the group
+has requested cancellation, it drains every child even if the owning task is
+already unwinding. A child with no wait point can therefore finish its current
+work before the caller continues. The cleanup preserves the first child
+failure for the group's own propagation path.
 
 `TaskGroup` may also be written as a direct parameter of a named function
 (D-TASKGROUP-PARAM1=A). This lets a lexical group flow down the call stack:
@@ -2396,6 +2401,13 @@ earlier:
 | `task.any { e1, e2, … } => T` | The first **completion** wins, including errors. |
 | `[Task<T>].join_all()` / `.wait_all()` | Both methods consume the list and return results in list order. They use the same fail-fast rule as `task.all`: a failure cancels remaining siblings. |
 | `[Task<T>].cancel_all()` | The method borrows the list and requests cancellation for every task. It does not select a winner or loser and does not wait. Each task unwinds at its next wait point under D-CANCELMODEL1. |
+
+When two branches are observed with the same scheduler completion sequence,
+`all`, `race`, and `any` break the tie by source order inside the task literal:
+the lower branch index wins. The scheduler completion sequence is the primary
+key, so distinct sequence values still follow completion order. Near-simultaneous
+wall-clock completion is deterministic only when the scheduler assigns the
+same sequence; source order is the deterministic tie-break in that case.
 
 `.join_all()` and `.wait_all()` therefore cancel remaining siblings and fail
 fast like `task.all`; `.cancel_all()` is explicit cancellation of every task,

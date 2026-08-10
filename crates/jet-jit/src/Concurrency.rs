@@ -26,6 +26,10 @@ thread_local! {
     static RUNTIME_ACCESS_DEPTH: Cell<usize> = const { Cell::new(0) };
     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    /// A native task owns its trap until the parent observes its join result.
+    /// Keeping this in task-local storage prevents a failing child from
+    /// making an unrelated sibling leave at its next loop header.
+    static TASK_TRAP: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 struct RuntimeAccessGuard {
@@ -90,6 +94,30 @@ where
     }
 }
 
+pub(crate) fn in_scheduler_task() -> bool {
+    jet_codegen::scheduler::jet_scheduler_in_task()
+}
+
+pub(crate) fn set_task_trap(msg: &str) {
+    TASK_TRAP.with(|slot| {
+        if slot.borrow().is_none() {
+            *slot.borrow_mut() = Some(msg.to_string());
+        }
+    });
+}
+
+pub(crate) fn task_trap_pending() -> bool {
+    TASK_TRAP.with(|slot| slot.borrow().is_some())
+}
+
+fn take_task_trap() -> Option<String> {
+    TASK_TRAP.with(|slot| slot.borrow_mut().take())
+}
+
+fn clear_task_trap() {
+    TASK_TRAP.with(|slot| slot.borrow_mut().take());
+}
+
 /// Marshal the typed Prelude task rail through the resident JIT's one-i64
 /// Result carrier. Child failure is a value on the `Err` side; only a wait
 /// boundary interrupt changes the host status and lexical control flow.
@@ -141,6 +169,63 @@ where
             JitWaitStatus::Panicked as i64
         }
     }
+}
+
+/// Marshal a typed Prelude task outcome to the plain value expected by
+/// `task.all`/`task.race`/`task.any` and compiler-generated scope joins. The
+/// outcome's failure meaning stays in `JetTaskFailure`; this host only stores
+/// the shared message in the JIT trap rail so the lexical cleanup path can
+/// finish before resident reporting emits exit 70.
+fn wait_task_value<T, F, Encode>(f: F, encode: Encode, combinator_failure: bool) -> i64
+where
+    F: FnOnce() -> JetOutcome<T, JetTaskFailure>,
+    Encode: FnOnce(&mut super::JitRuntime, T) -> u64,
+{
+    match jet_scheduler_wait_without_unwind(f) {
+        JetSchedulerWait::Ready(Ok(value)) => {
+            let value = with_runtime_mut(|rt| encode(rt, value));
+            WAIT_VALUE.with(|slot| slot.set(value as i64));
+            JitWaitStatus::Ready as i64
+        }
+        JetSchedulerWait::Ready(Err(failure)) => {
+            if combinator_failure {
+                append_task_combinator_failure_trailer();
+            }
+            let message = failure.message();
+            let _ = trap_panic(&message);
+            JitWaitStatus::Panicked as i64
+        }
+        JetSchedulerWait::Cancelled => {
+            set_pending_shield_exit(JetShieldExit::Cancelled);
+            JitWaitStatus::Interrupted as i64
+        }
+        JetSchedulerWait::Deadline(rendered) => {
+            with_runtime_mut(|rt| rt.set_deadline(rendered));
+            JitWaitStatus::Interrupted as i64
+        }
+        JetSchedulerWait::Panicked(message) => {
+            if combinator_failure {
+                append_task_combinator_failure_trailer();
+            }
+            with_runtime_mut(|rt| {
+                let line = format!("panic: {message}\n");
+                if !rt.stderr.ends_with(&line) {
+                    rt.stderr.push_str(&line);
+                }
+            });
+            let _ = trap_panic(&message);
+            JitWaitStatus::Panicked as i64
+        }
+    }
+}
+
+fn append_task_combinator_failure_trailer() {
+    with_runtime_mut(|rt| {
+        let line = "panic: a task panicked\n";
+        if !rt.stderr.ends_with(line) {
+            rt.stderr.push_str(line);
+        }
+    });
 }
 
 extern "C" fn jet_jit_wait_value() -> i64 {
@@ -555,15 +640,17 @@ where
             // only touch mutex-backed channel state and indexed sender slots.
             let rt_ptr = rt_addr as *mut super::JitRuntime;
             set_active_runtime(Some(rt_ptr));
+            clear_task_trap();
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = take_pending_shield_exit();
             let out = f();
-            // Rich panic traps without Rust unwind (I1). Re-raise so g.all/join
-            // see Panicked; wait_status appends the AOT trailing line once.
-            let rich = with_runtime_mut(|rt| rt.trapped.as_deref() == Some("__jet_rich_panic__"));
+            // A task trap is local until the join/combinator decides whether it
+            // propagates. Re-raise so g.all/join see Panicked; the parent then
+            // records the trap after all sibling cleanup has completed.
+            let task_trap = take_task_trap();
             set_active_runtime(None);
             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
-            if rich {
+            if task_trap.is_some() {
                 panic!("a task panicked");
             }
             out
@@ -632,7 +719,7 @@ fn close_task_group(group: i64) -> i64 {
         return JitWaitStatus::Ready as i64;
     };
     let mut status = JitWaitStatus::Ready as i64;
-    group.close_with(
+    let close_result = group.close_with(
         |task| {
             with_runtime_mut(|rt| {
                 let idx = *task as usize;
@@ -644,15 +731,31 @@ fn close_task_group(group: i64) -> i64 {
         |task| {
             let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
             if let Some(join) = join {
-                let child = wait_status(|| match join.join() {
-                    Ok(_) | Err(_) => 0,
+                let mut failure = None;
+                let child = wait_status(|| match join.join_for_cleanup() {
+                    Ok(_) => 0,
+                    Err(error) => {
+                        failure = Some(error);
+                        0
+                    }
                 });
+                if let Some(error) = failure {
+                    return Err(error);
+                }
                 if status == JitWaitStatus::Ready as i64 {
                     status = child;
                 }
             }
+            Ok(())
         },
     );
+    if let Err(failure) = close_result {
+        if status == JitWaitStatus::Ready as i64 {
+            let message = failure.message();
+            let _ = trap_panic(&message);
+            status = JitWaitStatus::Panicked as i64;
+        }
+    }
     status
 }
 
@@ -767,15 +870,29 @@ extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     }
 }
 
+/// Compiler-generated scope join: consume the handle and expose its plain
+/// value only after the shared Prelude outcome has succeeded.
+extern "C" fn jet_jit_task_scope_join(task: i64) -> i64 {
+    let join = with_runtime_mut(|rt| rt.tasks.get_mut(task as usize).and_then(Option::take));
+    match join {
+        Some(j) => wait_task_value(|| j.join(), |_, value| value as u64, false),
+        None => {
+            WAIT_VALUE.with(|slot| slot.set(task));
+            JitWaitStatus::Ready as i64
+        }
+    }
+}
+
 /// D-NURSERY1=A: `g.all([h1, h2, …])` — returns a new `[Int]` list handle.
 extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
     });
-    wait_task_result(
+    wait_task_value(
         || jet_scheduler_all(entries),
         |rt, values| store_i64_list(rt, values) as u64,
+        true,
     )
 }
 
@@ -823,7 +940,7 @@ extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
     });
-    wait_task_result(|| jet_scheduler_race(entries), |_, value| value as u64)
+    wait_task_value(|| jet_scheduler_race(entries), |_, value| value as u64, true)
 }
 
 /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result.
@@ -832,7 +949,7 @@ extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
     });
-    wait_task_result(|| jet_scheduler_any(entries), |_, value| value as u64)
+    wait_task_value(|| jet_scheduler_any(entries), |_, value| value as u64, true)
 }
 
 /// D-CONCSELECT1=A: `g.select().recv(…).after(ms[, v]).wait()`.
@@ -1014,6 +1131,7 @@ host_fns! {
     task_group_register: "jet_jit_task_group_register" => jet_jit_task_group_register: sig_void_i64_i64;
     task_group_close: "jet_jit_task_group_close" => jet_jit_task_group_close: sig_i64;
     task_join: "jet_jit_task_join" => jet_jit_task_join: sig_i64;
+    task_scope_join: "jet_jit_task_scope_join" => jet_jit_task_scope_join: sig_i64;
     task_cancel: "jet_jit_task_cancel" => jet_jit_task_cancel: sig_void_i64;
     task_detach: "jet_jit_task_detach" => jet_jit_task_detach: sig_void_i64;
     task_pause: "jet_jit_task_pause" => jet_jit_task_pause: sig_void_i64;
@@ -1043,6 +1161,3 @@ host_fns! {
     deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
     deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;
 }
-
-
-

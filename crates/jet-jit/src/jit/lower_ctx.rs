@@ -17028,6 +17028,10 @@ impl LowerCtx<'_, '_> {
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
             }
+            THandleOp::TaskScopeJoin => {
+                let status = self.call_host(self.host.conc.task_scope_join, &[recv_val]);
+                Ok(self.finish_wait_call(status))
+            }
             THandleOp::TaskTraceAll => {
                 Ok(self.call_host(self.host.conc.task_trace_all, &[recv_val]))
             }

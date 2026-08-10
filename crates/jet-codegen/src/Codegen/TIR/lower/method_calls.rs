@@ -3428,7 +3428,10 @@ pub(crate) fn lower_method_call(
     // → `Result<T, TaskFailure>`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
-    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+    if recv_type.is_none()
+        && (is_concurrency_method_name(method, args.len())
+            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
+    {
         // D-VERDICT-1323-1 / I8: `handles.wait_all()` and `handles.join_all()` are
         // the method spelling of `tasks.join_all`, so they lower to the same node
         // every engine already drives. No second mechanism.
@@ -3447,6 +3450,7 @@ pub(crate) fn lower_method_call(
                     err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
                 }),
             ),
+            Syntax::METHOD_TASK_SCOPE_JOIN => (THandleOp::TaskScopeJoin, elem),
             "detach" => (THandleOp::TaskDetach, unit_type()),
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),

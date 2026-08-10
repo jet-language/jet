@@ -285,13 +285,29 @@ fn assert_native_wait_exit(
     name: &str,
     source: &str,
     stderr_text: &str,
+    expected_stdout: &str,
 ) {
     assert_jit_compiles(name, source);
     let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
-    assert_ne!(code, 0, "{stderr}");
-    assert_eq!(stdout, "", "{stderr}");
+    assert_ne!(code, 0, "stdout={stdout:?}\n{stderr}");
+    assert_eq!(stdout, expected_stdout, "stdout={stdout:?}\n{stderr}");
     assert!(!stdout.contains("caller"), "{stdout:?}\n{stderr}");
     assert!(stderr.contains(stderr_text), "{stderr}");
+    assert!(
+        stderr.lines().any(|line| {
+            line.split_whitespace()
+                .take(3)
+                .eq(["run", "tier1", "native"])
+        }),
+        "{stderr}"
+    );
+}
+
+fn assert_native_wait_success(name: &str, source: &str, expected_stdout: &str) {
+    assert_jit_compiles(name, source);
+    let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
+    assert_eq!(code, 0, "stdout={stdout:?}\n{stderr}");
+    assert_eq!(stdout, expected_stdout, "{stderr}");
     assert!(
         stderr.lines().any(|line| {
             line.split_whitespace()
@@ -305,7 +321,6 @@ fn assert_native_wait_exit(
 #[test]
 fn native_cancellation_closes_group_before_caller_continues() {
     let source = r#"
-use core.tasks as tasks
 use core.time as time
 
 fn wait_in_group(gate: Shared<[Int]>) {
@@ -323,14 +338,19 @@ fn wait_in_group(gate: Shared<[Int]>) {
 
 fn run() {
     gate :: Shared.new([0])
-    outer :: tasks.spawn(() => wait_in_group(gate))
+    outer :: task wait_in_group(gate)
     loop gate.read((state: [Int]) => state[0]) == 0 {}
     outer.cancel()
     outer.join().drop("the process exits from the cancelled wait before this would matter")
     print("caller")
 }
 "#;
-    assert_native_wait_exit("taskgroup_cancel_exit", source, "cancel");
+    // D-CANCELMODEL1=C cancels at the outer task's sleep wait point. The
+    // explicit outer `.drop(...)` follows D-CONC-FAIL1=A and D-IGNORERET2,
+    // so it discards the resulting `Cancelled` value and the caller returns
+    // normally. Group cleanup still drains the uncancellable tight-loop child
+    // before the caller can print, so the settled line precedes caller.
+    assert_native_wait_success("taskgroup_cancel_exit", source, "settled\ncaller\n");
 }
 
 #[test]
@@ -357,7 +377,7 @@ fn run() {
     print("caller")
 }
 "#;
-    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003");
+    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003", "");
 }
 
 #[test]
@@ -391,7 +411,24 @@ fn run() {
     print("caller")
 }
 "#;
-    assert_native_wait_exit("taskgroup_wait_panic_exit", source, "wait failed");
+    assert_native_wait_exit("taskgroup_wait_panic_exit", source, "wait failed", "settled\n");
+}
+
+#[test]
+fn local_task_binding_is_not_parsed_as_spawn_syntax() {
+    let source = r#"
+fn run() {
+    task :: [7]
+    print(task[0])
+}
+"#;
+    let (code, stdout, stderr) = run_default_multi(
+        "task_local_binding",
+        "main.jet",
+        &[("main.jet", source)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "7\n", "{stderr}");
 }
 
 #[test]

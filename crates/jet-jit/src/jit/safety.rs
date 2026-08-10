@@ -3599,6 +3599,19 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         | TExprKind::Clone(inner)
         | TExprKind::Ok(inner)
         | TExprKind::Err(inner) => count_spawn_sites_expr(inner, n),
+        TExprKind::ListLit(elems) | TExprKind::ColumnarListLit { elems, .. } => {
+            for elem in elems {
+                count_spawn_sites_expr(elem, n);
+            }
+        }
+        TExprKind::ListSpread { parts } => {
+            for part in parts {
+                let expr = match part {
+                    ListSpreadPart::Elem(expr) | ListSpreadPart::Spread(expr) => expr,
+                };
+                count_spawn_sites_expr(expr, n);
+            }
+        }
         TExprKind::Binary { lhs, rhs, .. } => {
             count_spawn_sites_expr(lhs, n);
             count_spawn_sites_expr(rhs, n);

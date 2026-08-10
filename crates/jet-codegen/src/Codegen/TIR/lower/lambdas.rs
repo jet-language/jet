@@ -13,6 +13,9 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower::lambda_block_tail;
+use crate::Codegen::TIR::lower::{
+    prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
+};
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -273,12 +276,14 @@ fn lower_lambda_expecting_with_host_borrow(
     let prev_in_stm = cx.in_stm_transact.replace(false);
     let (body, executable) = match &lam.body {
         LambdaBody::Expr(e) => {
+            prepare_interrupt_callback_local_expr(e, cx, &mut lam_env);
             // An expression-bodied lambda returns an owned value, just like an
             // explicit `return`; clone a borrowed non-scalar parameter here.
             let lowered = lower_owned_expr(e, cx, &mut lam_env);
             (emit_tir_expr(&lowered, cx), TLambdaBody::Expr(Box::new(lowered)))
         }
         LambdaBody::Block(stmts) => {
+            prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
             let lowered = lower_stmts(stmts, cx, &mut lam_env);
             let mut inner = String::new();
             emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
@@ -367,6 +372,10 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
     }
 
     let ret = lambda_body_ty(lam, cx, env);
+    match &lam.body {
+        LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
+        LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
+    }
     let body = match &lam.body {
         LambdaBody::Expr(e) => TJitSpawnBody::Expr(Box::new(lower_expr(e, cx, &mut lam_env))),
         LambdaBody::Block(stmts) => {
@@ -436,6 +445,10 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     for p in &lam.params {
         lam_env.bind(&p.name, TLocal::user(&p.name), p.ty.clone());
     }
+    match &lam.body {
+        LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
+        LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
+    }
     let params: Vec<String> = lam
         .params
         .iter()
@@ -486,6 +499,7 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
         lam_env.bind(name, TLocal::generated(&cap), outer_env.ty_of(name));
     }
     let mut inner = String::new();
+    prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
     let lowered = lower_stmts(stmts, cx, &mut lam_env);
     emit_tir_stmts(&lowered, cx, &mut inner, 1);
     let closure = format!("move || {{ {} }}", inner);

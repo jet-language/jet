@@ -2707,7 +2707,8 @@ impl<'a> EvalCtx<'a> {
                     return self.eval_event_method(method, &mut r, &argv);
                 }
                 match op {
-                    crate::Codegen::TIR::THandleOp::TaskJoin => {
+                    crate::Codegen::TIR::THandleOp::TaskJoin
+                    | crate::Codegen::TIR::THandleOp::TaskScopeJoin => {
                         return self.take_task(&r);
                     }
                     crate::Codegen::TIR::THandleOp::TaskDetach => {

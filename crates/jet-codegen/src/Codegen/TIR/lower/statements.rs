@@ -144,14 +144,24 @@ fn collect_interrupt_callback_names_expr(
                 collect_interrupt_callback_names_expr(&arg.expr, cx, names);
             }
         }
-        Expr::Lambda(lam) => match &lam.body {
-            crate::AST::LambdaBody::Expr(body) => {
-                collect_interrupt_callback_names_expr(body, cx, names)
+        // A normal lambda is its own function boundary. Its body gets one scan
+        // when that lambda is lowered; descending here would make the
+        // enclosing function scan the nested function and reintroduce the old
+        // per-statement-list walk. Collecting/result loops are the exception:
+        // sema lowers those immediately-called lambdas as inline blocks in the
+        // current function, so their callback uses belong to this scan.
+        Expr::Lambda(lam) => {
+            if lam.meta.collecting_loop || lam.meta.result_loop {
+                match &lam.body {
+                    crate::AST::LambdaBody::Expr(body) => {
+                        collect_interrupt_callback_names_expr(body, cx, names)
+                    }
+                    crate::AST::LambdaBody::Block(body) => {
+                        collect_interrupt_callback_names(body, cx, names)
+                    }
+                }
             }
-            crate::AST::LambdaBody::Block(body) => {
-                collect_interrupt_callback_names(body, cx, names)
-            }
-        },
+        }
         Expr::Paren(inner, _)
         | Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
@@ -443,7 +453,7 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
     }
 }
 
-fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) {
+pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) {
     let mut names = HashSet::new();
     collect_interrupt_callback_names(stmts, cx, &mut names);
     let mut send = names;
@@ -464,6 +474,14 @@ fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv
         }
     }
     for name in send {
+        env.mark_send_fn(&name);
+    }
+}
+
+pub(super) fn prepare_interrupt_callback_local_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) {
+    let mut names = HashSet::new();
+    collect_interrupt_callback_names_expr(expr, cx, &mut names);
+    for name in names {
         env.mark_send_fn(&name);
     }
 }
@@ -493,7 +511,6 @@ fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
 }
 
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    prepare_interrupt_callback_locals(stmts, cx, env);
     let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 });
     let mut split_views = split_view_plan(stmts, cx, env);
     let mut index = 0;
