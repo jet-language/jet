@@ -838,8 +838,8 @@ impl<'a> Checker<'a> {
         self.registry
             .struct_fields(&name)?
             .iter()
-            .find(|(candidate, _, _, _)| candidate == field)
-            .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+            .find(|(candidate, _, _)| candidate == field)
+            .map(|(_, _, ty)| substitute_type(ty, &subst))
     }
 
     fn method_receiver_access(&self, receiver: &Expr, method: &str) -> ViewAccess {
@@ -2617,7 +2617,7 @@ impl<'a> Checker<'a> {
                         if name == "View"
                             && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
                 ) || matches!(ty, Type::Named(name) if self.registry.struct_fields(name).is_some_and(|fields| {
-                    fields.iter().any(|(_, _, field_ty, _)| matches!(
+                    fields.iter().any(|(_, _, field_ty)| matches!(
                         field_ty,
                         Type::Apply { name, args }
                             if name == "View"
@@ -3185,7 +3185,7 @@ impl<'a> Checker<'a> {
                 }
                 Type::Named(name) | Type::Apply { name, .. } if seen.insert(name.clone()) => {
                     if let Some(fields) = checker.registry.struct_fields(name) {
-                        for (field, _, field_ty, _) in fields {
+                        for (field, _, field_ty) in fields {
                             path.push(field.clone());
                             walk(checker, field_ty, path, seen, out);
                             path.pop();
@@ -3381,7 +3381,7 @@ impl<'a> Checker<'a> {
             let found = registry.struct_fields(name).is_some_and(|fields| {
                 fields
                     .iter()
-                    .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
+                    .any(|(_, _, field_ty)| contains(registry, field_ty, seen))
             }) || registry.enum_variants(name).is_some_and(|variants| {
                 variants
                     .values()
@@ -4438,7 +4438,7 @@ impl<'a> Checker<'a> {
             self.struct_subst(name, args)
         };
         let found = match self.registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty)| {
                 let actual = self.trait_reg.instantiate_type(ty, &subst);
                 self.type_contains_cell_guard_inner(&actual, seen)
             }),
@@ -4535,7 +4535,7 @@ impl<'a> Checker<'a> {
             self.struct_subst(name, args)
         };
         let found = match self.registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty)| {
                 let actual = self.trait_reg.instantiate_type(ty, &subst);
                 self.type_contains_local_cell_inner(&actual, seen)
             }),
@@ -4704,7 +4704,7 @@ impl<'a> Checker<'a> {
         };
         let found = match self.registry.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => {
-                for (field_name, _, field_ty, _) in fields {
+                for (field_name, _, field_ty) in fields {
                     let actual_ty = self.trait_reg.instantiate_type(field_ty, &subst);
                     if let Some(problem) = self.sendability_problem_inner(&actual_ty, true, seen) {
                         return Some(prepend_send_path(name, field_name, problem));

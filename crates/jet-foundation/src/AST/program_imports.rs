@@ -351,11 +351,9 @@ pub struct ProgramBundle {
     /// Each entry records the path and sha256 of a file embedded at compile
     /// time. Written to `.jet/lock` by the build driver for reproducibility.
     pub comptime_inputs: Vec<ComptimeInput>,
-    /// Pre-resolved import target indices: `(from_module_idx, import_span) → to_module_idx`.
-    /// Populated by `Loader::load_entry_with_overlay` after all modules are loaded.
-    /// Core-module imports and C imports are absent (they have no loaded module index).
-    /// Empty for single-module bundles created inline (compile_src / check_eval paths).
-    pub import_targets: std::collections::HashMap<(usize, Span), usize>,
+    /// One name ledger. Loader seeds file-import edges; sema fills checked
+    /// declaration, alias, visibility, path, and reference facts.
+    pub name_ledger: crate::Names::NameLedger,
     /// D-RINGLAYER1: optional `runtime:` ceiling from `pkg.jet`.
     pub layer_ceiling: Option<crate::RingLayer::RuntimeLayer>,
     /// D-RINGLAYER1: inferred minimum runtime profile for this package.

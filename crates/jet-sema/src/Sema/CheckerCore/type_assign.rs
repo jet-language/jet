@@ -164,11 +164,11 @@ impl<'a> Checker<'a> {
             let (owner, public_name) = if let Some((alias, leaf)) = name.rsplit_once('.') {
                 (self.imports.get(alias).copied(), leaf)
             } else {
-                let locally_owned = self.registry.contains(name)
-                    || self.modules.is_some_and(|modules| {
-                        modules[self.module_idx].type_pub.contains_key(name)
-                            && modules[self.module_idx].trait_reg.is_trait_name(name)
-                    });
+                let locally_owned = self.registry.contains(name) || {
+                    let declared = self.name_ledger.declaration(self.module_idx, name).is_some();
+                    self.modules
+                        .is_some_and(|modules| declared && modules[self.module_idx].trait_reg.is_trait_name(name))
+                };
                 let owner = if locally_owned {
                     Some(self.module_idx)
                 } else {

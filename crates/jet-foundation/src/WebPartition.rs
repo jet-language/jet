@@ -67,9 +67,9 @@ pub fn partition_key(
     fn_name: &str,
 ) -> String {
     match module_prefix {
-        Some(module) => format!("{module}__{fn_name}"),
+        Some(module) => crate::Names::member_name(module, fn_name),
         None => file_prefix
-            .map(|alias| format!("{alias}__{fn_name}"))
+            .map(|alias| crate::Names::member_name(alias, fn_name))
             .unwrap_or_else(|| fn_name.to_string()),
     }
 }

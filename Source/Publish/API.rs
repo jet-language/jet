@@ -55,9 +55,14 @@ pub fn extract_public_api_for_package(src: &str, file: &str, package: &str) -> V
     crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, package, &mut dimensions);
     collect_public_api(
         &entry.items,
-        &entry.alias,
+        bundle.entry,
+        facts
+            .name_ledger
+            .module_alias(bundle.entry)
+            .unwrap_or(&entry.alias),
         None,
         &facts.solved,
+        &facts.name_ledger,
         &dimensions,
         &mut out,
     );
@@ -67,18 +72,31 @@ pub fn extract_public_api_for_package(src: &str, file: &str, package: &str) -> V
 
 fn collect_public_api(
     items: &[crate::AST::Item],
+    module_idx: usize,
     module_alias: &str,
     code_module: Option<&str>,
     solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+    ledger: &crate::AST::NameLedger,
     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
     out: &mut Vec<ApiItem>,
 ) {
     for item in items {
-        if let Some(api) = public_api_of_item(item, module_alias, code_module, solved, dimensions) {
+        if let Some(api) = public_api_of_item(
+            item,
+            module_idx,
+            module_alias,
+            code_module,
+            solved,
+            ledger,
+            dimensions,
+        ) {
             out.push(api);
         }
         if let crate::AST::Item::Trait(trait_def) = item {
-            if trait_def.is_pub && !trait_def.is_package_pub {
+            let trait_name = code_module
+                .map(|module| crate::AST::member_name(module, &trait_def.name))
+                .unwrap_or_else(|| trait_def.name.clone());
+            if ledger.public(module_idx, &trait_name) {
                 out.extend(
                     trait_def
                         .methods
@@ -106,9 +124,11 @@ fn collect_public_api(
             if let Some(body) = &module.body {
                 collect_public_api(
                     body,
+                    module_idx,
                     module_alias,
                     Some(&module.name),
                     solved,
+                    ledger,
                     dimensions,
                     out,
                 );
@@ -126,20 +146,28 @@ fn public_item_name(code_module: Option<&str>, name: &str) -> String {
 /// Build an `ApiItem` for a single AST item, or `None` if it is private.
 fn public_api_of_item(
     item: &crate::AST::Item,
+    module_idx: usize,
     module_alias: &str,
     code_module: Option<&str>,
     solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+    ledger: &crate::AST::NameLedger,
     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
 ) -> Option<ApiItem> {
     use crate::AST::Item;
     match item {
-        Item::Func(f) if supported_public_name(&f.name) && f.is_pub && !f.is_package_pub => {
+        Item::Func(f) if supported_public_name(&f.name) => {
+            let ledger_name = code_module
+                .map(|module| crate::AST::member_name(module, &f.name))
+                .unwrap_or_else(|| f.name.clone());
+            if !ledger.public(module_idx, &ledger_name) {
+                return None;
+            }
             let signature = format_fn_sig(
                 f,
                 solved.get(&format!(
                     "{module_alias}::{}",
                     code_module
-                        .map(|module| format!("{module}__{}", f.name))
+                        .map(|module| crate::AST::member_name(module, &f.name))
                         .unwrap_or_else(|| f.name.clone())
                 ))
                 .or_else(|| solved.get(&f.name)),
@@ -154,21 +182,36 @@ fn public_api_of_item(
                 ),
             })
         }
-        Item::Struct(s) if supported_public_name(&s.name) && s.is_pub && !s.is_package_pub => Some(ApiItem {
-            kind: "struct".into(),
-            name: public_item_name(code_module, &s.name),
-            signature: format_struct_sig(s, dimensions),
-        }),
-        Item::Enum(e) if supported_public_name(&e.name) && e.is_pub && !e.is_package_pub => Some(ApiItem {
-            kind: "enum".into(),
-            name: public_item_name(code_module, &e.name),
-            signature: format_enum_sig(e),
-        }),
-        Item::Trait(t) if supported_public_name(&t.name) && t.is_pub && !t.is_package_pub => Some(ApiItem {
-            kind: "trait".into(),
-            name: public_item_name(code_module, &t.name),
-            signature: format_trait_sig(t, dimensions),
-        }),
+        Item::Struct(s) if supported_public_name(&s.name) => {
+            let ledger_name = code_module
+                .map(|module| crate::AST::member_name(module, &s.name))
+                .unwrap_or_else(|| s.name.clone());
+            ledger.public(module_idx, &ledger_name).then(|| ApiItem {
+                kind: "struct".into(),
+                name: public_item_name(code_module, &s.name),
+                signature: format_struct_sig(s, dimensions),
+            })
+        }
+        Item::Enum(e) if supported_public_name(&e.name) => {
+            let ledger_name = code_module
+                .map(|module| crate::AST::member_name(module, &e.name))
+                .unwrap_or_else(|| e.name.clone());
+            ledger.public(module_idx, &ledger_name).then(|| ApiItem {
+                kind: "enum".into(),
+                name: public_item_name(code_module, &e.name),
+                signature: format_enum_sig(e),
+            })
+        }
+        Item::Trait(t) if supported_public_name(&t.name) => {
+            let ledger_name = code_module
+                .map(|module| crate::AST::member_name(module, &t.name))
+                .unwrap_or_else(|| t.name.clone());
+            ledger.public(module_idx, &ledger_name).then(|| ApiItem {
+                kind: "trait".into(),
+                name: public_item_name(code_module, &t.name),
+                signature: format_trait_sig(t, dimensions),
+            })
+        }
         // ConstDef does not carry is_pub in v1 — consts are accessible by name
         // and the pub distinction is enforced at use sites by sema. Skip from
         // public API for now; revisit when const visibility is added to the AST.

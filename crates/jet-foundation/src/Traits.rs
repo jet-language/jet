@@ -74,9 +74,12 @@ impl TraitRegistry {
 
     /// Compute the three automatic structural traits for each bundle module.
     /// Module index is the nominal identity; an imported `alias.Type` resolves
-    /// through the bundle's import-target table before its leaf-name facts are
-    /// consulted. Bare names never borrow facts from another module.
-    pub fn bundle_auto_derives(bundle: &ProgramBundle) -> Vec<TraitRegistry> {
+    /// through the shared name ledger before its leaf-name facts are consulted.
+    /// Bare names never borrow facts from another module.
+    pub fn bundle_auto_derives(
+        bundle: &ProgramBundle,
+        name_ledger: &crate::Names::NameLedger,
+    ) -> Vec<TraitRegistry> {
         let mut registries: Vec<_> = bundle
             .modules
             .iter()
@@ -90,10 +93,7 @@ impl TraitRegistry {
                     .imports
                     .iter()
                     .filter_map(|import| {
-                        bundle
-                            .import_targets
-                            .get(&(module_idx, import.span))
-                            .copied()
+                        name_ledger.import_target(module_idx, import.span)
                             .map(|target| (import.import_alias(), target))
                     })
                     .collect();
@@ -113,7 +113,7 @@ impl TraitRegistry {
         let snapshot = registries.clone();
         for (module_idx, module) in bundle.modules.iter().enumerate() {
             for import in &module.imports {
-                let Some(&target) = bundle.import_targets.get(&(module_idx, import.span)) else {
+                let Some(target) = name_ledger.import_target(module_idx, import.span) else {
                     continue;
                 };
                 let alias = import.import_alias();
@@ -2235,7 +2235,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::List(inner) => format!("Vec<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Named(n) if n.is_empty() => "Self".to_string(),
         Type::Named(n) if assoc.contains(n) => format!("Self::{n}"),
-        Type::Named(n) => Syntax::generated_path(n),
+        Type::Named(n) => crate::Names::user_type_rust(n),
         Type::Apply { name, args } if name == "View" && args.len() == 1 => {
             if matches!(&args[0], Type::Named(inner) if inner == "str") {
                 "&str".to_string()
@@ -2248,7 +2248,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         }
         Type::Apply { name, args } => format!(
             "{}<{}>",
-            Syntax::generated_path(name),
+            crate::Names::user_type_rust(name),
             args.iter()
                 .map(|a| rust_type_name_assoc(a, assoc))
                 .collect::<Vec<_>>()
@@ -2259,7 +2259,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::TraitObject(t) => format!(
             "Box<dyn {}>",
             t.iter()
-                .map(|n| Syntax::generated_path(n))
+                .map(|name| crate::Names::user_type_rust(name))
                 .collect::<Vec<_>>()
                 .join(" + ")
         ),
@@ -2289,7 +2289,7 @@ pub fn emit_trait_def(
     out: &mut String,
     render_view_return: impl Fn(&Type, &HashSet<String>) -> String,
 ) {
-    out.push_str(&format!("pub trait {} {{\n", Syntax::generated_name(&t.name)));
+    out.push_str(&format!("pub trait {} {{\n", crate::Names::user_trait_rust(&t.name)));
     // D-LIB2: declare each associated type; method sigs below render uses of it
     // as `Self::Name`, and each impl emits `type Name = <concrete>;`.
     let assoc: HashSet<String> = t.assoc_types.iter().map(|(n, _)| n.clone()).collect();

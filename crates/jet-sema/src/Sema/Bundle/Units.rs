@@ -264,7 +264,7 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
             module
                 .imports
                 .iter()
-                .filter_map(|import| bundle.import_targets.get(&(module_index, import.span)).copied())
+                .filter_map(|import| bundle.name_ledger.import_target(module_index, import.span))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -278,9 +278,8 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
                 .iter()
                 .filter_map(|import| {
                     bundle
-                        .import_targets
-                        .get(&(module_index, import.span))
-                        .copied()
+                        .name_ledger
+                        .import_target(module_index, import.span)
                         .map(|target| (import.import_alias(), target))
                 })
                 .collect::<HashMap<_, _>>()

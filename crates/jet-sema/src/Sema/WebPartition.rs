@@ -203,7 +203,7 @@ fn collect_funcs(
         match item {
             Item::Func(f) => {
                 let local_key = match module_prefix {
-                    Some(m) => format!("{m}__{}", f.name),
+                    Some(m) => jet_foundation::Names::member_name(m, &f.name),
                     None => effect_key(None, &f.name),
                 };
                 let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);

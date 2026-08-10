@@ -6,8 +6,18 @@ use std::collections::{HashMap, HashSet};
 /// Look up the pre-resolved module index for an import. Returns `None` for
 /// core modules, C imports, and unqualified imports (they have no file target).
 #[inline]
+fn import_is_active(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> bool {
+    bundle
+        .name_ledger
+        .effective_alias(module_idx, &imp.import_alias())
+        .is_some()
+}
+
 fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
-    bundle.import_targets.get(&(module_idx, imp.span)).copied()
+    if !import_is_active(bundle, module_idx, imp) {
+        return None;
+    }
+    bundle.name_ledger.import_target(module_idx, imp.span)
 }
 
 fn file_import_target(
@@ -86,18 +96,26 @@ pub(crate) fn foreign_type_map(
             let rust_mod = mangle(&bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
-                    Item::Struct(s) if s.is_pub && !is_local(&s.name) => {
+                    Item::Struct(s)
+                        if bundle.name_ledger.visible(module_idx, target, &s.name)
+                            && !is_local(&s.name) =>
+                    {
                         map.insert(s.name.clone(), rust_mod.clone());
                     }
-                    Item::Enum(e) if e.is_pub && !is_local(&e.name) => {
+                    Item::Enum(e)
+                        if bundle.name_ledger.visible(module_idx, target, &e.name)
+                            && !is_local(&e.name) =>
+                    {
                         map.insert(e.name.clone(), rust_mod.clone());
                     }
-                    Item::UnitFamily(family) if family.is_pub => {
+                    Item::UnitFamily(family) => {
                         for member in family.distinct_defs() {
-                            map.insert(
-                                format!("{}.{}", bundle.modules[target].alias, member.name),
-                                rust_mod.clone(),
-                            );
+                            if bundle.name_ledger.visible(module_idx, target, &member.name) {
+                                map.insert(
+                                    format!("{}.{}", bundle.modules[target].alias, member.name),
+                                    rust_mod.clone(),
+                                );
+                            }
                         }
                     }
                     _ => {}
@@ -123,7 +141,7 @@ pub(crate) fn register_foreign_enum_variants(
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
             for item in &bundle.modules[target].items {
                 if let Item::Enum(e) = item {
-                    if e.is_pub {
+                    if bundle.name_ledger.visible(module_idx, target, &e.name) {
                         cx.enum_variants.entry(e.name.clone()).or_insert_with(|| {
                             e.variants
                                 .iter()
@@ -149,13 +167,20 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
         let alias = imp.import_alias();
         // S59: C `use` forms target a synthetic merged module by alias.
         if imp.is_c_import() {
+            if !import_is_active(bundle, module_idx, imp) {
+                continue;
+            }
             if let Some(target) = bundle.cffi.target_for(module_idx, &alias) {
                 let stem = &bundle.modules[target].alias;
                 map.insert(alias, mangle(stem));
             }
             continue;
         }
-        if let Some(target) = resolve_target(bundle, module_idx, imp) {
+        if let Some(target) = bundle
+            .name_ledger
+            .effective_alias(module_idx, &alias)
+            .and_then(|name| name.target_module)
+        {
             let stem = &bundle.modules[target].alias;
             map.insert(alias, mangle(stem));
         }
@@ -184,27 +209,34 @@ pub(crate) fn reexport_call_map(
         let target = &bundle.modules[target_idx];
         for reimp in &target.imports {
             let ImportKind::Unqualified {
-                module_alias,
+                module_alias: _,
                 items,
                 ..
             } = &reimp.kind
             else {
                 continue;
             };
-            if !reimp.is_pub {
-                continue;
-            }
-            // Resolve `module_alias` within the target module's own imports.
-            let real_idx = file_import_target(bundle, target_idx, module_alias);
-            if let Some(real_idx) = real_idx {
-                let real_mod = mangle(&bundle.modules[real_idx].alias);
-                for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    map.insert(
-                        (alias.clone(), local.to_string()),
-                        (real_mod.clone(), orig.clone()),
-                    );
+            for (orig, alias_opt) in items {
+                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                let Some(name) = bundle.name_ledger.effective_alias(target_idx, local) else {
+                    continue;
+                };
+                let Some(real_idx) = name.target_module else {
+                    continue;
+                };
+                if !bundle.name_ledger.visible(module_idx, target_idx, local) {
+                    continue;
                 }
+                let real_name = name
+                    .target
+                    .rsplit_once('.')
+                    .map(|(_, leaf)| leaf)
+                    .unwrap_or(orig)
+                    .to_string();
+                map.insert(
+                    (alias.clone(), local.to_string()),
+                    (mangle(&bundle.modules[real_idx].alias), real_name),
+                );
             }
         }
     }
@@ -251,6 +283,9 @@ pub(crate) fn core_import_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
+        if !import_is_active(bundle, module_idx, imp) {
+            continue;
+        }
         if let Some(core_module) = imp.core_module_path() {
             map.insert(imp.import_alias(), core_module);
             continue;
@@ -267,6 +302,9 @@ pub(crate) fn core_import_map(
             if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    if bundle.name_ledger.effective_alias(module_idx, local).is_none() {
+                        continue;
+                    }
                     let full = format!("{core_prefix}.{orig}");
                     if crate::Syntax::is_known_core_module(&full) {
                         map.insert(local.to_string(), full);
@@ -280,7 +318,7 @@ pub(crate) fn core_import_map(
 
 /// D-MOD3: build unqualified-import maps for codegen.
 /// Returns (inline_map, file_map) where:
-///   inline_map: unqualified name → "alias__method" (for inline code modules)
+///   inline_map: unqualified name → canonical member name (for inline code modules)
 ///   file_map:   unqualified name → (rust_mod_name, fn_name) (for file modules)
 pub(crate) fn unqualified_import_maps(
     bundle: &ProgramBundle,
@@ -315,20 +353,27 @@ pub(crate) fn unqualified_import_maps(
             // Std namespace — handled separately by core_import_map.
             continue;
         }
-        if code_mod_aliases.contains(module_alias.as_str()) {
-            // Inline code module.
-            for (orig, alias_opt) in items {
-                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                let key = format!("{}__{}", module_alias, orig);
-                inline_map.insert(local.to_string(), key);
-            }
-        } else if let Some(target) = file_import_target(bundle, module_idx, module_alias) {
-            // File module: resolve the file-import whose alias matches, then point
-            // each unqualified item at that Rust module.
-            let rust_mod = mangle(&bundle.modules[target].alias);
-            for (orig, alias_opt) in items {
-                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                file_map.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
+        for (orig, alias_opt) in items {
+            let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+            let Some(name) = bundle.name_ledger.effective_alias(module_idx, local) else {
+                continue;
+            };
+            if code_mod_aliases.contains(module_alias.as_str()) {
+                // Inline code module. Sema already stored the canonical member
+                // name, including generic-module substitutions.
+                inline_map.insert(local.to_string(), name.target.clone());
+            } else if let Some(target) = name.target_module {
+                // File module. Sema already resolved the alias to its target.
+                let real_name = name
+                    .target
+                    .rsplit_once('.')
+                    .map(|(_, leaf)| leaf)
+                    .unwrap_or(orig)
+                    .to_string();
+                file_map.insert(
+                    local.to_string(),
+                    (mangle(&bundle.modules[target].alias), real_name),
+                );
             }
         }
     }
@@ -503,6 +548,9 @@ pub(crate) fn import_sig_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
+        if !import_is_active(bundle, module_idx, imp) {
+            continue;
+        }
         let alias = imp.import_alias();
         // S59: C `use` forms — pull boundary fn sigs from the synthetic module.
         let target = if imp.is_c_import() {
@@ -518,7 +566,7 @@ pub(crate) fn import_sig_map(
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Func(f) if f.is_pub => {
+                Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
                     map.insert(
                         (alias.clone(), f.name.clone()),
                         f.params
@@ -564,7 +612,9 @@ pub(crate) fn import_sig_map(
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
-                    if f.is_pub && f.name == real_fn {
+                    if bundle.name_ledger.visible(module_idx, real_idx, &f.name)
+                        && f.name == real_fn
+                    {
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.params
@@ -591,6 +641,9 @@ pub(crate) fn import_ret_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
+        if !import_is_active(bundle, module_idx, imp) {
+            continue;
+        }
         let alias = imp.import_alias();
         let target = if imp.is_c_import() {
             match bundle.cffi.target_for(module_idx, &alias) {
@@ -605,7 +658,7 @@ pub(crate) fn import_ret_map(
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Func(f) if f.is_pub => {
+                Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
                     let ret = f
                         .return_type
                         .as_ref()
@@ -640,7 +693,9 @@ pub(crate) fn import_ret_map(
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
-                    if f.is_pub && f.name == real_fn {
+                    if bundle.name_ledger.visible(module_idx, real_idx, &f.name)
+                        && f.name == real_fn
+                    {
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.return_type
@@ -792,7 +847,7 @@ pub(crate) fn emit_program_items(
                             continue;
                         }
                         let mut mangled_f = f.clone();
-                        mangled_f.name = format!("{}__{}", cm.name, f.name);
+                        mangled_f.name = jet_foundation::Names::member_name(&cm.name, &f.name);
                         emit_func(cx, &mangled_f, out);
                     }
                 }

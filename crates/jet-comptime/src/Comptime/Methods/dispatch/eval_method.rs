@@ -768,7 +768,7 @@ impl<'a> Interp<'a> {
                         return self.call_func(&qualified, f, frame);
                     }
                 }
-                let mangled = format!("{}__{}", name, method);
+                let mangled = jet_foundation::Names::member_name(name, method);
                 if let Some(f) = self.funcs.get(mangled.as_str()).copied() {
                     if f.params.len() == args.len() {
                         let mut frame = HashMap::new();

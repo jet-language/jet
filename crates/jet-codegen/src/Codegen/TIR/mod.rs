@@ -45,6 +45,7 @@ pub(crate) use lower::*;
 pub(crate) use subset::*;
 
 use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp, VariantPayload};
+use crate::Codegen::{mangle, mangle_variant, user_type_rust};
 
 thread_local! {
     static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
@@ -1170,6 +1171,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             }
             Item::CodeModule(cm) => {
                 let Some(body) = &cm.body else { continue };
+                let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
                 for inner in body {
                     match inner {
                         Item::Func(f) => {
@@ -1180,17 +1182,17 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             // emitted module-qualified function name so body-local
                             // import scopes select `cm__function` while preserving
                             // the same canonical TIR call form for tier 0.
+                            let member = jet_foundation::Names::member_name(&cm.name, &f.name);
                             let mut mangled_f = f.clone();
-                            mangled_f.name = format!("{}__{}", cm.name, f.name);
+                            mangled_f.name = member.clone();
                             let mut lowered = lower_func(&mangled_f, &cx);
-                            lowered.name = format!("{}__{}", cm.name, f.name);
-                            funcs.push(lowered);
+                            lowered.name = member;                            funcs.push(lowered);
                         }
                         Item::Struct(s) => {
-                            let type_name = if s.name.starts_with(&format!("{}__", cm.name)) {
+                            let type_name = if s.name.starts_with(&member_prefix) {
                                 s.name.clone()
                             } else {
-                                format!("{}__{}", cm.name, s.name)
+                                jet_foundation::Names::member_name(&cm.name, &s.name)
                             };
                             for method in &s.methods {
                                 if !tir_covers_method(method, &type_name, &cx) {
@@ -1204,11 +1206,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         Item::Impl(imp) => {
                             let type_name = if imp
                                 .type_name
-                                .starts_with(&format!("{}__", cm.name))
+                                .starts_with(&member_prefix)
                             {
                                 imp.type_name.clone()
                             } else {
-                                format!("{}__{}", cm.name, imp.type_name)
+                                jet_foundation::Names::member_name(&cm.name, &imp.type_name)
                             };
                             for method in &imp.methods {
                                 let mut lowered = if let Some(trait_name) = &imp.trait_name {
@@ -1293,9 +1295,8 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         // symbol remains the imported module's Rust-qualified ABI.
                         let mut mangled_function = function.clone();
                         mangled_function.name =
-                            format!("{}__{}", code_module.name, function.name);
-                        let mut lowered = lower_func(&mangled_function, &imported_cx);
-                        lowered.name =
+                            jet_foundation::Names::member_name(&code_module.name, &function.name);
+                        let mut lowered = lower_func(&mangled_function, &imported_cx);                        lowered.name =
                             format!("{}::{}", mangle(&code_module.name), mangle(&function.name));
                         funcs.push(lowered);
                     }
@@ -1428,13 +1429,14 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             }
             Item::CodeModule(cm) => {
                 if let Some(body) = &cm.body {
+                    let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
                     for inner in body {
                         match inner {
                             Item::Struct(s) if s.type_params.is_empty() => {
-                                let name = if s.name.starts_with(&format!("{}__", cm.name)) {
+                                let name = if s.name.starts_with(&member_prefix) {
                                     s.name.clone()
                                 } else {
-                                    format!("{}__{}", cm.name, s.name)
+                                    jet_foundation::Names::member_name(&cm.name, &s.name)
                                 };
                                 struct_fields.insert(
                                     name.clone(),
@@ -1449,10 +1451,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 );
                             }
                             Item::Enum(e) if e.type_params.is_empty() => {
-                                let name = if e.name.starts_with(&format!("{}__", cm.name)) {
+                                let name = if e.name.starts_with(&member_prefix) {
                                     e.name.clone()
                                 } else {
-                                    format!("{}__{}", cm.name, e.name)
+                                    jet_foundation::Names::member_name(&cm.name, &e.name)
                                 };
                                 register_enum_variants(
                                     &name,
@@ -1464,7 +1466,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             Item::Const(c) => {
                                 if let Some(value) = &c.ct {
                                     constants.insert(
-                                        format!("{}__{}", cm.name, c.name),
+                                        jet_foundation::Names::member_name(&cm.name, &c.name),
                                         value.clone(),
                                     );
                                 }
@@ -1476,7 +1478,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     },
                                 };
                                 if let Some(value) = value {
-                                    int_constants.insert(format!("{}__{}", cm.name, c.name), value);
+                                    int_constants.insert(
+                                        jet_foundation::Names::member_name(&cm.name, &c.name),
+                                        value,
+                                    );
                                 }
                             }
                             _ => {}

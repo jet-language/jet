@@ -18,6 +18,9 @@ pub use program_imports::{
     ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
     MigrationOp, Program, ProgramBundle, TryConvert, core_list_prefix,
 };
+pub use crate::Names::{
+    mangle, mangle_path, mangle_variant, member_name, user_trait_rust, user_type_rust, NameLedger,
+};
 
 #[path = "AST/items.rs"]
 mod items;

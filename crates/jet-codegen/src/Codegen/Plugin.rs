@@ -28,6 +28,7 @@
 //!     files, which is already a complete, useful shape.
 
 use crate::AST::{Item, ProgramBundle, Type};
+use jet_foundation::Names::mangle;
 
 /// One exported plugin function's homogeneous scalar shape.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -159,7 +160,7 @@ pub fn emit_plugin(
 
     for item in entry_items {
         let Item::Func(f) = item else { continue };
-        if !f.is_pub {
+        if !bundle.name_ledger.public(bundle.entry, &f.name) {
             continue;
         }
         let Some(scalar) = plugin_export_shape(f) else {
@@ -190,7 +191,7 @@ pub fn emit_plugin(
             wrapper_name = wrapper_name,
             rust_params = rust_params.join(", "),
             ret = scalar.rust_ty(),
-            callee = crate::Syntax::generated_name(&f.name),
+            callee = mangle(&f.name),
             call_args = call_args.join(", "),
         ));
         exported.push(f.name.clone());

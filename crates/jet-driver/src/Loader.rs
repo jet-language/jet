@@ -685,7 +685,7 @@ fn load_entry_with_overlays_mode_with_sink(
 
     // Pre-resolve every file import to its loaded module index so Codegen doesn't
     // need to call back into Loader (breaks the Codegen→Loader dep cycle).
-    let mut import_targets = HashMap::new();
+    let mut name_ledger = crate::AST::NameLedger::default();
     for module_idx in 0..modules.len() {
         let (module_path, imports) = {
             let m = &modules[module_idx];
@@ -712,7 +712,7 @@ fn load_entry_with_overlays_mode_with_sink(
             ) {
                 let norm = normalize_path(&target_path);
                 if let Some(&target_idx) = path_to_idx.get(&norm) {
-                    import_targets.insert((module_idx, imp.span), target_idx);
+                    name_ledger.record_import_target(module_idx, imp.span, target_idx);
                 }
             }
         }
@@ -737,7 +737,7 @@ fn load_entry_with_overlays_mode_with_sink(
         ffi_callback_fns: HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets,
+        name_ledger,
         layer_ceiling,
         inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(),

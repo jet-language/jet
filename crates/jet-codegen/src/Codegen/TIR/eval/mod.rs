@@ -2864,7 +2864,7 @@ fn run_bundle_at_stage(
         // Dev-tier only: surface reset / migration notes on stderr.
         eprintln!("{msg}");
     }
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Const(c) = item {
                 let value = if c.is_persist {
@@ -2889,6 +2889,13 @@ fn run_bundle_at_stage(
             }
         }
         for imp in &module.imports {
+            if bundle
+                .name_ledger
+                .effective_alias(module_idx, &imp.import_alias())
+                .is_none()
+            {
+                continue;
+            }
             if let Some(core_module) = imp.core_module_path() {
                 core_imports
                     .entry(imp.import_alias())

@@ -17,6 +17,7 @@ pub struct ProgramSemanticFacts {
     pub effects: std::collections::HashMap<String, Vec<String>>,
     pub reaches_panic: std::collections::BTreeSet<String>,
     pub fact_registry: jet_foundation::Facts::FactRegistry,
+    pub name_ledger: jet_foundation::Names::NameLedger,
 }
 
 fn identity(module: &str, symbol: &str) -> String {
@@ -780,25 +781,28 @@ pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
     )
 }
 
-fn qualify_info(mut info: CtValue, module: &str, symbol: &str, kind: &str) -> CtValue {
+fn qualify_info(mut info: CtValue, module: &str, identity: &str, kind: &str) -> CtValue {
     if let CtValue::Struct { fields, .. } = &mut info {
         fields.push(("module".to_string(), ct_str(module)));
-        fields.push(("identity".to_string(), ct_str(identity(module, symbol))));
+        fields.push(("identity".to_string(), ct_str(identity)));
         fields.push(("kind".to_string(), ct_str(kind)));
     }
     info
 }
 
-fn qualified_method_info(method: &Func, module: &str, owner: &str) -> CtValue {
+fn qualified_method_info(method: &Func, module: &str, identity: &str) -> CtValue {
     let mut info = build_method_info(method);
     if let CtValue::Struct { fields, .. } = &mut info {
         fields.push(("module".to_string(), ct_str(module)));
-        fields.push(("identity".to_string(), ct_str(format!("{module}::{owner}.{}", method.name))));
+        fields.push((
+            "identity".to_string(),
+            ct_str(format!("{identity}.{}", method.name)),
+        ));
     }
     info
 }
 
-fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
+fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str) -> CtValue {
     let layout = build_enum_layout_info(def);
     let mut dimensions = Vec::new();
     let mut facts = Vec::new();
@@ -854,7 +858,7 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
                 .iter()
                 .flat_map(|implementation| implementation.methods.iter()),
         )
-        .map(|method| qualified_method_info(method, module, &def.name))
+        .map(|method| qualified_method_info(method, module, identity))
         .collect();
     let params = def.type_params.iter().map(build_type_param_info).collect();
     let (markers, expanded_markers) =
@@ -883,7 +887,29 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         ("facts", ct_list(facts)),
         ("dimensions", ct_list(dimensions)),
         ("implements", ct_list(def.trait_impls.iter().map(|implementation| ct_str(implementation.trait_name.clone())).collect())),
-    ]), module, &def.name, "enum")
+    ]), module, identity, "enum")
+}
+
+fn ledger_module_name(
+    ledger: &jet_foundation::Names::NameLedger,
+    module: usize,
+    fallback: &str,
+) -> String {
+    ledger
+        .module_alias(module)
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn ledger_identity(
+    ledger: &jet_foundation::Names::NameLedger,
+    module: usize,
+    module_name: &str,
+    symbol: &str,
+) -> String {
+    ledger
+        .semantic_identity(module, symbol)
+        .unwrap_or_else(|| identity(module_name, symbol))
 }
 
 /// D-METADEPTH2: read-only, post-sema whole-program snapshot handed only to
@@ -896,14 +922,28 @@ pub fn build_program_info(
         (String, String),
         (Vec<String>, Vec<CtValue>, Vec<CtValue>),
     >::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let module_name = ledger_module_name(&facts.name_ledger, module_idx, &module.alias);
         for item in &module.items {
             if let crate::AST::Item::Impl(implementation) = item {
-                let entry = external_impls.entry((module.alias.clone(), implementation.type_name.clone())).or_default();
+                let entry = external_impls
+                    .entry((module_name.clone(), implementation.type_name.clone()))
+                    .or_default();
                 if let Some(trait_name) = &implementation.trait_name {
                     entry.0.push(trait_name.clone());
                 }
-                entry.1.extend(implementation.methods.iter().map(|method| qualified_method_info(method, &module.alias, &implementation.type_name)));
+                entry.1.extend(implementation.methods.iter().map(|method| {
+                    qualified_method_info(
+                        method,
+                        &module_name,
+                        &ledger_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &implementation.type_name,
+                        ),
+                    )
+                }));
                 entry.2.extend(
                     implementation
                         .methods
@@ -916,7 +956,8 @@ pub fn build_program_info(
     let mut types = Vec::new();
     let mut functions = Vec::new();
     let mut packages = Vec::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let module_name = ledger_module_name(&facts.name_ledger, module_idx, &module.alias);
         let mut package_types = Vec::new();
         let mut package_functions = Vec::new();
         for item in &module.items {
@@ -942,8 +983,8 @@ pub fn build_program_info(
                         .unwrap_or_default();
                     let mut info = qualify_info(
                         build_struct_type_info_with_states(def, &states),
-                        &module.alias,
-                        &def.name,
+                        &module_name,
+                        &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
                         "struct",
                     );
                     if let CtValue::Struct { fields, .. } = &mut info {
@@ -956,7 +997,18 @@ pub fn build_program_info(
                                         .iter()
                                         .flat_map(|implementation| implementation.methods.iter()),
                                 )
-                                .map(|method| qualified_method_info(method, &module.alias, &def.name))
+                                .map(|method| {
+                                    qualified_method_info(
+                                        method,
+                                        &module_name,
+                                        &ledger_identity(
+                                            &facts.name_ledger,
+                                            module_idx,
+                                            &module_name,
+                                            &def.name,
+                                        ),
+                                    )
+                                })
                                 .collect();
                         }
                         if let Some((_, CtValue::List(values))) =
@@ -965,7 +1017,9 @@ pub fn build_program_info(
                             values.extend(reflected_facts(&facts.fact_registry));
                         }
                     }
-                    if let Some((traits, methods, transitions)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                    if let Some((traits, methods, transitions)) =
+                        external_impls.get(&(module_name.clone(), def.name.clone()))
+                    {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") {
                                 values.extend(traits.iter().cloned().map(ct_str));
@@ -982,7 +1036,11 @@ pub fn build_program_info(
                     package_types.push(info);
                 }
                 crate::AST::Item::Enum(def) => {
-                    let mut info = build_enum_type_info(def, &module.alias);
+                    let mut info = build_enum_type_info(
+                        def,
+                        &module_name,
+                        &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
+                    );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(values))) =
                             fields.iter_mut().find(|(name, _)| name == "facts")
@@ -990,7 +1048,9 @@ pub fn build_program_info(
                             values.extend(reflected_facts(&facts.fact_registry));
                         }
                     }
-                    if let Some((traits, methods, transitions)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                    if let Some((traits, methods, transitions)) =
+                        external_impls.get(&(module_name.clone(), def.name.clone()))
+                    {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") { values.extend(traits.iter().cloned().map(ct_str)); }
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") { values.extend(methods.iter().cloned()); }
@@ -1034,7 +1094,7 @@ pub fn build_program_info(
                     package_types.push(info);
                 }
                 crate::AST::Item::Func(func) if func.name != "build" => {
-                    let info = build_function_info(func, &module.alias, facts);
+                    let info = build_function_info(func, module_idx, &module_name, facts);
                     functions.push(info.clone());
                     package_functions.push(info);
                 }
@@ -1044,8 +1104,8 @@ pub fn build_program_info(
         packages.push(ct_struct(
             "PackageInfo",
             &[
-                ("name", ct_str(module.alias.clone())),
-                ("identity", ct_str(module.alias.clone())),
+                ("name", ct_str(module_name.clone())),
+                ("identity", ct_str(module_name)),
                 ("types", ct_list(package_types)),
                 ("functions", ct_list(package_functions)),
             ],
@@ -1061,8 +1121,13 @@ pub fn build_program_info(
     )
 }
 
-fn build_function_info(func: &Func, module: &str, facts: &ProgramSemanticFacts) -> CtValue {
-    let qualified = identity(module, &func.name);
+fn build_function_info(
+    func: &Func,
+    module_idx: usize,
+    module: &str,
+    facts: &ProgramSemanticFacts,
+) -> CtValue {
+    let qualified = ledger_identity(&facts.name_ledger, module_idx, module, &func.name);
     let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
     ct_struct(
         "FunctionInfo",

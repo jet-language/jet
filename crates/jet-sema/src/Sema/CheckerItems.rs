@@ -205,7 +205,12 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
-        if owner_mod != self.module_idx && !msig.is_pub {
+        let method_name = format!("{type_name}.{method}");
+        if owner_mod != self.module_idx
+            && !self
+                .name_ledger
+                .visible(self.module_idx, owner_mod, &method_name)
+        {
             self.diags.push(private_item(method, span));
         } else if owner_mod != self.module_idx
             && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic
@@ -969,7 +974,7 @@ impl<'a> Checker<'a> {
         &self,
         owner_mod: usize,
         type_name: &str,
-    ) -> Option<&[(String, Span, Type, bool)]> {
+    ) -> Option<&[(String, Span, Type)]> {
         if owner_mod == self.module_idx {
             self.registry.struct_fields(type_name)
         } else {
@@ -1037,7 +1042,7 @@ impl<'a> Checker<'a> {
                     };
                     let result = match registry.types.get(name) {
                         Some(TypeDef::Struct { fields, .. }) => fields.iter().any(
-                            |(_, _, field_ty, _)| {
+                            |(_, _, field_ty)| {
                                 contains(checker, field_ty, owner_mod, seen)
                             },
                         ),
@@ -1293,48 +1298,19 @@ impl<'a> Checker<'a> {
         None
     }
 
-    pub(crate) fn same_package_scope(&self, owner_mod: usize) -> bool {
-        if owner_mod == self.module_idx {
-            return true;
-        }
-        let Some(mods) = self.modules else {
-            return false;
-        };
-        let (Some(owner), Some(current)) = (mods.get(owner_mod), mods.get(self.module_idx)) else {
-            return false;
-        };
-        owner.package_scope == current.package_scope
-    }
-
     pub(crate) fn field_is_pub_in(&self, owner_mod: usize, type_name: &str, field: &str) -> bool {
         if owner_mod == self.module_idx {
             return true;
         }
-        let Some(mods) = self.modules else {
-            return false;
-        };
-        let Some(st) = mods.get(owner_mod) else {
-            return false;
-        };
-        let key = (type_name.to_string(), field.to_string());
-        st.field_pub.get(&key).copied().unwrap_or(false)
-            || (self.same_package_scope(owner_mod)
-                && st.field_pkg_pub.get(&key).copied().unwrap_or(false))
+        let name = format!("{type_name}.{field}");
+        self.name_ledger.visible(self.module_idx, owner_mod, &name)
     }
 
     pub(crate) fn type_is_pub_in(&self, owner_mod: usize, type_name: &str) -> bool {
         if owner_mod == self.module_idx {
             return true;
         }
-        let Some(mods) = self.modules else {
-            return false;
-        };
-        let Some(st) = mods.get(owner_mod) else {
-            return false;
-        };
-        st.type_pub.get(type_name).copied().unwrap_or(false)
-            || (self.same_package_scope(owner_mod)
-                && st.type_pkg_pub.get(type_name).copied().unwrap_or(false))
+        self.name_ledger.visible(self.module_idx, owner_mod, type_name)
     }
 
     pub(crate) fn check_struct_lit(
@@ -1438,7 +1414,7 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(soft_public_use(type_name, span));
         }
-        let def_fields: Vec<(String, Span, Type, bool)> = self
+        let def_fields: Vec<(String, Span, Type)> = self
             .struct_fields_of(owner_mod, type_name)
             .map(|fields| fields.to_vec())
             .unwrap_or_default();
@@ -1464,7 +1440,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|base| super::patch_type_name(base) == type_name)
             && def_fields
                 .iter()
-                .all(|(_, _, ty, _)| matches!(ty, Type::Option(_)));
+                .all(|(_, _, ty)| matches!(ty, Type::Option(_)));
         let mut provided = HashMap::new();
         for (name, name_span, expr) in fields.iter_mut() {
             if provided.insert(name.clone(), ()).is_some() {
@@ -1486,7 +1462,7 @@ impl<'a> Checker<'a> {
             let field_def = def_fields.iter().find(|(n, ..)| n == name);
             let saved_expected = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
-            if let Some((_, _, fty, _)) = field_def {
+            if let Some((_, _, fty)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.expected_type = if is_patch_lit {
                     inst.unwrap_option().cloned()
@@ -1541,7 +1517,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            if let Some((_, _, fty, _)) = field_def {
+            if let Some((_, _, fty)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 if let Some(et) = et {
                     // `View<str>` fields accept only live string-view bindings
@@ -1603,7 +1579,7 @@ impl<'a> Checker<'a> {
         }
         let missing: Vec<_> = def_fields
             .iter()
-            .filter(|(n, _, _, _)| !provided.contains_key(n))
+            .filter(|(n, _, _)| !provided.contains_key(n))
             .map(|(n, ..)| n.clone())
             .collect();
         // D-FIELDDEF1=C: omitted fields with `=` defaults are filled in.
@@ -1631,13 +1607,13 @@ impl<'a> Checker<'a> {
             let mut filled = expr;
             let field_def = def_fields.iter().find(|(n, ..)| n == &name);
             let saved_expected = self.expected_type.clone();
-            if let Some((_, _, fty, _)) = field_def {
+            if let Some((_, _, fty)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.expected_type = Some(inst);
             }
             let et = self.infer(&mut filled);
             self.expected_type = saved_expected;
-            if let (Some((_, _, fty, _)), Some(et)) = (field_def, et) {
+            if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.check_type_assignable(&inst, &et, filled.span());
             }

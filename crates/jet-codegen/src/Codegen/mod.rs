@@ -21,6 +21,8 @@ use crate::AST::{
 };
 use std::collections::HashSet;
 
+pub(crate) use jet_foundation::Names::{mangle, mangle_path as mangle_variant, user_type_rust};
+
 mod CModule;
 mod Context;
 mod Imports;
@@ -1452,35 +1454,6 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
     s
 }
 
-/// Rust identifier for a Jet name.
-///
-/// D-META-STAGE1=B: the compile-time mark rides the name, so a Jet name may
-/// begin with `$`, which Rust cannot spell. A marked name gets its own prefix
-/// rather than losing the mark. That keeps the mapping injective, which the
-/// ratified text requires: a plain name and a marked name can never denote the
-/// same binding, so they can never mangle to the same Rust place either.
-pub(crate) fn mangle(name: &str) -> String {
-    let name = match name.strip_prefix(crate::Syntax::COMPTIME_MARK) {
-        Some(rest) => format!("ct_{rest}"),
-        None => name.to_string(),
-    };
-    crate::Syntax::generated_name(&name)
-}
-
-/// D-TAG1: Rust identifier for an enum variant. A grouped leaf's Jet name is a
-/// dotted path (`Fire.Burn`); Rust variant names can't dot, so segments join
-/// with `__` (`__jet_Fire__Burn`). Flat variants mangle exactly as before.
-/// Sema rejects two paths that would flatten identically (E0105), so this is
-/// injective over a checked program.
-pub(crate) fn mangle_variant(name: &str) -> String {
-    crate::Syntax::generated_path(name)
-}
-
-/// Rust identifier for a Jet user type (`Payment.Client` → `__jet_Payment__Client`).
-pub(crate) fn user_type_rust(name: &str) -> String {
-    crate::Syntax::generated_path(name)
-}
-
 pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_owned: bool) {
     if include_runtime_owned {
         out.push_str("pub trait __jet_Display {\n");
@@ -1507,12 +1480,14 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             continue;
         }
         if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
+            let trait_rust = mangle(name);
             out.push_str(&format!(
-                "pub trait __jet_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
+                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
             ));
         } else {
+            let trait_rust = mangle(name);
             out.push_str(&format!(
-                "pub trait __jet_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
+                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
             ));
         }
     }
@@ -1523,8 +1498,9 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Mul", "mul", "jet_mul"),
             ("Div", "div", "jet_div"),
         ] {
+            let trait_rust = mangle(trait_name);
             out.push_str(&format!(
-                "impl __jet_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
+                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
             ));
         }
     }
@@ -1535,8 +1511,9 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Mul", "mul", "*"),
             ("Div", "div", "/"),
         ] {
+            let trait_rust = mangle(trait_name);
             out.push_str(&format!(
-                "impl __jet_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
+                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
             ));
         }
     }
@@ -2549,7 +2526,7 @@ mod tests {
                 rule_facts: std::mem::take(&mut program.rule_facts),
             }],
             parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: crate::AST::CFfi::default(),
-            comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
+            comptime_inputs: Vec::new(), name_ledger: crate::AST::NameLedger::default(), layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
             active_os: crate::Syntax::OSTarget::host(),
@@ -2628,7 +2605,7 @@ mod tests {
             ffi_callback_fns: HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
-            import_targets: HashMap::new(),
+            name_ledger: crate::AST::NameLedger::default(),
             layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core,
             web_partitions: HashMap::new(),
@@ -3122,7 +3099,8 @@ pub fn emit_bundle_dbg(
     // package edition. Keep codegen on the same edition sema checked.
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let mut out = String::new();
     out.push_str(&format!(
         "// Generated by {} — do not edit. Edit the .{} source instead.\n",
@@ -3227,10 +3205,14 @@ pub fn emit_bundle_dbg(
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(&mut cx, bundle, bundle.entry);
     for import in &entry.imports {
-        let Some(&target) = bundle
-            .import_targets
-            .get(&(bundle.entry, import.span))
-        else {
+        if bundle
+            .name_ledger
+            .effective_alias(bundle.entry, &import.import_alias())
+            .is_none()
+        {
+            continue;
+        }
+        let Some(target) = bundle.name_ledger.import_target(bundle.entry, import.span) else {
             continue;
         };
         let imported = &bundle.modules[target];
@@ -3293,7 +3275,8 @@ pub fn emit_bundle_tests_cov(
     coverage: bool,
 ) -> String {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let tests: Vec<&TestDef> = entry
         .items
         .iter()
@@ -3515,7 +3498,8 @@ pub fn emit_bundle_fuzz(
     test_name: Option<&str>,
 ) -> Result<String, String> {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let tests: Vec<&TestDef> = entry
         .items
         .iter()
@@ -3778,7 +3762,8 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 /// instead of printing false timings.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let benches: Vec<&BenchDef> = entry
         .items
         .iter()

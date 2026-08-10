@@ -60,7 +60,7 @@
             ffi_callback_fns: std::collections::HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
-            import_targets: std::collections::HashMap::new(),
+            name_ledger: crate::AST::NameLedger::default(),
             layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core,
             web_partitions: std::collections::HashMap::new(),

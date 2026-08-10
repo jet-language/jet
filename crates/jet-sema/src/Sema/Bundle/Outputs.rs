@@ -115,6 +115,7 @@ fn resolve_output_callable(
     entry: &Expr,
     bundle: &ProgramBundle,
     states: &[ModuleState],
+    name_ledger: &jet_foundation::Names::NameLedger,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<crate::AST::ResolvedOutput> {
     let (target, source_name, lowered_name) = match entry {
@@ -148,7 +149,7 @@ fn resolve_output_callable(
             };
             let state = &states[module_idx];
             if let Some(canonical) = state.code_modules.get(alias) {
-                let lowered = format!("{canonical}__{member}");
+                let lowered = jet_foundation::Names::member_name(canonical, member);
                 if !state.funcs.contains_key(&lowered) {
                     diags.push(output_error(
                         format!("module `{alias}` has no function `{member}`"),
@@ -170,9 +171,7 @@ fn resolve_output_callable(
                     ));
                     return None;
                 }
-                let same_package = target_state.package_scope == state.package_scope;
-                let visible = target_state.func_pub.get(member).copied().unwrap_or(false)
-                    || (same_package && target_state.func_pkg_pub.get(member).copied().unwrap_or(false));
+                let visible = name_ledger.visible(module_idx, target, member);
                 if !visible {
                     diags.push(output_error(
                         format!("function `{alias}.{member}` is private"),
@@ -257,14 +256,16 @@ fn resolve_output_callable(
         ));
         return None;
     }
-    let module_alias = &bundle.modules[target].alias;
+    let module_alias = name_ledger
+        .module_alias(target)
+        .unwrap_or(&bundle.modules[target].alias);
     let rust_path = if target == bundle.entry {
-        Syntax::generated_name(&semantic_name)
+        crate::AST::mangle(&semantic_name)
     } else {
         format!(
             "{}::{}",
-            Syntax::generated_name(module_alias),
-            Syntax::generated_name(&source_name)
+            crate::AST::mangle(module_alias),
+            crate::AST::mangle(&source_name),
         )
     };
     Some(crate::AST::ResolvedOutput {
@@ -279,8 +280,11 @@ fn resolve_output_callable(
         params: signature.params.clone(),
         return_type: signature.return_type.clone(),
         reference: entry.span(),
-        definition: states[target].func_spans.get(&semantic_name)
-            .or_else(|| states[target].func_spans.get(&source_name)).copied().unwrap_or(entry.span()),
+        definition: name_ledger
+            .declaration(target, &semantic_name)
+            .or_else(|| name_ledger.declaration(target, &source_name))
+            .map(|declaration| declaration.span)
+            .unwrap_or(entry.span()),
         authority: crate::AST::OutputCallableAuthority::SafeJet,
         effects: Vec::new(),
         selected: false,
@@ -322,6 +326,7 @@ fn output_default(bundle: &ProgramBundle, field: &str, diags: &mut Vec<Diagnosti
 pub(super) fn resolve_outputs(
     bundle: &mut ProgramBundle,
     states: &[ModuleState],
+    name_ledger: &jet_foundation::Names::NameLedger,
     mode: CompileMode,
     explicit: Option<&str>,
     diags: &mut Vec<Diagnostic>,
@@ -375,7 +380,17 @@ pub(super) fn resolve_outputs(
                 diags.push(output_error(format!("{kind:?} Output is missing `entry:`"), "every runnable Output links to one checked function".to_string(), "add `entry: function_name`".to_string(), *span));
                 continue;
             };
-            if let Some(fact) = resolve_output_callable(module_idx, value.name.clone(), kind, output_name, entry, bundle, states, diags) {
+            if let Some(fact) = resolve_output_callable(
+                module_idx,
+                value.name.clone(),
+                kind,
+                output_name,
+                entry,
+                bundle,
+                states,
+                name_ledger,
+                diags,
+            ) {
                 resolved.push((module_idx, item_idx, fact));
             }
         }
