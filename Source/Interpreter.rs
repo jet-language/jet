@@ -129,7 +129,11 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     let mut sink = crate::Comptime::DevSink::new();
     match crate::Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
         Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
-            sink.stderr.push_str(&error.jet_show());
+            let rendered = error
+                .to_jet_err()
+                .map(|error| jet_foundation::Outcome::jet_render_err(&error))
+                .unwrap_or_else(|| error.jet_show());
+            sink.stderr.push_str(&rendered);
             sink.stderr.push('\n');
             RunOutcome::Ran {
                 stdout: sink.stdout,
@@ -274,7 +278,11 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
         },
     ) {
         Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
-            sink.stderr.push_str(&error.jet_show());
+            let rendered = error
+                .to_jet_err()
+                .map(|error| jet_foundation::Outcome::jet_render_err(&error))
+                .unwrap_or_else(|| error.jet_show());
+            sink.stderr.push_str(&rendered);
             sink.stderr.push('\n');
             RunOutcome::Ran {
                 stdout: sink.stdout,
