@@ -49,7 +49,7 @@ const COMMAND_FLAGS = {
   state: [],
   card: ['title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
     'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag',
-    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'evidence', 'handoff', 'expectRev', 'force'],
+    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'handoff', 'expectRev', 'force'],
   decision: ['id', 'cardId', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild',
     'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy', 'draft', 'ready', 'outcome',
     'comment', 'quote', 'open', 'expectRev'],
@@ -318,6 +318,10 @@ function cmdCard(store, { pos, flags }) {
       return out(flags, `updated card #${result.num} → ${db.laneOf(result, state.decisions, state.cards).lane}`, result);
     }
     case 'criteria': {
+      if (flags.reopen !== undefined) {
+        const { result } = store.mutate((s) => db.reopenCriterion(s, ref, flags.reopen, { reason: flags.reason, by }));
+        return out(flags, 'criterion #' + result.n + ' reopened on card #' + result.cardNum, result);
+      }
       if (flags.add !== undefined) {
         const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
@@ -955,7 +959,9 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             claimed-idle, missing-attribution,
                                             ballot-gaps, stale-draft, orphan-
                                             blockers, blocker-unpopulated,
-                                            duplicate-suspect);
+                                            duplicate-suspect,
+                                            criteria-evidence-conflict,
+                                            criteria-phase-drift);
                                             --docs also flags a ratified
                                             decision id still listed in
                                             docs/ballots/*.md; exit 1 on any
@@ -986,6 +992,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower card criteria <ref> --add "text" --by X           add an exit criterion
                             --meet n --evidence "…" --by X    builder: mark met
                             --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
+                            --reopen n --reason "…" --by X     reopen met/verified criterion
                             --list                            show the checklist
   tower card release <ref> --by X [--handoff "…"]         --handoff required if the card is building
   tower decision list|show|add|update|ratify|reopen|delete

@@ -131,3 +131,21 @@ test('addCriterion/meetCriterion/verifyCriterion validate ref, n, and required f
   st.mutate((s) => db.addCriterion(s, '#1', 'a thing', 'planner'));
   assert.throws(() => st.mutate((s) => db.verifyCriterion(s, '#1', 1, { by: 'x' })), (e) => e.code === 'E_INVALID'); // not met yet
 });
+
+test('reopenCriterion resets met and verified rows and records the reason', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Reopen criteria' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'met row', 'planner'));
+  st.mutate((s) => db.addCriterion(s, '#1', 'verified row', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'builder' }));
+  st.mutate((s) => db.meetCriterion(s, '#1', 2, { evidence: 'built', by: 'builder' }));
+  st.mutate((s) => db.verifyCriterion(s, '#1', 2, { evidence: 'checked', by: 'verifier' }));
+  st.mutate((s) => db.reopenCriterion(s, '#1', 1, { reason: 'met result changed', by: 'repairer' }));
+  st.mutate((s) => db.reopenCriterion(s, '#1', 2, { reason: 'verified result changed', by: 'repairer' }));
+  const state = st.load();
+  assert.ok(state.cards[0].criteria.every(item => item.status === 'open' && !item.evidence));
+  const events = state.events.filter(e => e.action === 'card.criteria-reopen');
+  assert.equal(events.length, 2);
+  assert.ok(events.every(e => e.by === 'repairer'));
+  assert.match(events[0].note + events[1].note, /met result changed|verified result changed/);
+});

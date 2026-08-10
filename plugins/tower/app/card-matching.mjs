@@ -10,6 +10,8 @@ const TITLE_STOP_WORDS = new Set([
   'update', 'use', 'using', 'card', 'cards', 'issue', 'problem',
 ]);
 const REFERENCE_NAME_RE = /(?:^|_)(?:test|fixture|example|spec)(?:_|$)|^(?:test|fixture|example|spec)[A-Z]/i;
+// Two meaningful words are too little signal for a title-only duplicate.
+const MIN_TITLE_SIGNAL = 3;
 
 const clean = (value) => String(value ?? '').toLowerCase();
 
@@ -41,6 +43,7 @@ function strongTitleOverlap(left, right) {
   const a = titleTokens(left);
   const b = titleTokens(right);
   const common = shared(a, b);
+  if (Math.min(a.size, b.size) < MIN_TITLE_SIGNAL) return false;
   return common.length >= 2 && common.length / Math.min(a.size, b.size) >= 0.75;
 }
 

@@ -955,6 +955,22 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 
+export function reopenCriterion(s, ref, n, { reason, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'reopen needs --by <agent>');
+  if (!reason || !String(reason).trim()) fail('E_INVALID', 'reopen needs --reason <text>');
+  if (item.status === 'open') fail('E_INVALID', 'criterion #' + n + ' is already open');
+  item.status = 'open';
+  item.metBy = null;
+  item.verifiedBy = null;
+  item.evidence = '';
+  item.at = now();
+  touchCard(c, by);
+  logEvent(s, { by, action: 'card.criteria-reopen', ref: c.id, note: '#' + item.n + ': ' + String(reason).trim() });
+  return { ...item, cardId: c.id, cardNum: c.num };
+}
+
 // D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete for
 // everyone, owner included — a ratified decision is durable record, never a
 // casualty of tidying up. #461 gives it a real way out: the decisions retire
