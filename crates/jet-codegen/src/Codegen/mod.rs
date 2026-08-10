@@ -3198,6 +3198,9 @@ pub fn emit_bundle_dbg(
         cx.inline_unqualified_file = file;
         cx.inline_import_names = names;
         cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, true, true);
         out.push_str("}\n\n");
     }
@@ -3265,6 +3268,9 @@ pub fn emit_bundle_dbg(
     cx.inline_unqualified_file = file;
     cx.inline_import_names = names;
     cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, true, false);
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
@@ -3368,7 +3374,7 @@ pub fn emit_bundle_tests_cov(
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
-        cx.coverage = coverage;
+        cx.coverage = coverage; // inline Core scope setup follows below
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
@@ -3389,6 +3395,9 @@ pub fn emit_bundle_tests_cov(
         cx.inline_unqualified_file = file;
         cx.inline_import_names = names;
         cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3424,6 +3433,9 @@ pub fn emit_bundle_tests_cov(
     cx.inline_unqualified_file = file;
     cx.inline_import_names = names;
     cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     emit_test_fns(&cx, &tests, &mut out);
@@ -3600,6 +3612,9 @@ pub fn emit_bundle_fuzz(
         cx.inline_unqualified_file = file;
         cx.inline_import_names = names;
         cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3634,6 +3649,9 @@ pub fn emit_bundle_fuzz(
     cx.inline_unqualified_file = file;
     cx.inline_import_names = names;
     cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     emit_test_fns(&cx, &tests, &mut out);
@@ -3871,6 +3889,9 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         cx.inline_unqualified_file = file;
         cx.inline_import_names = names;
         cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3906,6 +3927,9 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     cx.inline_unqualified_file = file;
     cx.inline_import_names = names;
     cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     out.push_str(

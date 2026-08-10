@@ -89,27 +89,87 @@ pub(crate) fn collect_used_core(
         if module_annotations_mention_encoding_surface(module) {
             used.insert("core.encoding::types".to_string());
         }
+        let mut module_imports = imports.clone();
+        for ((scope, name), (core_module, core_item)) in &states[idx].inline_reexport_core {
+            module_imports.insert(
+                format!("{scope}.{name}"),
+                format!("{core_module}::{core_item}"),
+            );
+        }
         for item in &module.items {
             match item {
-                Item::Func(f) => collect_core_stmts(&f.body, imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Func(f) => collect_core_stmts(&f.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Struct(s) => {
                     for m in &s.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
+                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Enum(e) => {
                     for m in &e.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
+                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Impl(i) => {
                     for m in &i.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
+                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
-                Item::Test(t) => collect_core_stmts(&t.body, imports, &mut used, &mut spans, &mut ffi_cb),
-                Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used, &mut spans, &mut ffi_cb),
-                Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Test(t) => collect_core_stmts(&t.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Bench(b) => collect_core_stmts(&b.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Const(c) => collect_core_expr(&c.value, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::CodeModule(cm) => {
+                    let Some(body) = &cm.body else { continue };
+                    let mut scoped_imports = module_imports.clone();
+                    for ((scope, name), core_module) in &states[idx].inline_core_imports {
+                        if scope == &cm.name {
+                            scoped_imports.insert(name.clone(), core_module.clone());
+                        }
+                    }
+                    for ((scope, name), (core_module, core_item)) in
+                        &states[idx].inline_reexport_core
+                    {
+                        if scope == &cm.name {
+                            scoped_imports.insert(
+                                format!("{scope}.{name}"),
+                                format!("{core_module}::{core_item}"),
+                            );
+                        }
+                    }
+                    for inner in body {
+                        match inner {
+                            Item::Func(f) => collect_core_stmts(
+                                &f.body,
+                                &scoped_imports,
+                                &mut used,
+                                &mut spans,
+                                &mut ffi_cb,
+                            ),
+                            Item::Struct(s) => {
+                                for method in &s.methods {
+                                    collect_core_stmts(
+                                        &method.body,
+                                        &scoped_imports,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                            }
+                            Item::Impl(i) => {
+                                for method in &i.methods {
+                                    collect_core_stmts(
+                                        &method.body,
+                                        &scoped_imports,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Item::EffectDecl(_)
                 | Item::MarkerDecl(_)
                 | Item::FactDecl(_)
@@ -120,14 +180,14 @@ pub(crate) fn collect_used_core(
                 | Item::Distinct(_)
                 | Item::TypeAlias(_) // D-TYPEALIAS1: erases
                 | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
-                | Item::CModule(_) | Item::CodeModule(_)
+                | Item::CModule(_)
                 | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
                 | Item::StateDecl(_) // D-STATE-DECL: uses no core imports
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
-            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+                | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
+                | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+                | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
             }
         }
     }
@@ -547,7 +607,16 @@ pub(crate) fn collect_core_expr(
                 note_core_usage(used, spans, format!("core::{method}"), Some(*method_span));
             }
             if let Expr::Ident(alias, _) = receiver.as_ref() {
-                if let Some(module) = imports.get(alias) {
+                if let Some(module) = imports.get(&format!("{alias}.{method}")) {
+                    if let Some((module, item)) = module.split_once("::") {
+                        note_core_usage(
+                            used,
+                            spans,
+                            format!("{module}::{item}"),
+                            Some(*method_span),
+                        );
+                    }
+                } else if let Some(module) = imports.get(alias) {
                     note_core_usage(
                         used,
                         spans,

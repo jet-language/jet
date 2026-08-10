@@ -39,7 +39,7 @@ pub(crate) fn alloc_new_type<'a>(
     if locals.contains(alias) {
         return None;
     }
-    if cx.core_imports.get(alias).map(String::as_str) != Some(Syntax::CORE_MEM_MODULE) {
+    if cx.any_core_import_module(alias) != Some(Syntax::CORE_MEM_MODULE) {
         return None;
     }
     match alloc_type.as_str() {
@@ -72,7 +72,7 @@ pub(crate) fn solve_new_type<'a>(
     if locals.contains(alias) {
         return None;
     }
-    if cx.core_imports.get(alias).map(String::as_str) != Some(Syntax::CORE_SOLVE_MODULE) {
+    if cx.any_core_import_module(alias) != Some(Syntax::CORE_SOLVE_MODULE) {
         return None;
     }
     (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
@@ -105,7 +105,7 @@ pub(crate) fn game_static_type<'a>(
     let Expr::Ident(alias, _) = &**inner else {
         return None;
     };
-    if locals.contains(alias) || cx.core_imports.get(alias).map(String::as_str) != Some("core.game")
+    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.game")
     {
         return None;
     }
@@ -129,7 +129,7 @@ pub(crate) fn tls_static_op(
     let Expr::Ident(alias, _) = &**inner else {
         return None;
     };
-    if locals.contains(alias) || cx.core_imports.get(alias).map(String::as_str) != Some("core.tls") {
+    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.tls") {
         return None;
     }
     match (static_type.as_str(), method) {
@@ -149,7 +149,7 @@ pub(crate) fn http_client_static_op(
     let Expr::Field(inner, static_type, _) = receiver else { return None; };
     let Expr::Ident(alias, _) = &**inner else { return None; };
     if locals.contains(alias)
-        || cx.core_imports.get(alias).map(String::as_str) != Some("core.http.client")
+        || cx.any_core_import_module(alias) != Some("core.http.client")
     {
         return None;
     }

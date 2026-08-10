@@ -101,6 +101,15 @@ pub struct InlineVersion {
     pub span: Span,
 }
 
+/// The target selected by one member in a Core `.[…]` import list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoreListPath {
+    /// The member names another Core module, such as `encoding.json`.
+    Module(String),
+    /// The member names an item inside the longest known Core module prefix.
+    Item { module: String, item: String },
+}
+
 /// D-CORE-USELIST1=A: the std path prefix a `use <prefix>.[…]` list walks, or
 /// `None` when the prefix names something else. The prefix may be any depth, so
 /// `use core.encoding.[json]` walks to `core.encoding.json` exactly as
@@ -112,6 +121,29 @@ pub fn core_list_prefix(module_alias: &str) -> Option<String> {
         .or_else(|| module_alias.strip_prefix("jet"))?;
     (rest.is_empty() || rest.starts_with('.'))
         .then(|| format!("{}{rest}", Syntax::CORE_SHORT))
+}
+
+/// Resolve one member path in a Core `.[…]` import list. The longest known
+/// module prefix wins, so `core.[math.abs]` and `core.math.[abs]` select the
+/// same Core member while `core.encoding.[json]` selects a submodule.
+pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> {
+    let prefix = core_list_prefix(module_alias)?;
+    let full = format!("{prefix}.{member}");
+    if Syntax::is_known_core_module(&full) {
+        return Some(CoreListPath::Module(full));
+    }
+
+    let parts: Vec<&str> = full.split('.').collect();
+    for split in (1..parts.len()).rev() {
+        let module = parts[..split].join(".");
+        if Syntax::is_known_core_module(&module) {
+            let item = parts[split..].join(".");
+            if !item.is_empty() {
+                return Some(CoreListPath::Item { module, item });
+            }
+        }
+    }
+    None
 }
 
 impl ImportDecl {
@@ -314,7 +346,7 @@ pub enum ImportKind {
     File(String, Span),
     /// Bare module name — searched from the project root.
     Module(String, Span),
-    /// D-MOD3/4: `use alias.Item` / `use alias.{A, B as C}` / `pub use alias.Item`
+    /// D-MOD3/4: `use alias.Item` / `use alias.[A, B as C]` / `pub use alias.Item`
     /// D-SELIMPORT1=A: each item may carry an `as alias` — `(original, alias_if_any)`.
     Unqualified {
         module_alias: String,

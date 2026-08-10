@@ -264,12 +264,20 @@ pub(crate) fn core_import_map(
             ..
         } = &imp.kind
         {
-            if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
+            if crate::AST::core_list_prefix(module_alias).is_some() {
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let full = format!("{core_prefix}.{orig}");
-                    if crate::Syntax::is_known_core_module(&full) {
-                        map.insert(local.to_string(), full);
+                    match crate::AST::core_list_path(module_alias, orig) {
+                        Some(crate::AST::CoreListPath::Module(module)) => {
+                            map.insert(local.to_string(), module);
+                        }
+                        Some(crate::AST::CoreListPath::Item { module, .. }) => {
+                            // A bare imported Core item lowers as
+                            // `module.item`; keep the module in the ordinary
+                            // core-import map for every backend.
+                            map.insert(local.to_string(), module);
+                        }
+                        None => {}
                     }
                 }
             }
@@ -417,6 +425,78 @@ pub(crate) fn inline_import_maps(
         }
     }
     (inline_scopes, file_scopes, names, inline_reexports)
+}
+
+/// D-NAME-WALK1=A: build the Core portion of every inline-module import
+/// scope, plus Core items re-exported by that inline module. Core aliases are
+/// keyed by the emitted `module__function` name so a body-local import cannot
+/// leak into a sibling or enclosing function.
+pub(crate) fn inline_core_import_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (
+    HashMap<String, HashMap<String, String>>,
+    HashMap<(String, String), (String, String)>,
+) {
+    let module = &bundle.modules[module_idx];
+    let mut scopes = HashMap::new();
+    let mut reexports = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        let Some(body) = &cm.body else {
+            continue;
+        };
+        let mut scope = HashMap::new();
+        for imp in &cm.imports {
+            if let Some(core_module) = imp.core_module_path() {
+                scope.insert(imp.import_alias(), core_module);
+                continue;
+            }
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &imp.kind
+            else {
+                continue;
+            };
+            if crate::AST::core_list_prefix(module_alias).is_none() {
+                continue;
+            }
+            for (orig, alias_opt) in items {
+                let local = alias_opt.as_deref().unwrap_or(orig.as_str()).to_string();
+                let Some(path) = crate::AST::core_list_path(module_alias, orig) else {
+                    continue;
+                };
+                match path {
+                    crate::AST::CoreListPath::Module(core_module) => {
+                        scope.insert(local, core_module);
+                    }
+                    crate::AST::CoreListPath::Item { module, item } => {
+                        scope.insert(local.clone(), module.clone());
+                        if imp.is_pub {
+                            reexports.insert((cm.name.clone(), local), (module, item));
+                        }
+                    }
+                }
+            }
+        }
+        if scope.is_empty() {
+            continue;
+        }
+        for inner in body {
+            let Item::Func(function) = inner else {
+                continue;
+            };
+            scopes.insert(
+                format!("{}__{}", cm.name, function.name),
+                scope.clone(),
+            );
+        }
+    }
+    (scopes, reexports)
 }
 
 /// Build signature/return entries for selective imports whose target is a file

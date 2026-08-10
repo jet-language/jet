@@ -1483,10 +1483,16 @@ fn check_func_body_bundle_scoped(
     let mut scoped_core_imports = st.core_imports.clone();
     let mut scoped_unqualified = st.unqualified.clone();
     let mut scoped_unqualified_file = st.unqualified_file.clone();
+    let mut scoped_core_item_imports = st.core_item_imports.clone();
     if let Some(inline_module) = inline_module {
         for ((scope, name), module) in &st.inline_core_imports {
             if scope == inline_module {
                 scoped_core_imports.insert(name.clone(), module.clone());
+            }
+        }
+        for ((scope, name), item) in &st.inline_core_items {
+            if scope == inline_module {
+                scoped_core_item_imports.insert(name.clone(), item.clone());
             }
         }
         for ((scope, name), mangled) in &st.inline_unqualified {
@@ -1513,11 +1519,13 @@ fn check_func_body_bundle_scoped(
         code_module_identities: &st.code_module_identities,
         unqualified: &scoped_unqualified,
         unqualified_file: &scoped_unqualified_file,
+        core_item_imports: &scoped_core_item_imports,
         inline_unqualified: &st.inline_unqualified,
         inline_unqualified_file: &st.inline_unqualified_file,
         inline_module: inline_module.map(str::to_owned),
         inline_reexport_inline: &st.inline_reexport_inline,
         inline_reexport_file: &st.inline_reexport_file,
+        inline_reexport_core: &st.inline_reexport_core,
         func_pub: &st.func_pub,
         func_pkg_pub: &st.func_pkg_pub,
         module_path: &st.module_path,

@@ -1330,12 +1330,15 @@ fn check_bundle_opts_for_output_inner(
             code_module_identities: HashMap::new(),
             unqualified: HashMap::new(),
             unqualified_file: HashMap::new(),
+            core_item_imports: HashMap::new(),
             reexports: HashMap::new(),
             inline_unqualified: HashMap::new(),
             inline_unqualified_file: HashMap::new(),
             inline_core_imports: HashMap::new(),
+            inline_core_items: HashMap::new(),
             inline_reexport_inline: HashMap::new(),
             inline_reexport_file: HashMap::new(),
+            inline_reexport_core: HashMap::new(),
         })
         .collect();
 
@@ -2222,21 +2225,43 @@ fn check_bundle_opts_for_output_inner(
                     }
                 }
             } else if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
-                // Std namespace prefix: `use core.mem` → bind each item as a Core import.
-                // Each item `x` becomes `{prefix}.x` in the known-modules table.
+                // D-CORE-USELIST1=A: a list member may name either a Core
+                // submodule (`core.encoding.[json]`) or an item in the
+                // longest known module prefix (`core.math.[abs]`).
                 let st = &mut states[idx];
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
                     let full = format!("{core_prefix}.{orig}");
-                    if !crate::Syntax::is_known_core_module(&full) {
-                        diags.push(Diagnostic::error(
-                            "E1001",
-                            format!("there is no core module `{}`", full),
-                            "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
-                            format!("import one of: {}", crate::Syntax::core_modules_list()),
-                            Some(*module_alias_span),
-                        ));
-                    } else if st.core_imports.contains_key(local) {
+                    let target = match crate::AST::core_list_path(module_alias, orig) {
+                        Some(crate::AST::CoreListPath::Module(module)) => Some((module, None)),
+                        Some(crate::AST::CoreListPath::Item { module, item })
+                            if crate::Sema::CheckerCoreLib::core_module_items(&module)
+                                .iter()
+                                .any(|known| known == &item) =>
+                        {
+                            Some((module, Some(item)))
+                        }
+                        _ => None,
+                    };
+                    let Some((module, item)) = target else {
+                        if crate::Syntax::is_known_core_module(&core_prefix) {
+                            diags.push(crate::Sema::CheckerCoreLib::unknown_core_item(
+                                &core_prefix,
+                                orig,
+                                *module_alias_span,
+                            ));
+                        } else {
+                            diags.push(Diagnostic::error(
+                                "E1001",
+                                format!("there is no core module `{}`", full),
+                                "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
+                                format!("import one of: {}", crate::Syntax::core_modules_list()),
+                                Some(*module_alias_span),
+                            ));
+                        }
+                        continue;
+                    };
+                    if st.core_imports.contains_key(local) {
                         diags.push(Diagnostic::error(
                             "E0105",
                             format!("the import name `{}` is used twice", local),
@@ -2246,11 +2271,11 @@ fn check_bundle_opts_for_output_inner(
                         ));
                     } else {
                         // D-RINGLAYER1=A M2: unqualified `use core.X` obeys the same layer rules.
-                        if let Some(mod_layer) = crate::Syntax::core_module_layer(&full) {
+                        if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
                             if let Some(ceiling) = bundle.layer_ceiling {
                                 if mod_layer > ceiling {
                                     diags.push(crate::Syntax::layer_ceiling_exceeded(
-                                        &full,
+                                        &module,
                                         mod_layer,
                                         ceiling,
                                         Some(*module_alias_span),
@@ -2263,7 +2288,10 @@ fn check_bundle_opts_for_output_inner(
                                 bundle.inferred_layer = mod_layer;
                             }
                         }
-                        st.core_imports.insert(local.to_string(), full);
+                        st.core_imports.insert(local.to_string(), module);
+                        if let Some(item) = item {
+                            st.core_item_imports.insert(local.to_string(), item);
+                        }
                     }
                 }
             } else if st.imports.contains_key(module_alias.as_str()) {
@@ -2342,6 +2370,44 @@ fn check_bundle_opts_for_output_inner(
             .collect();
         for (inline_name, imports) in inline_imports {
             for imp in imports {
+                // Qualified Core imports use the enclosing file's Core
+                // namespace, but their binding remains local to this inline
+                // module body.
+                if let Some(module) = imp.core_module_path() {
+                    if !crate::Syntax::is_known_core_module(&module) {
+                        diags.push(Diagnostic::error(
+                            "E1001",
+                            format!("there is no core module `{module}`"),
+                            "`core` is compiler-known, and only the frozen core modules exist"
+                                .to_string(),
+                            format!("import one of: {}", crate::Syntax::core_modules_list()),
+                            Some(imp.span),
+                        ));
+                        continue;
+                    }
+                    if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
+                        if let Some(ceiling) = bundle.layer_ceiling {
+                            if mod_layer > ceiling {
+                                diags.push(crate::Syntax::layer_ceiling_exceeded(
+                                    &module,
+                                    mod_layer,
+                                    ceiling,
+                                    Some(imp.span),
+                                    Some(&format!("`use {module}`")),
+                                ));
+                                continue;
+                            }
+                        }
+                        if mod_layer > bundle.inferred_layer {
+                            bundle.inferred_layer = mod_layer;
+                        }
+                    }
+                    states[idx].inline_core_imports.insert(
+                        (inline_name.clone(), imp.import_alias()),
+                        module,
+                    );
+                    continue;
+                }
                 let ImportKind::Unqualified {
                     module_alias,
                     module_alias_span,
@@ -2358,7 +2424,7 @@ fn check_bundle_opts_for_output_inner(
                     enum Target {
                         Inline { alias: String, mangled: String },
                         File { name: String, module_idx: usize },
-                        Core { module: String },
+                        Core { module: String, item: Option<String> },
                     }
                     let resolved = {
                         let st = &states[idx];
@@ -2396,17 +2462,39 @@ fn check_bundle_opts_for_output_inner(
                             crate::AST::core_list_prefix(&module_alias)
                         {
                             let full = format!("{core_prefix}.{orig}");
-                            if !crate::Syntax::is_known_core_module(&full) {
-                                diags.push(Diagnostic::error(
-                                    "E1001",
-                                    format!("there is no core module {full}"),
-                                    "core is compiler-known, and only the frozen core modules exist".to_string(),
-                                    format!("import one of: {}", crate::Syntax::core_modules_list()),
-                                    Some(module_alias_span),
-                                ));
-                                None
-                            } else {
-                                Some(Target::Core { module: full })
+                            let target = match crate::AST::core_list_path(&module_alias, &orig) {
+                                Some(crate::AST::CoreListPath::Module(module)) => {
+                                    Some((module, None))
+                                }
+                                Some(crate::AST::CoreListPath::Item { module, item })
+                                    if crate::Sema::CheckerCoreLib::core_module_items(&module)
+                                        .iter()
+                                        .any(|known| known == &item) =>
+                                {
+                                    Some((module, Some(item)))
+                                }
+                                _ => None,
+                            };
+                            match target {
+                                Some((module, item)) => Some(Target::Core { module, item }),
+                                None => {
+                                    if crate::Syntax::is_known_core_module(&core_prefix) {
+                                        diags.push(crate::Sema::CheckerCoreLib::unknown_core_item(
+                                            &core_prefix,
+                                            &orig,
+                                            module_alias_span,
+                                        ));
+                                    } else {
+                                        diags.push(Diagnostic::error(
+                                            "E1001",
+                                            format!("there is no core module {full}"),
+                                            "core is compiler-known, and only the frozen core modules exist".to_string(),
+                                            format!("import one of: {}", crate::Syntax::core_modules_list()),
+                                            Some(module_alias_span),
+                                        ));
+                                    }
+                                    None
+                                }
                             }
                         } else if let Some(&target_idx) = st.imports.get(&module_alias) {
                             let target = &states[target_idx];
@@ -2472,9 +2560,18 @@ fn check_bundle_opts_for_output_inner(
                                     .insert((inline_name.clone(), local), (name, module_idx));
                             }
                         }
-                        Target::Core { module } => {
+                        Target::Core { module, item } => {
+                            let key = (inline_name.clone(), local.clone());
                             st.inline_core_imports
-                                .insert((inline_name.clone(), local), module);
+                                .insert(key.clone(), module.clone());
+                            if let Some(item) = item {
+                                st.inline_core_items
+                                    .insert(key.clone(), item.clone());
+                                if imp.is_pub {
+                                    st.inline_reexport_core
+                                        .insert(key, (module, item));
+                                }
+                            }
                         }
                     }
                 }

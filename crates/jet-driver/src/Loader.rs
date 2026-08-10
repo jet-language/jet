@@ -1272,7 +1272,7 @@ fn load_file(
         if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
             continue;
         }
-        // D-MOD3: `use alias.Item` / `use alias.{A,B}` forms don't load new files;
+        // D-MOD3: `use alias.Item` / `use alias.[A,B]` forms don't load new files;
         // sema resolves them against already-loaded modules (E0609–E0611).
         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
             continue;

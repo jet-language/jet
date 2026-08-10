@@ -314,16 +314,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             ..
         } => {
             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
+                cx.any_core_import_module(alias) == Some(crate::Syntax::CORE_EMAIL_MODULE)
                     && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")
+                cx.any_core_import_module(alias) == Some("core.encoding.cbor")
                     && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
                     && type_args.is_empty()
             });
             let core_encoding_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding")
+                cx.any_core_import_module(alias) == Some("core.encoding")
                     && matches!(
                         type_name.as_str(),
                         "EncodingLimits" | "EncodingCause" | "EncodingError"
@@ -331,7 +331,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     && type_args.is_empty()
             });
             let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
+                cx.any_core_import_module(alias) == Some("core.encoding.xml")
                     && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
                     && type_args.is_empty()
             });

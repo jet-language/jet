@@ -406,7 +406,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         if matches!(receiver, Expr::Field(..)) {
             if let Some(submodule) =
-                core_module_path_from_receiver(receiver, &cx.core_imports, locals)
+                core_module_path_from_receiver(receiver, cx, locals)
             {
                 return core_call_covered(&submodule, method)
                     && core_call_args_in_subset(&submodule, method, args, cx, locals);
@@ -414,7 +414,7 @@ pub(crate) fn method_call_in_subset(
         }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
-                if let Some(module) = cx.core_imports.get(alias) {
+                if let Some(module) = cx.any_core_import_module(alias) {
                     // c109 Phase 13: the two closure-taking core calls (`http.serve`/
                     // `scope.guard`) — NOT in `core_fixed_sig`, each a
                     // bespoke emit shape with a literal-lambda closure arg.
@@ -423,6 +423,13 @@ pub(crate) fn method_call_in_subset(
                     }
                     return core_call_covered(module, method)
                         && core_call_args_in_subset(module, method, args, cx, locals);
+                }
+                if let Some((module, real_method)) = cx
+                    .inline_reexport_core
+                    .get(&(alias.clone(), method.to_string()))
+                {
+                    return core_call_covered(module, real_method)
+                        && core_call_args_in_subset(module, real_method, args, cx, locals);
                 }
                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
@@ -986,35 +993,35 @@ pub(crate) fn method_call_in_subset(
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
+                    if cx.any_core_import_module(alias) == Some("core.encoding") {
                         return true;
                     }
                 }
             }
             if leaf == "DataLimits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.data") {
+                    if cx.any_core_import_module(alias) == Some("core.data") {
                         return true;
                     }
                 }
             }
             if leaf == "CBOROptions" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor") {
+                    if cx.any_core_import_module(alias) == Some("core.encoding.cbor") {
                         return true;
                     }
                 }
             }
             if matches!(leaf.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions") {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml") {
+                    if cx.any_core_import_module(alias) == Some("core.encoding.xml") {
                         return true;
                     }
                 }
             }
             if leaf == "Limits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.email") {
+                    if cx.any_core_import_module(alias) == Some("core.email") {
                         return true;
                     }
                 }
@@ -1162,13 +1169,15 @@ pub(crate) fn method_call_in_subset(
 
 pub(super) fn core_module_path_from_receiver(
     receiver: &Expr,
-    imports: &std::collections::HashMap<String, String>,
+    cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> Option<String> {
     match receiver {
-        Expr::Ident(alias, _) if !locals.contains(alias) => imports.get(alias).cloned(),
+        Expr::Ident(alias, _) if !locals.contains(alias) => {
+            cx.any_core_import_module(alias).map(str::to_owned)
+        }
         Expr::Field(base, leaf, _) => {
-            let module = core_module_path_from_receiver(base, imports, locals)?;
+            let module = core_module_path_from_receiver(base, cx, locals)?;
             let submodule = format!("{module}.{leaf}");
             crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
         }

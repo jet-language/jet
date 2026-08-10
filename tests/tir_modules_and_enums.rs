@@ -319,6 +319,63 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-NAME-WALK1=A: an inline module gets the same Core member walk as the
+/// enclosing file. This covers both a body-local Core list and a Core item
+/// re-exported through the inline module's public surface.
+#[test]
+fn inline_module_core_use_list_and_pub_reexport_match_all_tiers() {
+    let src = "\
+use core.math.[abs, min]
+module api {
+    use core.math.[abs]
+    pub use core.math.[abs as exported]
+    pub fn local(n: Int) => Int {
+        return abs(n)
+    }
+}
+fn run() {
+    print(abs(-3))
+    print(min(9, 4))
+    print(api.local(-7))
+    print(api.exported(-5))
+}
+";
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_inline_core_use_list", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "3\n4\n7\n5\n");
+    }
+    let (code, stdout, stderr) = run_default_multi(
+        "inline_core_use_list",
+        "main.jet",
+        &[("main.jet", src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "3\n4\n7\n5\n");
+    assert!(stderr.contains("tier1 native"), "{stderr}");
+    assert!(!stderr.contains("tier0 interp"), "{stderr}");
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_inline_core_use_interp_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stdout, "3\n4\n7\n5\n");
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected inline Core imports: {diags:?}")
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// The same body-local import law applies when the prefix is a file module.
 /// This catches codegen's local signature/return maps, not only sema lookup.
 #[test]

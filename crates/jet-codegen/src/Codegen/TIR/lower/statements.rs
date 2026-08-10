@@ -104,8 +104,7 @@ fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
 fn is_core_os_receiver(expr: &Expr, cx: &Cx) -> bool {
     match expr {
         Expr::Ident(alias, _) => cx
-            .core_imports
-            .get(alias)
+            .any_core_import_module(alias)
             .is_some_and(|module| module == "core.os"),
         Expr::Field(base, leaf, _) => leaf == "os" && is_core_os_receiver(base, cx),
         _ => false,
@@ -658,7 +657,9 @@ pub(crate) fn place_window_init<'a>(
             ..
         } if method == crate::Syntax::MEM_PIN
             && matches!(receiver.as_ref(), Expr::Ident(alias, _)
-                if cx.core_imports.get(alias).is_some_and(|m| m == crate::Syntax::CORE_MEM_MODULE)) =>
+                if cx
+                    .any_core_import_module(alias)
+                    .is_some_and(|m| m == crate::Syntax::CORE_MEM_MODULE)) =>
         {
             let inner = &args.first()?.expr;
             Some((

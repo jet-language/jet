@@ -1243,6 +1243,10 @@ pub(crate) struct ModuleState {
     /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
     /// Maps name → (function_name, module_idx).
     unqualified_file: HashMap<String, (String, usize)>,
+    /// D-CORE-USELIST1=A: unqualified Core items imported via `use core.X.[…]`.
+    /// The value is the original Core member name; `core_imports` carries its
+    /// module path so the call lowers through the ordinary Core method path.
+    core_item_imports: HashMap<String, String>,
     /// D-MOD4: `pub use alias.Item` re-exports — items this module exposes on its
     /// own public surface even though they're defined elsewhere. Maps the
     /// exported name → (target_function_name, target_module_idx). A caller doing
@@ -1258,10 +1262,15 @@ pub(crate) struct ModuleState {
     /// D-NAME-WALK1=A: core modules imported by item name inside an inline
     /// module. Kept separate from the file-level map for scope safety.
     inline_core_imports: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: original Core member names for inline-module imports.
+    inline_core_items: HashMap<(String, String), String>,
     /// D-NAME-WALK1=A: inline-module `pub use` of another inline function.
     inline_reexport_inline: HashMap<(String, String), (String, String)>,
     /// D-NAME-WALK1=A: inline-module `pub use` of a file-module function.
     inline_reexport_file: HashMap<(String, String), (String, usize)>,
+    /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
+    /// value is the Core module and the second is the original member name.
+    inline_reexport_core: HashMap<(String, String), (String, String)>,
 }
 
 pub(crate) struct Checker<'a> {
@@ -1280,6 +1289,8 @@ pub(crate) struct Checker<'a> {
     unqualified: &'a HashMap<String, String>,
     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
     unqualified_file: &'a HashMap<String, (String, usize)>,
+    /// D-CORE-USELIST1=A: unqualified Core items in scope (local name → member).
+    core_item_imports: &'a HashMap<String, String>,
     /// D-NAME-WALK1=A: imports scoped to one inline-module body.
     inline_unqualified: &'a HashMap<(String, String), String>,
     inline_unqualified_file: &'a HashMap<(String, String), (String, usize)>,
@@ -1287,6 +1298,7 @@ pub(crate) struct Checker<'a> {
     /// D-NAME-WALK1=A: public re-exports declared inside inline modules.
     inline_reexport_inline: &'a HashMap<(String, String), (String, String)>,
     inline_reexport_file: &'a HashMap<(String, String), (String, usize)>,
+    inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
     /// D-MOD2: pub flags for this module's functions, including inline-module
     /// items mangled as `M__item`. Used to reject `M.private()` from outside.
     func_pub: &'a HashMap<String, bool>,

@@ -510,7 +510,7 @@ mod tests {
         std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
         std::fs::write(
             &main,
-            "use \"./library\" as api\nuse api.{report as alias_report}\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker.{value: 1}\n    worker.step()\n    other :: Other.{value: 2}\n    other.step()\n}\n",
+            "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker.{value: 1}\n    worker.step()\n    other :: Other.{value: 2}\n    other.step()\n}\n",
         )
         .unwrap();
 

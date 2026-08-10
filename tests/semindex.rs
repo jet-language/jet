@@ -376,7 +376,7 @@ fn semantic_symbols_include_module_and_selected_imports() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use \"./library\" as api\nuse api.{score as imported_score}\nfn run() { print(imported_score(\"Ada\")) }\n",
+        "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() { print(imported_score(\"Ada\")) }\n",
     )
     .unwrap();
     let symbols = open_symbols(&main).expect("import symbols");

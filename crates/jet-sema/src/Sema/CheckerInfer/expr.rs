@@ -548,6 +548,37 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    pub(crate) fn normalize_imported_core_expr(&mut self, e: &mut Expr) {
+        let (name, span) = match &*e {
+            Expr::Call(call) => (call.name.clone(), call.name_span),
+            _ => return,
+        };
+        if self.funcs.contains_key(&name) || self.lookup(&name).is_some() {
+            return;
+        }
+        let Some(item) = self.core_item_imports.get(&name).cloned() else {
+            return;
+        };
+        if !self.core_imports.contains_key(&name) {
+            return;
+        }
+        let old = std::mem::replace(e, Expr::Absent(span));
+        let Expr::Call(call) = old else {
+            unreachable!("Core import normalization only replaces calls");
+        };
+        *e = Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(name, call.name_span)),
+            method: item,
+            method_span: call.name_span,
+            owner_type_args: Vec::new(),
+            type_args: call.type_args,
+            args: call.args,
+            recv_type: None,
+            resolved_ret: call.resolved_ret,
+            checked_widen: false,
+        };
+    }
+
     pub(crate) fn normalize_prelude_expr(&mut self, e: &mut Expr) {
         let (name, span) = match &*e {
             Expr::Call(call) => (call.name.clone(), call.name_span),
@@ -601,6 +632,7 @@ impl<'a> Checker<'a> {
     }
 
     fn normalize_contextual_expr(&mut self, e: &mut Expr) {
+        self.normalize_imported_core_expr(e);
         self.normalize_prelude_expr(e);
         // D-FAIL-ERROR1=A: labels make the default-error constructor
         // unambiguous. Outside a Result expectation, the one-message form is
@@ -1336,6 +1368,11 @@ impl<'a> Checker<'a> {
                 if let Some(t) = self.consts.get(name).cloned() {
                     self.record_const_reference(name, *span);
                     return Some(t);
+                }
+                if let Some(item) = self.core_item_imports.get(name).cloned() {
+                    if let Some(module) = self.core_imports.get(name).cloned() {
+                        return self.infer_core_field(&module, &item, *span, *span);
+                    }
                 }
                 if let Some(sig) = self.funcs.get(name).cloned() {
                     // D-METHODMACRO1=A: a bare top-level function name resolved here

@@ -15,7 +15,6 @@ use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
-use std::collections::HashMap;
 
 fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match expr {
@@ -67,13 +66,15 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// in-subset lambda in the closure-arg position.
 pub(super) fn core_module_path_from_receiver(
     receiver: &Expr,
-    imports: &HashMap<String, String>,
+    cx: &Cx,
     env: &LowerEnv,
 ) -> Option<String> {
     match receiver {
-        Expr::Ident(alias, _) if !env.locals.contains_key(alias) => imports.get(alias).cloned(),
+        Expr::Ident(alias, _) if !env.locals.contains_key(alias) => cx
+            .core_import_module_for_function(&env.fn_name, alias)
+            .map(str::to_owned),
         Expr::Field(base, leaf, _) => {
-            let module = core_module_path_from_receiver(base, imports, env)?;
+            let module = core_module_path_from_receiver(base, cx, env)?;
             let submodule = format!("{module}.{leaf}");
             crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
         }

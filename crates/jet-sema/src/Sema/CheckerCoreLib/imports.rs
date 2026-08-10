@@ -41,12 +41,26 @@ impl<'a> Checker<'a> {
             }
             if let Some((real_name, real_idx)) = self
                 .inline_reexport_file
-                .get(&(alias.to_string(), item))
+                .get(&(alias.to_string(), item.clone()))
                 .cloned()
             {
                 return self.infer_import_call(
                     real_idx,
                     &real_name,
+                    alias_span,
+                    span,
+                    type_args,
+                    args,
+                );
+            }
+            if let Some((module, real_item)) = self
+                .inline_reexport_core
+                .get(&(alias.to_string(), item))
+                .cloned()
+            {
+                return self.infer_core_call(
+                    &module,
+                    &real_item,
                     alias_span,
                     span,
                     type_args,

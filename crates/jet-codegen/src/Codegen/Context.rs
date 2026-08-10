@@ -201,11 +201,16 @@ pub(crate) struct Cx {
     pub(crate) inline_unqualified: HashMap<String, HashMap<String, String>>,
     pub(crate) inline_unqualified_file:
         HashMap<String, HashMap<String, (String, String)>>,
+    /// D-NAME-WALK1=A: per-inline-function Core import scopes. The key is the
+    /// emitted mangled function name (`module__function`).
+    pub(crate) inline_core_imports: HashMap<String, HashMap<String, String>>,
     /// Names from inline scopes used by the conservative TIR coverage gate.
     /// Lowering still reads the exact per-function map.
     pub(crate) inline_import_names: HashSet<String>,
     /// D-NAME-WALK1=A: inline-module pub re-exports of inline functions.
     pub(crate) inline_reexport_inline: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: inline-module pub re-exports of Core items.
+    pub(crate) inline_reexport_core: HashMap<(String, String), (String, String)>,
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
@@ -782,9 +787,38 @@ impl Cx {
         }
     }
 
+    /// Resolve a Core alias in the exact function scope selected by
+    /// D-NAME-WALK1=A. Inline bindings overlay the enclosing file bindings.
+    pub(crate) fn core_import_module_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+    ) -> Option<&str> {
+        self.inline_core_imports
+            .get(fn_name)
+            .and_then(|scope| scope.get(alias))
+            .or_else(|| self.core_imports.get(alias))
+            .map(String::as_str)
+    }
+
+    /// Resolve a Core alias without a function-specific scope. TIR coverage
+    /// predicates have only structural AST facts, so they use the enclosing
+    /// map first and then any inline body map as a conservative reachability
+    /// check. Lowering always uses the exact helper above.
+    pub(crate) fn any_core_import_module(&self, alias: &str) -> Option<&str> {
+        self.core_imports
+            .get(alias)
+            .or_else(|| {
+                self.inline_core_imports
+                    .values()
+                    .find_map(|scope| scope.get(alias))
+            })
+            .map(String::as_str)
+    }
+
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
-        match (self.core_imports.get(alias).map(String::as_str), leaf) {
+        match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
@@ -2533,7 +2567,7 @@ pub(crate) fn register_bundle_unit_metadata(
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
-        inline_import_maps, reexport_call_map, unqualified_import_maps,
+        inline_core_import_maps, inline_import_maps, reexport_call_map, unqualified_import_maps,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
@@ -2560,6 +2594,9 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.inline_unqualified_file = file;
     cx.inline_import_names = names;
     cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, module_idx);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     cx.package_edition = bundle.edition.clone();
 }
 
@@ -2882,8 +2919,10 @@ pub(crate) fn build_cx_items(
         unqualified_file: HashMap::new(),
         inline_unqualified: HashMap::new(),
         inline_unqualified_file: HashMap::new(),
+        inline_core_imports: HashMap::new(),
         inline_import_names: HashSet::new(),
         inline_reexport_inline: HashMap::new(),
+        inline_reexport_core: HashMap::new(),
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),

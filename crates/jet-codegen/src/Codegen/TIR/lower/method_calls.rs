@@ -2064,7 +2064,9 @@ pub(crate) fn lower_method_call(
     if method == "set" && args.len() == 2 && !super::is_eval_fragment() {
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias)
-                && cx.core_imports.get(alias).is_some_and(|module| module == "core.env")
+                && cx
+                    .core_import_module_for_function(&env.fn_name, alias)
+                    .is_some_and(|module| module == "core.env")
             {
                 let name = lower_expr(&args[0].expr, cx, env);
                 let value = lower_expr(&args[1].expr, cx, env);
@@ -2093,7 +2095,16 @@ pub(crate) fn lower_method_call(
     // would otherwise fall through to `StaticCall { User(alias) }` and E0956.
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
-            if let Some(module) = cx.core_imports.get(alias).cloned() {
+            let core_target = cx
+                .core_import_module_for_function(&env.fn_name, alias)
+                .map(|module| (module.to_owned(), method.to_owned()))
+                .or_else(|| {
+                    cx.inline_reexport_core
+                        .get(&(alias.clone(), method.to_owned()))
+                        .cloned()
+                });
+            if let Some((module, core_method)) = core_target {
+                let method = core_method.as_str();
                 if module == "core.archive" {
                     if let Some(source_call) = lower_archive_source_call(
                         method,
@@ -2235,7 +2246,7 @@ pub(crate) fn lower_method_call(
     }
     if recv_type.is_none() {
         if matches!(receiver, Expr::Field(..)) {
-            if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
+            if let Some(submodule) = core_module_path_from_receiver(receiver, cx, env)
             {
                 if submodule == "core.archive" {
                     if let Some(source_call) = lower_archive_source_call(
@@ -4366,7 +4377,7 @@ pub(crate) fn lower_method_call(
         }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding")
             {
                 return TExpr {
                     ty: Type::Named("EncodingLimits".to_string()),
@@ -4380,7 +4391,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "DataLimits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.data")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.data")
             {
                 return TExpr {
                     ty: Type::Named("DataLimits".to_string()),
@@ -4394,7 +4405,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "DataLimits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.data")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.data")
             {
                 return TExpr {
                     ty: Type::Named("DataLimits".to_string()),
@@ -4408,7 +4419,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "CBOROptions"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.cbor")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding.cbor")
             {
                 return TExpr {
                     ty: Type::Named("CBOROptions".to_string()),
@@ -4422,7 +4433,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if matches!(leaf.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions")
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.xml")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding.xml")
             {
                 return TExpr {
                     ty: Type::Named(leaf.clone()),
@@ -4436,7 +4447,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "Limits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.email")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.email")
             {
                 return TExpr {
                     ty: Type::Named("Limits".to_string()),
