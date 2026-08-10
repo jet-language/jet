@@ -180,6 +180,25 @@ view is ever half-archived. `tower archive status|show <id>|restore <id>`
 reads it back; `card show`/`decision show` fall through to history
 automatically once something isn't live any more.
 
+## Minting law — the count must be honest
+
+The board's open count is a promise. A stated remaining count that turns out to be far
+higher is the same failure as one that turns out to be far lower. Before `tower card add`:
+
+1. **Probe.** Re-run the failure. A cause already fixed means retarget or close the
+   existing card — never duplicate it.
+2. **Retarget over close-and-remint.** A test still red for a *new* reason keeps its card;
+   update title, body, and log. One card per persistent problem.
+3. **One card per work slice.** Defects one worker fixes in one pass with one proof run are
+   ONE card with a discrete criterion per defect. Log absorbed content on the survivor,
+   then `tower card delete` the folded duplicates. Grouping cuts dispatch, build, review,
+   and merge cost per defect.
+4. **Mint only separate, uncovered work** — and say plainly that you did.
+
+Never quote a scope number you have not measured; front-load discovery with one
+full-corpus census instead of streaming surprises card by card. `tower lint` reports
+board health; a rising open count during a burndown is a defect in the burndown.
+
 ## Non-negotiables
 
 - **Never edit `plugins/tower/.tower/tower.json` directly** — the CLI/HTTP validate, lock,
