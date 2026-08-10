@@ -905,11 +905,19 @@ fn declare_name(
     );
 }
 
+fn scoped_name(prefix: Option<&str>, name: &str) -> String {
+    prefix.map_or_else(|| name.to_string(), |prefix| jet_foundation::Names::member_name(prefix, name))
+}
+
+fn scoped_path(prefix: &str, name: &str) -> String {
+    format!("{prefix}.{name}")
+}
+
 fn declare_method_names(
     ledger: &mut jet_foundation::Names::NameLedger,
     module: usize,
-    module_alias: &str,
     owner: &str,
+    owner_path: &str,
     methods: &[Func],
 ) {
     for method in methods {
@@ -917,7 +925,7 @@ fn declare_method_names(
             ledger,
             module,
             format!("{owner}.{}", method.name),
-            format!("{module_alias}.{owner}.{}", method.name),
+            format!("{owner_path}.{}", method.name),
             "method",
             method.name_span,
             jet_foundation::Names::NameVisibility::from_flags(
@@ -928,10 +936,11 @@ fn declare_method_names(
     }
 }
 
-fn declare_item_names(
+fn declare_item_names_scoped(
     ledger: &mut jet_foundation::Names::NameLedger,
     module: usize,
-    module_alias: &str,
+    path_prefix: &str,
+    name_prefix: Option<&str>,
     item: &Item,
 ) {
     use jet_foundation::Names::NameVisibility;
@@ -940,18 +949,20 @@ fn declare_item_names(
         Item::Func(function) => declare_name(
             ledger,
             module,
-            function.name.clone(),
-            format!("{module_alias}.{}", function.name),
+            scoped_name(name_prefix, &function.name),
+            scoped_path(path_prefix, &function.name),
             "function",
             function.name_span,
             NameVisibility::from_flags(function.is_pub, function.is_package_pub),
         ),
         Item::Struct(definition) => {
+            let item_name = scoped_name(name_prefix, &definition.name);
+            let item_path = scoped_path(path_prefix, &definition.name);
             declare_name(
                 ledger,
                 module,
-                definition.name.clone(),
-                format!("{module_alias}.{}", definition.name),
+                item_name.clone(),
+                item_path.clone(),
                 "type",
                 definition.name_span,
                 NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
@@ -960,8 +971,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    format!("{}.{}", definition.name, field.name),
-                    format!("{module_alias}.{}.{}", definition.name, field.name),
+                    format!("{item_name}.{}", field.name),
+                    format!("{item_path}.{}", field.name),
                     "field",
                     field.name_span,
                     NameVisibility::from_flags(field.is_pub, field.is_package_pub),
@@ -970,27 +981,29 @@ fn declare_item_names(
             declare_method_names(
                 ledger,
                 module,
-                module_alias,
-                &definition.name,
+                &item_name,
+                &item_path,
                 &definition.methods,
             );
             for implementation in &definition.trait_impls {
                 declare_method_names(
                     ledger,
                     module,
-                    module_alias,
-                    &definition.name,
+                    &item_name,
+                    &item_path,
                     &implementation.methods,
                 );
             }
         }
         Item::Enum(definition) => {
+            let item_name = scoped_name(name_prefix, &definition.name);
+            let item_path = scoped_path(path_prefix, &definition.name);
             let visibility = NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
             declare_name(
                 ledger,
                 module,
-                definition.name.clone(),
-                format!("{module_alias}.{}", definition.name),
+                item_name.clone(),
+                item_path.clone(),
                 "type",
                 definition.name_span,
                 visibility,
@@ -999,8 +1012,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    format!("{}.{}", definition.name, variant.name),
-                    format!("{module_alias}.{}.{}", definition.name, variant.name),
+                    format!("{item_name}.{}", variant.name),
+                    format!("{item_path}.{}", variant.name),
                     "variant",
                     variant.name_span,
                     visibility,
@@ -1009,16 +1022,16 @@ fn declare_item_names(
             declare_method_names(
                 ledger,
                 module,
-                module_alias,
-                &definition.name,
+                &item_name,
+                &item_path,
                 &definition.methods,
             );
             for implementation in &definition.trait_impls {
                 declare_method_names(
                     ledger,
                     module,
-                    module_alias,
-                    &definition.name,
+                    &item_name,
+                    &item_path,
                     &implementation.methods,
                 );
             }
@@ -1026,8 +1039,8 @@ fn declare_item_names(
         Item::Distinct(definition) => declare_name(
             ledger,
             module,
-            definition.name.clone(),
-            format!("{module_alias}.{}", definition.name),
+            scoped_name(name_prefix, &definition.name),
+            scoped_path(path_prefix, &definition.name),
             "type",
             definition.name_span,
             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
@@ -1035,8 +1048,8 @@ fn declare_item_names(
         Item::TypeAlias(definition) => declare_name(
             ledger,
             module,
-            definition.name.clone(),
-            format!("{module_alias}.{}", definition.name),
+            scoped_name(name_prefix, &definition.name),
+            scoped_path(path_prefix, &definition.name),
             "type",
             definition.name_span,
             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
@@ -1046,8 +1059,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    definition.name.clone(),
-                    format!("{module_alias}.{}", definition.name),
+                    scoped_name(name_prefix, &definition.name),
+                    scoped_path(path_prefix, &definition.name),
                     "type",
                     definition.name_span,
                     NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
@@ -1055,12 +1068,14 @@ fn declare_item_names(
             }
         }
         Item::Trait(definition) => {
+            let item_name = scoped_name(name_prefix, &definition.name);
+            let item_path = scoped_path(path_prefix, &definition.name);
             let visibility = NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
             declare_name(
                 ledger,
                 module,
-                definition.name.clone(),
-                format!("{module_alias}.{}", definition.name),
+                item_name.clone(),
+                item_path.clone(),
                 "trait",
                 definition.name_span,
                 visibility,
@@ -1069,8 +1084,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    format!("{}.{}", definition.name, method.name),
-                    format!("{module_alias}.{}.{}", definition.name, method.name),
+                    format!("{item_name}.{}", method.name),
+                    format!("{item_path}.{}", method.name),
                     "method",
                     method.name_span,
                     visibility,
@@ -1080,26 +1095,28 @@ fn declare_item_names(
         Item::Tag(definition) => declare_name(
             ledger,
             module,
-            definition.name.clone(),
-            format!("{module_alias}.{}", definition.name),
+            scoped_name(name_prefix, &definition.name),
+            scoped_path(path_prefix, &definition.name),
             "tag",
             definition.name_span,
             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
         ),
         Item::Impl(implementation) => {
+            let owner = scoped_name(name_prefix, &implementation.type_name);
+            let owner_path = scoped_path(path_prefix, &implementation.type_name);
             declare_method_names(
                 ledger,
                 module,
-                module_alias,
-                &implementation.type_name,
+                &owner,
+                &owner_path,
                 &implementation.methods,
             );
             for (name, span, _) in &implementation.assoc_type_impls {
                 declare_name(
                     ledger,
                     module,
-                    format!("{}.{}", implementation.type_name, name),
-                    format!("{module_alias}.{}.{}", implementation.type_name, name),
+                    format!("{owner}.{name}"),
+                    format!("{owner_path}.{name}"),
                     "associated_type",
                     *span,
                     NameVisibility::Private,
@@ -1109,8 +1126,8 @@ fn declare_item_names(
         Item::Const(definition) => declare_name(
             ledger,
             module,
-            definition.name.clone(),
-            format!("{module_alias}.{}", definition.name),
+            scoped_name(name_prefix, &definition.name),
+            scoped_path(path_prefix, &definition.name),
             "const",
             definition.name_span,
             NameVisibility::Private,
@@ -1120,8 +1137,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    function.name.clone(),
-                    format!("{module_alias}.{}", function.name),
+                    scoped_name(name_prefix, &function.name),
+                    scoped_path(path_prefix, &function.name),
                     "extern",
                     function.name_span,
                     NameVisibility::Private,
@@ -1133,8 +1150,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    function.name.clone(),
-                    format!("{module_alias}.{}", function.name),
+                    scoped_name(name_prefix, &function.name),
+                    scoped_path(path_prefix, &function.name),
                     "extern",
                     function.name_span,
                     NameVisibility::Public,
@@ -1142,6 +1159,8 @@ fn declare_item_names(
             }
         }
         Item::CodeModule(code_module) => {
+            let item_name = scoped_name(name_prefix, &code_module.name);
+            let item_path = scoped_path(path_prefix, &code_module.name);
             let visibility = NameVisibility::from_flags(
                 code_module.is_pub,
                 code_module.is_package_pub,
@@ -1149,39 +1168,33 @@ fn declare_item_names(
             declare_name(
                 ledger,
                 module,
-                code_module.name.clone(),
-                format!("{module_alias}.{}", code_module.name),
+                item_name.clone(),
+                item_path.clone(),
                 "module",
                 code_module.name_span,
                 visibility,
             );
             if let Some(body) = &code_module.body {
                 for nested in body {
-                    if let Item::Func(function) = nested {
-                        let semantic_name = jet_foundation::Names::member_name(
-                            &code_module.name,
-                            &function.name,
-                        );
-                        declare_name(
-                            ledger,
-                            module,
-                            semantic_name,
-                            format!("{module_alias}.{}.{}", code_module.name, function.name),
-                            "function",
-                            function.name_span,
-                            NameVisibility::from_flags(function.is_pub, function.is_package_pub),
-                        );
-                    }
+                    declare_item_names_scoped(
+                        ledger,
+                        module,
+                        &item_path,
+                        Some(&item_name),
+                        nested,
+                    );
                 }
             }
         }
         Item::StateDecl(state) => {
             let visibility = NameVisibility::from_flags(state.is_pub, state.is_package_pub);
+            let state_name = scoped_name(name_prefix, &state.type_name);
+            let state_path = scoped_path(path_prefix, &state.type_name);
             declare_name(
                 ledger,
                 module,
-                state.type_name.clone(),
-                format!("{module_alias}.{}", state.type_name),
+                state_name.clone(),
+                state_path.clone(),
                 "state",
                 state.type_name_span,
                 visibility,
@@ -1190,8 +1203,8 @@ fn declare_item_names(
                 declare_name(
                     ledger,
                     module,
-                    format!("{}.State.{name}", state.type_name),
-                    format!("{module_alias}.{}.State.{name}", state.type_name),
+                    format!("{state_name}.State.{name}"),
+                    format!("{state_path}.State.{name}"),
                     "state",
                     *span,
                     visibility,
@@ -1203,8 +1216,8 @@ fn declare_item_names(
             declare_name(
                 ledger,
                 module,
-                protocol.name.clone(),
-                format!("{module_alias}.{}", protocol.name),
+                scoped_name(name_prefix, &protocol.name),
+                scoped_path(path_prefix, &protocol.name),
                 "protocol",
                 protocol.name_span,
                 visibility,
@@ -1212,6 +1225,15 @@ fn declare_item_names(
         }
         _ => {}
     }
+}
+
+fn declare_item_names(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module: usize,
+    module_alias: &str,
+    item: &Item,
+) {
+    declare_item_names_scoped(ledger, module, module_alias, None, item);
 }
 
 fn populate_name_ledger(
