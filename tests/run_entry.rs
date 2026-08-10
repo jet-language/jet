@@ -4,6 +4,18 @@ fn bare_run_stays_valid() {
 }
 
 #[test]
+fn script_top_level_recovery_always_consumes_a_token() {
+    // A stray `}` is not a statement, and statement recovery stops *before* a
+    // `}` at brace depth 0. The top-level script loop must still move the
+    // cursor, or it re-reports the same token until memory runs out.
+    let diagnostics = jet::compile("    }\n").expect_err("a stray `}` is not a program");
+    assert!(
+        diagnostics.len() < 10,
+        "top-level recovery must report the stray brace once, not in a loop: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
     let source = "message :: \"script entry\"\nprint(message)\nfn helper() => Int { return 42 }\n";
     let output = jet::compile(source)

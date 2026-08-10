@@ -1357,12 +1357,23 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     _other => {
+                        // Script body at the top level. `sync_stmt` stops
+                        // *before* a `}` at brace depth 0 because inside a
+                        // block the block parser consumes it — at the top
+                        // level nothing does, so a stray `}` would leave the
+                        // cursor where it was and this loop would re-report
+                        // the same token forever. Every pass through this arm
+                        // must move the cursor.
+                        let before = self.pos;
                         match self.stmt() {
                             Ok(stmt) => script_body.push(stmt),
                             Err(d) => {
                                 self.diags.push(d);
                                 self.sync_stmt();
                             }
+                        }
+                        if self.pos == before {
+                            self.bump();
                         }
                         continue;
                     }
