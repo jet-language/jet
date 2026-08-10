@@ -1148,9 +1148,10 @@ pub fn compile_benches_with_path(
 /// compile error on its normal path.
 pub fn has_bench_blocks(file: &str) -> bool {
     with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle.modules[bundle.entry]
-            .items
+        Ok(bundle) => bundle
+            .modules
             .iter()
+            .flat_map(|module| module.items.iter())
             .any(|i| matches!(i, AST::Item::Bench(_))),
         Err(_) => false,
     })
@@ -1162,9 +1163,10 @@ pub fn has_bench_blocks(file: &str) -> bool {
 /// the caller surfaces the real compile error on the normal harness path.
 pub fn has_test_blocks(file: &str) -> bool {
     with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle.modules[bundle.entry]
-            .items
+        Ok(bundle) => bundle
+            .modules
             .iter()
+            .flat_map(|module| module.items.iter())
             .any(|i| matches!(i, AST::Item::Test(_))),
         Err(_) => true,
     })

@@ -796,3 +796,46 @@ fn tool_install_task_collision_is_e1297_snapshot() {
             .exists()
     );
 }
+
+#[test]
+fn test_runs_jet_tests_and_propagates_failure() {
+    let project = Scratch::new("test-project");
+    let root = Scratch::new("test-root");
+    fs::write(
+        project.join("package.jet"),
+        "name: \"test_project\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("main.jet"),
+        "#Test(\"failing test\") {\n    require(false)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "use jetpack as pkg\npub fn shell() => [JSON] = [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_project@local\"]), pkg.prompt(\"test\")]\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["test", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "jetpack test must report the failing test\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("failing test") || stderr.contains("failing test"),
+        "test name missing from output:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("FAIL") || stderr.contains("FAIL"),
+        "failure missing from output:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}

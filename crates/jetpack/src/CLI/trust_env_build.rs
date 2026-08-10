@@ -4,6 +4,7 @@ use super::realize::{
     apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
     report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
 };
+use super::services_secrets_config::find_jet_binary;
 use super::workspace_sources::{cwd_table, load_workspace};
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
@@ -646,12 +647,34 @@ fn report_select_error(theme: &Theme, d: &crate::Diagnostics::Diagnostic) -> i32
 }
 
 /// Build (or test) each selected workspace member via the core provider.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkspaceAction {
+    Build,
+    Test,
+}
+
+impl WorkspaceAction {
+    fn present(self) -> &'static str {
+        match self {
+            Self::Build => "building",
+            Self::Test => "testing",
+        }
+    }
+
+    fn past(self) -> &'static str {
+        match self {
+            Self::Build => "built",
+            Self::Test => "tested",
+        }
+    }
+}
+
 fn run_workspace_members(
     theme: &Theme,
     parsed: &Parsed,
     dir: &std::path::Path,
     plan_members: &[WorkspaceMember],
-    action: &str,
+    action: WorkspaceAction,
 ) -> i32 {
     let roots = Store::resolve();
     let mut ok = true;
@@ -663,7 +686,7 @@ fn run_workspace_members(
         } else {
             dir.join(&member.path)
         };
-        theme.status(&format!("{action} workspace member: {}", member.name));
+        theme.status(&format!("{} workspace member: {}", action.present(), member.name));
         let table = RefSpec::SourceTable::from_decls([(
             member.name.clone(),
             format!("path:{}", abs.display()),
@@ -672,7 +695,7 @@ fn run_workspace_members(
         let raw = format!("{}@{}", member.name, member.name);
         if ordered_members.len() > 1 {
             theme.progress_chain(
-                action,
+                action.present(),
                 idx + 1,
                 ordered_members.len(),
                 &member.name,
@@ -695,8 +718,9 @@ fn run_workspace_members(
             &spec,
             member.name.len().max(8),
         )
-        .is_none()
-        {
+        .is_none() {
+            ok = false;
+        } else if action == WorkspaceAction::Test && !run_jet_tests(&abs) {
             ok = false;
         } else {
             built.push(member.clone());
@@ -705,7 +729,8 @@ fn run_workspace_members(
     if ok {
         MemberSelect::record_member_input_hashes(dir, &built);
         theme.status(&format!(
-            "{action} {} workspace member(s).",
+            "{} {} workspace member(s).",
+            action.past(),
             ordered_members.len()
         ));
         0
@@ -738,7 +763,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                         theme.status("no workspace members matched the selection.");
                         return 0;
                     }
-                    run_workspace_members(theme, parsed, &dir, &selected, "building")
+                    run_workspace_members(theme, parsed, &dir, &selected, WorkspaceAction::Build)
                 }
             };
         }
@@ -888,6 +913,38 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
 /// `jetpack test` — realize selected workspace members (D-JPK-SELECTOR1=C).
 /// Outside a workspace, falls through to the same project-plan realize path as
 /// `build` (tests ride the package after realize).
+fn run_jet_tests(dir: &std::path::Path) -> bool {
+    // Cargo runs integration-test binaries from `target/debug/deps`, while
+    // the sibling compiler binary stays in `target/debug`. Find that binary
+    // before falling back to the normal installed/PATH lookup.
+    let jet = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let deps = exe.parent()?;
+            (deps.file_name().and_then(|name| name.to_str()) == Some("deps"))
+                .then_some(deps.parent()?.join(if cfg!(windows) {
+                    "jet.exe"
+                } else {
+                    Syntax::BINARY_NAME
+                }))
+        })
+        .filter(|candidate| candidate.is_file())
+        .map(|candidate| candidate.to_string_lossy().into_owned())
+        .unwrap_or_else(find_jet_binary);
+
+    match std::process::Command::new(jet)
+        .arg("test")
+        .current_dir(dir)
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(error) => {
+            eprintln!("jetpack could not run jet test: {error}");
+            false
+        }
+    }
+}
+
 pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
@@ -909,11 +966,19 @@ pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
                     }
                     let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
                     theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
-                    run_workspace_members(theme, parsed, &dir, &selected, "testing")
+                    run_workspace_members(theme, parsed, &dir, &selected, WorkspaceAction::Test)
                 }
             };
         }
     }
-    // Non-workspace: identical realize path to build.
-    cmd_build(theme, parsed)
+    // Non-workspace: identical realize path to build, then run the package's
+    // tests with the compiler's canonical test semantics.
+    let code = cmd_build(theme, parsed);
+    if code == 0 && run_jet_tests(&dir) {
+        0
+    } else if code != 0 {
+        code
+    } else {
+        1
+    }
 }
