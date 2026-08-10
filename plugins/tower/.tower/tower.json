@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1868,
-    "rev": 33247,
+    "rev": 33255,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -113048,6 +113048,11 @@
       "log": [
         {
           "at": "2026-08-10",
+          "by": "fable",
+          "text": "Verified on master by orchestrator (build green, commits 2695a9ff6 + 0afa2901a): fmt stability passes; 3 of 4 inline_module tests pass. ONE gap remains: inline_module_core_use_list_and_pub_reexport_match_all_tiers fails on the interpreter tier only (whole-program deopt, tests/tir_modules_and_enums.rs:353) — AOT and JIT agree, interpreter does not. That is the last I9 slice for C3. The prior worker could not build (nix fetcher cache read-only in its sandbox) so its green claims were unproven; jit_gaps rows were correctly restored pending proof."
+        },
+        {
+          "at": "2026-08-10",
           "by": "codex",
           "text": "Codex closeout: inline Core import scopes and function re-export lowering added; required build and four targeted tests were blocked before compilation by inaccessible /nix/var/nix/daemon-socket/socket, so smoke was not run against the stale binary."
         },
@@ -113127,7 +113132,7 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:56.255Z",
-      "updated": "2026-08-10T16:21:18.787Z",
+      "updated": "2026-08-10T16:27:17.410Z",
       "updatedBy": "fable",
       "claimedAt": "2026-08-09T21:08:55.523Z"
     },
@@ -116238,58 +116243,6 @@
       "completedAt": "2026-08-10T13:58:10.019Z"
     },
     {
-      "id": "c0pwqnks",
-      "num": 1860,
-      "title": "task.race/task.any pick a non-deterministic winner on near-simultaneous branches",
-      "body": "task_control_tiers::task_control_plane_matches_under_aot and task_control_plane_matches_on_default_run flake: `task.race { 3, 4 }` and `task.any { 5, 6 }` sometimes return the second branch (4/6) instead of the first (3/5), on both AOT and tier0 interp. Root cause is in the shared scheduler policy (jet_task_select / JetTaskSelectPolicy in crates/jet-codegen/src/Prelude/TaskGroup.rs + Scheduler.rs), not in the D-CONC-SPAWN1=D surface migration (card #1854) — confirmed pre-existing on master before that work (stashed repro flaked 2/5 runs on unmodified tree). Two near-instant literal branches race the OS thread scheduler with no deterministic tie-break, so 'first successful/completed wins' isn't reproducible. Needs either a real tie-break rule (documented) or the test needs branches with a real ordering guarantee. Blocks a clean task_control_tiers proof run.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P1",
-      "plan": null,
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [
-        "bucket-1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-08-10T11:54:56.182Z",
-      "updated": "2026-08-10T16:21:20.550Z",
-      "updatedBy": "fable"
-    },
-    {
-      "id": "c01d132r",
-      "num": 1861,
-      "title": "'task' reserved keyword collides with existing local-variable name 'task' repo-wide",
-      "body": "D-CONC-SPAWN1=D reserves 'task' as a hard keyword: the parser's primary-expression dispatch (crates/jet-parser/src/Parser/Expressions/primary.rs, task_surface_expr) treats ANY bare identifier 'task' in expression position as the task-spawn keyword, unconditionally -- so a local variable literally named 'task' (legal as a binding target, since looks_like_sigil_binding() matches Ident before the keyword-dispatch arm) can never be REFERENCED again: 'task.join()', 'task.cancel()', and even a bare '[task]' list literal all fail E0003 ('unknown task selector' or 'expected a value, found ]'). Repro: 'use core.tasks as tasks\\nfn run() { task :: tasks.spawn(() => 10)\\n  tasks.join_all([task]) }' -> E0003 at the ']'. This is unrelated to the retired taskgroup/g.task spelling (card #1854) -- it hits the still-valid core.tasks/tasks.spawn() mechanism whenever the local handle happens to be named 'task', which was a completely ordinary identifier before this ratification. Found and fixed within files already touched for #1854 (tests/taskgroup_params.rs, concurrency_boundaries.rs, tir_unsafe_and_runtime.rs, shared_guards.rs, tests/ui/cffi_callback_runtime_handle.jet -- renamed 'task' -> 'handle'/'child' locally). NOT swept repo-wide: a full audit needs a real scan (rg word-boundary 'task' is too noisy -- collides with #Job/#Task markers, jetpack's own unrelated 'task' domain, task_runner.jet, etc.) across every test/example that uses core.tasks with a variable named 'task'. Recommend either a rename sweep or (better) a dedicated E-code diagnostic when sema sees a binding named 'task' shadow-fail like this, so future authors get a clear message instead of a confusing E0003 selector error.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [
-        "bucket-1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-08-10T12:14:30.160Z",
-      "updated": "2026-08-10T16:21:20.982Z",
-      "updatedBy": "fable"
-    },
-    {
       "id": "c0lsm8ov",
       "num": 1862,
       "title": "TIR interpreter ICEs on a panic inside a task combinator branch (SOFT_EXIT unregistered diagnostic code)",
@@ -116340,7 +116293,7 @@
     {
       "id": "c0s0dmiy",
       "num": 1863,
-      "title": "examples/features/modules/module_file_use/main.jet uses retired 'use X.{a,b}' import-list syntax",
+      "title": "fmt-lossless corpus red: formatter reorders tokens in script-mode example",
       "body": "tests/support/fmt_lossless.rs::fmt_is_lossless_on_supported_source_corpus (which re-parses/formats every examples/ and tests/ui/ .jet file) fails: examples/features/modules/module_file_use/main.jet:3 writes 'use mathlib.{lo, hi}', which is retired -- current syntax is 'use alias.[item, other as local]' (D-CORE-USELIST1), error E0003. Unrelated to cards #1854/#1859/#1860/#1861/#1862 (found incidentally while proving #1854's migration via the formatter corpus check). Small, isolated fix: migrate the one example to the current selective-import syntax.",
       "kind": "bug",
       "track": "epoch",
@@ -116351,7 +116304,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "RETARGETED, not closed-and-reminted (anti-inflation): the original cause (retired 'use X.{a,b}' in module_file_use/main.jet) is FIXED — that file now reads 'use mathlib.[lo, hi]' and zero retired forms remain in examples/ or tests/ui/. The same test is still red on a NEW cause: fmt changes ordered token 0 on examples/features/script_mode/implicit_run.jet (before Ident(\"message\"), after KwFn) per tests/support/fmt_lossless.rs:797. This card now tracks the fmt-lossless corpus staying green; it retargets as causes are peeled off instead of spawning successor cards."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [
@@ -116360,7 +116319,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:20:13.924Z",
-      "updated": "2026-08-10T16:21:21.415Z",
+      "updated": "2026-08-10T16:28:05.685Z",
       "updatedBy": "fable"
     },
     {
@@ -116392,7 +116351,7 @@
     {
       "id": "c0ywsi40",
       "num": 1865,
-      "title": "Task panic doesn't reliably propagate as process exit through group auto-join / sibling cancellation",
+      "title": "Task surface residual defects: tie-break, name collision, panic propagation",
       "body": "3 tests newly reachable after card #1854's syntax migration (previously blocked by E0003 parse errors on the retired taskgroup spelling) expose runtime gaps in how a child task's panic surfaces through task.group's auto-join and Drop-based close:\n\n1. tests/taskgroup_params.rs::early_return_closes_group_before_caller_continues -- 'bad :: task panic(\"child\")' inside a task.group, never explicitly joined (relies on append_taskgroup_auto_joins' compiler-inserted cancel()+join() at group-scope-exit). Expected exit code 70 (panic), got 0 -- the auto-inserted plain '.join()' returns T ? TaskFailure and its Result is silently discarded (not checked, not re-raised), so the panic never surfaces as a process exit.\n\n2. tests/taskgroup_params.rs::native_panicked_wait_closes_group_before_caller_continues -- 'slow :: task slow_value(gate)' (tight 2M-iteration compute loop, no wait point) + 'ignored :: task.any { fail_after_start(gate) }' (panics almost immediately) + trailing 'slow.join()'. Expected stdout '' (process exits via panic before slow's loop finishes, ~instant). Got stdout 'settled\\n' after ~6.5s -- slow's loop actually completes. Hypothesis (not fully confirmed): jet_task_outcome_unwrap (card #1854/#1862, Prelude/CoreLib/JetStd/MathTaskMem.rs) takes the 'jet_scheduler_panic_should_unwind()' raw-panic branch instead of the immediate-process::exit(70) branch at this call site, so the panic unwinds through task.group's Drop (JetTaskGroupRuntime::close_with), which cancels+joins slow -- but slow has no wait point (D-CANCELMODEL1=C cancellation is only preemptive AT wait points), so join() blocks for the full 6.5s before the panic continues propagating. Needs verifying whether jet_scheduler_in_task()/jet_runtime_should_unwind() is misreporting 'in a task' for code running in the task.group's own (non-task) scope, or whether the real issue is that Drop-based close_with blocking on an uncancellable sibling is simply the correct-but-untested behavior and the test's EXPECTED stdout is now wrong given a tight-loop task can never be interrupted.\n\n3. tests/taskgroup_params.rs::native_cancellation_closes_group_before_caller_continues -- also fails (assert_native_wait_exit checks exit code + stderr contains 'cancel' + a native-tier trace line); root cause not yet isolated, same family (task.group + task cancellation via external tasks.spawn().cancel() on a function containing a task.group).\n\nNone of these are the SOFT_EXIT/TASK_CANCELLED/STM-mut bugs already fixed under #1854/#1862 (verified via direct repro: 'settled' prints identically on BOTH AOT and interp tiers, so it isn't a tier-specific interpreter gap either). This is deep task-cancellation/auto-join runtime semantics, out of scope for the #1854 syntax migration itself -- flagging for dedicated investigation rather than guessing a fix under time pressure. Repro scripts used: /tmp/claude-*/scratchpad/any_cancel_repro.jet (recreate from tests/taskgroup_params.rs::native_panicked_wait_closes_group_before_caller_continues source if needed).",
       "kind": "bug",
       "track": "epoch",
@@ -116403,8 +116362,42 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "CONSOLIDATION (anti-inflation): absorbed cards 1860 and 1861 into this one. All three are residual defects in the same task/spawn surface, in the same file neighborhood, fixable by one worker in one pass with one proof run. Absorbed content — 1860: task.race/task.any tie-break is nondeterministic on near-simultaneous branches. 1861: the 'task' reserved keyword collides with pre-existing local variables named task. Nothing is hidden; each defect is now a discrete exit criterion below. Cards 1860 and 1861 deleted to keep the board count honest."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "task.race / task.any tie-break is deterministic and specified for near-simultaneous branches (absorbed from 1860)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T16:28:12.995Z"
+        },
+        {
+          "n": 2,
+          "text": "the task keyword no longer collides with pre-existing locals named task; diagnostic or scoping rule is specified (absorbed from 1861)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T16:28:13.390Z"
+        },
+        {
+          "n": 3,
+          "text": "a task panic propagates reliably through group auto-join and Drop-based close, on every tier (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T16:28:13.787Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "bucket-1"
@@ -116412,7 +116405,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:44:13.194Z",
-      "updated": "2026-08-10T16:21:22.285Z",
+      "updated": "2026-08-10T16:28:13.787Z",
       "updatedBy": "fable"
     },
     {
@@ -157232,6 +157225,62 @@
   ],
   "events": [
     {
+      "at": "2026-08-10T16:28:20.875Z",
+      "by": "fable",
+      "action": "card.delete",
+      "ref": "c01d132r",
+      "note": "'task' reserved keyword collides with existing local-variable name 'task' repo-wide"
+    },
+    {
+      "at": "2026-08-10T16:28:20.519Z",
+      "by": "fable",
+      "action": "card.delete",
+      "ref": "c0pwqnks",
+      "note": "task.race/task.any pick a non-deterministic winner on near-simultaneous branches"
+    },
+    {
+      "at": "2026-08-10T16:28:13.787Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ywsi40",
+      "note": "#3 a task panic propagates reliably through group auto-join and"
+    },
+    {
+      "at": "2026-08-10T16:28:13.390Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ywsi40",
+      "note": "#2 the task keyword no longer collides with pre-existing locals"
+    },
+    {
+      "at": "2026-08-10T16:28:12.995Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ywsi40",
+      "note": "#1 task.race / task.any tie-break is deterministic and specifie"
+    },
+    {
+      "at": "2026-08-10T16:28:12.630Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ywsi40",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-08-10T16:28:05.685Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0s0dmiy",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-08-10T16:27:17.411Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vw1da8",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-10T16:21:26.670Z",
       "by": "fable",
       "action": "card.update",
@@ -160673,62 +160722,6 @@
       "by": "e3-burndown",
       "action": "card.update",
       "ref": "c0ff60ce",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T16:49:19.139Z",
-      "by": "codex-1842-repair",
-      "action": "card.update",
-      "ref": "c0mmq29e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T16:47:51.135Z",
-      "by": "codex-1678-repair",
-      "action": "card.update",
-      "ref": "c0q9x5ds",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-09T16:47:33.562Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0ff60ce",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T16:46:09.655Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c0ff60ce",
-      "note": ""
-    },
-    {
-      "at": "2026-08-09T16:44:46.107Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c09s0caz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T16:44:04.236Z",
-      "by": "codex-1811-repair",
-      "action": "card.update",
-      "ref": "c09s0caz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T16:43:55.898Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0mmq29e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-09T16:43:38.702Z",
-      "by": "e3-burndown",
-      "action": "card.update",
-      "ref": "c0q9x5ds",
       "note": "phase,logEntry"
     }
   ],
