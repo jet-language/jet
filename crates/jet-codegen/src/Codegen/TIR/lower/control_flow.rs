@@ -5,6 +5,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::arm_fallible_pattern;
+use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
 use crate::Codegen::TIR::arm_bin_match_pattern;
@@ -409,6 +410,55 @@ fn lower_if_cond_atom(
     } = cond
     {
         let subj = lower_if_let_subject(subject, cx, env);
+        // DataEvent shares variant names (`Int`, `Float`, …) with the dynamic
+        // DataTree surface. Once sema has resolved the subject to DataEvent, use
+        // that enum's prelude pattern and payload facts instead of the DataTree
+        // heuristic below.
+        if matches!(&subj.ty, Type::Named(name) if name == "DataEvent") {
+            let enum_type = Some("DataEvent".to_string());
+            if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
+                if bindings.len() == 1 {
+                    let ty = variant_binding_types_for_enum(cx, "DataEvent", variant)
+                        .and_then(|ts| ts.into_iter().next());
+                    let cloned = lower_if_let_subject(subject, cx, env);
+                    let cloned_subj = TExpr {
+                        ty: cloned.ty.clone(),
+                        kind: TExprKind::Clone(Box::new(cloned)),
+                    };
+                    return (
+                        TIfCond::IfLet {
+                            pattern: TPattern::arm(pattern.clone(), enum_type),
+                            subj: cloned_subj,
+                        },
+                        Some((name.clone(), TLocal::user(name), ty)),
+                        Vec::new(),
+                    );
+                }
+            } else if bindings.len() == 1 && matches!(bindings.first(), Some(PatSlot::Wildcard)) {
+                let cloned = lower_if_let_subject(subject, cx, env);
+                let cloned_subj = TExpr {
+                    ty: cloned.ty.clone(),
+                    kind: TExprKind::Clone(Box::new(cloned)),
+                };
+                return (
+                    TIfCond::IfLet {
+                        pattern: TPattern::arm(pattern.clone(), enum_type),
+                        subj: cloned_subj,
+                    },
+                    None,
+                    Vec::new(),
+                );
+            } else if bindings.is_empty() {
+                return (
+                    TIfCond::Matches {
+                        pattern: TPattern::arm(pattern.clone(), enum_type),
+                        subj,
+                    },
+                    None,
+                    Vec::new(),
+                );
+            }
+        }
         if let Type::Union(members) = &subj.ty {
             let enum_name = crate::AST::union_enum_name(members);
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
@@ -676,6 +726,20 @@ pub(crate) fn lower_switch(
         .all(|a| arm_fallible_pattern(cx, &a.cond, subject).is_some())
     {
         return lower_fallible_match(subject, arms, else_body, cx, env);
+    }
+    // Shape A-GUARD: lower guarded variant arms through the same short-circuit
+    // TIfCond chain used by ordinary `if` conditions. This keeps payload bindings
+    // in scope for their guards and gives AOT, JIT, and interpreter one lowering.
+    if else_body.is_some()
+        && arms.iter().any(|a| {
+            arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
+        })
+        && arms.iter().all(|a| {
+            arm_variant_pattern(cx, &a.cond, subject).is_some()
+                || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
+        })
+    {
+        return lower_guard_switch(arms, else_body, cx, env);
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range

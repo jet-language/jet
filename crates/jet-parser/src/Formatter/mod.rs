@@ -288,31 +288,50 @@ fn format_program_with_tokens(
         f.newline();
         f.emit_trailing(policy_span.end);
     }
-    for item in &prog.items {
-        if !first {
-            f.blank_separator_before_item();
-        }
-        first = false;
-        f.emit_leading(item_span_start(item, src));
-        f.fmt_item(item);
-        f.emit_trailing(item_span_end(item));
-    }
     // D-ENTRY-SCRIPT1=B: script statements stay on the top-level surface for
-    // formatting; sema adds the implicit `run` only after this pass.
-    for (index, stmt) in prog.script_body.iter().enumerate() {
+    // formatting; sema adds the implicit `run` only after this pass. The AST
+    // stores declarations and script statements in separate collections, so
+    // merge them back by source position or fmt moves a later declaration
+    // ahead of earlier script code.
+    let mut item_i = 0;
+    let mut stmt_i = 0;
+    let mut previous_was_script = false;
+    while item_i < prog.items.len() || stmt_i < prog.script_body.len() {
+        let emit_stmt = if stmt_i == prog.script_body.len() {
+            false
+        } else if item_i == prog.items.len() {
+            true
+        } else {
+            prog.script_body[stmt_i].span().start < item_span_start(&prog.items[item_i], src)
+        };
+
         if !first {
-            if index == 0 {
+            if emit_stmt && previous_was_script {
+                if !f.at_line_start {
+                    f.newline();
+                }
+            } else {
                 f.blank_separator_before_item();
-            } else if !f.at_line_start {
-                f.newline();
             }
         }
         first = false;
-        f.emit_leading(stmt.span().start);
-        f.fmt_stmt(stmt);
-        f.emit_trailing(f.statement_source_end(stmt));
-        if !f.at_line_start {
-            f.newline();
+        if emit_stmt {
+            let stmt = &prog.script_body[stmt_i];
+            f.emit_leading(stmt.span().start);
+            f.fmt_stmt(stmt);
+            f.emit_trailing(f.statement_source_end(stmt));
+            if !f.at_line_start {
+                f.newline();
+            }
+            stmt_i += 1;
+            previous_was_script = true;
+        } else {
+            let item = &prog.items[item_i];
+            f.emit_leading(item_span_start(item, src));
+            f.fmt_item(item);
+            f.emit_trailing(item_span_end(item));
+            item_i += 1;
+            previous_was_script = false;
         }
     }
     f.emit_remaining_comments();

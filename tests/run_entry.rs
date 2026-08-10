@@ -23,7 +23,7 @@ fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
     let output = jet::compile(source)
         .expect("script statements should lower through the normal entry path");
     assert!(
-        output.rust.contains("pub fn __jet_run() -> Result<(), JetErr>"),
+        output.rust.contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
         "implicit script entry must use the fallible unit boundary:\n{}",
         output.rust
     );
@@ -171,8 +171,8 @@ fn run() => () ? {
 "#;
     let out = jet::compile(src).expect("fallible unit run should compile");
     assert!(
-        out.rust.contains("pub fn __jet_run() -> Result<(), JetErr>"),
-        "() ? run should lower to Result<(), JetErr>:\n{}",
+        out.rust.contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
+        "() ? run should lower to JetOutcome<(), JetErr>:\n{}",
         out.rust
     );
     assert!(
@@ -203,7 +203,7 @@ fn run() => () ? CryptoError {
         .ffi
         .as_ref()
         .expect("core.crypto must prepare its hidden bridge");
-    let return_type = format!("Result<(), {}::JetCryptoError>", ffi.crate_name);
+    let return_type = format!("JetOutcome<(), {}::JetCryptoError>", ffi.crate_name);
     assert!(
         out.rust.contains(&format!("pub fn __jet_run() -> {return_type}")),
         "CryptoError run should retain its error type:\n{}",
