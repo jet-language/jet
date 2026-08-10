@@ -1296,8 +1296,8 @@ fn populate_name_ledger(
             };
             for (original, local_alias) in items {
                 let local = local_alias.as_deref().unwrap_or(original);
-                let target = if module_alias == "core" || module_alias == "jet" {
-                    Some((format!("core.{original}"), None))
+                let target = if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
+                    Some((format!("{core_prefix}.{original}"), None))
                 } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
                     Some((
                         format!("{}.{}", bundle.modules[*target_module].alias, real),
