@@ -241,7 +241,69 @@ mod tests {
     }
 }
 
+fn cmp_sequence(
+    left: &[CtValue],
+    right: &[CtValue],
+    span: Span,
+    struct_order: &dyn Fn(&str) -> Option<Vec<String>>,
+    enum_order: &dyn Fn(&str) -> Option<Vec<String>>,
+) -> Result<std::cmp::Ordering, Diagnostic> {
+    for (left, right) in left.iter().zip(right) {
+        let ordering = cmp_with_layout(
+            left.clone(),
+            right.clone(),
+            span,
+            struct_order,
+            enum_order,
+        )?;
+        if ordering != std::cmp::Ordering::Equal {
+            return Ok(ordering);
+        }
+    }
+    Ok(left.len().cmp(&right.len()))
+}
+
+fn ordered_field_values(fields: Vec<(String, CtValue)>, order: Option<&[String]>) -> Vec<CtValue> {
+    let Some(order) = order else {
+        return fields.into_iter().map(|(_, value)| value).collect();
+    };
+    let mut remaining = fields;
+    let mut values = Vec::with_capacity(remaining.len());
+    for name in order {
+        if let Some(index) = remaining.iter().position(|(field, _)| field == name) {
+            values.push(remaining.remove(index).1);
+        }
+    }
+    values.extend(remaining.into_iter().map(|(_, value)| value));
+    values
+}
+
+/// Compare the values admitted by sema's `Comparable` bound. This is the
+/// canonical evaluator used by comptime and TIR deopt, so composite values
+/// must not fall through to a backend-specific comparison.
 pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+    let no_struct_order = |_: &str| None;
+    let no_enum_order = |_: &str| None;
+    cmp_with_layout(
+        a,
+        b,
+        span,
+        &no_struct_order,
+        &no_enum_order,
+    )
+}
+
+/// Compare using the declaration order carried by the canonical TIR program.
+/// The ordinary comptime path has no program table, so `cmp` above retains its
+/// value-local fallback. Runtime/deopt calls pass these two lookups to preserve
+/// the same field and enum discriminant order that AOT derives.
+pub fn cmp_with_layout(
+    a: CtValue,
+    b: CtValue,
+    span: Span,
+    struct_order: &dyn Fn(&str) -> Option<Vec<String>>,
+    enum_order: &dyn Fn(&str) -> Option<Vec<String>>,
+) -> Result<std::cmp::Ordering, Diagnostic> {
     use CtValue::*;
     match (a, b) {
         (Int(a), Int(b)) => Ok(a.cmp(&b)),
@@ -252,7 +314,137 @@ pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Dia
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
         (Str(a), Str(b)) => Ok(a.cmp(&b)),
         (BigInt(a), BigInt(b)) => Ok(a.compare(&b)),
+        (Bytes(a), Bytes(b)) => Ok(a.cmp(&b)),
+        (Bytes(left), List(right)) => cmp_sequence(
+            &left
+                .into_iter()
+                .map(|value| Int(i64::from(value)))
+                .collect::<Vec<_>>(),
+            &right,
+            span,
+            struct_order,
+            enum_order,
+        ),
+        (List(left), Bytes(right)) => cmp_sequence(
+            &left,
+            &right
+                .into_iter()
+                .map(|value| Int(i64::from(value)))
+                .collect::<Vec<_>>(),
+            span,
+            struct_order,
+            enum_order,
+        ),
+        (List(left), List(right)) => {
+            cmp_sequence(&left, &right, span, struct_order, enum_order)
+        }
+        (
+            Struct {
+                type_name: left_name,
+                fields: left,
+            },
+            Struct {
+                type_name: right_name,
+                fields: right,
+            },
+        ) if left_name == right_name => {
+            let order = struct_order(&left_name);
+            let left = ordered_field_values(left, order.as_deref());
+            let right = ordered_field_values(right, order.as_deref());
+            cmp_sequence(&left, &right, span, struct_order, enum_order)
+        }
+        (
+            Enum {
+                type_name: left_name,
+                variant: left_variant,
+                args: left_args,
+            },
+            Enum {
+                type_name: right_name,
+                variant: right_variant,
+                args: right_args,
+            },
+        ) if left_name == right_name => {
+            let variant = enum_order(&left_name)
+                .and_then(|order| {
+                    let left_index = order.iter().position(|name| name == &left_variant)?;
+                    let right_index = order.iter().position(|name| name == &right_variant)?;
+                    Some(left_index.cmp(&right_index))
+                })
+                .unwrap_or_else(|| left_variant.cmp(&right_variant));
+            if variant != std::cmp::Ordering::Equal {
+                return Ok(variant);
+            }
+            cmp_sequence(
+                &left_args
+                    .into_iter()
+                    .map(|(_, value)| value)
+                    .collect::<Vec<_>>(),
+                &right_args
+                    .into_iter()
+                    .map(|(_, value)| value)
+                    .collect::<Vec<_>>(),
+                span,
+                struct_order,
+                enum_order,
+            )
+        }
+        (Present(left), Present(right)) => {
+            cmp_with_layout(*left, *right, span, struct_order, enum_order)
+        }
+        (Failed(left), Failed(right)) => match (left, right) {
+            (CtReport::Told(left), CtReport::Told(right)) => {
+                cmp_with_layout(*left, *right, span, struct_order, enum_order)
+            }
+            (CtReport::Clean(_), CtReport::Clean(_)) => Ok(std::cmp::Ordering::Equal),
+            (CtReport::Clean(_), CtReport::Told(_)) => Ok(std::cmp::Ordering::Less),
+            (CtReport::Told(_), CtReport::Clean(_)) => Ok(std::cmp::Ordering::Greater),
+        },
+        (Failed(_), Present(_)) => Ok(std::cmp::Ordering::Less),
+        (Present(_), Failed(_)) => Ok(std::cmp::Ordering::Greater),
         _ => Err(unsupported("comparing these values", span)),
+    }
+}
+
+/// Compare fixed-width integers using their declared signedness. Runtime TIR
+/// values use one `CtValue::Int` carrier, so the type fact must be applied
+/// before a canonical `min`/`max`/`clamp` comparison.
+pub fn cmp_int_values(
+    left: &CtValue,
+    right: &CtValue,
+    ty: &Type,
+    span: Span,
+) -> Result<std::cmp::Ordering, Diagnostic> {
+    let (left, right) = match (left, right) {
+        (CtValue::Int(left), CtValue::Int(right)) => (*left, *right),
+        _ => return cmp(left.clone(), right.clone(), span),
+    };
+    match ty {
+        Type::Int => Ok(left.cmp(&right)),
+        Type::IntN { signed, bits } => {
+            let width = u32::from(*bits).min(64);
+            let mask = if width == 64 {
+                u64::MAX
+            } else {
+                (1u64 << width) - 1
+            };
+            let left = left as u64 & mask;
+            let right = right as u64 & mask;
+            if *signed {
+                let sign = 1u64 << (width - 1);
+                let extend = |value: u64| {
+                    if width < 64 && value & sign != 0 {
+                        (value | !mask) as i64
+                    } else {
+                        value as i64
+                    }
+                };
+                Ok(extend(left).cmp(&extend(right)))
+            } else {
+                Ok(left.cmp(&right))
+            }
+        }
+        _ => cmp(CtValue::Int(left), CtValue::Int(right), span),
     }
 }
 

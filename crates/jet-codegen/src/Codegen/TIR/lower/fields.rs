@@ -603,13 +603,17 @@ pub(crate) fn lower_comptime_scalar(
 ) -> Option<crate::Codegen::TIR::TExprKind> {
     use crate::Codegen::TIR::{TExprKind, TStrPart};
     match value? {
-        crate::AST::CtValue::Int(int) => Some(TExprKind::IntLit(
-            *int,
-            match ty {
-                Some(Type::IntN { signed, bits }) => Some((*signed, *bits)),
+        crate::AST::CtValue::Int(int) => {
+            let width = ty.and_then(|ty| match ty {
+                Type::IntN { signed, bits } => Some((*signed, *bits)),
+                Type::Named(name) => match crate::AST::numeric_type_from_name(name) {
+                    Some(Type::IntN { signed, bits }) => Some((signed, bits)),
+                    _ => None,
+                },
                 _ => None,
-            },
-        )),
+            });
+            Some(TExprKind::IntLit(*int, width))
+        }
         crate::AST::CtValue::Float(float) => Some(TExprKind::FloatLit(float.as_f64())),
         crate::AST::CtValue::Bool(flag) => Some(TExprKind::BoolLit(*flag)),
         crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),

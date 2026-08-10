@@ -70,7 +70,7 @@ use crate::{Syntax, TypedHeads};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call,
+    apply_core_call, apply_core_call_with_layout, apply_data_line_call, apply_impure_core_call,
     apply_repl_authorized_core_call, display_core_pure_value, eval_regex_replace_all_with,
 };
 pub use Methods::apply_seeded_rng_method;
@@ -337,6 +337,7 @@ pub fn run_build_entry_with_policy(
         globals: &program.globals,
         methods: &program.methods,
         structs: &program.structs,
+        enums: &program.enums,
         computed_fields: &program.computed_fields,
         distinct_ranges: &program.distinct_ranges,
         distinct_bases: &program.distinct_bases,
@@ -410,6 +411,11 @@ static EMPTY_STRUCTS: std::sync::OnceLock<HashMap<String, &'static StructDef>> =
     std::sync::OnceLock::new();
 fn empty_structs() -> &'static HashMap<String, &'static StructDef> {
     EMPTY_STRUCTS.get_or_init(HashMap::new)
+}
+static EMPTY_ENUMS: std::sync::OnceLock<HashMap<String, &'static EnumDef>> =
+    std::sync::OnceLock::new();
+fn empty_enums() -> &'static HashMap<String, &'static EnumDef> {
+    EMPTY_ENUMS.get_or_init(HashMap::new)
 }
 
 /// TIR core-call bridge for schema-aware CBOR encoding. `CtValue` erases
@@ -776,7 +782,7 @@ pub fn run_main(
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
     sink: &mut DevSink,
-    _program: &ProgramInfo,
+    program: &ProgramInfo,
 ) -> Result<CtValue, Diagnostic> {
     // #777: AST tree-walker entry retired — same TirBridge path as REPL/debug.
     let mut interp = Interp {
@@ -800,6 +806,7 @@ pub fn run_main(
         globals: empty_globals(),
         methods: empty_methods(),
         structs: empty_structs(),
+        enums: &program.enums,
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -848,6 +855,7 @@ pub fn run_main_debug(
         globals: empty_globals(),
         methods: empty_methods(),
         structs: empty_structs(),
+        enums: empty_enums(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -904,6 +912,7 @@ pub fn run_main_value(
         globals: empty_globals(),
         methods: empty_methods(),
         structs: empty_structs(),
+        enums: empty_enums(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -949,6 +958,7 @@ pub fn run_main_with_fuel(
         globals: empty_globals(),
         methods: empty_methods(),
         structs: empty_structs(),
+        enums: empty_enums(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -992,6 +1002,7 @@ pub fn run_repl_main_with_fuel(
         globals: empty_globals(),
         methods: empty_methods(),
         structs: empty_structs(),
+        enums: empty_enums(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -1130,6 +1141,7 @@ fn run_repl_step_inner(
         globals: empty_globals(),
         methods: empty_methods(),
         structs,
+        enums: empty_enums(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -1344,6 +1356,7 @@ pub fn evaluate_derive_body(
         globals: empty_globals(),
         methods: empty_methods(),
         structs: empty_structs(),
+        enums: empty_enums(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),

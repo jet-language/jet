@@ -376,6 +376,133 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn dotted_core_member_list_resolves_the_final_member_name() {
+    let src = r#"
+use core.encoding.[json as json]
+fn run() {
+    print(json.to_string(json.parse("{{\"ok\":true}}") ?? panic("bad")))
+}
+"#;
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_dotted_core_member_list", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "{\"ok\":true}\n");
+    }
+    let (code, stdout, stderr) = run_default_multi(
+        "dotted_core_member_list",
+        "main.jet",
+        &[("main.jet", src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "{\"ok\":true}\n");
+}
+
+#[test]
+fn non_numeric_core_bounds_match_all_tiers() {
+    let src = r#"
+use core.math as math
+fn run() {
+    print(math.min(true, false))
+    print(math.max(false, true))
+    print(math.clamp(false, true, true))
+}
+"#;
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_non_numeric_core_bounds", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "false\ntrue\ntrue\n");
+    }
+    let (code, stdout, stderr) = run_default_multi(
+        "non_numeric_core_bounds",
+        "main.jet",
+        &[("main.jet", src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "false\ntrue\ntrue\n");
+}
+
+#[test]
+fn composite_core_bounds_match_all_tiers() {
+    let src = r#"
+use core.math as math
+fn run() {
+    print(math.min([1, 2], [1, 3]).get(1) ?? panic("missing"))
+    small :: U8.{200}
+    low :: U8.{100}
+    print(math.min(small, low))
+}
+"#;
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_composite_core_bounds", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "2\n100\n");
+    }
+    let (code, stdout, stderr) = run_default_multi(
+        "composite_core_bounds",
+        "main.jet",
+        &[("main.jet", src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "2\n100\n");
+}
+
+/// Comparable derives use declaration order, not the order of fields in a
+/// literal or the lexical spelling of an enum variant. Fixed-width bounds also
+/// keep their declared unsigned ordering when TIR deopts.
+#[test]
+fn declared_comparable_layout_and_u64_bounds_match_all_tiers() {
+    let src = r#"
+use core.math as math
+use core.env as env
+#Comparable
+struct Pair {
+    first: Int
+    second: Int
+}
+#Comparable
+enum Choice {
+    Z
+    A
+}
+fn choose_pair(left: Pair, right: Pair, gate: Bool) => Pair {
+    if gate { return math.min(left, right) }
+    return math.min(left, right)
+}
+fn choose_choice(left: Choice, right: Choice, gate: Bool) => Choice {
+    if gate { return math.min(left, right) }
+    return math.min(left, right)
+}
+fn choose_u64(left: U64, right: U64, gate: Bool) => U64 {
+    if gate { return math.max(left, right) }
+    return math.max(left, right)
+}
+fn run() {
+    gate :: (env.get("JET_COMPARABLE_GATE") ?? "") == "on"
+    left :: Pair.{ second: 1, first: 2 }
+    right :: Pair.{ second: 2, first: 1 }
+    chosen :: choose_pair(left, right, gate)
+    print(chosen.first)
+    print(choose_choice(Choice.Z, Choice.A, gate) == Choice.Z)
+    high :: U64.MAX
+    low :: U64.{0}
+    print(choose_u64(high, low, gate) == high)
+}
+"#;
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_declared_comparable_layout", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "1\ntrue\ntrue\n");
+    }
+    let (code, stdout, stderr) = run_default_multi(
+        "declared_comparable_layout",
+        "main.jet",
+        &[("main.jet", src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "1\ntrue\ntrue\n");
+}
+
 /// The same body-local import law applies when the prefix is a file module.
 /// This catches codegen's local signature/return maps, not only sema lookup.
 #[test]

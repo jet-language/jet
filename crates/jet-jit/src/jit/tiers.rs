@@ -153,7 +153,7 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
 
     for f in &program.funcs {
         if program.canonical_deopt.contains(&f.name) {
-            let reason = "typed decode uses the canonical TIR migration plan".to_string();
+            let reason = "canonical TIR semantics are required for this value shape".to_string();
             deopt.push((f.name.clone(), reason.clone()));
             rows.push(TierRow {
                 function: f.name.clone(),

@@ -968,6 +968,27 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // D-VERDICT-1867-1: an inline module may publicly re-export a
+            // foreign namespace. Keep the namespace hop structural here;
+            // the actual library function still resolves through the same
+            // imported-module checker as a direct `use`.
+            if let Expr::Field(base, leaf, _) = &**receiver {
+                if let Expr::Ident(inline_alias, _) = &**base {
+                    if let Some(&mod_idx) = self
+                        .inline_reexport_foreign
+                        .get(&(inline_alias.clone(), leaf.clone()))
+                    {
+                        return self.infer_import_call(
+                            mod_idx,
+                            method,
+                            span,
+                            span,
+                            type_args,
+                            args,
+                        );
+                    }
+                }
+            }
             if let Some((module, alias_span)) = self.core_module_path_from_receiver(receiver) {
                 let ret = self.infer_core_call(&module, method, alias_span, span, type_args, args);
                 if is_polymorphic_core_special(&module, method) {

@@ -336,8 +336,8 @@ Single-module form stays as today: `use core.files as fs`.
 
 **What this replaces for groups**
 
-Today, selective *item* import uses braces: `use math.{sin, cos as c}`
-(D-SELIMPORT1). Under this proposal, that group form also moves to the
+The retired selective *item* import spelling was brace-based:
+`use math.{sin, cos as c}` (D-SELIMPORT1). The shipped group form uses the
 same list:
 
 ```jet

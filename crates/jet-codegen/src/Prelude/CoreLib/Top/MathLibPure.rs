@@ -1,6 +1,116 @@
 // Shared core.math helpers (I9). Included by AOT prelude, JIT math_rt, and comptime ambient.
 // Keep std-only; no jet_std / host types.
 
+/// Numeric Core bounds shared by AOT, JIT, and comptime. Engines only marshal
+/// the typed call to these Prelude functions.
+pub fn jet_std_math_abs_i64(value: i64) -> i64 {
+    value.abs()
+}
+
+pub fn jet_std_math_min_i64(left: i64, right: i64) -> i64 {
+    if left <= right { left } else { right }
+}
+
+pub fn jet_std_math_max_i64(left: i64, right: i64) -> i64 {
+    if left >= right { left } else { right }
+}
+
+pub fn jet_std_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
+    jet_std_math_min_i64(jet_std_math_max_i64(value, low), high)
+}
+
+fn jet_std_math_intn_parts(value: i64, signed: i64, bits: i64) -> (i64, u64) {
+    let width = bits.clamp(1, 64) as u32;
+    let mask = if width == 64 {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    };
+    let raw = value as u64 & mask;
+    let decoded = if signed != 0 && width < 64 && raw & (1u64 << (width - 1)) != 0 {
+        (raw | !mask) as i64
+    } else {
+        raw as i64
+    };
+    (decoded, raw)
+}
+
+pub fn jet_std_math_abs_intn(value: i64, signed: i64, bits: i64) -> i64 {
+    let (decoded, raw) = jet_std_math_intn_parts(value, signed, bits);
+    if signed == 0 { raw as i64 } else { decoded.wrapping_abs() }
+}
+
+pub fn jet_std_math_min_intn(left: i64, right: i64, signed: i64, bits: i64) -> i64 {
+    let (left_signed, left_raw) = jet_std_math_intn_parts(left, signed, bits);
+    let (right_signed, right_raw) = jet_std_math_intn_parts(right, signed, bits);
+    if signed == 0 {
+        if left_raw <= right_raw { left_raw as i64 } else { right_raw as i64 }
+    } else if left_signed <= right_signed {
+        left_signed
+    } else {
+        right_signed
+    }
+}
+
+pub fn jet_std_math_max_intn(left: i64, right: i64, signed: i64, bits: i64) -> i64 {
+    let (left_signed, left_raw) = jet_std_math_intn_parts(left, signed, bits);
+    let (right_signed, right_raw) = jet_std_math_intn_parts(right, signed, bits);
+    if signed == 0 {
+        if left_raw >= right_raw { left_raw as i64 } else { right_raw as i64 }
+    } else if left_signed >= right_signed {
+        left_signed
+    } else {
+        right_signed
+    }
+}
+
+pub fn jet_std_math_clamp_intn(
+    value: i64,
+    low: i64,
+    high: i64,
+    signed: i64,
+    bits: i64,
+) -> i64 {
+    jet_std_math_min_intn(
+        jet_std_math_max_intn(value, low, signed, bits),
+        high,
+        signed,
+        bits,
+    )
+}
+
+pub fn jet_std_math_abs_f32(value: f32) -> f32 {
+    value.abs()
+}
+
+pub fn jet_std_math_min_f32(left: f32, right: f32) -> f32 {
+    left.min(right)
+}
+
+pub fn jet_std_math_max_f32(left: f32, right: f32) -> f32 {
+    left.max(right)
+}
+
+pub fn jet_std_math_clamp_f32(value: f32, low: f32, high: f32) -> f32 {
+    value.clamp(low, high)
+}
+
+pub fn jet_std_math_abs_f64(value: f64) -> f64 {
+    value.abs()
+}
+
+pub fn jet_std_math_min_f64(left: f64, right: f64) -> f64 {
+    left.min(right)
+}
+
+pub fn jet_std_math_max_f64(left: f64, right: f64) -> f64 {
+    left.max(right)
+}
+
+pub fn jet_std_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
+    value.clamp(low, high)
+}
+
 /// The largest whole number whose square is at most `value`, or absent when
 /// there is none. A negative number has no whole square root.
 pub fn jet_std_math_isqrt(value: i64) -> Option<i64> {
@@ -261,4 +371,3 @@ pub fn jet_std_math_lgamma(x: f64) -> f64 {
         g.ln()
     }
 }
-

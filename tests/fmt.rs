@@ -2260,6 +2260,9 @@ module math {
 }
 
 use math.[clamp, clamp as c2]
+use core.math.[abs as absolute, min]
+use core.encoding.[json, csv]
+use c.[raylib as rl, sqlite3]
 
 fn run() {
     print(clamp(15, 0, 10))
@@ -2268,7 +2271,12 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["use math.[clamp, clamp as c2]"],
+        &[
+            "use math.[clamp, clamp as c2]",
+            "use core.math.[abs as absolute, min]",
+            "use core.encoding.[json, csv]",
+            "use c.[raylib as rl, sqlite3]",
+        ],
         "selective import with alias",
     );
     let once = jet::format_source(src).expect("fmt should accept selective imports");

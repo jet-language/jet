@@ -198,6 +198,9 @@ pub(super) struct Interp<'a> {
     /// c139/D-DISPLAYDBG: struct definitions by Jet type name, used only to
     /// mirror codegen's `JetDebug` field order and `#[Redact]` handling.
     pub(super) structs: &'a HashMap<String, &'a crate::AST::StructDef>,
+    /// Declaration-order enum metadata for ordered Core bounds. This keeps
+    /// comptime min/max/clamp on the same variant order as TIR and AOT.
+    pub(super) enums: &'a HashMap<String, &'a crate::AST::EnumDef>,
     /// c139: `(TypeName, field) -> expr` for D-FIELDPOL1 computed fields
     /// (`name: T => expr`). Sema has already rewritten sibling names to
     /// `self.<field>` inside `expr`, so evaluating it just needs `self` bound

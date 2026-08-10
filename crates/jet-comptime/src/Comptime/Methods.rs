@@ -15,7 +15,8 @@ pub(super) use core_calls::{
 pub(crate) use core_calls::validate_datetime_literal;
 /// Public host entry for the TIR evaluator (#777).
 pub use core_calls::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, data_status_rows,
+    apply_core_call, apply_core_call_with_layout, apply_data_line_call, apply_impure_core_call,
+    data_status_rows,
     display_core_pure_value, eval_regex_replace_all_with,
 };
 pub use dispatch::apply_dollar_splices;

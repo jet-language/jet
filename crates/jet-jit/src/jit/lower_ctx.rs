@@ -11363,29 +11363,157 @@ impl LowerCtx<'_, '_> {
                             )
                         }
                         "abs" if args.len() == 1 => {
-                            // Inline f64 abs — no separate host (Prelude uses libm).
+                            if matches!(args[0].ty, Type::Int) {
+                                let x = self.lower_expr(&args[0])?;
+                                let host = self
+                                    .module
+                                    .declare_func_in_func(self.host.math_extra.abs_i64, self.b.func);
+                                let call = self.b.ins().call(host, &[x]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if let Type::IntN { signed, bits } = &args[0].ty {
+                                let x = self.lower_expr(&args[0])?;
+                                let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
+                                let bits = self.b.ins().iconst(
+                                    types::I64,
+                                    i64::from(*bits),
+                                );
+                                let host = self.module.declare_func_in_func(
+                                    self.host.math_extra.abs_intn,
+                                    self.b.func,
+                                );
+                                let call = self.b.ins().call(host, &[x, signed, bits]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
                             let x = self.lower_expr(&args[0])?;
-                            let neg = self.b.ins().fneg(x);
-                            let zero = self.b.ins().f64const(0.0);
-                            let neg_mask = self.b.ins().fcmp(FloatCC::LessThan, x, zero);
-                            return Ok(self.b.ins().select(neg_mask, neg, x));
+                            let host_id = if matches!(args[0].ty, Type::Float32) {
+                                self.host.math_extra.abs_f32
+                            } else {
+                                self.host.math_extra.abs_f64
+                            };
+                            let host = self.module.declare_func_in_func(host_id, self.b.func);
+                            let call = self.b.ins().call(host, &[x]);
+                            return Ok(self.b.inst_results(call)[0]);
                         }
                         "max" if args.len() == 2 => {
+                            if matches!(args[0].ty, Type::Int) {
+                                let a = self.lower_expr(&args[0])?;
+                                let b = self.lower_expr(&args[1])?;
+                                let host = self
+                                    .module
+                                    .declare_func_in_func(self.host.math_extra.max_i64, self.b.func);
+                                let call = self.b.ins().call(host, &[a, b]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if let Type::IntN { signed, bits } = &args[0].ty {
+                                let a = self.lower_expr(&args[0])?;
+                                let b = self.lower_expr(&args[1])?;
+                                let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
+                                let bits = self.b.ins().iconst(
+                                    types::I64,
+                                    i64::from(*bits),
+                                );
+                                let host = self.module.declare_func_in_func(
+                                    self.host.math_extra.max_intn,
+                                    self.b.func,
+                                );
+                                let call = self.b.ins().call(host, &[a, b, signed, bits]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if !matches!(args[0].ty, Type::Float | Type::Float32) {
+                                return Err("jit core.math.max requires scalar numeric args".to_string());
+                            }
                             let a = self.lower_expr(&args[0])?;
                             let b = self.lower_expr(&args[1])?;
-                            return Ok(self.b.ins().fmax(a, b));
+                            let host_id = if matches!(args[0].ty, Type::Float32) {
+                                self.host.math_extra.max_f32
+                            } else {
+                                self.host.math_extra.max_f64
+                            };
+                            let host = self.module.declare_func_in_func(host_id, self.b.func);
+                            let call = self.b.ins().call(host, &[a, b]);
+                            return Ok(self.b.inst_results(call)[0]);
                         }
                         "min" if args.len() == 2 => {
+                            if matches!(args[0].ty, Type::Int) {
+                                let a = self.lower_expr(&args[0])?;
+                                let b = self.lower_expr(&args[1])?;
+                                let host = self
+                                    .module
+                                    .declare_func_in_func(self.host.math_extra.min_i64, self.b.func);
+                                let call = self.b.ins().call(host, &[a, b]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if let Type::IntN { signed, bits } = &args[0].ty {
+                                let a = self.lower_expr(&args[0])?;
+                                let b = self.lower_expr(&args[1])?;
+                                let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
+                                let bits = self.b.ins().iconst(
+                                    types::I64,
+                                    i64::from(*bits),
+                                );
+                                let host = self.module.declare_func_in_func(
+                                    self.host.math_extra.min_intn,
+                                    self.b.func,
+                                );
+                                let call = self.b.ins().call(host, &[a, b, signed, bits]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if !matches!(args[0].ty, Type::Float | Type::Float32) {
+                                return Err("jit core.math.min requires scalar numeric args".to_string());
+                            }
                             let a = self.lower_expr(&args[0])?;
                             let b = self.lower_expr(&args[1])?;
-                            return Ok(self.b.ins().fmin(a, b));
+                            let host_id = if matches!(args[0].ty, Type::Float32) {
+                                self.host.math_extra.min_f32
+                            } else {
+                                self.host.math_extra.min_f64
+                            };
+                            let host = self.module.declare_func_in_func(host_id, self.b.func);
+                            let call = self.b.ins().call(host, &[a, b]);
+                            return Ok(self.b.inst_results(call)[0]);
                         }
                         "clamp" if args.len() == 3 => {
+                            if matches!(args[0].ty, Type::Int) {
+                                let x = self.lower_expr(&args[0])?;
+                                let lo = self.lower_expr(&args[1])?;
+                                let hi = self.lower_expr(&args[2])?;
+                                let host = self
+                                    .module
+                                    .declare_func_in_func(self.host.math_extra.clamp_i64, self.b.func);
+                                let call = self.b.ins().call(host, &[x, lo, hi]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if let Type::IntN { signed, bits } = &args[0].ty {
+                                let x = self.lower_expr(&args[0])?;
+                                let lo = self.lower_expr(&args[1])?;
+                                let hi = self.lower_expr(&args[2])?;
+                                let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
+                                let bits = self.b.ins().iconst(
+                                    types::I64,
+                                    i64::from(*bits),
+                                );
+                                let host = self.module.declare_func_in_func(
+                                    self.host.math_extra.clamp_intn,
+                                    self.b.func,
+                                );
+                                let call = self.b.ins().call(host, &[x, lo, hi, signed, bits]);
+                                return Ok(self.b.inst_results(call)[0]);
+                            }
+                            if !matches!(args[0].ty, Type::Float | Type::Float32) {
+                                return Err("jit core.math.clamp requires scalar numeric args".to_string());
+                            }
                             let x = self.lower_expr(&args[0])?;
                             let lo = self.lower_expr(&args[1])?;
                             let hi = self.lower_expr(&args[2])?;
-                            let raised = self.b.ins().fmax(x, lo);
-                            return Ok(self.b.ins().fmin(raised, hi));
+                            let host_id = if matches!(args[0].ty, Type::Float32) {
+                                self.host.math_extra.clamp_f32
+                            } else {
+                                self.host.math_extra.clamp_f64
+                            };
+                            let host = self.module.declare_func_in_func(host_id, self.b.func);
+                            let call = self.b.ins().call(host, &[x, lo, hi]);
+                            return Ok(self.b.inst_results(call)[0]);
                         }
                         "decimal" if args.len() == 1 => (
                             self.host.num.decimal_from_str,

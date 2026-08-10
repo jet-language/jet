@@ -2615,7 +2615,11 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 | Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
 | Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
-| Project | `use c.raylib as rl` — one form per lib per file |
+| Project | `use c.raylib as rl` or `use c.[raylib as rl, sqlite3]` — one form per lib per file |
+
+All foreign-language namespaces use the same `.[…]` member-list form as ordinary
+namespaces. Single-library `use <lang>.<lib> as alias` remains valid; there is no
+FFI-only import grammar (D-VERDICT-1867-1).
 
 **D-SHAPE-CASE2=A — FFI casing escape: binding modules are exempt zones**
 *(ratified 2026-07-16, card #665)*: casing diagnostics (S54/D-SHAPE-CASE1)
@@ -2781,8 +2785,9 @@ Per-language binder depth, all ratified 2026-07-03:
 **D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
 worker (typed message boundary, crash-isolated, `=[Py]=>` effect added to the
 D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
-zero-copy buffer-protocol arrays. One `use py.X` surface; the tier never
-moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
+zero-copy buffer-protocol arrays. One `use py.X` or `use py.[X, Y]` surface; the
+tier never moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` or
+`use js.[X, Y]` surface, host chosen by
 compile target — browser JS engine on the web target, QuickJS/componentize-js
 WASM component on wasmtime for native targets. `jet inspect bind js` generates
 committable typed stubs from a package's `.d.ts` — this AMENDS D-NPMTYPE1's

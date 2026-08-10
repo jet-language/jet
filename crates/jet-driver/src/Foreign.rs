@@ -12,6 +12,19 @@ use crate::AST::{ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModu
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
+    module.imports.iter().chain(
+        module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::CodeModule(code_module) => Some(code_module.imports.iter()),
+                _ => None,
+            })
+            .flatten(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinderSurface {
     /// `use <lang>.<lib>` / `#Extern module <lang>.<lib>` / generated cache.
@@ -365,14 +378,13 @@ pub fn route_plan(
 }
 
 pub fn is_active_namespace_import(imp: &ImportDecl) -> bool {
-    let Some(ns) = imp.foreign_namespace() else {
-        return false;
-    };
-    binder_for(ns.language)
-        .map(|binder| {
-            binder.surface == BinderSurface::Namespace && binder.status == BinderStatus::Active
-        })
-        .unwrap_or(false)
+    imp.foreign_imports().into_iter().any(|(ns, _)| {
+        binder_for(ns.language)
+            .map(|binder| {
+                binder.surface == BinderSurface::Namespace && binder.status == BinderStatus::Active
+            })
+            .unwrap_or(false)
+    })
 }
 
 /// D-FFI-UNIFY1 / D-FFI-JS1: active non-C namespace imports are backed by
@@ -405,61 +417,60 @@ pub fn assemble_active_namespaces_with_provenance(
     let user_module_count = bundle.modules.len();
 
     for idx in 0..user_module_count {
-        let imports = bundle.modules[idx].imports.clone();
+        let imports: Vec<_> = all_imports(&bundle.modules[idx]).cloned().collect();
         for imp in &imports {
-            let Some(ns) = imp.foreign_namespace() else {
-                continue;
-            };
-            if ns.language == ForeignLanguage::C {
-                continue;
-            }
-            let Some(descriptor) = binder_for(ns.language) else {
-                continue;
-            };
-            if descriptor.surface != BinderSurface::Namespace
-                || descriptor.status != BinderStatus::Active
-            {
-                continue;
-            }
-            if ns.language == ForeignLanguage::Com && !cfg!(target_os = "windows") {
-                return Err(vec![ForeignDiagnostic {
-                    file: bundle.modules[idx].display.clone(),
-                    source: bundle.modules[idx].source.clone(),
-                    diagnostic: Diagnostic::error(
-                        "E3260",
-                        "`com.*` needs a Windows host".to_string(),
-                        "COM automation depends on Windows apartments, the registry, and IDispatch"
-                            .to_string(),
-                        "build and run this module on a Windows host; use a non-COM boundary for other targets"
-                            .to_string(),
-                        Some(imp.span),
-                    ),
-                }]);
-            }
-
-            let key = (ns.language, ns.lib.clone());
-            let target_idx = if let Some(idx) = surfaces.get(&key).copied() {
-                idx
-            } else {
-                let idx = match materialize_namespace(bundle, ns.language, &ns.lib) {
-                    Ok(idx) => idx,
-                    Err(diagnostics) => {
-                        let path = binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
-                        let source = std::fs::read_to_string(&path).unwrap_or_default();
-                        return Err(diagnostics
-                            .into_iter()
-                            .map(|diagnostic| ForeignDiagnostic {
-                                file: path.display().to_string(),
-                                source: source.clone(),
-                                diagnostic,
-                            })
-                            .collect());
-                    }
+            for (ns, _) in imp.foreign_imports() {
+                if ns.language == ForeignLanguage::C {
+                    continue;
+                }
+                let Some(descriptor) = binder_for(ns.language) else {
+                    continue;
                 };
-                surfaces.insert(key, idx);
-                idx
-            };
-            bundle.import_targets.insert((idx, imp.span), target_idx);
+                if descriptor.surface != BinderSurface::Namespace
+                    || descriptor.status != BinderStatus::Active
+                {
+                    continue;
+                }
+                if ns.language == ForeignLanguage::Com && !cfg!(target_os = "windows") {
+                    return Err(vec![ForeignDiagnostic {
+                        file: bundle.modules[idx].display.clone(),
+                        source: bundle.modules[idx].source.clone(),
+                        diagnostic: Diagnostic::error(
+                            "E3260",
+                            "`com.*` needs a Windows host".to_string(),
+                            "COM automation depends on Windows apartments, the registry, and IDispatch"
+                                .to_string(),
+                            "build and run this module on a Windows host; use a non-COM boundary for other targets"
+                                .to_string(),
+                            Some(imp.span),
+                        ),
+                    }]);
+                }
+
+                let key = (ns.language, ns.lib.clone());
+                let target_idx = if let Some(idx) = surfaces.get(&key).copied() {
+                    idx
+                } else {
+                    let idx = match materialize_namespace(bundle, ns.language, &ns.lib) {
+                        Ok(idx) => idx,
+                        Err(diagnostics) => {
+                            let path = binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
+                            let source = std::fs::read_to_string(&path).unwrap_or_default();
+                            return Err(diagnostics
+                                .into_iter()
+                                .map(|diagnostic| ForeignDiagnostic {
+                                    file: path.display().to_string(),
+                                    source: source.clone(),
+                                    diagnostic,
+                                })
+                                .collect());
+                        }
+                    };
+                    surfaces.insert(key, idx);
+                    idx
+                };
+                bundle.import_targets.insert((idx, imp.span), target_idx);
+            }
         }
     }
     Ok(())

@@ -97,7 +97,8 @@ pub struct JitProgram {
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
     /// M5: payload field types per `__jet_Type::__jet_Variant` pattern prefix.
     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
-    /// Functions whose typed decode must use the canonical TIR migration plan.
+    /// Functions that must use canonical TIR semantics instead of resident
+    /// lowering (typed decode migrations and non-scalar Comparable values).
     pub canonical_deopt: std::collections::HashSet<String>,
     /// Functions whose codec calls must remain canonical during named deopt.
     pub canonical_calls: std::collections::HashSet<String>,

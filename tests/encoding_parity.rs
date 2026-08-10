@@ -1107,7 +1107,7 @@ fn stream_fixture(format: &str, body: &str) -> String {
     format!(
         r#"
 use core.encoding as encoding
-use core.encoding.{format} as fmt
+use core.encoding.[{format} as fmt]
 use core.files as files
 
 {body}
@@ -1401,7 +1401,7 @@ fn comptime_rejects_file_backed_streams_at_named_boundary() {
     ] {
         let scratch = Scratch::new(label);
         let source = format!(
-            "use core.encoding.{module}\nuse core.files as files\n\n$probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(probe)\n}}\n"
+            "use core.encoding.[{module}]\nuse core.files as files\n\n$probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(probe)\n}}\n"
         );
         let path = scratch.write_project("2026", &source);
         let diags = jet::check_with_path(path.to_str().unwrap());

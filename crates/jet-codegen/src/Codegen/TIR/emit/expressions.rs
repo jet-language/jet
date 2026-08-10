@@ -128,6 +128,27 @@ fn ct_lit_needs_its_type(value: &crate::AST::CtValue) -> bool {
     }
 }
 
+fn serialize_typed_int(value: i64, ty: &Type) -> Option<String> {
+    let (signed, bits) = match ty {
+        Type::IntN { signed, bits } => (*signed, *bits),
+        Type::Named(name) => match crate::AST::numeric_type_from_name(name) {
+            Some(Type::IntN { signed, bits }) => (signed, bits),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if signed {
+        return Some(format!("{value}i{bits}"));
+    }
+    let width = u32::from(bits).min(64);
+    let mask = if width == 64 {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    };
+    Some(format!("{}u{bits}", (value as u64) & mask))
+}
+
 fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
     if let TExprKind::Local(local) = &recv.kind {
         return local.rust_name();
@@ -731,11 +752,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::IntLit(n, width) => {
             let resolved = width.or_else(|| match &e.ty {
                 Type::IntN { signed, bits } => Some((*signed, *bits)),
+                Type::Named(name) => match crate::AST::numeric_type_from_name(name) {
+                    Some(Type::IntN { signed, bits }) => Some((signed, bits)),
+                    _ => None,
+                },
                 _ => None,
             });
             match resolved {
-                Some((signed, bits)) => {
-                    format!("{}{}{}", n, if signed { 'i' } else { 'u' }, bits)
+                Some((true, bits)) => format!("{n}i{bits}"),
+                Some((false, bits)) => {
+                    let width = u32::from(bits).min(64);
+                    let mask = if width == 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << width) - 1
+                    };
+                    format!("{}u{bits}", (*n as u64) & mask)
                 }
                 None => format!("{}i64", n),
             }
@@ -783,6 +815,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 if let crate::AST::CtValue::List(xs) = value {
                     let parts: Vec<String> = xs.iter().map(|x| x.serialize()).collect();
                     return format!("[{}]", parts.join(", "));
+                }
+            }
+            if let crate::AST::CtValue::Int(number) = value {
+                if let Some(baked) = serialize_typed_int(*number, &e.ty) {
+                    return baked;
                 }
             }
             let baked = value.clone().serialize();

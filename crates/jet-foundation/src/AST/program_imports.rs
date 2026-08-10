@@ -146,6 +146,15 @@ pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> 
     None
 }
 
+/// The binding introduced by one member-list item. A dotted Core member uses
+/// its leaf by default (`use core.[encoding.json]` binds `json`); an explicit
+/// alias always wins.
+pub fn member_import_local(original: &str, alias: Option<&str>) -> String {
+    alias
+        .map(str::to_owned)
+        .unwrap_or_else(|| original.rsplit('.').next().unwrap_or(original).to_string())
+}
+
 impl ImportDecl {
     /// The effective alias for this import: the user-given alias if present,
     /// otherwise the default derived from the import kind.
@@ -186,15 +195,46 @@ impl ImportDecl {
         ForeignNamespace::from_module_path(name)
     }
 
-    /// True when this import is any C `use` form (`use c.<lib>` or `use "<…>.h"`).
-    pub fn is_c_import(&self) -> bool {
+    /// Resolve every foreign library carried by this import.
+    ///
+    /// The member-list form deliberately stays in `ImportKind::Unqualified`:
+    /// `use c.[raylib as rl, sqlite3]` is the same parser path as an ordinary
+    /// `use alias.[item as local]`.  This helper is the shared semantic seam
+    /// for loaders, sema, and codegen; no foreign namespace gets a grammar of
+    /// its own.
+    pub fn foreign_imports(&self) -> Vec<(ForeignNamespace, String)> {
         match &self.kind {
             ImportKind::Module(_, _) => self
                 .foreign_namespace()
-                .map(|ns| ns.language == ForeignLanguage::C)
-                .unwrap_or(false),
+                .map(|namespace| vec![(namespace, self.import_alias())])
+                .unwrap_or_default(),
+            ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } => items
+                .iter()
+                .filter_map(|(member, alias)| {
+                    let namespace = ForeignNamespace::from_module_path(&format!(
+                        "{module_alias}.{member}"
+                    ))?;
+                    let local = alias.as_deref().unwrap_or(&namespace.lib).to_string();
+                    Some((namespace, local))
+                })
+                .collect(),
+            ImportKind::File(_, _) => Vec::new(),
+        }
+    }
+
+    /// True when this import is any C `use` form (`use c.<lib>`, a C member
+    /// list, or `use "<…>.h"`).
+    pub fn is_c_import(&self) -> bool {
+        match &self.kind {
+            ImportKind::Module(_, _) | ImportKind::Unqualified { .. } => self
+                .foreign_imports()
+                .into_iter()
+                .any(|(ns, _)| ns.language == ForeignLanguage::C),
             ImportKind::File(path, _) => path.ends_with(".h"),
-            ImportKind::Unqualified { .. } => false,
         }
     }
 }

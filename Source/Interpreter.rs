@@ -218,7 +218,6 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
     program.entry = name.to_string();
     let mut sink = crate::Comptime::DevSink::new();
     let mut globals = std::collections::HashMap::new();
-    let mut core_imports = std::collections::HashMap::new();
     for module in &bundle.modules {
         for item in &module.items {
             if let Item::Const(c) = item {
@@ -227,14 +226,8 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
                 }
             }
         }
-        for imp in &module.imports {
-            if let Some(core_module) = imp.core_module_path() {
-                core_imports
-                    .entry(imp.import_alias())
-                    .or_insert(core_module);
-            }
-        }
     }
+    let core_imports = crate::Codegen::core_imports_for_bundle(bundle);
     match crate::Codegen::TIR::run_program_with_structs(
         &program,
         &bundle.project_root,

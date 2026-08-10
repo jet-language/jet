@@ -107,7 +107,7 @@ impl<'a> Parser<'a> {
                     // Peek ahead to decide which import form this is:
                     //   use ident.ident ;   → Unqualified single (no `as`)
                     //   use ident …         → dotted path; `import_decl_module_path`
-                    //                         also owns the `.[…]`, `.{…}`, and `.*`
+                    //                         also owns the `.[…]` and `.*`
                     //                         suffixes, at any path depth
                     let (first, first_span) = self.expect_ident("after `use`")?;
                     if matches!(self.peek().kind, TokKind::Dot) {
@@ -148,7 +148,7 @@ impl<'a> Parser<'a> {
                         if matches!(self.peek().kind, TokKind::LBrace) {
                             return Err(Diagnostic::error(
                                 "E0003",
-                                "`.{…}` is retired for selective imports".to_string(),
+                                "selective imports use the `.[…]` member-list form".to_string(),
                                 "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
                                 "write `use alias.[item, other as local]`".to_string(),
                                 Some(self.peek().span),
@@ -255,7 +255,7 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::LBrace) {
                 return Err(Diagnostic::error(
                     "E0003",
-                    "`.{…}` is retired for selective imports".to_string(),
+                    "selective imports use the `.[…]` member-list form".to_string(),
                     "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
                     "write `use alias.[item, other as local]`".to_string(),
                     Some(self.peek().span),

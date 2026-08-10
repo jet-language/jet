@@ -2,10 +2,10 @@
 //
 // `include/libc_subset.h` declares two real libc functions. The native binder
 // (Source/CBind.rs) translated them into the bindgen cache at
-// `.jet/bindings/c/c.jet`; `use c.c` loads that cache so the symbols resolve
+// `.jet/bindings/c/c.jet`; `use c.[c as libc]` loads that cache so the symbols resolve
 // like any namespaced module call. At the edge, `String` marshals to a C
 // `char*` and the scalar `Int`s cross by value — no `unsafe` in this file.
-use c.c as libc
+use c.[c as libc]
 
 fn run() {
     // `char*` -> String parameter: strlen counts the bytes before the NUL.

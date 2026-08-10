@@ -204,6 +204,23 @@ pub(crate) struct Cx {
     /// D-NAME-WALK1=A: per-inline-function Core import scopes. The key is the
     /// emitted mangled function name (`module__function`).
     pub(crate) inline_core_imports: HashMap<String, HashMap<String, String>>,
+    /// D-NAME-WALK1=A / D-VERDICT-1867-1: per-inline-function foreign
+    /// namespace scopes. The value is the mounted Rust module name.
+    pub(crate) inline_foreign_imports: HashMap<String, HashMap<String, String>>,
+    /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign call signatures scoped to
+    /// the emitted inline function that declared the import. Keeping this
+    /// fact local prevents two inline bodies with the same alias and method
+    /// name from overwriting one another.
+    pub(crate) inline_foreign_sigs:
+        HashMap<String, HashMap<(String, String), Vec<(AccessConvention, Type)>>>,
+    pub(crate) inline_foreign_rets:
+        HashMap<String, HashMap<(String, String), Option<Type>>>,
+    /// Signature facts for foreign namespaces re-exported by an inline
+    /// module, keyed by `(inline module, exported alias, method)`.
+    pub(crate) inline_foreign_reexport_sigs:
+        HashMap<(String, String, String), Vec<(AccessConvention, Type)>>,
+    pub(crate) inline_foreign_reexport_rets:
+        HashMap<(String, String, String), Option<Type>>,
     /// Names from inline scopes used by the conservative TIR coverage gate.
     /// Lowering still reads the exact per-function map.
     pub(crate) inline_import_names: HashSet<String>,
@@ -211,6 +228,9 @@ pub(crate) struct Cx {
     pub(crate) inline_reexport_inline: HashMap<(String, String), String>,
     /// D-NAME-WALK1=A: inline-module pub re-exports of Core items.
     pub(crate) inline_reexport_core: HashMap<(String, String), (String, String)>,
+    /// D-VERDICT-1867-1: inline-module pub re-exports of foreign namespaces.
+    /// The key is `(inline module, exported namespace alias)`.
+    pub(crate) inline_reexport_foreign: HashMap<(String, String), String>,
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
@@ -253,8 +273,9 @@ pub(crate) struct Cx {
     /// these facts to admit one native specialization per concrete call shape.
     pub(crate) jit_generic_calls:
         std::cell::RefCell<std::collections::BTreeMap<String, Vec<Vec<Type>>>>,
-    /// Functions whose typed decode depends on the canonical TIR migration
-    /// plan. The resident codec has no authority to reinterpret that plan.
+    /// Functions whose semantics must stay on the canonical TIR evaluator.
+    /// This includes typed decode migrations and values whose Comparable
+    /// representation is outside the resident scalar ABI.
     pub(crate) jit_canonical_deopt: std::cell::RefCell<HashSet<String>>,
     /// Functions whose codec calls must stay on TIR if the function deopts.
     pub(crate) jit_canonical_calls: std::cell::RefCell<HashSet<String>>,
@@ -801,6 +822,44 @@ impl Cx {
             .map(String::as_str)
     }
 
+    pub(crate) fn import_module_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+    ) -> Option<&str> {
+        self.inline_foreign_imports
+            .get(fn_name)
+            .and_then(|scope| scope.get(alias))
+            .or_else(|| self.import_mods.get(alias))
+            .map(String::as_str)
+    }
+
+    pub(crate) fn import_signature_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+        method: &str,
+    ) -> Option<Vec<(AccessConvention, Type)>> {
+        self.inline_foreign_sigs
+            .get(fn_name)
+            .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
+            .cloned()
+            .or_else(|| self.import_sigs.get(&(alias.to_string(), method.to_string())).cloned())
+    }
+
+    pub(crate) fn import_return_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+        method: &str,
+    ) -> Option<Option<Type>> {
+        self.inline_foreign_rets
+            .get(fn_name)
+            .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
+            .cloned()
+            .or_else(|| self.import_rets.get(&(alias.to_string(), method.to_string())).cloned())
+    }
+
     /// Resolve a Core alias without a function-specific scope. TIR coverage
     /// predicates have only structural AST facts, so they use the enclosing
     /// map first and then any inline body map as a conservative reachability
@@ -810,6 +869,17 @@ impl Cx {
             .get(alias)
             .or_else(|| {
                 self.inline_core_imports
+                    .values()
+                    .find_map(|scope| scope.get(alias))
+            })
+            .map(String::as_str)
+    }
+
+    pub(crate) fn any_foreign_import_module(&self, alias: &str) -> Option<&str> {
+        self.import_mods
+            .get(alias)
+            .or_else(|| {
+                self.inline_foreign_imports
                     .values()
                     .find_map(|scope| scope.get(alias))
             })
@@ -2567,7 +2637,10 @@ pub(crate) fn register_bundle_unit_metadata(
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
-        inline_core_import_maps, inline_import_maps, reexport_call_map, unqualified_import_maps,
+        inline_core_import_maps, inline_foreign_import_maps,
+        inline_foreign_import_signature_maps, inline_foreign_reexport_maps,
+        inline_foreign_reexport_signature_maps, inline_import_maps,
+        register_foreign_enum_variants, reexport_call_map, unqualified_import_maps,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
@@ -2576,6 +2649,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         .iter()
         .any(|module| module.alias == "core_archive");
     cx.foreign_types = foreign_type_map(bundle, module_idx);
+    register_foreign_enum_variants(cx, bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     cx.import_sigs = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);
@@ -2597,14 +2671,35 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     let (inline_core, reexport_core) = inline_core_import_maps(bundle, module_idx);
     cx.inline_core_imports = inline_core;
     cx.inline_reexport_core = reexport_core;
+    cx.inline_foreign_imports = inline_foreign_import_maps(bundle, module_idx);
+    let (inline_foreign_sigs, inline_foreign_rets) =
+        inline_foreign_import_signature_maps(bundle, module_idx);
+    cx.inline_foreign_sigs = inline_foreign_sigs;
+    cx.inline_foreign_rets = inline_foreign_rets;
+    cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, module_idx);
+    let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
+        inline_foreign_reexport_signature_maps(bundle, module_idx);
+    cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
+    cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     cx.package_edition = bundle.edition.clone();
 }
 
 fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    use super::Imports::foreign_list_targets;
     let imported = bundle.modules[module_idx]
         .imports
         .iter()
-        .filter_map(|import| bundle.import_targets.get(&(module_idx, import.span)).copied());
+        .filter_map(|import| bundle.import_targets.get(&(module_idx, import.span)).copied())
+        .chain(
+            bundle.modules[module_idx]
+                .imports
+                .iter()
+                .flat_map(|import| {
+                    foreign_list_targets(bundle, module_idx, import)
+                        .into_iter()
+                        .map(|(_, target)| target)
+                }),
+        );
     for target in imported {
         for item in &bundle.modules[target].items {
             let (owner, methods) = match item {
@@ -2920,9 +3015,15 @@ pub(crate) fn build_cx_items(
         inline_unqualified: HashMap::new(),
         inline_unqualified_file: HashMap::new(),
         inline_core_imports: HashMap::new(),
+        inline_foreign_imports: HashMap::new(),
+        inline_foreign_sigs: HashMap::new(),
+        inline_foreign_rets: HashMap::new(),
+        inline_foreign_reexport_sigs: HashMap::new(),
+        inline_foreign_reexport_rets: HashMap::new(),
         inline_import_names: HashSet::new(),
         inline_reexport_inline: HashMap::new(),
         inline_reexport_core: HashMap::new(),
+        inline_reexport_foreign: HashMap::new(),
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),

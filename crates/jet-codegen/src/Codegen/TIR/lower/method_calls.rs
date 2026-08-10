@@ -50,6 +50,50 @@ fn progress_return_ty(args: &[TExpr]) -> Type {
         _ => unit_type(),
     }
 }
+
+fn polymorphic_core_return_ty(
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+    resolved_ret: Option<&Type>,
+) -> Type {
+    resolved_ret.cloned().unwrap_or_else(|| match (module, method) {
+        ("core.math", "abs" | "min" | "max" | "clamp") => args
+            .first()
+            .map(|arg| arg.ty.clone())
+            .unwrap_or_else(unit_type),
+        ("core.io", "progress") => progress_return_ty(args),
+        _ => core_call_return_ty(module, method),
+    })
+}
+
+fn mark_non_numeric_core_bounds_for_deopt(
+    cx: &Cx,
+    fn_name: &str,
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+) {
+    if module != "core.math"
+        || !matches!(method, "min" | "max" | "clamp")
+        || args.first().is_some_and(|arg| {
+            matches!(
+                arg.ty,
+                Type::Int | Type::IntN { .. } | Type::Float | Type::Float32
+            )
+        })
+    {
+        return;
+    }
+    // The resident JIT has scalar numeric lowering for these polymorphic
+    // calls, but Comparable also includes strings, chars, bools, collections,
+    // and user types. Keep those values on the canonical TIR evaluator instead
+    // of allowing a numeric Cranelift operation to reinterpret their ABI.
+    cx.jit_canonical_deopt
+        .borrow_mut()
+        .insert(fn_name.to_string());
+}
+
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
 use crate::Codegen::TIR::lambda_body_ty;
@@ -2185,6 +2229,13 @@ pub(crate) fn lower_method_call(
                         lower_core_arg(&module, method, index, &arg.expr, cx, env)
                     })
                     .collect();
+                mark_non_numeric_core_bounds_for_deopt(
+                    cx,
+                    &env.fn_name,
+                    &module,
+                    method,
+                    &targs,
+                );
                 let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                 let ty = if module == "core.mem" {
                     match method {
@@ -2207,13 +2258,7 @@ pub(crate) fn lower_method_call(
                         )))),
                     })
                 } else if crate::Sema::is_polymorphic_core_special(&module, method) {
-                    resolved_ret.cloned().unwrap_or_else(|| {
-                        if module == "core.io" && method == "progress" {
-                            progress_return_ty(&targs)
-                        } else {
-                            unit_type()
-                        }
-                    })
+                    polymorphic_core_return_ty(&module, method, &targs, resolved_ret)
                 } else if module == "core.event"
                     && matches!(method, "new" | "with_policy" | "hook" | "async_result")
                 {
@@ -2278,15 +2323,16 @@ pub(crate) fn lower_method_call(
                         lower_core_arg(&submodule, method, index, &arg.expr, cx, env)
                     })
                     .collect();
+                mark_non_numeric_core_bounds_for_deopt(
+                    cx,
+                    &env.fn_name,
+                    &submodule,
+                    method,
+                    &targs,
+                );
                 let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                 let ty = if crate::Sema::is_polymorphic_core_special(&submodule, method) {
-                    resolved_ret.cloned().unwrap_or_else(|| {
-                        if submodule == "core.io" && method == "progress" {
-                            progress_return_ty(&targs)
-                        } else {
-                            core_call_return_ty(&submodule, method)
-                        }
-                    })
+                    polymorphic_core_return_ty(&submodule, method, &targs, resolved_ret)
                 } else {
                     core_call_return_ty(&submodule, method)
                 };
@@ -2308,6 +2354,49 @@ pub(crate) fn lower_method_call(
                         widen_to_vec,
                     },
                 };
+            }
+        }
+        // D-VERDICT-1867-1: lower `inline.foreign_alias.method(...)` after
+        // sema has resolved the exported namespace. Its signatures use the
+        // same per-function foreign scope as a direct inline import.
+        if let Expr::Field(base, leaf, _) = receiver {
+            if let Expr::Ident(owner, _) = base.as_ref() {
+                if !env.locals.contains_key(owner) {
+                    if let Some(rust_mod) = cx
+                        .inline_reexport_foreign
+                        .get(&(owner.clone(), leaf.clone()))
+                        .cloned()
+                    {
+                        let sig = cx
+                            .inline_foreign_reexport_sigs
+                            .get(&(owner.clone(), leaf.clone(), method.to_string()))
+                            .cloned()
+                            .or_else(|| {
+                                cx.import_signature_for_function(&env.fn_name, leaf, method)
+                            });
+                        let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                        let ret = cx
+                            .inline_foreign_reexport_rets
+                            .get(&(owner.clone(), leaf.clone(), method.to_string()))
+                            .cloned()
+                            .or_else(|| {
+                                cx.import_return_for_function(&env.fn_name, leaf, method)
+                            })
+                            .flatten()
+                            .unwrap_or_else(unit_type);
+                        return TExpr {
+                            ty: ret,
+                            kind: TExprKind::ModuleCall {
+                                form: TModuleCallForm::Qualified {
+                                    rust_mod,
+                                    rust_fn: mangle(method).to_string(),
+                                },
+                                type_args: type_args.to_vec(),
+                                args: targs,
+                            },
+                        };
+                    }
+                }
             }
         }
         if let Expr::Ident(alias, _) = receiver {
@@ -2362,11 +2451,11 @@ pub(crate) fn lower_method_call(
                         },
                     };
                 }
-                if let Some(mod_name) = cx.import_mods.get(alias).cloned() {
-                    let sig = cx
-                        .import_sigs
-                        .get(&(alias.clone(), method.to_string()))
-                        .cloned();
+                if let Some(mod_name) = cx
+                    .import_module_for_function(&env.fn_name, alias)
+                    .map(str::to_owned)
+                {
+                    let sig = cx.import_signature_for_function(&env.fn_name, alias, method);
                     if let Some(wrapper) = cx
                         .extern_funcs
                         .get(&format!("{mod_name}::{method}"))
@@ -2384,9 +2473,7 @@ pub(crate) fn lower_method_call(
                             })
                             .collect();
                         let ty = cx
-                            .import_rets
-                            .get(&(alias.clone(), method.to_string()))
-                            .cloned()
+                            .import_return_for_function(&env.fn_name, alias, method)
                             .flatten()
                             .unwrap_or_else(unit_type);
                         return TExpr {
@@ -2399,9 +2486,7 @@ pub(crate) fn lower_method_call(
                     }
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     let ret = cx
-                        .import_rets
-                        .get(&(alias.clone(), method.to_string()))
-                        .cloned()
+                        .import_return_for_function(&env.fn_name, alias, method)
                         .flatten()
                         .unwrap_or_else(unit_type);
                     return TExpr {

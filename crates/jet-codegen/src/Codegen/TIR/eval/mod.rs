@@ -813,6 +813,8 @@ pub(super) struct EvalCtx<'a> {
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
     pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    /// `TypeName -> variant names` in declaration/discriminant order.
+    pub(super) enum_variants: HashMap<String, Vec<String>>,
     /// Sema-compiled published-schema plans. These contain wire keys and
     /// lowered helper names, never AST expressions or a field/type tuple codec.
     pub(super) codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
@@ -1087,6 +1089,7 @@ struct EvalTaskConfig<'a> {
     repl_grants: Vec<String>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
+    enum_variants: HashMap<String, Vec<String>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
     distinct_bases: HashMap<String, Type>,
     distinct_ranges: HashMap<String, (i64, i64)>,
@@ -1237,6 +1240,7 @@ impl<'a> EvalCtx<'a> {
             repl_grants: self.repl_grants.clone(),
             struct_fields: self.struct_fields.clone(),
             struct_field_types: self.struct_field_types.clone(),
+            enum_variants: self.enum_variants.clone(),
             codec_migrations: self.codec_migrations.clone(),
             distinct_bases: self.distinct_bases.clone(),
             distinct_ranges: self.distinct_ranges.clone(),
@@ -1307,6 +1311,7 @@ impl<'a> EvalCtx<'a> {
             embed_inputs: None,
             struct_fields: config.struct_fields,
             struct_field_types: config.struct_field_types,
+            enum_variants: config.enum_variants,
             codec_migrations: config.codec_migrations,
             distinct_bases: config.distinct_bases,
             distinct_ranges: config.distinct_ranges,
@@ -2476,6 +2481,27 @@ fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
     program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
 }
 
+fn program_enum_variants(program: &JitProgram) -> HashMap<String, Vec<String>> {
+    program
+        .enum_variants
+        .iter()
+        .map(|(name, variants)| {
+            (
+                name.clone(),
+                variants
+                    .iter()
+                    .map(|variant| {
+                        variant
+                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                            .unwrap_or(variant)
+                            .replace("__", ".")
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String, bool)>> {
     let mut out = HashMap::new();
     for module in &bundle.modules {
@@ -2718,6 +2744,7 @@ fn run_program_with_structs_on_stack(
         embed_inputs: None,
         struct_fields,
         struct_field_types,
+        enum_variants: program_enum_variants(program),
         codec_migrations: program.codec_migrations.clone(),
         distinct_bases: program.distinct_bases.clone(),
         distinct_ranges: program.distinct_ranges.clone(),
@@ -2794,6 +2821,7 @@ pub fn run_named_func(
         embed_inputs: None,
         struct_fields: HashMap::new(),
         struct_field_types: program_struct_field_types(program),
+        enum_variants: program_enum_variants(program),
         codec_migrations: program.codec_migrations.clone(),
         distinct_bases: program.distinct_bases.clone(),
         distinct_ranges: program.distinct_ranges.clone(),
@@ -2864,7 +2892,7 @@ fn run_bundle_at_stage(
         // Dev-tier only: surface reset / migration notes on stderr.
         eprintln!("{msg}");
     }
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Const(c) = item {
                 let value = if c.is_persist {
@@ -2888,12 +2916,8 @@ fn run_bundle_at_stage(
                 }
             }
         }
-        for imp in &module.imports {
-            if let Some(core_module) = imp.core_module_path() {
-                core_imports
-                    .entry(imp.import_alias())
-                    .or_insert(core_module);
-            }
+        for (alias, core_module) in crate::Codegen::core_import_map(bundle, module_idx) {
+            core_imports.entry(alias).or_insert(core_module);
         }
     }
     run_program_with_structs_at_stage(
@@ -3002,6 +3026,7 @@ fn eval_expr_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
+        enum_variants: HashMap::new(),
         codec_migrations: HashMap::new(),
         distinct_bases: HashMap::new(),
         distinct_ranges: HashMap::new(),
@@ -3123,6 +3148,7 @@ fn eval_block_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
+        enum_variants: HashMap::new(),
         codec_migrations: HashMap::new(),
         distinct_bases: HashMap::new(),
         distinct_ranges: HashMap::new(),

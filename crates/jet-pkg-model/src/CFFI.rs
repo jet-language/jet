@@ -34,10 +34,58 @@ use std::path::Path;
 // Struct defs live in AST for cross-seam sharing; re-export for callers.
 pub use crate::AST::{CFfi, CImportLink, CLib};
 
+fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
+    module.imports.iter().chain(
+        module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::CodeModule(code_module) => Some(code_module.imports.iter()),
+                _ => None,
+            })
+            .flatten(),
+    )
+}
+
+fn all_imports_scoped(
+    module: &LoadedModule,
+) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
+    module.imports.iter().map(|import| (None, import)).chain(
+        module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::CodeModule(code_module) => Some(
+                    code_module
+                        .imports
+                        .iter()
+                        .map(|import| (Some(code_module.name.as_str()), import)),
+                ),
+                _ => None,
+            })
+            .flatten(),
+    )
+}
+
+/// Resolve every C library in a logical-module import, including
+/// `use c.[raylib as rl, sqlite3]`.
+pub fn c_module_imports(imp: &ImportDecl) -> Vec<(String, String)> {
+    imp.foreign_imports()
+        .into_iter()
+        .filter_map(|(namespace, alias)| {
+            (namespace.language == ForeignLanguage::C).then_some((namespace.lib, alias))
+        })
+        .collect()
+}
+
 /// `Module("c.<lib>")` → `Some("<lib>")` (the logical-module C `use` form).
+/// For a member list this returns the first library; callers that need every
+/// library must use `c_module_imports`.
 pub fn c_module_lib(imp: &ImportDecl) -> Option<String> {
-    let ns = imp.foreign_namespace()?;
-    (ns.language == ForeignLanguage::C).then_some(ns.lib)
+    c_module_imports(imp)
+        .into_iter()
+        .next()
+        .map(|(lib, _)| lib)
 }
 
 /// `File("<…>.h")` → `Some((header, lib))` (the header-path C `use` form). The
@@ -56,7 +104,7 @@ pub fn c_header_lib(imp: &ImportDecl) -> Option<(String, String)> {
 
 /// Is this import any C `use` form?
 pub fn is_c_import(imp: &ImportDecl) -> bool {
-    c_module_lib(imp).is_some() || c_header_lib(imp).is_some()
+    !c_module_imports(imp).is_empty() || c_header_lib(imp).is_some()
 }
 
 fn import_alias(imp: &ImportDecl) -> String {
@@ -412,59 +460,59 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
     //    on demand so the alias still resolves and link discovery still runs.
     let n_user_modules = bundle.modules.len();
     for idx in 0..n_user_modules {
-        let imports = bundle.modules[idx].imports.clone();
-        for imp in &imports {
-            let lib = if let Some(lib) = c_module_lib(imp) {
-                lib
-            } else if let Some((_, lib)) = c_header_lib(imp) {
-                lib
-            } else {
-                continue;
-            };
-
-            let target_idx = match lib_to_idx.get(&lib) {
-                Some(&i) => i,
-                None => {
-                    // No surface yet: make an empty synthetic module so the
-                    // alias resolves and link discovery still names the lib.
-                    let synth_idx = bundle.modules.len();
-                    bundle.modules.push(LoadedModule {
-                        path: std::path::PathBuf::from(format!("<c.{lib}>")),
-                        display: format!("c.{lib}"),
-                        source: String::new(),
-                        alias: synthetic_alias(&lib),
-                        imports: Vec::new(),
-                        items: vec![Item::CModule(CModule {
-                            kind: CModuleKind::Extern,
+        let imports: Vec<_> = all_imports_scoped(&bundle.modules[idx])
+            .map(|(scope, import)| (scope.map(str::to_owned), import.clone()))
+            .collect();
+        for (scope, imp) in &imports {
+            let mut requested = c_module_imports(imp);
+            if let Some((_, lib)) = c_header_lib(imp) {
+                requested.push((lib, import_alias(imp)));
+            }
+            for (lib, alias) in requested {
+                let target_idx = match lib_to_idx.get(&lib) {
+                    Some(&i) => i,
+                    None => {
+                        // No surface yet: make an empty synthetic module so the
+                        // alias resolves and link discovery still names the lib.
+                        let synth_idx = bundle.modules.len();
+                        bundle.modules.push(LoadedModule {
+                            path: std::path::PathBuf::from(format!("<c.{lib}>")),
+                            display: format!("c.{lib}"),
+                            source: String::new(),
+                            alias: synthetic_alias(&lib),
+                            imports: Vec::new(),
+                            items: vec![Item::CModule(CModule {
+                                kind: CModuleKind::Extern,
+                                lib: lib.clone(),
+                                path_span: Span::new(0, 0),
+                                functions: Vec::new(),
+                                span: Span::new(0, 0),
+                            })],
+                            script_body: Vec::new(),
+                            block_spans: Vec::new(),
+                            web_target_ceiling: None,
+                            pub_file: false,
+                            no_prelude: false,
+                            html_path: None,
+                            no_alloc_policy: None,
+                            policy_declarations: Vec::new(),
+                            rule_facts: Vec::new(),
+                        });
+                        lib_to_idx.insert(lib.clone(), synth_idx);
+                        cffi.libs.push(CLib {
                             lib: lib.clone(),
-                            path_span: Span::new(0, 0),
-                            functions: Vec::new(),
-                            span: Span::new(0, 0),
-                        })],
-                        script_body: Vec::new(),
-                        block_spans: Vec::new(),
-                        web_target_ceiling: None,
-                        pub_file: false,
-                        no_prelude: false,
-                        html_path: None,
-                        no_alloc_policy: None,
-                        policy_declarations: Vec::new(),
-                        rule_facts: Vec::new(),
-                    });
-                    lib_to_idx.insert(lib.clone(), synth_idx);
-                    cffi.libs.push(CLib {
-                        lib: lib.clone(),
-                        module_idx: synth_idx,
-                    });
-                    synth_idx
-                }
-            };
-            let alias = import_alias(imp);
-            cffi.import_links.push(CImportLink {
-                importing_idx: idx,
-                alias,
-                target_idx,
-            });
+                            module_idx: synth_idx,
+                        });
+                        synth_idx
+                    }
+                };
+                cffi.import_links.push(CImportLink {
+                    importing_idx: idx,
+                    scope: scope.clone(),
+                    alias,
+                    target_idx,
+                });
+            }
         }
     }
 
@@ -615,7 +663,7 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
         let generated_language = generated_cache_language(&module.path.to_string_lossy());
         let generated = generated_language.is_some();
         let mut seen: HashMap<String, (bool, String)> = HashMap::new();
-        for import in &module.imports {
+        for import in all_imports(module) {
             origins
                 .spans
                 .entry(import.span)
@@ -626,14 +674,14 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
                 .entry(import.alias_span)
                 .or_insert_with(Vec::new)
                 .push(origin.clone());
-            let (lib, is_header, header) = if let Some(lib) = c_module_lib(import) {
-                (Some(lib), false, String::new())
-            } else if let Some((header, lib)) = c_header_lib(import) {
-                (Some(lib), true, header)
-            } else {
-                (None, false, String::new())
-            };
-            if let Some(lib) = lib {
+            let mut uses: Vec<(String, bool, String)> = c_module_imports(import)
+                .into_iter()
+                .map(|(lib, _)| (lib, false, String::new()))
+                .collect();
+            if let Some((header, lib)) = c_header_lib(import) {
+                uses.push((lib, true, header));
+            }
+            for (lib, is_header, header) in uses {
                 if !library_order.contains(&lib) {
                     library_order.push(lib.clone());
                 }
@@ -643,11 +691,11 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
                         origins.duplicate_uses.push(origin.clone());
                     }
                 } else {
-                    seen.insert(lib, (is_header, header));
+                    seen.insert(lib.clone(), (is_header, header));
                 }
-            }
-            if let Some((_, lib)) = c_header_lib(import) {
-                header_origins_by_lib.entry(lib).or_insert_with(|| origin.clone());
+                if is_header {
+                    header_origins_by_lib.entry(lib).or_insert_with(|| origin.clone());
+                }
             }
         }
         for item in &module.items {
@@ -735,14 +783,16 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
 fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
     let mut libs = Vec::new();
     for module in &bundle.modules {
-        for import in &module.imports {
-            let lib = c_module_lib(import)
-                .or_else(|| c_header_lib(import).map(|(_, lib)| lib));
-            let Some(lib) = lib else {
-                continue;
-            };
-            if !libs.contains(&lib) {
-                libs.push(lib);
+        for import in all_imports(module) {
+            for (lib, _) in c_module_imports(import) {
+                if !libs.contains(&lib) {
+                    libs.push(lib);
+                }
+            }
+            if let Some((_, lib)) = c_header_lib(import) {
+                if !libs.contains(&lib) {
+                    libs.push(lib);
+                }
             }
         }
     }
@@ -782,21 +832,23 @@ fn duplicate_use_form_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for module in &bundle.modules {
         let mut seen: HashMap<String, (bool, String)> = HashMap::new();
-        for import in &module.imports {
-            let (lib, is_header, header) = if let Some(lib) = c_module_lib(import) {
-                (lib, false, String::new())
-            } else if let Some((header, lib)) = c_header_lib(import) {
-                (lib, true, header)
-            } else {
-                continue;
-            };
-            if let Some((previous_is_header, previous_header)) = seen.get(&lib) {
-                if *previous_is_header != is_header {
-                    let header = if is_header { &header } else { previous_header };
-                    diagnostics.push(e3204(&lib, header, import.span));
+        for import in all_imports(module) {
+            let mut uses: Vec<(String, bool, String)> = c_module_imports(import)
+                .into_iter()
+                .map(|(lib, _)| (lib, false, String::new()))
+                .collect();
+            if let Some((header, lib)) = c_header_lib(import) {
+                uses.push((lib, true, header));
+            }
+            for (lib, is_header, header) in uses {
+                if let Some((previous_is_header, previous_header)) = seen.get(&lib) {
+                    if *previous_is_header != is_header {
+                        let header = if is_header { &header } else { previous_header };
+                        diagnostics.push(e3204(&lib, header, import.span));
+                    }
+                } else {
+                    seen.insert(lib, (is_header, header));
                 }
-            } else {
-                seen.insert(lib, (is_header, header));
             }
         }
     }
@@ -819,12 +871,13 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
         std::collections::HashMap::new();
 
     for module in &bundle.modules {
-        for imp in &module.imports {
-            if let Some(lib) = c_module_lib(imp) {
+        for imp in all_imports(module) {
+            for (lib, _) in c_module_imports(imp) {
                 if !libs.contains(&lib) {
                     libs.push(lib);
                 }
-            } else if let Some((header_path, lib)) = c_header_lib(imp) {
+            }
+            if let Some((header_path, lib)) = c_header_lib(imp) {
                 if !libs.contains(&lib) {
                     libs.push(lib.clone());
                 }

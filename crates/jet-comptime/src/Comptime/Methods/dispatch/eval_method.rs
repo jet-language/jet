@@ -43,6 +43,51 @@ fn decode_xml_error(error: jet_foundation::XmlPull::Error) -> CtValue {
     )
 }
 
+fn static_expr_type(interp: &Interp<'_>, expr: &Expr) -> Option<Type> {
+    match expr {
+        Expr::Ident(name, _) => interp
+            .binding_types
+            .get(name)
+            .cloned()
+            .or_else(|| crate::AST::numeric_type_from_name(name)),
+        Expr::StructLit {
+            type_name,
+            type_args,
+            ..
+        } => Some(if type_args.is_empty() {
+            Type::Named(type_name.clone())
+        } else {
+            Type::Apply {
+                name: type_name.clone(),
+                args: type_args.clone(),
+            }
+        }),
+        Expr::TypedLit { head: Some(head), .. } => Some(head.clone()),
+        Expr::EnumLit { type_name, .. } => Some(Type::Named(type_name.clone())),
+        Expr::MethodCall {
+            resolved_ret: Some(ret),
+            ..
+        } => Some(ret.clone()),
+        Expr::Field(base, field, _) => {
+            let base_type = static_expr_type(interp, base)?;
+            let Type::Named(name) = base_type else {
+                return None;
+            };
+            interp
+                .structs
+                .get(&name)
+                .and_then(|structure| structure.fields.iter().find(|f| f.name == *field))
+                .map(|field| field.ty.clone())
+                .or_else(|| crate::AST::numeric_type_from_name(&name))
+        }
+        Expr::Copy(inner, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Place(inner, _, _) => static_expr_type(interp, inner),
+        _ => None,
+    }
+}
+
 impl<'a> Interp<'a> {
     pub(in super::super::super) fn eval_method(
         &mut self,
@@ -458,6 +503,39 @@ impl<'a> Interp<'a> {
                 }
                 if module == "core.data" && matches!(method, "line_text" | "line_svg") {
                     return apply_data_line_call(method, argv, span);
+                }
+                if module == "core.math" && matches!(method, "min" | "max" | "clamp") {
+                    let value_type = args
+                        .first()
+                        .and_then(|arg| static_expr_type(self, &arg.expr));
+                    let struct_order = |name: &str| {
+                        self.structs.get(name).map(|structure| {
+                            structure
+                                .fields
+                                .iter()
+                                .map(|field| field.name.clone())
+                                .collect()
+                        })
+                    };
+                    let enum_order = |name: &str| {
+                        self.enums.get(name).map(|definition| {
+                            definition
+                                .variants
+                                .iter()
+                                .map(|variant| variant.name.clone())
+                                .collect()
+                        })
+                    };
+                    return apply_core_call_with_layout(
+                        &module,
+                        method,
+                        argv,
+                        value_type.as_ref(),
+                        span,
+                        self.repl_mode,
+                        &struct_order,
+                        &enum_order,
+                    );
                 }
                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
                 // declared field types. CtValue intentionally erases `[U8]`

@@ -4,7 +4,9 @@ use std::cell::Cell;
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
-use super::super::Builtins::as_int;
+use super::super::Builtins::{
+    as_int, cmp as compare_values, cmp_int_values, cmp_with_layout,
+};
 use super::super::Diagnostics::unsupported;
 use crate::AST::{as_bytes, CtReport, CtValue};
 
@@ -292,6 +294,106 @@ fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
             span,
         )),
     }
+}
+
+fn prelude_ordered_bound(
+    left: &CtValue,
+    right: &CtValue,
+    take_lower: bool,
+    value_type: Option<&Type>,
+    span: Span,
+) -> Result<Option<CtValue>, Diagnostic> {
+    let Some(value_type) = value_type else {
+        return Ok(None);
+    };
+    match value_type {
+        Type::Int => {
+            let (CtValue::Int(left), CtValue::Int(right)) = (left, right) else {
+                return Err(unsupported("non-integer argument to core.math bound", span));
+            };
+            let value = if take_lower {
+                math_lib_pure::jet_std_math_min_i64(*left, *right)
+            } else {
+                math_lib_pure::jet_std_math_max_i64(*left, *right)
+            };
+            Ok(Some(CtValue::Int(value)))
+        }
+        Type::IntN { signed, bits } => {
+            let (CtValue::Int(left), CtValue::Int(right)) = (left, right) else {
+                return Err(unsupported("non-integer argument to core.math bound", span));
+            };
+            let value = if take_lower {
+                math_lib_pure::jet_std_math_min_intn(
+                    *left,
+                    *right,
+                    i64::from(*signed),
+                    i64::from(*bits),
+                )
+            } else {
+                math_lib_pure::jet_std_math_max_intn(
+                    *left,
+                    *right,
+                    i64::from(*signed),
+                    i64::from(*bits),
+                )
+            };
+            Ok(Some(CtValue::Int(value)))
+        }
+        Type::Float | Type::Float32 => {
+            let (CtValue::Float(left), CtValue::Float(right)) = (left, right) else {
+                return Err(unsupported("non-float argument to core.math bound", span));
+            };
+            let value = match (left, right) {
+                (CtFloat::F32(left), CtFloat::F32(right)) => CtFloat::F32(if take_lower {
+                    math_lib_pure::jet_std_math_min_f32(*left, *right)
+                } else {
+                    math_lib_pure::jet_std_math_max_f32(*left, *right)
+                }),
+                (CtFloat::F64(left), CtFloat::F64(right)) => CtFloat::F64(if take_lower {
+                    math_lib_pure::jet_std_math_min_f64(*left, *right)
+                } else {
+                    math_lib_pure::jet_std_math_max_f64(*left, *right)
+                }),
+                _ => return Err(unsupported("mixing float widths", span)),
+            };
+            Ok(Some(CtValue::Float(value)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// `min`, `max`, and `clamp` are polymorphic over every comparable Jet value.
+/// Keep the interpreter's CoreCall route aligned with the generic operators
+/// emitted by AOT/JIT instead of narrowing the implementation to Float.
+fn ordered_bound(
+    left: CtValue,
+    right: CtValue,
+    take_lower: bool,
+    span: Span,
+    value_type: Option<&Type>,
+    struct_order: &dyn Fn(&str) -> Option<Vec<String>>,
+    enum_order: &dyn Fn(&str) -> Option<Vec<String>>,
+) -> Result<CtValue, Diagnostic> {
+    if let Some(value) = prelude_ordered_bound(&left, &right, take_lower, value_type, span)? {
+        return Ok(value);
+    }
+    let ordering = match value_type {
+        Some(ty @ (Type::Int | Type::IntN { .. })) => cmp_int_values(&left, &right, ty, span)?,
+        Some(_) => cmp_with_layout(
+            left.clone(),
+            right.clone(),
+            span,
+            struct_order,
+            enum_order,
+        )?,
+        None => compare_values(left.clone(), right.clone(), span)?,
+    };
+    let choose_left = if take_lower {
+        ordering != std::cmp::Ordering::Greater
+    } else {
+        ordering != std::cmp::Ordering::Less
+    };
+    Ok(if choose_left { left } else { right })
 }
 
 fn named_tuple(fields: &[(&str, CtValue)]) -> CtValue {
@@ -911,6 +1013,33 @@ pub fn apply_core_call(
     span: Span,
     repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
+    let no_struct_order = |_: &str| None;
+    let no_enum_order = |_: &str| None;
+    apply_core_call_with_layout(
+        module,
+        method,
+        args,
+        None,
+        span,
+        repl_mode,
+        &no_struct_order,
+        &no_enum_order,
+    )
+}
+
+/// Evaluate a Core call when the caller retains the argument type and nominal
+/// declaration layouts. The erased `CtValue` carrier cannot recover `U64`'s
+/// unsigned ordering or a record's declaration order on its own.
+pub fn apply_core_call_with_layout(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    value_type: Option<&Type>,
+    span: Span,
+    repl_mode: bool,
+    struct_order: &dyn Fn(&str) -> Option<Vec<String>>,
+    enum_order: &dyn Fn(&str) -> Option<Vec<String>>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(
@@ -1057,11 +1186,26 @@ pub fn apply_core_call(
         ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
         ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
-        ("core.math", "abs") => match one(0)? {
-            CtValue::Int(n) => Ok(CtValue::Int(n.abs())),
-            CtValue::Float(f) => Ok(CtValue::Float(f.abs())),
-            _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
-        },
+        ("core.math", "abs") => {
+            let value = one(0)?;
+            match (value, value_type) {
+                (CtValue::Int(n), Some(Type::IntN { signed, bits })) => Ok(CtValue::Int(
+                    math_lib_pure::jet_std_math_abs_intn(
+                        *n,
+                        i64::from(*signed),
+                        i64::from(*bits),
+                    ),
+                )),
+                (CtValue::Int(n), _) => Ok(CtValue::Int(math_lib_pure::jet_std_math_abs_i64(*n))),
+                (CtValue::Float(CtFloat::F32(value)), _) => Ok(CtValue::Float(CtFloat::F32(
+                    math_lib_pure::jet_std_math_abs_f32(*value),
+                ))),
+                (CtValue::Float(CtFloat::F64(value)), _) => Ok(CtValue::Float(CtFloat::F64(
+                    math_lib_pure::jet_std_math_abs_f64(*value),
+                ))),
+                _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
+            }
+        }
         ("core.math", "pow") => {
             let a = as_ct_float(one(0)?, span)?;
             let b = as_ct_float(one(1)?, span)?;
@@ -1069,27 +1213,41 @@ pub fn apply_core_call(
                 a.powf(b).ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
-        ("core.math", "min") => {
-            let a = as_ct_float(one(0)?, span)?;
-            let b = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                a.min(b).ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "max") => {
-            let a = as_ct_float(one(0)?, span)?;
-            let b = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                a.max(b).ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
+        ("core.math", "min" | "max") => {
+            let left = one(0)?.clone();
+            let right = one(1)?.clone();
+            Ok(ordered_bound(
+                left,
+                right,
+                method == "min",
+                span,
+                value_type,
+                struct_order,
+                enum_order,
+            )?)
         }
         ("core.math", "clamp") => {
-            let value = as_ct_float(one(0)?, span)?;
-            let low = as_ct_float(one(1)?, span)?;
-            let high = as_ct_float(one(2)?, span)?;
-            Ok(CtValue::Float(value.clamp(low, high).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            let value = one(0)?.clone();
+            let low = one(1)?.clone();
+            let high = one(2)?.clone();
+            let value = ordered_bound(
+                value,
+                low,
+                false,
+                span,
+                value_type,
+                struct_order,
+                enum_order,
+            )?;
+            Ok(ordered_bound(
+                value,
+                high,
+                true,
+                span,
+                value_type,
+                struct_order,
+                enum_order,
+            )?)
         }
         ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
         ("core.math", "log10") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log10())),

@@ -159,7 +159,9 @@ module.exports = grammar({
         optional(seq("as", field("alias", $.identifier))),
       ),
 
-    // `.[ a, b as c ]` member-list suffix on a `use` path (D-CORE-USELIST1).
+    // `.[ a, b as c ]` member-list suffix on every `use` path, including
+    // foreign namespaces such as `c.[raylib as rl, sqlite3]`
+    // (D-CORE-USELIST1 / D-VERDICT-1867-1).
     // The whole `.[` is one token so it never competes with a path-extending
     // `.`; entries may be dotted paths and may carry an `as` alias.
     use_group: ($) =>

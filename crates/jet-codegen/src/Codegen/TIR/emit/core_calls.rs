@@ -442,6 +442,67 @@ pub(crate) fn emit_tir_core_call(
         }
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
+    // `IntN` keeps its declared width and signedness in TIR. Only the default
+    // `Int` can use the shared i64 Prelude helpers. Fixed-width integers and
+    // both float widths use their typed Prelude helpers too; the cast around
+    // IntN keeps the helper ABI independent of the generated Rust width.
+    let int_math = matches!(args.first().map(|arg| &arg.ty), Some(Type::Int));
+    let intn_signed = matches!(
+        args.first().map(|arg| &arg.ty),
+        Some(Type::IntN { signed: true, .. })
+    );
+    let intn_unsigned = matches!(
+        args.first().map(|arg| &arg.ty),
+        Some(Type::IntN { signed: false, .. })
+    );
+    let intn_bits = args.first().and_then(|arg| match &arg.ty {
+        Type::IntN { bits, .. } => Some(*bits),
+        _ => None,
+    });
+    let float32_math = matches!(args.first().map(|arg| &arg.ty), Some(Type::Float32));
+    let float64_math = matches!(args.first().map(|arg| &arg.ty), Some(Type::Float));
+    // User records and enums implement Jet's Comparable trait, not Rust's
+    // `Ord`. Use that derived declaration-order comparison for the
+    // polymorphic bounds; primitive collections and carriers keep their
+    // existing native `.min()`/`.max()` path below.
+    let layout_comparable = args.first().is_some_and(|arg| match &arg.ty {
+        Type::Named(name) | Type::Apply { name, .. } => {
+            cx.struct_fields.contains_key(name) || cx.enum_variants.contains_key(name)
+        }
+        _ => false,
+    });
+    if layout_comparable && matches!(method, "min" | "max" | "clamp") {
+        let left = format!("({}).clone()", arg(0));
+        let right = format!("({}).clone()", arg(1));
+        let choose = |left: &str, right: &str, lower: bool| {
+            if lower {
+                format!(
+                    "match __jmath_order {{ __jet_Ordering::__jet_Greater => {right}, _ => {left} }}"
+                )
+            } else {
+                format!(
+                    "match __jmath_order {{ __jet_Ordering::__jet_Less => {right}, _ => {left} }}"
+                )
+            }
+        };
+        return match method {
+            "min" | "max" => {
+                let body = choose("__jmath_left", "__jmath_right", method == "min");
+                format!(
+                    "{{ let __jmath_left = ({left}); let __jmath_right = ({right}); let __jmath_order = __jet_Comparable::compare(&__jmath_left, &__jmath_right); {body} }}"
+                )
+            }
+            "clamp" => {
+                let high = format!("({}).clone()", arg(2));
+                let raised = choose("__jmath_value", "__jmath_low", false);
+                let lowered = choose("__jmath_raised", "__jmath_high", true);
+                format!(
+                    "{{ let __jmath_value = ({left}); let __jmath_low = ({right}); let __jmath_high = ({high}); let __jmath_order = __jet_Comparable::compare(&__jmath_value, &__jmath_low); let __jmath_raised = {raised}; let __jmath_order = __jet_Comparable::compare(&__jmath_raised, &__jmath_high); {lowered} }}"
+                )
+            }
+            _ => unreachable!("layout comparable bound guard"),
+        };
+    }
     let regex_fn = |name: &str| {
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         format!("{}::{}", crate_name, name)
@@ -2677,11 +2738,137 @@ pub(crate) fn emit_tir_core_call(
         // c109 Phase 20: the polymorphic core specials.
         // Their return type is arg-type dependent (resolved by sema's bespoke
         // `infer_core_call` and written onto the node's `resolved_ret`, read at
-        // lowering), but the EMITTED form is a fixed per-`(module, method)` string —
-        // no type decision here (I3). Args are emitted PLAINLY.
+        // lowering). Integer math dispatches to the shared Prelude functions;
+        // the type fact is already fixed on the lowered TIR node (I3).
+        ("core.math", "abs") if int_math => {
+            format!("{}({})", helper("jet_std_math_abs_i64"), arg(0))
+        }
+        ("core.math", "abs") if intn_signed => format!(
+            "({}(({}) as i64, 1, {})) as {}",
+            helper("jet_std_math_abs_intn"),
+            arg(0),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "abs") if intn_unsigned => format!(
+            "({}(({}) as i64, 0, {})) as {}",
+            helper("jet_std_math_abs_intn"),
+            arg(0),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "abs") if float32_math => {
+            format!("{}({})", helper("jet_std_math_abs_f32"), arg(0))
+        }
+        ("core.math", "abs") if float64_math => {
+            format!("{}({})", helper("jet_std_math_abs_f64"), arg(0))
+        }
         ("core.math", "abs") => format!("({}).abs()", arg(0)),
+        ("core.math", "min") if int_math => {
+            format!("{}({}, {})", helper("jet_std_math_min_i64"), arg(0), arg(1))
+        }
+        ("core.math", "min") if intn_signed => format!(
+            "({}(({}) as i64, ({}) as i64, 1, {})) as {}",
+            helper("jet_std_math_min_intn"),
+            arg(0),
+            arg(1),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "min") if intn_unsigned => format!(
+            "({}(({}) as i64, ({}) as i64, 0, {})) as {}",
+            helper("jet_std_math_min_intn"),
+            arg(0),
+            arg(1),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "min") if float32_math => format!(
+            "{}({}, {})",
+            helper("jet_std_math_min_f32"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.math", "min") if float64_math => format!(
+            "{}({}, {})",
+            helper("jet_std_math_min_f64"),
+            arg(0),
+            arg(1)
+        ),
         ("core.math", "min") => format!("({}).min({})", arg(0), arg(1)),
+        ("core.math", "max") if int_math => {
+            format!("{}({}, {})", helper("jet_std_math_max_i64"), arg(0), arg(1))
+        }
+        ("core.math", "max") if intn_signed => format!(
+            "({}(({}) as i64, ({}) as i64, 1, {})) as {}",
+            helper("jet_std_math_max_intn"),
+            arg(0),
+            arg(1),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "max") if intn_unsigned => format!(
+            "({}(({}) as i64, ({}) as i64, 0, {})) as {}",
+            helper("jet_std_math_max_intn"),
+            arg(0),
+            arg(1),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "max") if float32_math => format!(
+            "{}({}, {})",
+            helper("jet_std_math_max_f32"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.math", "max") if float64_math => format!(
+            "{}({}, {})",
+            helper("jet_std_math_max_f64"),
+            arg(0),
+            arg(1)
+        ),
         ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),
+        ("core.math", "clamp") if int_math => {
+            format!(
+                "{}({}, {}, {})",
+                helper("jet_std_math_clamp_i64"),
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
+        ("core.math", "clamp") if intn_signed => format!(
+            "({}(({}) as i64, ({}) as i64, ({}) as i64, 1, {})) as {}",
+            helper("jet_std_math_clamp_intn"),
+            arg(0),
+            arg(1),
+            arg(2),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "clamp") if intn_unsigned => format!(
+            "({}(({}) as i64, ({}) as i64, ({}) as i64, 0, {})) as {}",
+            helper("jet_std_math_clamp_intn"),
+            arg(0),
+            arg(1),
+            arg(2),
+            intn_bits.unwrap_or(64),
+            cx.rust_type(&args[0].ty)
+        ),
+        ("core.math", "clamp") if float32_math => format!(
+            "{}({}, {}, {})",
+            helper("jet_std_math_clamp_f32"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.math", "clamp") if float64_math => format!(
+            "{}({}, {}, {})",
+            helper("jet_std_math_clamp_f64"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
         ("core.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
         
         ("core.random", "shuffle") => {

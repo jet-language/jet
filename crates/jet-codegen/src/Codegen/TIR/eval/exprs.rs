@@ -845,6 +845,55 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
+    /// Evaluate the polymorphic Core bounds that the resident tiers cannot
+    /// lower as scalar arithmetic. AOT's derived Comparable implementation
+    /// follows declaration order for records and enum discriminants; carry
+    /// those same tables into TIR deopt instead of asking the erased value
+    /// carrier to guess from literal field order or variant spelling.
+    fn eval_core_ordered_bound(
+        &self,
+        method: &str,
+        arg_types: &[Type],
+        argv: &[CtValue],
+        span: Span,
+    ) -> Result<Option<CtValue>, Diagnostic> {
+        if !matches!(method, "min" | "max" | "clamp")
+            || argv.len() != if method == "clamp" { 3 } else { 2 }
+        {
+            return Ok(None);
+        }
+
+        let struct_order = |name: &str| {
+            let plain = name
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(name);
+            self.struct_fields
+                .get(name)
+                .or_else(|| self.struct_fields.get(plain))
+                .map(|fields| fields.iter().map(|(field, _)| field.clone()).collect())
+        };
+        let enum_order = |name: &str| {
+            let plain = name
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(name);
+            self.enum_variants
+                .get(name)
+                .or_else(|| self.enum_variants.get(plain))
+                .cloned()
+        };
+        crate::Comptime::apply_core_call_with_layout(
+            "core.math",
+            method,
+            argv.to_vec(),
+            arg_types.first(),
+            span,
+            self.repl_mode,
+            &struct_order,
+            &enum_order,
+        )
+        .map(Some)
+    }
+
     // #1799: these calls read or mutate runtime-owned clock/global state. A
     // build-time fold uses a throwaway evaluator, so materializing any of them
     // would freeze state that the running program cannot resync. Runtime and
@@ -3058,6 +3107,17 @@ impl<'a> EvalCtx<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
+                }
+                if module == "core.math" {
+                    let arg_types = args
+                        .iter()
+                        .map(|arg| arg.ty.clone())
+                        .collect::<Vec<_>>();
+                    if let Some(value) =
+                        self.eval_core_ordered_bound(method, &arg_types, &argv, *source_span)?
+                    {
+                        return Ok(value);
+                    }
                 }
                 let progress_known_total = if module == "core.io" && method == "progress" {
                     if let Some((items, known_total)) =
@@ -5319,6 +5379,20 @@ impl<'a> EvalCtx<'a> {
                                     &format!("`{module}.{}()` at compile time", method.name),
                                     self.span(),
                                 ));
+                            }
+                            if module == "core.math" {
+                                let arg_types = args
+                                    .iter()
+                                    .map(|arg| arg.value.ty.clone())
+                                    .collect::<Vec<_>>();
+                                if let Some(value) = self.eval_core_ordered_bound(
+                                    &method.name,
+                                    &arg_types,
+                                    &argv,
+                                    self.span(),
+                                )? {
+                                    return Ok(value);
+                                }
                             }
                             return apply_core_call(
                                 module,

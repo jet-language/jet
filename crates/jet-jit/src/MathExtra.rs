@@ -48,6 +48,61 @@ fn pair_ii(a: i64, b: i64) -> i64 {
 
 // ── Prelude-backed (#1464) ───────────────────────────────────────────────────
 
+extern "C" fn jet_jit_math_abs_i64(x: i64) -> i64 {
+    math_rt::jet_std_math_abs_i64(x)
+}
+extern "C" fn jet_jit_math_min_i64(a: i64, b: i64) -> i64 {
+    math_rt::jet_std_math_min_i64(a, b)
+}
+extern "C" fn jet_jit_math_max_i64(a: i64, b: i64) -> i64 {
+    math_rt::jet_std_math_max_i64(a, b)
+}
+extern "C" fn jet_jit_math_clamp_i64(x: i64, lo: i64, hi: i64) -> i64 {
+    math_rt::jet_std_math_clamp_i64(x, lo, hi)
+}
+extern "C" fn jet_jit_math_abs_intn(x: i64, signed: i64, bits: i64) -> i64 {
+    math_rt::jet_std_math_abs_intn(x, signed, bits)
+}
+extern "C" fn jet_jit_math_min_intn(a: i64, b: i64, signed: i64, bits: i64) -> i64 {
+    math_rt::jet_std_math_min_intn(a, b, signed, bits)
+}
+extern "C" fn jet_jit_math_max_intn(a: i64, b: i64, signed: i64, bits: i64) -> i64 {
+    math_rt::jet_std_math_max_intn(a, b, signed, bits)
+}
+extern "C" fn jet_jit_math_clamp_intn(
+    x: i64,
+    lo: i64,
+    hi: i64,
+    signed: i64,
+    bits: i64,
+) -> i64 {
+    math_rt::jet_std_math_clamp_intn(x, lo, hi, signed, bits)
+}
+extern "C" fn jet_jit_math_abs_f32(x: f32) -> f32 {
+    math_rt::jet_std_math_abs_f32(x)
+}
+extern "C" fn jet_jit_math_min_f32(a: f32, b: f32) -> f32 {
+    math_rt::jet_std_math_min_f32(a, b)
+}
+extern "C" fn jet_jit_math_max_f32(a: f32, b: f32) -> f32 {
+    math_rt::jet_std_math_max_f32(a, b)
+}
+extern "C" fn jet_jit_math_clamp_f32(x: f32, lo: f32, hi: f32) -> f32 {
+    math_rt::jet_std_math_clamp_f32(x, lo, hi)
+}
+extern "C" fn jet_jit_math_abs_f64(x: f64) -> f64 {
+    math_rt::jet_std_math_abs_f64(x)
+}
+extern "C" fn jet_jit_math_min_f64(a: f64, b: f64) -> f64 {
+    math_rt::jet_std_math_min_f64(a, b)
+}
+extern "C" fn jet_jit_math_max_f64(a: f64, b: f64) -> f64 {
+    math_rt::jet_std_math_max_f64(a, b)
+}
+extern "C" fn jet_jit_math_clamp_f64(x: f64, lo: f64, hi: f64) -> f64 {
+    math_rt::jet_std_math_clamp_f64(x, lo, hi)
+}
+
 extern "C" fn jet_jit_math_erf(x: f64) -> f64 {
     math_rt::jet_std_math_erf(x)
 }
@@ -245,6 +300,13 @@ host_fns! {
         f64_f64_f64.params.push(AbiParam::new(types::F64));
         f64_f64_f64.params.push(AbiParam::new(types::F64));
         f64_f64_f64.returns.push(AbiParam::new(types::F64));
+        let mut f32_f32 = Signature::new(cc);
+        f32_f32.params.push(AbiParam::new(types::F32));
+        f32_f32.returns.push(AbiParam::new(types::F32));
+        let mut f32_f32_f32 = Signature::new(cc);
+        f32_f32_f32.params.push(AbiParam::new(types::F32));
+        f32_f32_f32.params.push(AbiParam::new(types::F32));
+        f32_f32_f32.returns.push(AbiParam::new(types::F32));
         let mut f64_i64_f64 = Signature::new(cc);
         f64_i64_f64.params.push(AbiParam::new(types::F64));
         f64_i64_f64.params.push(AbiParam::new(types::I64));
@@ -274,6 +336,24 @@ host_fns! {
         i64_i64_i64.params.push(AbiParam::new(types::I64));
         i64_i64_i64.params.push(AbiParam::new(types::I64));
         i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut i64_i64_i64_i64 = Signature::new(cc);
+        i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut i64_i64_i64_i64_i64 = Signature::new(cc);
+        i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut i64_i64_i64_i64_i64_i64 = Signature::new(cc);
+        i64_i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
         let mut f64_handle = Signature::new(cc);
         f64_handle.params.push(AbiParam::new(types::F64));
         f64_handle.returns.push(AbiParam::new(types::I64));
@@ -297,6 +377,22 @@ host_fns! {
     digits: "jet_jit_math_digits" => jet_jit_math_digits: i64_i64;
     leading_ones: "jet_jit_math_leading_ones" => jet_jit_math_leading_ones: i64_i64;
     trailing_ones: "jet_jit_math_trailing_ones" => jet_jit_math_trailing_ones: i64_i64;
+    abs_i64: "jet_jit_math_abs_i64" => jet_jit_math_abs_i64: i64_i64;
+    min_i64: "jet_jit_math_min_i64" => jet_jit_math_min_i64: i64_i64_i64;
+    max_i64: "jet_jit_math_max_i64" => jet_jit_math_max_i64: i64_i64_i64;
+    clamp_i64: "jet_jit_math_clamp_i64" => jet_jit_math_clamp_i64: i64_i64_i64;
+    abs_intn: "jet_jit_math_abs_intn" => jet_jit_math_abs_intn: i64_i64_i64_i64;
+    min_intn: "jet_jit_math_min_intn" => jet_jit_math_min_intn: i64_i64_i64_i64_i64;
+    max_intn: "jet_jit_math_max_intn" => jet_jit_math_max_intn: i64_i64_i64_i64_i64;
+    clamp_intn: "jet_jit_math_clamp_intn" => jet_jit_math_clamp_intn: i64_i64_i64_i64_i64_i64;
+    abs_f32: "jet_jit_math_abs_f32" => jet_jit_math_abs_f32: f32_f32;
+    min_f32: "jet_jit_math_min_f32" => jet_jit_math_min_f32: f32_f32_f32;
+    max_f32: "jet_jit_math_max_f32" => jet_jit_math_max_f32: f32_f32_f32;
+    clamp_f32: "jet_jit_math_clamp_f32" => jet_jit_math_clamp_f32: f32_f32_f32;
+    abs_f64: "jet_jit_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
+    min_f64: "jet_jit_math_min_f64" => jet_jit_math_min_f64: f64_f64_f64;
+    max_f64: "jet_jit_math_max_f64" => jet_jit_math_max_f64: f64_f64_f64;
+    clamp_f64: "jet_jit_math_clamp_f64" => jet_jit_math_clamp_f64: f64_f64_f64;
     asinh: "jet_jit_math_asinh" => jet_jit_math_asinh: f64_f64;
     acosh: "jet_jit_math_acosh" => jet_jit_math_acosh: f64_f64;
     atanh: "jet_jit_math_atanh" => jet_jit_math_atanh: f64_f64;
@@ -337,8 +433,3 @@ host_fns! {
     div_mod: "jet_jit_math_div_mod" => jet_jit_math_div_mod: i64_i64_i64;
     div_rem: "jet_jit_math_div_rem" => jet_jit_math_div_rem: i64_i64_i64;
 }
-
-
-
-
-

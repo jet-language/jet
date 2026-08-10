@@ -257,6 +257,130 @@ fn unified_foreign_namespace_model_recognizes_every_registered_root() {
 }
 
 #[test]
+fn foreign_member_lists_use_the_shared_unqualified_parser_for_every_root() {
+    use jet::AST::{ForeignLanguage, ImportKind};
+
+    for language in ForeignLanguage::ALL {
+        let source = format!(
+            "use {}.[lib1 as first, lib2]\nfn run() {{ }}\n",
+            language.root()
+        );
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+        assert!(lex_diagnostics.is_empty(), "{}: {lex_diagnostics:?}", language.root());
+        let program = jet::Parser::parse(&tokens)
+            .unwrap_or_else(|diagnostics| panic!("{}: {diagnostics:?}", language.root()));
+        let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &program.imports[0].kind
+        else {
+            panic!("{} list took a foreign-only parser branch", language.root());
+        };
+        assert_eq!(module_alias, language.root());
+        assert_eq!(
+            items,
+            &[
+                ("lib1".to_string(), Some("first".to_string())),
+                ("lib2".to_string(), None),
+            ]
+        );
+    }
+}
+
+#[test]
+fn c_member_lists_resolve_each_library_and_alias_through_cffi() {
+    let root = common::unique_tmp("jet_cffi_member_list");
+    fs::create_dir_all(&root).unwrap();
+    let main = root.join("main.jet");
+    let source = r#"use c.[c as libc, m]
+
+#Extern module c.c {
+    fn clamp(left: Int, middle: Int, right: Int) => Int = "libc_clamp"
+}
+#Extern module c.m {
+    fn version(left: Int, middle: Int, right: Int) => Int = "libm_version"
+}
+
+module c_scope {
+    use c.[c as lib]
+    pub fn call() => Int {
+        return lib.clamp(1, 2, 3)
+    }
+}
+module m_scope {
+    use c.[m as lib]
+    pub fn call() => Int {
+        return lib.version(1, 2, 3)
+    }
+}
+
+fn run() { }
+"#;
+    fs::write(
+        root.join("package.jet"),
+        "name: \"member_list\"\nversion: \"0.1.0\"\ndeps: .{ c: c@system, m: c@system }\n",
+    )
+    .unwrap();
+    fs::write(&main, source).unwrap();
+    let output = jet::compile_with_path(source, main.to_str().unwrap())
+        .unwrap_or_else(|diagnostics| panic!("C member list rejected: {diagnostics:?}"));
+    assert!(output.rust.contains("libc_clamp"));
+    assert!(output.rust.contains("libm_version"));
+    assert!(output.rust.contains("__c_c"));
+    assert!(output.rust.contains("__c_m"));
+    let c_scope = output
+        .rust
+        .find("fn __jet_c_scope__call")
+        .expect("inline C scope emitted");
+    let m_scope = output
+        .rust
+        .find("fn __jet_m_scope__call")
+        .expect("second inline C scope emitted");
+    assert!(
+        output.rust[c_scope..m_scope].contains("__c_c"),
+        "c_scope resolved its local alias to the wrong C library"
+    );
+    assert!(
+        output.rust[m_scope..].contains("__c_m"),
+        "m_scope resolved its local alias to the wrong C library"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn inline_foreign_alias_collision_is_rejected_in_one_scope() {
+    let root = common::unique_tmp("jet_cffi_member_alias_collision");
+    fs::create_dir_all(&root).unwrap();
+    let main = root.join("main.jet");
+    let source = r#"use c.[c, m]
+
+#Extern module c.c {
+    fn first() => Int = "libc_first"
+}
+#Extern module c.m {
+    fn second() => Int = "libm_second"
+}
+
+module duplicate {
+    use c.[c as lib, m as lib]
+    pub fn call() => Int {
+        return lib.first()
+    }
+}
+
+fn run() { }
+"#;
+    fs::write(&main, source).unwrap();
+    let diagnostics = jet::compile_with_path(source, main.to_str().unwrap())
+        .expect_err("two inline aliases with one name must fail");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0105"));
+    let rendered = jet::render_diagnostics(main.to_str().unwrap(), source, &diagnostics);
+    assert!(rendered.contains("the import name `lib` is used twice"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
     let dir = common::unique_tmp("jet_foreign_active_js");
     fs::create_dir_all(&dir).unwrap();
@@ -278,6 +402,16 @@ fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
     assert_eq!(diags[0].code, "E1002");
     let rendered = jet::render_diagnostics(main.to_str().unwrap(), src, &diags);
     assert!(rendered.contains("`swift` is reserved for first-party or foreign packages"));
+
+    let dir = common::unique_tmp("jet_foreign_reserved_list");
+    fs::create_dir_all(&dir).unwrap();
+    let main = dir.join("main.jet");
+    let src = "use swift.[foundation, ui]\nfn run() { }\n";
+    fs::write(&main, src).unwrap();
+
+    let diags = jet::compile_with_path(src, main.to_str().unwrap())
+        .expect_err("planned foreign member lists must be reserved");
+    assert_eq!(diags[0].code, "E1002");
 }
 
 #[cfg(not(target_os="windows"))]
@@ -296,12 +430,58 @@ fn foreign_js_import_uses_generated_binding_cache_for_symbols() {
         "pub fn scatter() => Int {\n    return 7\n}\n",
     )
     .unwrap();
+    fs::write(
+        cache_dir.join("d3.jet"),
+        "pub fn select() => Int {\n    return 8\n}\n",
+    )
+    .unwrap();
     let main = dir.join("main.jet");
-    let src = "use js.plotly as plot\nfn run() {\n    print(plot.scatter())\n}\n";
+    let src = "use js.plotly as plot\nuse js.[d3]\nfn run() {\n    print(plot.scatter())\n    print(d3.select())\n}\n";
     fs::write(&main, src).unwrap();
 
     jet::compile_with_path(src, main.to_str().unwrap())
         .unwrap_or_else(|d| panic!("js cache import rejected:\n{:?}", d));
+}
+
+#[test]
+fn foreign_js_inline_member_list_uses_the_same_binding_cache() {
+    let dir = common::unique_tmp("jet_foreign_js_inline_cache");
+    let cache_dir = dir.join(".jet/bindings/js");
+    fs::create_dir_all(&cache_dir).unwrap();
+    fs::write(
+        cache_dir.join("plotly.jet"),
+        "pub fn scatter() => Int {\n    return 7\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        cache_dir.join("d3.jet"),
+        "pub fn select() => Int {\n    return 8\n}\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    pub fn inner() => Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
+    fs::write(&main, src).unwrap();
+
+    jet::compile_with_path(src, main.to_str().unwrap())
+        .unwrap_or_else(|d| panic!("inline js member list rejected:\n{:?}", d));
+}
+
+#[test]
+fn foreign_js_inline_pub_member_list_reexports_the_namespace() {
+    let dir = common::unique_tmp("jet_foreign_js_inline_pub_cache");
+    let cache_dir = dir.join(".jet/bindings/js");
+    fs::create_dir_all(&cache_dir).unwrap();
+    fs::write(
+        cache_dir.join("plotly.jet"),
+        "pub fn scatter() => Int {\n    return 7\n}\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    let src = "module nested {\n    pub use js.[plotly as plots]\n}\nfn run() {\n    print(nested.plots.scatter())\n}\n";
+    fs::write(&main, src).unwrap();
+
+    jet::compile_with_path(src, main.to_str().unwrap())
+        .unwrap_or_else(|d| panic!("inline js pub member-list re-export rejected:\n{:?}", d));
 }
 
 #[test]

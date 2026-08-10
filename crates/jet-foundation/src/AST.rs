@@ -17,7 +17,7 @@ pub use program_imports::{
     AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
     ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
     MigrationOp, Program, ProgramBundle, TryConvert, CoreListPath, core_list_path,
-    core_list_prefix,
+    core_list_prefix, member_import_local,
 };
 
 #[path = "AST/items.rs"]
