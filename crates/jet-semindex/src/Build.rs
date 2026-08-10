@@ -188,6 +188,7 @@ impl SymbolDB {
         self.index.set_instances(bundle.modules.iter().enumerate().flat_map(|(module_idx, module)| module.items.iter().filter_map(move |item| {
             let Item::CodeModule(cm) = item else { return None };
             let identity = cm.instance_identity.as_ref()?;
+            let member_name = |name: &str| jet_foundation::Names::member_name(&cm.name, name);
             Some(InstanceFact {
                 name: cm.name.clone(), module_path: module.display.clone(),
                 fingerprint: identity.fingerprint.clone(),
@@ -202,11 +203,11 @@ impl SymbolDB {
                     span: application.span.into(),
                 }).collect(),
                 exported_members: cm.body.as_deref().unwrap_or_default().iter().filter_map(|item| match item {
-                    Item::Func(def) if facts.name_ledger.exported(module_idx, &jet_foundation::Names::member_name(&cm.name, &def.name)) => Some(def.name.clone()),
-                    Item::Struct(def) if facts.name_ledger.exported(module_idx, &def.name) => Some(def.name.clone()),
-                    Item::Enum(def) if facts.name_ledger.exported(module_idx, &def.name) => Some(def.name.clone()),
-                    Item::Trait(def) if facts.name_ledger.exported(module_idx, &def.name) => Some(def.name.clone()),
-                    Item::Tag(def) if facts.name_ledger.exported(module_idx, &def.name) => Some(def.name.clone()),
+                    Item::Func(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Struct(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Enum(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Trait(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Tag(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
                     _ => None,
                 }).collect(),
             })
