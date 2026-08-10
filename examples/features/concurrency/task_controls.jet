@@ -18,7 +18,7 @@ fn run() {
     t.cancel()
     print(t.join() ?? panic("cancelled task"))
 
-    print(task.any { slow_two(), 1 })
+    print(task.any { slow_two(), 1 } ?? panic("any failed"))
 
     (tx, rx) :: tasks.channel<Int>()
     tx.send(9)

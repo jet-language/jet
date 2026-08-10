@@ -51,10 +51,10 @@ Generated on: 2026-08-09
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1120 |
+| Module members | 1113 |
 | Collection method rows | 714 |
-| Jet-side rows | 1834 |
-| Total rows | 10412 |
+| Jet-side rows | 1827 |
+| Total rows | 10405 |
 
 ## Verdicts
 
@@ -65,7 +65,7 @@ Generated on: 2026-08-09
 | Jet loses (two or more languages agree) | 196 |
 | Single witness (recorded, not scored) | 8274 |
 | Exported type, not an operation | 155 |
-| Not compared | 423 |
+| Not compared | 416 |
 | Deliberately declined | 108 |
 
 ## Competitors

@@ -1451,6 +1451,10 @@ pub(crate) struct Checker<'a> {
     /// D-DETACH1: the binding name currently being elaborated (set at check_binding
     /// entry, cleared after). Used to record view-capturing task names.
     current_binding_name: Option<String>,
+    /// Binding owned by the task spawn whose lambda is being checked. Nested
+    /// task bodies must not reuse that outer name for group auto-join tracking,
+    /// but sendability diagnostics still need the outer detach target.
+    task_spawn_binding_name: Option<String>,
     /// M8: binding name when checking `f :: (…) => …` (E0804 self-call).
     lambda_binding: Option<String>,
     /// Names mutably captured by an escaping lambda still in scope (E0204).

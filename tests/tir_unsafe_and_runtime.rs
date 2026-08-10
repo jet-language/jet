@@ -580,8 +580,11 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
                 stderr,
                 exit_code,
             } => {
-                assert_eq!(exit_code, code, "{tier} exit drift");
-                assert_eq!(stderr, "", "{tier} stderr drift");
+                assert_eq!(
+                    exit_code, code,
+                    "{tier} exit drift: stdout={tier_stdout:?} stderr={stderr:?}"
+                );
+                assert_eq!(stderr, "", "{tier} stderr drift: stdout={tier_stdout:?}");
                 assert_eq!(tier_stdout, stdout, "{tier} ordered output drift");
                 if !force_interpreter {
                     assert!(
@@ -612,7 +615,7 @@ fn task_all() {
     if !have_rustc() {
         return;
     }
-    let src = "\
+    let src = r#"
 fn work(value: Int, turns: Int) => Int {
     total := value
     loop _, 1..turns {
@@ -622,15 +625,82 @@ fn work(value: Int, turns: Int) => Int {
     return total
 }
 fn run() {
-    results :: task.all {
+    results :: (task.all {
         work(10, 10000),
         work(20, 1),
         work(30, 100)
-    }
+    }) ?? panic("task.all failed")
     print(results[0], results[1], results[2])
 }
-";
+"#;
     assert_task_tier_parity("tir_task_all", src, "10\n20\n30\n");
+}
+
+/// D-CONC-FAIL1=A: child failure is one typed rail on AOT, resident JIT, and
+/// forced interpreter. `??` is the only consumer-side recovery form.
+#[test]
+fn task_failure_rail() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.time as time
+
+fn boom() => Int {
+    panic("boom")
+    return 0
+}
+fn deadline() => Int {
+    #Context(deadline: 0) {
+        time.sleep(1)
+    }
+    return 0
+}
+fn failure_label(error: TaskFailure) => String {
+    if error == {
+        .Panicked(reason) -> {
+            return "panic:{reason}"
+        }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
+    }
+}
+fn run() {
+    task.group workers {
+        failed :: task boom()
+        failed_result :: failed.join()
+        if failed_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong panic variant") }
+        }
+        all_result :: task.all { boom(), 2 }
+        if all_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong all variant") }
+        }
+        expired :: task deadline()
+        expired_result :: expired.join()
+        if expired_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong deadline variant") }
+        }
+        cancelled :: task {
+            time.sleep(1000)
+        }
+        cancelled.cancel()
+        cancelled_result :: cancelled.join()
+        if cancelled_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong cancel variant") }
+        }
+    }
+}
+"#;
+    assert_task_tier_parity(
+        "tir_task_failure_rail",
+        src,
+        "panic:boom\npanic:boom\ndeadline\ncancelled\n",
+    );
 }
 
 #[test]
@@ -652,7 +722,7 @@ fn run() {
 }
 
 #[test]
-fn task_all_parent_deadline_is_e3003_in_every_tier() {
+fn task_join_parent_deadline_is_e3003_in_every_tier() {
     if !have_rustc() {
         return;
     }
@@ -666,16 +736,16 @@ fn run() {
 }
 ";
     let (code, stdout, stderr) =
-        build_and_run_full("jet_tir_test", "tir_task_all_deadline", src);
+        build_and_run_full("jet_tir_test", "tir_task_join_deadline", src);
     assert_eq!(code, 70, "{stderr}");
     assert_eq!(stdout, "", "{stderr}");
     assert!(
-        stderr.contains("Error [E3003]: deadline exceeded while waiting in task selection"),
+        stderr.contains("Error [E3003]: deadline exceeded while waiting in task join"),
         "{stderr}"
     );
 
     let dir = std::env::temp_dir().join(format!(
-        "jet_task_all_deadline_parity_{}",
+        "jet_task_join_deadline_parity_{}",
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
@@ -765,7 +835,7 @@ fn channel_send_receive() {
     if !have_rustc() {
         return;
     }
-    let src = "\
+    let src = r#"
 use core.tasks as tasks
 fn run() {
 (s1, ch) :: tasks.channel<Int>()
@@ -779,14 +849,14 @@ fn run() {
     t1.join() ?? panic("task failed")
     t2.join() ?? panic("task failed")
     results := [Int].{}
-    results.push(ch.receive() ?? panic(\"channel closed\"))
-    results.push(ch.receive() ?? panic(\"channel closed\"))
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.push(ch.receive() ?? panic("channel closed"))
     results.sort()
     loop x, results {
         print(x)
     }
 }
-";
+"#;
     let (code, stdout) = build_and_run("tir_channel", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "12\n30\n");
@@ -803,7 +873,9 @@ fn run() {
     task.group g {
         (sender, receiver) :: tasks.channel<Int>()
         sender.send(42)
-        value :: g.select().recv(receiver).wait()
+        value :: if {
+            received, receiver -> received
+        }
         print(value)
     }
 }

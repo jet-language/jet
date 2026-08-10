@@ -6,10 +6,16 @@ fn run() {
         (s1, ch1) :: tasks.channel<Int>()
         (s2, ch2) :: tasks.channel<Int>()
         s1.send(11)
-        winner :: g.select().recv(ch1).recv(ch2).wait()
+        winner :: if {
+            value, ch1 -> value
+            value, ch2 -> value
+        }
         print(winner)
         s2.send(22)
-        winner2 :: g.select().recv(ch1).recv(ch2).wait()
+        winner2 :: if {
+            value, ch1 -> value
+            value, ch2 -> value
+        }
         print(winner2)
     }
 }

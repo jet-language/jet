@@ -4258,10 +4258,20 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::TaskGroup {
                 group,
-                limit: _limit,
+                limit,
                 body,
             } => {
-                let handle = self.call_host(self.host.conc.task_group_new, &[]);
+                let (limit, bounded) = match limit {
+                    Some(limit) => (
+                        self.lower_expr(limit)?,
+                        self.b.ins().iconst(types::I64, 1),
+                    ),
+                    None => (
+                        self.b.ins().iconst(types::I64, 0),
+                        self.b.ins().iconst(types::I64, 0),
+                    ),
+                };
+                let handle = self.call_host(self.host.conc.task_group_new, &[limit, bounded]);
                 let var = self.fresh_var(types::I64);
                 self.b.def_var(var, handle);
                 let place = Self::local_key(group);
@@ -12114,12 +12124,19 @@ impl LowerCtx<'_, '_> {
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
-                TCoreClosureKind::Spawn { group, .. } => {
+                TCoreClosureKind::Spawn { group, site, .. } => {
                     let group = match group {
                         Some(group) => Some(self.lower_expr(group)?),
                         None => None,
                     };
-                    let task = self.lower_spawn()?;
+                    if let Some(group) = group {
+                        let host = self.module.declare_func_in_func(
+                            self.host.conc.task_group_acquire,
+                            self.b.func,
+                        );
+                        self.b.ins().call(host, &[group]);
+                    }
+                    let task = self.lower_spawn(*site)?;
                     if let Some(group) = group {
                         let host = self.module.declare_func_in_func(
                             self.host.conc.task_group_register,
@@ -16182,9 +16199,7 @@ impl LowerCtx<'_, '_> {
         Ok(dst)
     }
 
-    fn lower_spawn(&mut self) -> Result<Value, String> {
-        let site = *self.spawn_site;
-        *self.spawn_site += 1;
+    fn lower_spawn(&mut self, site: usize) -> Result<Value, String> {
         let lam = self
             .spawn_lambdas
             .get(site)

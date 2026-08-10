@@ -317,7 +317,7 @@ fn run() {
         t :: task {
             worker()
         }
-        result :: task.all { worker() }
+        result :: (task.all { worker() }) ?? panic("task.all failed")
         print(result[0])
     }
 }

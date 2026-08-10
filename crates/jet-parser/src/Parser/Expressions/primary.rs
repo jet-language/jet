@@ -352,7 +352,7 @@ impl<'a> Parser<'a> {
                         value: None,
                     })
                 }
-                TokKind::Ident(name) if name == Syntax::KW_TASK => self.task_surface_expr(),
+                TokKind::Ident(name) if name == Syntax::KW_CONC_TASK => self.task_surface_expr(),
                 TokKind::Ident(name) => {
                     let span = self.bump().span;
                     let type_name = name.clone();
@@ -605,6 +605,9 @@ impl<'a> Parser<'a> {
                             (LambdaBody::Expr(Box::new(body)), body_span)
                         };
                         branches.push((body, body_span));
+                        while matches!(self.peek().kind, TokKind::Semi) {
+                            self.bump();
+                        }
                         if matches!(self.peek().kind, TokKind::RBrace) {
                             break;
                         }

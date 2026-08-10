@@ -156,7 +156,7 @@ properties through one coherent Jet mechanism.
 | Domain | Reference bar | Jet closure proof |
 | --- | --- | --- |
 | Safety and systems | Rust ownership, Zig comptime/build control, Swift ergonomics | memory/ownership adversary corpus; no safe-source `unsafe`; verified FFI; freestanding and hosted target portfolio; compile/startup/runtime budgets |
-| Concurrency and services | Go task/network ergonomics; Erlang/Elixir supervision and upgrade discipline | one task/taskgroup scheduler; nonblocking I/O; cancellation/deadline proof; supervised service tree; cluster/chaos/rolling-generation tests |
+| Concurrency and services | Go task/network ergonomics; Erlang/Elixir supervision and upgrade discipline | one task scheduler; nonblocking I/O; cancellation/deadline proof; supervised service tree; cluster/chaos/rolling-generation tests |
 | Interactive work | Python/Julia/Jupyter REPL and notebook loop | multiline structural REPL; persistent search; rich display; Jupyter protocol; interrupt/debug/profile; AOT-equivalent Core semantics |
 | Web applications | React compiler and server components; Svelte runes and compiled reactivity; SvelteKit/Next routing, data, forms, SSR; Vite HMR | one typed application graph; fine-grained dependency compilation; SSR/SSG/streaming; hydration/islands; server actions/forms; accessibility; real-browser HMR and deployment adapters |
 | Native/mobile UI | SwiftUI and Jetpack Compose state, previews, accessibility, adaptive layout | one renderer/component model; desktop/mobile backends; previews; hot reload; navigation/lifecycle/restoration; accessibility and store packaging |

@@ -93,22 +93,32 @@ pub(crate) fn lambda_body_ty_expecting(
         }
         lam_env
     }
-    match &lam.body {
+    // Type probing lowers the expression to recover its total type, but the
+    // probe is not the executable TIR pass. Do not publish spawn callbacks it
+    // discovers into the shared JIT lambda table; the real lowering pass that
+    // follows owns those entries and their site indexes.
+    let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    let body_ty = match &lam.body {
         LambdaBody::Expr(e) => {
             let mut lam_env = bind_params(lam, env, expected_params);
             lower_expr(e, cx, &mut lam_env).ty
         }
         LambdaBody::Block(stmts) => {
-            let Some((_, tail)) = lambda_block_tail(stmts) else {
-                return unit_type();
-            };
-            let mut lam_env = bind_params(lam, env, expected_params);
-            match tail {
-                Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
-                _ => unit_type(),
+            if let Some((_, tail)) = lambda_block_tail(stmts) {
+                let mut lam_env = bind_params(lam, env, expected_params);
+                match tail {
+                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => {
+                        lower_expr(e, cx, &mut lam_env).ty
+                    }
+                    _ => unit_type(),
+                }
+            } else {
+                unit_type()
             }
         }
-    }
+    };
+    *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
+    body_ty
 }
 
 /// c109 Phase 6/13: lower method-call arguments. The clone/Arc, borrow, and mut-borrow

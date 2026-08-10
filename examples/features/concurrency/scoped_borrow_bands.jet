@@ -20,7 +20,7 @@ fn run() {
         print(task.all {
             { left.position += left.velocity; left.position },
             { right.position += right.velocity; right.position }
-        })
+        } ?? panic("task.all failed"))
     }
     print(particles[0].position)
     print(particles[1].position)
@@ -30,10 +30,11 @@ fn run() {
     // lands on the owner, because the group joins before the block ends.
     task.group solo {
         only :: &particles[1]
-        task {
+        done :: task {
             only.position += only.velocity
             only.position
         }
+        print(done.join() ?? panic("task failed"))
     }
     print(particles[1].position)
 }

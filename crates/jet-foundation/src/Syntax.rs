@@ -187,8 +187,6 @@ pub const TASK_GROUP: &str = "task.group";
 
 /// D-CONC-JOIN1=A / D-CONC-SPAWN1=D: the nameable child-handle type.
 pub const TYPE_TASK: &str = "Task";
-/// D-CONC-GROUP1=A / D-CONC-SPAWN1=D: the scoped group-borrow type.
-pub const TYPE_GROUP: &str = "Group";
 
 /// D-CONC-CHAN1=A: builtin channel constructor.
 pub const BUILTIN_CHANNEL: &str = "channel";

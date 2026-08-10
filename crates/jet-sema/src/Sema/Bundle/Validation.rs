@@ -1531,6 +1531,7 @@ pub(crate) fn check_func_body_bundle(
         reactive_upgrade_names: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,
+        task_spawn_binding_name: None,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         trait_reg: &st.trait_reg,

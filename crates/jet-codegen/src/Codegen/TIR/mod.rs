@@ -1332,6 +1332,20 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             .map(str::to_string)
             .collect(),
     );
+    // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
+    // packed JIT/AOT shape even when the source only reaches it through
+    // `Task<T>.join()` and never constructs a variant explicitly.
+    enum_variants.insert(
+        crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+        ["user_Cancelled", "user_DeadlineBlown", "user_Panicked"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
+    enum_variant_payload_types.insert(
+        format!("user_{}::user_Panicked", crate::Syntax::TYPE_TASK_FAILURE),
+        vec![Type::String],
+    );
     let mut int_constants = std::collections::HashMap::new();
     let mut constants = std::collections::HashMap::new();
     // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).

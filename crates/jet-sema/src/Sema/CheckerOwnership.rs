@@ -4760,7 +4760,11 @@ impl<'a> Checker<'a> {
             crossing,
             SendCrossing::TaskCapture | SendCrossing::TaskResult
         ) {
-            if let Some(name) = &self.current_binding_name {
+            if let Some(name) = self
+                .current_binding_name
+                .as_ref()
+                .or(self.task_spawn_binding_name.as_ref())
+            {
                 if matches!(problem.kind, SendProblemKind::ViewBorrow) {
                     self.view_borrow_escape_tasks.insert(name.clone());
                 } else {
@@ -4813,7 +4817,7 @@ impl<'a> Checker<'a> {
                 });
                 let fix = if is_param && is_task_list {
                     format!(
-                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`",
+                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or collect the work in a canonical `task.all` or `task.group` block",
                         Syntax::SIGIL_MOVE
                     )
                 } else if is_task_list {

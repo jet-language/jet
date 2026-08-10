@@ -4572,7 +4572,7 @@ fn jet_http_mw_timeout(duration: &jet_std::Duration, next: JetHTTPHandler) -> Je
                 return match result {
                     JetSchedulerResult::Value(response) => response,
                     JetSchedulerResult::Cancelled => Ok(jet_http_srv_empty_response(504)),
-                    JetSchedulerResult::Panicked | JetSchedulerResult::Deadline(_) => {
+                    JetSchedulerResult::Panicked(_) | JetSchedulerResult::Deadline(_) => {
                         Ok(jet_http_srv_internal_response())
                     }
                 };

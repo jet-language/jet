@@ -561,6 +561,16 @@ impl<'a> JitMeta<'a> {
 
     /// Discriminant index from structured enum + variant Jet names.
     pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
+        // D-CONC-FAIL1=A: Prelude TaskFailure uses the same order on every
+        // packed enum ABI, even when no user enum table reaches this JIT.
+        if enum_name == jet_foundation::Syntax::TYPE_TASK_FAILURE {
+            return match variant {
+                "Cancelled" => Some(0),
+                "DeadlineBlown" => Some(1),
+                "Panicked" => Some(2),
+                _ => None,
+            };
+        }
         // Core ProcessStreamMode is not registered on JitProgram; fixed order
         // matches jet_std::ProcessStreamMode { Stream, Inherit, Capture }.
         if enum_name == "ProcessStreamMode" {
@@ -790,6 +800,7 @@ impl<'a> JitMeta<'a> {
                 | "EventResult"
                 | "DispatchState"
                 | "ServiceReceipt"
+                | jet_foundation::Syntax::TYPE_TASK_FAILURE
         ) || self.enum_variants.contains_key(name)
     }
 

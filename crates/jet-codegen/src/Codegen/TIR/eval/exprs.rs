@@ -18,7 +18,7 @@ use super::local_cell::{internal_index, project_mut, project_pair_mut, project_r
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
     progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
-    unsupported, EvalCallable, EvalCtx, Flow,
+    unsupported, wall_now_ms, EvalCallable, EvalCtx, Flow,
 };
 
 fn progress_parts(
@@ -2917,6 +2917,20 @@ impl<'a> EvalCtx<'a> {
                     std::thread::yield_now();
                     return Ok(CtValue::Unit);
                 }
+                if module == "core.time" && method == "sleep" && args.len() == 1 {
+                    if !self.runtime_execution {
+                        return Err(unsupported("`core.time.sleep` at compile time", *source_span));
+                    }
+                    let millis = as_int(&self.eval_expr(&args[0], scope)?, *source_span)?;
+                    let end = wall_now_ms().saturating_add(millis.max(0));
+                    while wall_now_ms() < end {
+                        self.task_wait_check("time sleep")?;
+                        let remaining = end.saturating_sub(wall_now_ms());
+                        std::thread::sleep(std::time::Duration::from_millis(remaining.min(1) as u64));
+                    }
+                    self.task_wait_check("time sleep")?;
+                    return Ok(CtValue::Unit);
+                }
                 if module == "core.tasks" && method == "current_task" && args.is_empty() {
                     // Outside a spawned evaluator task: idle defaults match Prelude.
                     return Ok(CtValue::Str(
@@ -4010,6 +4024,9 @@ impl<'a> EvalCtx<'a> {
                     }
                     crate::Codegen::TIR::TOrFallback::Panic { msg, loc } => {
                         let message = self.eval_expr(msg, scope)?.jet_show();
+                        if self.task_cancel.is_some() {
+                            return Err(super::task_child_panic(message, self.span()));
+                        }
                         let file = loc.file.trim_matches('"');
                         let fn_name = loc.fn_name.trim_matches('"');
                         let src_line = loc.src_line.trim_matches('"');
@@ -4908,6 +4925,9 @@ impl<'a> EvalCtx<'a> {
                         "values are not equal".to_string()
                     }
                 };
+                if self.task_cancel.is_some() {
+                    return Err(super::task_child_panic(msg, self.span()));
+                }
                 let file = loc.file.trim_matches('"');
                 let fn_name = loc.fn_name.trim_matches('"');
                 let src_line = loc.src_line.trim_matches('"');

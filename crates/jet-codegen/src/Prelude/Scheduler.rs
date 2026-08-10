@@ -127,6 +127,23 @@ struct JetDeadlineUnwind {
     rendered: String,
 }
 
+fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
+        .unwrap_or_else(|| "task panicked".to_string());
+    // AOT's rich panic path includes its source location in the Rust unwind
+    // payload. That location is an internal diagnostic detail, not the
+    // TaskFailure reason; strip only the compiler-shaped suffix so AOT,
+    // resident JIT, and the interpreter publish the same child value.
+    message
+        .rsplit_once(" (at ")
+        .filter(|(_, location)| location.ends_with(')') && location[..location.len() - 1].contains(':'))
+        .map(|(reason, _)| reason.to_string())
+        .unwrap_or(message)
+}
+
 fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
     if let Some(deadline) = payload.downcast_ref::<JetDeadlineUnwind>() {
         eprintln!("{}", deadline.rendered);
@@ -2288,12 +2305,12 @@ fn scheduler() -> Arc<Scheduler> {
 
 pub enum JetSchedulerResult<T> {
     Value(T),
-    Panicked,
+    Panicked(String),
     Cancelled,
     Deadline(String),
 }
 
-fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
+pub fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
     if jet_scheduler_panic_should_unwind() {
         std::panic::panic_any(JetDeadlineUnwind { rendered });
     }
@@ -2306,24 +2323,34 @@ pub struct JetSchedulerJoin<T> {
     completion_order: Arc<OnceLock<u128>>,
 }
 
+/// One parent-wait deadline policy for AOT and Cranelift adapters. A child
+/// deadline is a `TaskFailure`; an expired joining context is the E3003 control
+/// diagnostic owned by this wait point.
+pub fn jet_task_join_deadline_check() {
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        jet_deadline_exceeded("task join");
+    }
+}
+
 impl<T> JetSchedulerJoin<T> {
-    pub fn join(self) -> T {
+    /// D-CONC-FAIL1=A: child control failures are ordinary values on the
+    /// language failure rail. Only cancellation of the joining parent remains
+    /// a scheduler unwind at this wait point.
+    pub fn join(self) -> Result<T, jet_std::JetTaskFailure> {
         // D-CANCELMODEL1=C: join is a wait point. If the joining task is already
         // cancelled, unwind here before blocking.
         jet_task_wait_point_cancel_check();
         match self.rx.recv() {
-            Ok(JetSchedulerResult::Value(v)) => v,
-            Ok(JetSchedulerResult::Panicked) | Err(_) => {
-                jet_scheduler_fatal("a task panicked");
+            Ok(JetSchedulerResult::Value(v)) => Ok(v),
+            Ok(JetSchedulerResult::Panicked(reason)) => {
+                Err(jet_std::JetTaskFailure::Panicked(reason))
             }
-            Ok(JetSchedulerResult::Cancelled) => {
-                // A joined child that was cancelled propagates cancellation up: inside
-                // a task this unwinds as Cancelled, on the host it stops the program.
-                jet_task_deliver_cancel();
-                jet_scheduler_fatal("a task was cancelled");
-            }
-            Ok(JetSchedulerResult::Deadline(rendered)) => {
-                jet_scheduler_propagate_deadline(rendered);
+            Err(_) => Err(jet_std::JetTaskFailure::Panicked(
+                "task completion disconnected".to_string(),
+            )),
+            Ok(JetSchedulerResult::Cancelled) => Err(jet_std::JetTaskFailure::Cancelled),
+            Ok(JetSchedulerResult::Deadline(_rendered)) => {
+                Err(jet_std::JetTaskFailure::DeadlineBlown)
             }
         }
     }
@@ -2332,7 +2359,9 @@ impl<T> JetSchedulerJoin<T> {
         match self.rx.try_recv() {
             Ok(r) => Some(r),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked(
+                "task completion disconnected".to_string(),
+            )),
         }
     }
 
@@ -2348,7 +2377,7 @@ impl<T> JetSchedulerJoin<T> {
 fn jet_scheduler_select_tasks<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
     mode: jet_std::JetTaskSelectMode,
-) -> Vec<T> {
+) -> Result<Vec<T>, jet_std::JetTaskFailure> {
     use jet_std::{
         jet_task_deadline, jet_task_select, jet_task_wait_policy, JetTaskWaitInterrupt,
     };
@@ -2378,16 +2407,13 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
     );
     jet_scheduler_drain();
     match result {
-        Ok(values) => values,
-        Err(JetSchedulerResult::Deadline(rendered)) => {
-            jet_scheduler_propagate_deadline(rendered)
+        Ok(values) => Ok(values),
+        Err(JetSchedulerResult::Deadline(_rendered)) => {
+            Err(jet_std::JetTaskFailure::DeadlineBlown)
         }
-        Err(JetSchedulerResult::Cancelled) => {
-            jet_task_deliver_cancel();
-            jet_scheduler_fatal("a task was cancelled")
-        }
-        Err(JetSchedulerResult::Panicked) => {
-            jet_scheduler_fatal("a task panicked")
+        Err(JetSchedulerResult::Cancelled) => Err(jet_std::JetTaskFailure::Cancelled),
+        Err(JetSchedulerResult::Panicked(reason)) => {
+            Err(jet_std::JetTaskFailure::Panicked(reason))
         }
         Err(JetSchedulerResult::Value(_)) => unreachable!(),
     }
@@ -2396,26 +2422,24 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
 /// D-CONCCOMB1: join every handle in list order; fail fast and cancel siblings on error.
 pub fn jet_scheduler_all<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> Vec<T> {
+) -> Result<Vec<T>, jet_std::JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::All)
 }
 
 /// D-CONCCOMB1/D-RACEWIN1: first successful result wins; cancel losers.
 pub fn jet_scheduler_race<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> T {
+) -> Result<T, jet_std::JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)
-        .pop()
-        .expect("race result missing")
+        .map(|mut values| values.pop().expect("race result missing"))
 }
 
 /// D-CONCCOMB1: first completed result wins (success or failure path visible).
 pub fn jet_scheduler_any<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> T {
+) -> Result<T, jet_std::JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)
-        .pop()
-        .expect("any result missing")
+        .map(|mut values| values.pop().expect("any result missing"))
 }
 
 /// D-SELECT-GENERIC1=A: the one typed select door. Every engine supplies
@@ -2546,7 +2570,7 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
                     .expect("deadline payload type checked");
                 JetSchedulerResult::Deadline(deadline.rendered)
             }
-            Err(_) => JetSchedulerResult::Panicked,
+            Err(e) => JetSchedulerResult::Panicked(jet_scheduler_panic_message(&*e)),
         };
         if let Some(registry) = jet_observe_registry() {
             registry.tasks.lock().unwrap().remove(&observe_id);

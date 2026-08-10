@@ -12,7 +12,7 @@ fn fast_val() => Int = 42
 fn run() {
     task.group g {
         print("inside task.group")
-        results :: task.all { sum_range(1, 25), sum_range(26, 50) }
+        results :: task.all { sum_range(1, 25), sum_range(26, 50) } ?? panic("task.all failed")
         print(results[0] + results[1])
         winner :: task.race {
             fast_val(),
@@ -20,7 +20,7 @@ fn run() {
                 time.sleep(200)
                 sum_range(1, 500000)
             }
-        }
+        } ?? panic("race failed")
         print(winner)
     }
 }

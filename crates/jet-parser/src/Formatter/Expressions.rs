@@ -1888,7 +1888,7 @@ impl<'a> Fmt<'a> {
             if !lam.params.is_empty() {
                 return false;
             }
-            self.write(&format!("{} ", Syntax::KW_TASK));
+            self.write(&format!("{} ", Syntax::KW_CONC_TASK));
             match &lam.body {
                 crate::AST::LambdaBody::Expr(expr) => {
                     self.fmt_expr(expr, Prec::OrFallback);
@@ -1912,7 +1912,7 @@ impl<'a> Fmt<'a> {
         else {
             return false;
         };
-        self.write(&format!("{}.{} {{", Syntax::KW_TASK, method));
+        self.write(&format!("{}.{} {{", Syntax::KW_CONC_TASK, method));
         for (index, branch) in branches.iter().enumerate() {
             if index > 0 {
                 self.write(", ");
@@ -1926,22 +1926,24 @@ impl<'a> Fmt<'a> {
             {
                 if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
                     && spawn_method == "spawn"
-                    && let [CallArg {
+                {
+                    if let [CallArg {
                         expr: Expr::Lambda(lam),
                         ..
                     }] = spawn_args.as_slice()
-                {
-                    match &lam.body {
-                        crate::AST::LambdaBody::Expr(expr) => {
-                            self.fmt_expr(expr, Prec::OrFallback);
-                            continue;
-                        }
-                        crate::AST::LambdaBody::Block(stmts) => {
-                            self.write("{");
-                            self.newline();
-                            self.with_indent(|f| f.fmt_block_stmts(stmts));
-                            self.end_block();
-                            continue;
+                    {
+                        match &lam.body {
+                            crate::AST::LambdaBody::Expr(expr) => {
+                                self.fmt_expr(expr, Prec::OrFallback);
+                                continue;
+                            }
+                            crate::AST::LambdaBody::Block(stmts) => {
+                                self.write("{");
+                                self.newline();
+                                self.with_indent(|f| f.fmt_block_stmts(stmts));
+                                self.end_block();
+                                continue;
+                            }
                         }
                     }
                 }

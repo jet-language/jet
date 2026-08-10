@@ -1,7 +1,23 @@
-Error [E0104]: `task` needs a zero-parameter body, got 1 parameter
-  --> tests/ui/task_spawn_parameters.jet:2:14
+Error [E1102]: this task returns `fn(Int) => Int`, which isn't sendable
+  --> tests/ui/task_spawn_parameters.jet:2:15
     |
   2 |     t :: task (x: Int) => x
-    |              ^^^^^^^^^^^^^
- Why: a task body captures values from the enclosing scope — it takes no parameters
- Fix: move data in via capture instead of lambda parameters
+    |               ^^^^^^^^^^^^^
+ Why: the closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
+ Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
+
+Error [E0405]: the fallback is Int (a whole number), but the success value is fn(Int) => Int
+  --> tests/ui/task_spawn_parameters.jet:3:23
+    |
+  3 |     print(t.join() ?? 0)
+    |                       ^
+ Why: both sides of `??` must be the same type
+ Fix: use fn(Int) => Int here
+
+Error [E0112]: `print` doesn't know how to show fn(Int) => Int
+  --> tests/ui/task_spawn_parameters.jet:3:13
+    |
+  3 |     print(t.join() ?? 0)
+    |             ^^^^^^^^^^^
+ Why: print shows values that have a display
+ Fix: print one of its parts instead

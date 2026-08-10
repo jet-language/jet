@@ -723,7 +723,7 @@ pub(crate) fn handle_method_return_ty(
 /// closure's body type — total from the lowered lambda's return); `serve` → Unit (runs
 /// forever); `guard` → `ScopeGuard`. These types are rarely load-bearing in emit (a
 /// binding carries sema's `b.ty`), but kept total per the design principle.
-pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: Type) -> Type {
+pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, _body_ty: Type) -> Type {
     match (module, method) {
         ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
         ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),

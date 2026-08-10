@@ -254,7 +254,7 @@
 
         fn join(&self) {
             if let Some(handle) = self.handle.lock().unwrap().take() {
-                handle.join();
+                let _ = handle.join();
             }
         }
     }
@@ -279,25 +279,25 @@
 
     /// D-CONC-SPAWN1=D: the internal runtime identity shared by a lexical
     /// `task.group` and every named helper that receives it.
+    #[derive(Clone)]
     pub struct JetTaskGroup {
-        children: JetTaskGroupRuntime<std::sync::Arc<dyn JetTaskGroupChild>>,
+        children: std::sync::Arc<JetTaskGroupRuntime<std::sync::Arc<dyn JetTaskGroupChild>>>,
         slots: Option<std::sync::Arc<JetTaskGroupSlots>>,
     }
 
     impl JetTaskGroup {
         pub fn new() -> Self {
             Self {
-                children: JetTaskGroupRuntime::new(),
+                children: std::sync::Arc::new(JetTaskGroupRuntime::new()),
                 slots: None,
             }
         }
 
         pub fn with_limit(limit: i64) -> Self {
-            assert!(limit > 0, "task-group limit must be positive");
             Self {
-                children: JetTaskGroupRuntime::new(),
+                children: std::sync::Arc::new(JetTaskGroupRuntime::new()),
                 slots: Some(std::sync::Arc::new(JetTaskGroupSlots {
-                    limit: limit as usize,
+                    limit: jet_task_group_limit(limit),
                     active: std::sync::Mutex::new(0),
                     wake: std::sync::Condvar::new(),
                 })),
@@ -306,11 +306,13 @@
 
         fn acquire_slot(&self) -> Option<JetTaskGroupPermit> {
             let slots = self.slots.as_ref()?.clone();
-            let mut active = slots.active.lock().unwrap();
-            while *active >= slots.limit {
-                active = slots.wake.wait(active).unwrap();
+            {
+                let mut active = slots.active.lock().unwrap();
+                while *active >= slots.limit {
+                    active = slots.wake.wait(active).unwrap();
+                }
+                *active += 1;
             }
-            *active += 1;
             Some(JetTaskGroupPermit { slots })
         }
 
@@ -440,11 +442,14 @@
         pub fn cancel(&self) {
             self.state.control.cancel();
         }
-        pub fn join(self) -> T {
+        /// D-CONC-FAIL1=A: child cancellation, deadline, and panic are values
+        /// in the one TaskFailure rail; the scheduler owns only the wait-point
+        /// adapter for cancellation of the joining parent.
+        pub fn join(self) -> Result<T, JetTaskFailure> {
             if !self.state.skip_join_deadline {
-                super::jet_deadline_check("task join");
+                super::jet_task_join_deadline_check();
             }
-            let v = self
+            let result = self
                 .state
                 .handle
                 .lock()
@@ -453,9 +458,9 @@
                 .expect("task already joined")
                 .join();
             if !self.state.skip_join_deadline {
-                super::jet_deadline_check("task join");
+                super::jet_task_join_deadline_check();
             }
-            v
+            result
         }
         pub fn detach(self) {
             let _ = self.state.handle.lock().unwrap().take();
@@ -483,17 +488,23 @@
     }
 
     /// D-CONC-SPAWN1=D: `task.all` joins every child; fail fast and cancel siblings on error.
-    pub fn jet_task_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> Vec<T> {
+    pub fn jet_task_all<T: Send + 'static>(
+        tasks: Vec<JetTask<T>>,
+    ) -> Result<Vec<T>, JetTaskFailure> {
         super::jet_scheduler_all(jet_task_entries(tasks, "all"))
     }
 
     /// D-CONC-SPAWN1=D: `task.race` returns the first successful result and cancels siblings.
-    pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
+    pub fn jet_task_race<T: Send + 'static>(
+        tasks: Vec<JetTask<T>>,
+    ) -> Result<T, JetTaskFailure> {
         super::jet_scheduler_race(jet_task_entries(tasks, "race"))
     }
 
     /// D-CONC-SPAWN1=D: `task.any` returns the first completed result.
-    pub fn jet_task_any<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
+    pub fn jet_task_any<T: Send + 'static>(
+        tasks: Vec<JetTask<T>>,
+    ) -> Result<T, JetTaskFailure> {
         super::jet_scheduler_any(jet_task_entries(tasks, "any"))
     }
 

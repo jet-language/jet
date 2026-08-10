@@ -232,10 +232,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
-        HighlightToken {
-            text: KW_TASK,
-            kind: HighlightKind::Keyword,
-        },
         text: CTX_BLOCK,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -404,10 +400,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: TYPE_TASK,
-        class: HighlightClass::TypeBuiltin,
-    },
-    HighlightToken {
-        text: TYPE_GROUP,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -1142,13 +1134,13 @@ use super::{
     MARKER_PREFIX, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
     KW_CONC_TASK, KW_SHARED, READINESS_AFTER, TASK_ALL, TASK_ANY, TASK_GROUP, TASK_JOIN, TASK_RACE,
     TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
-    TYPE_GROUP, TYPE_RECEIVER, TYPE_SENDER, TYPE_TASK, TYPE_TASK_FAILURE,
+    TYPE_RECEIVER, TYPE_SENDER, TYPE_TASK, TYPE_TASK_FAILURE,
     KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
     KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,
     KW_MARKER, KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB,
     KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF,
-    KW_TASK,
+    KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST, KW_TODO,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
     KW_VIA, VALIDATE_CHECK_FN,
     LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,

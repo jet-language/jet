@@ -4,7 +4,7 @@ fn run() {
     (s1, ch) :: tasks.channel<Int>()
     s2 :: ~s1
     s3 :: ~s1
-    task.all { s1.send(30), s2.send(10), s3.send(20) }
+    _ :: task.all { s1.send(30), s2.send(10), s3.send(20) } ?? panic("task sends failed")
     results := [Int].{}
     results.push(ch.receive() ?? panic("channel closed"))
     results.push(ch.receive() ?? panic("channel closed"))

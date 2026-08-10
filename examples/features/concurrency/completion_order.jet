@@ -11,10 +11,10 @@ fn fast_seven() => Int = 7
 fn run() {
     task.group race_group {
         time.sleep(200)
-        print(task.race { slow_one(), fast_seven() })
+        print(task.race { slow_one(), fast_seven() } ?? panic("race failed"))
     }
     task.group any_group {
         time.sleep(200)
-        print(task.any { slow_one(), fast_seven() })
+        print(task.any { slow_one(), fast_seven() } ?? panic("any failed"))
     }
 }

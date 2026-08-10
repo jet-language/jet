@@ -1,4 +1,3 @@
-use core.tasks as tasks
 use core.time as time
 
 fn run() {
@@ -6,14 +5,14 @@ fn run() {
         slow :: task {
             time.sleep(10)
             print("finished fast")
-        })
+        }
         slow.join() ?? panic("fast task failed")
     }
     #Context(deadline: time.now() + 20) {
         slow :: task {
             time.sleep(40)
             print("finished slow")
-        })
+        }
         slow.join() ?? panic("slow task failed")
     }
 }

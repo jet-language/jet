@@ -579,6 +579,9 @@ fn jet_panic_rich(
         }));
     }
     jet_proof_record(2, 1, "panic", msg, file, line);
+    if jet_runtime_should_unwind() {
+        panic!("{} (at {}:{})", msg, file, line);
+    }
     let line_s = line.to_string();
     let margin = line_s.len();
     let pad = " ".repeat(margin);
@@ -591,9 +594,6 @@ fn jet_panic_rich(
     eprintln!("   {}| {}{}", pad, " ".repeat(col_offset), caret);
     if !locals.is_empty() {
         eprintln!("locals: {}", locals);
-    }
-    if jet_runtime_should_unwind() {
-        panic!("{} (at {}:{})", msg, file, line);
     }
     jet_runtime_exit();
 }

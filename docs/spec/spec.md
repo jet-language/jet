@@ -2302,9 +2302,9 @@ zero-parameter work captured from its surrounding scope:
 ```jet
 one :: task work()
 two :: task { work_again() }
-results :: task.all { work_a(), work_b() }
-winner :: task.race { fast(), slow() }
-first :: task.any { read_cache(), read_network() }
+results :: (task.all { work_a(), work_b() }) ?? []
+winner :: (task.race { fast(), slow() }) ?? 0
+first :: (task.any { read_cache(), read_network() }) ?? fallback
 ```
 
 Each branch of `task.all`, `task.race`, or `task.any` starts one child. `all`
@@ -2314,8 +2314,9 @@ first completed result and cancels the remaining children. The combinators
 consume their children; there are no list twins or handle-list spellings.
 
 `task.group name { … }` opens a lexical group. `task.group name(limit: n) { … }`
-also bounds the number of active children; `n` must be positive. The group owns
-every child created in its body and joins the children when the block closes.
+also bounds the number of active children; an `n` below one is clamped to one
+before child admission. The group owns every child created in its body and
+joins the children when the block closes.
 The same `TaskGroup` parameter may be passed to a named helper; `task` in that
 helper uses the caller's group:
 
@@ -2349,10 +2350,10 @@ overlapping. Two children reaching one place is **E1101**.
 task.group g {
     left :: &particles[0]
     right :: &particles[2]
-    print(task.all {
+    print((task.all {
         { left.position += left.velocity; left.position },
         { right.position += right.velocity; right.position }
-    })
+    }) ?? [])
 }
 ```
 
@@ -2365,9 +2366,9 @@ Combinators are nested selectors, not methods on a group handle:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `task.all { a(), b() }` | Starts one child per branch, waits for every child, and fail-fast cancels the remaining children. |
-| `task.race { a(), b() }` | Returns the first successful result and cancels the losers. |
-| `task.any { a(), b() }` | Returns the first completed result, including errors, and cancels the remaining children. |
+| `task.all { a(), b() }` | Returns `[T] ? TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
+| `task.race { a(), b() }` | Returns `T ? TaskFailure`; the first successful result wins and cancels the losers. |
+| `task.any { a(), b() }` | Returns `T ? TaskFailure`; the first completed result wins and cancels the remaining children. |
 | `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
 
 - Waiting on several sources at once — a select — is a subjectless `if` table

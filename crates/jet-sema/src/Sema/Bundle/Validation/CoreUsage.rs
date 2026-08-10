@@ -275,13 +275,20 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans, ffi_cb);
                 }
             }
+            Stmt::TaskGroup { body, span, .. } => {
+                // D-CONC-SPAWN1=D: the canonical `task.group` surface reaches
+                // the same embedded scheduler kernel as task combinators. It
+                // has no Core import for `collect_used_core` to observe, so
+                // record the compiler-owned runtime seam explicitly.
+                note_core_usage(used, spans, "core.concurrency::task", Some(*span));
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
+            }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
-            | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
@@ -407,6 +414,17 @@ pub(crate) fn collect_core_expr(
             recv_type,
             ..
         } => {
+            // D-CONC-SPAWN1=D: `task`/`task.all`/`task.race`/`task.any`
+            // are compiler-owned syntax, not Core imports. Sema records their
+            // private dispatch type so this late reachability walk can pull in
+            // the scheduler kernel without relying on source spelling.
+            if matches!(
+                recv_type.as_deref(),
+                Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
+                    | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+            ) {
+                note_core_usage(used, spans, "core.concurrency::task", Some(*method_span));
+            }
             // Epoch 3 String surface delegates Unicode classification, title
             // casing, trimming, and display-width padding to the pinned
             // `core.text` implementation. Mark that shared prelude reachable

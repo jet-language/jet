@@ -650,7 +650,15 @@ pub(crate) fn expr_collect_captures(
                 Expr::Ident(name, _)
                     if name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
             );
-            if !static_type {
+            // The parser lowers nested `task.all`/`race`/`any` inside a
+            // lambda through this compiler-private receiver before sema
+            // rewrites it to the active group. It is a dispatch marker, not
+            // a source capture.
+            let task_surface = matches!(
+                receiver.as_ref(),
+                Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER
+            );
+            if !static_type && !task_surface {
                 expr_collect_captures(receiver, bound, read, mut_cap);
             }
             for a in args {

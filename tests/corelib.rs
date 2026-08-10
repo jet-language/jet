@@ -9514,10 +9514,10 @@ fn slow_one() => Int {
 
 fn run() {
     task.group g {
-        winner :: task.race {
+        winner :: (task.race {
             slow_one(),
             fast_nine()
-        }
+        }) ?? panic("race failed")
         print(winner)
     }
 }

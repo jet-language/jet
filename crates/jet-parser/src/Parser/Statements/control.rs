@@ -2146,7 +2146,7 @@ impl<'a> Parser<'a> {
             }
             // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }` — structured task scope.
             TokKind::Ident(n)
-                if n == Syntax::KW_TASK
+                if n == Syntax::KW_CONC_TASK
                     && matches!(self.peek2().kind, TokKind::Dot)
                     && matches!(&self.peek3().kind, TokKind::Ident(selector) if selector == "group")
                     && matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(_)))

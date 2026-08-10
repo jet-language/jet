@@ -607,11 +607,6 @@ pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 /// writes `region`.
 pub const MARKER_REGION: &str = "Region"; // D-BLOCKPLANE1
 
-/// D-CONC-SPAWN1=D (ratified 2026-08-06): one reserved concurrency keyword.
-/// Selectors stay ordinary identifiers and follow this word (`task.all`,
-/// `task.race`, `task.any`, and `task.group`).
-pub const KW_TASK: &str = "task";
-
 /// D-CTX1 (ratified 2026-06-22, G2): smart-context block marker.
 /// `#context(field: value) { … }` swaps named ambient fields (allocator,
 /// logger) for the lexical+dynamic extent of the block, then restores them.

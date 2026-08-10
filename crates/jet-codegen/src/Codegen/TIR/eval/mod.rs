@@ -94,6 +94,36 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::e0956_unsupported(what, span)
 }
 
+/// D-CONC-FAIL1=A: the evaluator turns a child diagnostic into the same
+/// normal TaskFailure enum that the shared scheduler reports. A diagnostic
+/// raised by the joining parent remains a control diagnostic and is not
+/// converted here.
+fn task_failure_value(error: &Diagnostic) -> CtValue {
+    let (variant, args) = match error.code.as_str() {
+        "TASK_CANCELLED" => ("Cancelled", Vec::new()),
+        "E3003" => ("DeadlineBlown", Vec::new()),
+        _ => (
+            "Panicked",
+            vec![(None, CtValue::Str(error.what.clone()))],
+        ),
+    };
+    CtValue::Enum {
+        type_name: crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+        variant: variant.to_string(),
+        args,
+    }
+}
+
+fn task_child_panic(message: String, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0953",
+        message,
+        "a child task panicked".to_string(),
+        String::new(),
+        Some(span),
+    )
+}
+
 pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
     authorizer: &'short mut Option<&'long mut dyn Comptime::ReplAuthorizer>,
 ) -> Option<&'short mut (dyn Comptime::ReplAuthorizer + 'short)> {
@@ -883,10 +913,49 @@ struct EvalRuntime<'a> {
     clocks: Vec<i64>,
     channels: Vec<EvalChannel>,
     task_groups: Vec<Vec<usize>>,
-    task_group_limits: Vec<Option<i64>>,
+    task_group_slots: Vec<Option<Arc<EvalTaskGroupSlots>>>,
     tasks: Vec<Option<EvalTask>>,
     web_apps: Vec<EvalWebApp>,
     completion_order: AtomicU64,
+}
+
+struct EvalTaskGroupSlots {
+    limit: usize,
+    active: Mutex<usize>,
+    wake: Condvar,
+}
+
+struct EvalTaskGroupPermit {
+    slots: Arc<EvalTaskGroupSlots>,
+}
+
+impl EvalTaskGroupSlots {
+    fn acquire(self: &Arc<Self>) -> EvalTaskGroupPermit {
+        let mut active = self
+            .active
+            .lock()
+            .expect("evaluator task-group slots poisoned");
+        while *active >= self.limit {
+            active = self
+                .wake
+                .wait(active)
+                .expect("evaluator task-group slots poisoned");
+        }
+        *active += 1;
+        EvalTaskGroupPermit { slots: self.clone() }
+    }
+}
+
+impl Drop for EvalTaskGroupPermit {
+    fn drop(&mut self) {
+        let mut active = self
+            .slots
+            .active
+            .lock()
+            .expect("evaluator task-group slots poisoned");
+        *active = active.saturating_sub(1);
+        self.slots.wake.notify_one();
+    }
 }
 
 struct EvalSharedState {
@@ -974,6 +1043,15 @@ struct EvalTaskCompletion {
     result: Result<CtValue, Diagnostic>,
 }
 
+#[derive(Debug)]
+enum EvalTaskSelectError {
+    /// The parent reached its own cancellation/deadline wait policy.
+    Wait(Diagnostic),
+    /// A child failed while completing. This becomes `? TaskFailure` at the
+    /// task surface instead of escaping as an interpreter diagnostic.
+    Child(Diagnostic),
+}
+
 struct EvalTaskJob<'a> {
     lambda: &'a TJitSpawnLambda,
     captured: HashMap<String, CtValue>,
@@ -983,6 +1061,7 @@ struct EvalTaskJob<'a> {
     completion_order: Arc<OnceLock<u64>>,
     cancel: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    permit: Option<EvalTaskGroupPermit>,
 }
 
 fn select_eval_tasks(
@@ -990,17 +1069,20 @@ fn select_eval_tasks(
     mode: crate::task_group::JetTaskSelectMode,
     span: Span,
     mut wait_check: impl FnMut() -> Result<(), Diagnostic>,
-) -> Result<Vec<CtValue>, Diagnostic> {
+) -> Result<Vec<CtValue>, EvalTaskSelectError> {
     crate::task_group::jet_task_select(
         tasks,
         mode,
-        &mut wait_check,
+        || wait_check().map_err(EvalTaskSelectError::Wait),
         |task| task.completion_order.get().copied().map(Into::into),
         |task| match task.completion.try_recv() {
-            Ok(completion) => Some(completion.result),
+            Ok(completion) => Some(completion.result.map_err(EvalTaskSelectError::Child)),
             Err(mpsc::TryRecvError::Empty) => None,
             Err(mpsc::TryRecvError::Disconnected) => {
-                Some(Err(unsupported("task completion", span)))
+                Some(Err(EvalTaskSelectError::Child(unsupported(
+                    "task completion",
+                    span,
+                ))))
             }
         },
         |task| task.cancel.store(true, Ordering::Release),
@@ -1043,7 +1125,7 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             channels: Vec::new(),
             task_groups: Vec::new(),
-            task_group_limits: Vec::new(),
+            task_group_slots: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
@@ -1058,12 +1140,12 @@ struct YieldConsumer<'a> {
 }
 
 impl<'a> EvalCtx<'a> {
-    fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
+    fn task_wait_check(&self, wait_kind: &str) -> Result<(), Diagnostic> {
         self.task_wait_while_paused();
         let deadline = self
             .context_deadline
             .filter(|deadline| wall_now_ms() >= *deadline)
-            .map(|_| crate::task_group::jet_task_deadline("task selection"));
+            .map(|_| crate::task_group::jet_task_deadline(wait_kind));
         let cancelled = self
             .task_cancel
             .as_ref()
@@ -1087,6 +1169,14 @@ impl<'a> EvalCtx<'a> {
                 Some(self.span()),
             )),
         }
+    }
+
+    fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
+        self.task_wait_check("task selection")
+    }
+
+    fn task_join_wait_check(&self) -> Result<(), Diagnostic> {
+        self.task_wait_check("task join")
     }
 
     /// The evaluator twin of `JetTaskControl::wait_while_paused`: a paused task
@@ -1203,6 +1293,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn run_task_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
+        let _permit = job.permit;
         let mut ctx = EvalCtx {
             funcs: config.funcs,
             base_dir: config.base_dir,
@@ -1311,6 +1402,16 @@ impl<'a> EvalCtx<'a> {
         let completion_order = Arc::new(OnceLock::new());
         let cancel = Arc::new(AtomicBool::new(false));
         let paused = Arc::new(AtomicBool::new(false));
+        let permit = group
+            .and_then(|group| {
+                self.runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .task_group_slots
+                    .get(group)
+                    .and_then(Clone::clone)
+            })
+            .map(|slots| slots.acquire());
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
         runtime.tasks.push(Some(EvalTask {
@@ -1333,6 +1434,7 @@ impl<'a> EvalCtx<'a> {
                 completion_order,
                 cancel,
                 paused,
+                permit,
             })
             .map_err(|_| unsupported("closed task group", self.span()))?;
         Ok(CtValue::Struct {
@@ -1364,13 +1466,15 @@ impl<'a> EvalCtx<'a> {
 
     fn new_taskgroup(
         &mut self,
-        limit: Option<&TExpr>,
+        limit: Option<&'a TExpr>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let limit = match limit {
             Some(limit) => match self.eval_expr(limit, scope)? {
-                CtValue::Int(value) if value > 0 => Some(value),
-                CtValue::Int(_) => return Err(unsupported("non-positive task-group limit", self.span())),
+                // An omitted limit is unbounded. An explicit non-positive
+                // value is the smallest bounded group; every engine applies
+                // this same runtime rule after sema's static checks.
+                CtValue::Int(value) => Some(crate::task_group::jet_task_group_limit(value)),
                 _ => return Err(unsupported("task-group limit", self.span())),
             },
             None => None,
@@ -1378,7 +1482,13 @@ impl<'a> EvalCtx<'a> {
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.task_groups.len();
         runtime.task_groups.push(Vec::new());
-        runtime.task_group_limits.push(limit);
+        runtime.task_group_slots.push(limit.map(|limit| {
+            Arc::new(EvalTaskGroupSlots {
+                limit,
+                active: Mutex::new(0),
+                wake: Condvar::new(),
+            })
+        }));
         Ok(CtValue::Struct {
             type_name: "__JetTirTaskGroup".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -1661,19 +1771,22 @@ impl<'a> EvalCtx<'a> {
                     // Prelude wait policy (bd15-rev): a cancelled scope or an
                     // expired deadline refuses the join here exactly as
                     // jet_task_wait_policy does on the other tiers.
-                    self.task_wait_cancel_check()?;
-                    return Ok(result);
+                    self.task_join_wait_check()?;
+                    return Ok(CtValue::Present(Box::new(result)));
                 }
             }
         }
-        self.task_wait_cancel_check()?;
+        self.task_join_wait_check()?;
         let task = self.take_task_entry(value)?;
         let result = task.completion
             .recv()
             .map_err(|_| unsupported("task completion", self.span()))?
             .result;
-        self.task_wait_cancel_check()?;
-        result
+        self.task_join_wait_check()?;
+        match result {
+            Ok(value) => Ok(CtValue::Present(Box::new(value))),
+            Err(error) => Ok(CtValue::failed(Box::new(task_failure_value(&error)))),
+        }
     }
 
     pub(super) fn task_select(
@@ -1688,29 +1801,38 @@ impl<'a> EvalCtx<'a> {
         if tasks.is_empty() {
             return Err(unsupported("empty task group combinator", self.span()));
         }
-        select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()).map(
-            |mut values| {
-                if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
+        match select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()) {
+            Ok(mut values) => {
+                let value = if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
                     CtValue::List(values)
                 } else {
                     values.pop().expect("race/any result missing")
-                }
-            },
-        )
+                };
+                Ok(CtValue::Present(Box::new(value)))
+            }
+            Err(EvalTaskSelectError::Wait(error)) => Err(error),
+            Err(EvalTaskSelectError::Child(error)) => {
+                Ok(CtValue::failed(Box::new(task_failure_value(&error))))
+            }
+        }
     }
 
     fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
         let span = self.span();
         let children = {
             let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            std::mem::take(
+            let children = std::mem::take(
                 runtime
                     .task_groups
                     .get_mut(index)
                     .ok_or_else(|| unsupported("task group handle", span))?,
-            )
+            );
+            let _ = runtime
+                .task_group_slots
+                .get_mut(index)
+                .and_then(Option::take);
+            children
         };
-        let mut first = None;
         {
             let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
             for child in &children {
@@ -1727,21 +1849,10 @@ impl<'a> EvalCtx<'a> {
                 .tasks
                 .get_mut(child)
                 .and_then(Option::take);
-            let result = task.and_then(|task| task.completion.recv().ok());
-            if let Some(EvalTaskCompletion {
-                result: Err(error),
-                ..
-            }) = result
-            {
-                if first.is_none() {
-                    first = Some(error);
-                }
-            }
+            let _ = task.and_then(|task| task.completion.recv().ok());
         }
-        match first {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        self.task_wait_cancel_check()?;
+        Ok(())
     }
 
     pub(crate) fn span(&self) -> Span {

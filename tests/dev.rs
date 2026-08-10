@@ -1472,7 +1472,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
         std::process::id()
     ));
     let file = "examples/features/concurrency/all_failfast.jet";
-    // I9 / #1486: AOT prints the same rich panic + trailing line as the golden.
+    // I9 / #1685: AOT prints the same typed TaskFailure panic as the golden.
     let expected_stderr =
         fs::read_to_string("examples/features/expected/concurrency/all_failfast.err.out")
             .expect("all_failfast.err.out");
@@ -1481,7 +1481,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     assert_eq!(first, expected);
 
     // Strict JIT no longer AOT-fallbacks all_failfast; parallel AOT runs keep
-    // the panic-hook regression signal.
+    // the typed-failure panic-hook regression signal.
 
     let binary = Arc::new(dir.join("jet_scheduler_panic_hook_0"));
     let failures = Arc::new(Mutex::new(Vec::new()));
@@ -7070,7 +7070,7 @@ fn resident_jit_safety_detail_smoke() {
         "types/structs",
         "types/enums",
         "basics/branches",
-        "concurrency/taskgroup",
+        "concurrency/task_group",
     ] {
         let file = format!("examples/features/{stem}.jet");
         let mut bundle = jet::Loader::load_entry(&file).expect("load");
@@ -7082,7 +7082,7 @@ fn resident_jit_safety_detail_smoke() {
         if stem == "basics/value_dispatch" {
             eprintln!("  compile: {:?}", jet_jit::try_compile_bundle(&bundle));
         }
-        if stem == "131_taskgroup" {
+        if stem == "concurrency/task_group" {
             let (sites, lams) = jet_jit::jit_spawn_stats(&bundle);
             eprintln!("  spawn: {sites} sites / {lams} lambdas");
             eprintln!(
@@ -8362,8 +8362,8 @@ fn run() {
 }
 
 /// #1486 / I9: task-group rich panic under default jet run must match AOT golden
-/// stderr (full panic block + trailing `panic: a task panicked`), including after
-/// a warm re-invoke that reinstalls compile-time string handles.
+/// stderr (full panic block + typed TaskFailure panic), including after a warm
+/// re-invoke that reinstalls compile-time string handles.
 #[test]
 fn all_failfast_jit_stderr_matches_aot_golden() {
     if skip_if_cranelift_host_unsupported() {

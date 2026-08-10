@@ -93,7 +93,11 @@ fn lower_spawn_function(
     let mut fbcx = FunctionBuilderContext::new();
     let mut vars = HashMap::new();
     let mut var_tys = HashMap::new();
-    let mut spawn_site = 0usize;
+    // Nested spawn/combinator bodies carry global TIR site indexes, but each
+    // compiled callback gets its own lowering cursor. Start that cursor at the
+    // first site in this body so nested callbacks do not resolve against the
+    // first lambda in the program.
+    let mut spawn_site = super::safety::first_spawn_site(lam).unwrap_or(0);
     {
         let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
         let entry = b.create_block();

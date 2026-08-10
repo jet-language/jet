@@ -1,6 +1,34 @@
 // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: canonical task-group ownership.
 // This exact Prelude source is compiled for JIT hosts and embedded in AOT
 // programs. Engines supply only representation-specific cancel/join adapters.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JetTaskFailure {
+    Cancelled,
+    DeadlineBlown,
+    Panicked(String),
+}
+
+/// One ABI spelling for the typed failure rail. Engines may pack the returned
+/// tag beside their representation-specific reason handle, but the failure
+/// meaning and tag values live here with `JetTaskFailure`.
+pub fn jet_task_failure_abi(
+    failure: JetTaskFailure,
+    encode_reason: impl FnOnce(String) -> u64,
+) -> u64 {
+    match failure {
+        JetTaskFailure::Cancelled => 0,
+        JetTaskFailure::DeadlineBlown => 1,
+        JetTaskFailure::Panicked(reason) => (encode_reason(reason) << 8) | 2,
+    }
+}
+
+/// D-CONC-SPAWN1=D: explicit group limits share one clamping rule on every
+/// execution tier. `None` means no admission bound; an explicit value below
+/// one is the smallest bounded group.
+pub fn jet_task_group_limit(limit: i64) -> usize {
+    limit.max(1) as usize
+}
+
 #[derive(Debug)]
 pub struct JetTaskGroupRuntime<T> {
     children: std::sync::Mutex<Vec<T>>,
@@ -22,22 +50,24 @@ impl<T> JetTaskGroupRuntime<T> {
         C: FnMut(&T),
         J: FnMut(T),
     {
-        let children = std::mem::take(&mut *self.children.lock().unwrap());
-        for child in &children {
-            cancel(child);
-        }
-        let mut first_panic = None;
-        for child in children {
-            if let Err(payload) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| join(child)))
-            {
-                if first_panic.is_none() {
-                    first_panic = Some(payload);
-                }
+        // A child may register another child through the shared lexical group
+        // handle while it is being joined. Drain until the shared queue is
+        // empty so lexical close covers that nested work too.
+        loop {
+            let children = std::mem::take(&mut *self.children.lock().unwrap());
+            if children.is_empty() {
+                break;
             }
-        }
-        if let Some(payload) = first_panic {
-            std::panic::resume_unwind(payload);
+            for child in &children {
+                cancel(child);
+            }
+            for child in children {
+                // D-CONC-FAIL1=A: lexical close joins and discards child outcomes.
+                // A child failure remains observable only through that child's
+                // explicit `join()`/combinator result; it must not escape the
+                // group's cleanup boundary or terminate the parent.
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| join(child)));
+            }
         }
     }
 }
@@ -250,13 +280,10 @@ mod tests {
                 |child| cancel_events.lock().unwrap().push(format!("cancel {child}")),
                 |child| {
                     join_events.lock().unwrap().push(format!("join {child}"));
-                    if child != 3 {
-                        panic!("failed {child}");
-                    }
                 },
             );
         }));
-        assert!(result.is_err());
+        assert!(result.is_ok());
         assert_eq!(
             *events.lock().unwrap(),
             ["cancel 1", "cancel 2", "cancel 3", "join 1", "join 2", "join 3"]

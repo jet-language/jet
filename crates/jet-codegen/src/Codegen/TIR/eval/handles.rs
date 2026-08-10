@@ -804,7 +804,9 @@ pub(super) fn eval_handle(
         THandleOp::TaskJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()
-                .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                .find_map(|(name, value)| {
+                    (name == "value").then(|| CtValue::Present(Box::new(value.clone())))
+                })
                 .ok_or_else(|| unsupported("task result", span)),
             _ => Err(unsupported("task receiver", span)),
         },

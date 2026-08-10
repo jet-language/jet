@@ -2459,8 +2459,6 @@ Blocking tasks and typed channels are Jet's concurrency model. There is no
 `async`/`await` and no mutex API; tasks communicate by sending owned values.
 
 ```jet
-use core.tasks as tasks
-
 fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n; first..last {
@@ -2502,9 +2500,9 @@ there's no combined channel value).
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
 | `task body` / `task { body }` | `Task<T>` | Run one zero-parameter child |
-| `task.all { … }` | `[T]` | Run every branch, fail-fast, and return results in source order |
-| `task.race { … }` | `T` | Return the first successful branch and cancel losers |
-| `task.any { … }` | `T` | Return the first completed branch and cancel the rest |
+| `task.all { … }` | `[T] ? TaskFailure` | Run every branch, fail-fast, and return results in source order |
+| `task.race { … }` | `T ? TaskFailure` | Return the first successful branch and cancel losers |
+| `task.any { … }` | `T ? TaskFailure` | Return the first completed branch and cancel the rest |
 | `task.group name(limit: n) { … }` | nothing | Own children and join them at scope close |
 | `tasks.yield_now()` | nothing | Cooperative yield at a scheduler wait point (`yield` is the stream keyword) |
 | `tasks.current_task()` | `String` | Control-plane trace of the running task (`paused=...,cancel=...`) |
@@ -2534,8 +2532,9 @@ and `ProcessChild.wait()`) observe the inherited budget and report runtime
 **E3003** on exceed. Task cancellation wakes the same scheduler wait points.
 
 `task.group` remains the structured default: it owns child tasks until scope
-exit. Inside one, use `task.all`, `task.race`, and `task.any`; `race`/`any` cancel
-losers. The group handle's `select()` races receivers and timers: `.recv(rx)` waits for a channel
+exit. A numeric limit below one is clamped to one before a child starts. Inside
+one, use `task.all`, `task.race`, and `task.any`; `race`/`any` cancel losers.
+The group handle's `select()` races receivers and timers: `.recv(rx)` waits for a channel
 value, `.after(ms: N)` is a unit timer arm, and `.after(ms: N, value: fallback)`
 is a typed timeout arm that can be mixed with same-`T` receive arms.
 

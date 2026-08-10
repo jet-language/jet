@@ -50,6 +50,13 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     if name == "DataEvent" {
         return true;
     }
+    // D-CONC-FAIL1=A: TaskFailure is the shared Prelude enum published by
+    // every task join/combinator. Its variants are registered in the TIR
+    // context even though no user `enum` item owns them, so variant matches
+    // must stay on the same typed-IR path as ordinary covered enums.
+    if name == crate::Syntax::TYPE_TASK_FAILURE {
+        return true;
+    }
     if crate::Generics::is_type_var_name(name)
         || is_json_type_name(name)
         || is_db_value_type_name(name)

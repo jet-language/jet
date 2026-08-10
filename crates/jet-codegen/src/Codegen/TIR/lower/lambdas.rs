@@ -414,14 +414,36 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
 pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
     let mut lam_env = fork_panic(env);
     let mut prep = String::new();
-    for name in &lam.meta.cloned_captures {
+    let mut cloned_captures = lam.meta.cloned_captures.clone();
+    // Sema sees the parser's compiler-private `task` receiver before it is
+    // rewritten to the active lexical group. The AOT body is rendered after
+    // that rewrite, so a nested `task.*` call would otherwise move the parent
+    // `JetTaskGroup` into the child closure and rustc would reject the second
+    // nested use. Clone only this injected group handle; user TaskGroup
+    // captures remain rejected by sema (E1110).
+    let reads = match &lam.body {
+        LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
+        LambdaBody::Expr(e) => crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())]),
+    };
+    for name in reads {
+        if !cloned_captures.iter().any(|capture| capture == &name)
+            && matches!(
+                env.ty_of(&name),
+                Some(Type::Named(ty)) if ty == crate::Syntax::TYPE_TASKGROUP
+            )
+        {
+            cloned_captures.push(name);
+        }
+    }
+    cloned_captures.sort();
+    for name in &cloned_captures {
         let cap = format!("_jet_cap_{}", mangle(name));
         prep.push_str(&format!(
             "let {} = ({}).clone();\n    ",
             cap,
             env.place_of(name)
         ));
-        lam_env.bind(name, TLocal::generated(&cap), None);
+        lam_env.bind(name, TLocal::generated(&cap), env.ty_of(name));
     }
     for p in &lam.params {
         lam_env.bind(&p.name, TLocal::user(&p.name), p.ty.clone());
@@ -437,10 +459,16 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
             format!("{}{}", mangle(&p.name), ty)
         })
         .collect();
+    // Rendering the AOT closure lowers its body a second time. Nested task
+    // combinators collect their JIT spawn lambdas while lowering, so keep
+    // that bookkeeping pass-only; otherwise nested AOT rendering duplicates
+    // the resident-JIT lambda table.
+    let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
     let body = match &lam.body {
         LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
         LambdaBody::Block(stmts) => render_spawn_block_body(stmts, cx, &mut lam_env),
     };
+    *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
     let closure = format!("move |{}| {}", params.join(", "), body);
     if prep.is_empty() {
         closure

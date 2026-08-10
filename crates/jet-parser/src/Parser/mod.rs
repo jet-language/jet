@@ -438,7 +438,17 @@ impl<'a> Parser<'a> {
             Token {
                 kind: TokKind::Ident(name),
                 span,
-            } => Ok((name, span)),
+            } if name != Syntax::KW_CONC_TASK => Ok((name, span)),
+            Token {
+                kind: TokKind::Ident(name),
+                span,
+            } => Err(Diagnostic::error(
+                "E0003",
+                format!("`{name}` is reserved for structured task syntax"),
+                "the `task` word starts a child or task combinator".to_string(),
+                "choose a different identifier name".to_string(),
+                Some(span),
+            )),
             t => Err(Diagnostic::error(
                 "E0003",
                 format!("expected a name {}, found {}", where_, describe(&t.kind)),

@@ -533,7 +533,7 @@ impl<'a> Fmt<'a> {
             }
             // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }`.
             Stmt::TaskGroup { name, limit, body, .. } => {
-                self.write(&format!("{}.{} {}", Syntax::KW_TASK, "group", name));
+                self.write(&format!("{}.{} {}", Syntax::KW_CONC_TASK, "group", name));
                 if let Some(limit) = limit {
                     self.write("(limit: ");
                     self.fmt_expr(limit, Prec::OrFallback);

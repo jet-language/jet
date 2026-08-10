@@ -29,7 +29,7 @@ pub fn jet_scheduler_task_panic_leave() {
     JET_IN_SCHEDULER_TASK.with(|c| c.set(false));
 }
 
-fn jet_scheduler_panic_should_unwind() -> bool {
+pub fn jet_scheduler_panic_should_unwind() -> bool {
     JET_IN_SCHEDULER_TASK.with(|c| c.get())
 }
 
@@ -264,7 +264,7 @@ mod scheduler_host_tests {
     #[test]
     fn race_uses_completion_order_when_results_are_already_ready() {
         assert_eq!(
-            jet_scheduler_race(ready_entries_in_reverse_completion_order()),
+            jet_scheduler_race(ready_entries_in_reverse_completion_order()).unwrap(),
             42
         );
     }
@@ -272,7 +272,7 @@ mod scheduler_host_tests {
     #[test]
     fn any_uses_completion_order_when_results_are_already_ready() {
         assert_eq!(
-            jet_scheduler_any(ready_entries_in_reverse_completion_order()),
+            jet_scheduler_any(ready_entries_in_reverse_completion_order()).unwrap(),
             42
         );
     }
@@ -465,7 +465,7 @@ mod scheduler_host_tests {
                     "cancelled task must report Cancelled, got {}",
                     match other {
                         JetSchedulerResult::Value(_) => "Value",
-                        JetSchedulerResult::Panicked => "Panicked",
+                        JetSchedulerResult::Panicked(_) => "Panicked",
                         JetSchedulerResult::Cancelled => unreachable!(),
                         JetSchedulerResult::Deadline(_) => "Deadline",
                     }

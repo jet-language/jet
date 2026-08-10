@@ -1106,7 +1106,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     // already use parser shapes owned by existing generic/type/call/loop
     // grammar. Future task/shared/select forms stay on their implementation
     // cards and do not get parser stubs here.
-    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) => TaskFailure {
+    let src = r#"fn inspect(handle: Task<Int>, group: TaskGroup, rx: Receiver<Int>, tx: Sender<Int>) => TaskFailure {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown
@@ -1123,7 +1123,7 @@ fn open() {
     let once = jet::format_source(src).expect("parseable concurrency spellings should format");
     for spelling in [
         "Task<Int>",
-        "Group",
+        "TaskGroup",
         "Receiver<Int>",
         "Sender<Int>",
         "TaskFailure",

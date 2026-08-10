@@ -570,7 +570,7 @@ fn run() {{
     handle :: task {{
         pinned.hops += 1
         return pinned.payload
-    }
+    }}
     handle.cancel()
     print("{{(handle.join() ?? 0)}}")
 }}

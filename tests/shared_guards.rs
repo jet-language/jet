@@ -39,10 +39,10 @@ fn run() {
     started := Shared.new(0)
     began := Condition.new()
     task.group workers {
-        print(task.race {
+        print((task.race {
             wait_until_cancel(shared, changed, started, began),
             finish_after_start(started, began)
-        })
+        }) ?? panic("race failed"))
     }
     reacquired :: shared.guard_edit()
     reacquired.value += 1

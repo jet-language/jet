@@ -1384,7 +1384,17 @@ fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 
 fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("join", 0) => Some(args.first().cloned()),
+        // D-CONC-FAIL1=A: every task wait uses the one fallible rail. The
+        // runtime task handle owns the same `TaskFailure` report for joins,
+        // races, and fail-fast group selection.
+        ("join", 0) => Some(Some(Type::Result {
+            ok: Box::new(
+                args.first()
+                    .cloned()
+                    .unwrap_or_else(|| Type::Named("Unit".to_string())),
+            ),
+            err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
+        })),
         // D-DETACH1: fire-and-forget — consumes the Task handle, returns unit.
         (Syntax::TASK_DETACH, 0) => Some(None),
         // D-COROUTINE1=A: task handle control-plane hooks over the internal coroutine substrate.

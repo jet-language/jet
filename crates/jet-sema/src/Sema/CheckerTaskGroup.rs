@@ -69,6 +69,16 @@ impl TaskGroupCtx {
 }
 
 impl<'a> Checker<'a> {
+    /// D-CONC-FAIL1=A: every task surface operation reports the same typed
+    /// failure rail. The combinator's successful payload remains its natural
+    /// value; cancellation, deadline, and child panic use TaskFailure.
+    fn task_failure_result(ok: Type) -> Type {
+        Type::Result {
+            ok: Box::new(ok),
+            err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
+        }
+    }
+
     pub(crate) fn active_taskgroup(&self) -> Option<&TaskGroupCtx> {
         self.taskgroup_stack.last()
     }
@@ -108,14 +118,14 @@ impl<'a> Checker<'a> {
                 "any" => self.infer_taskgroup_any(args, span),
                 _ => None,
             };
-            *recv_type_out = Some(INTERNAL_TASK_GROUP_SURFACE_TYPE.to_string());
+            *recv_type_out = Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE.to_string());
             *resolved_ret_out = ret.clone();
             return ret;
         }
 
         if method == "spawn" {
             let ret = self.infer_task_spawn(None, args, span);
-            *recv_type_out = Some(INTERNAL_TASK_SURFACE_TYPE.to_string());
+            *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
             *resolved_ret_out = ret.clone();
             return ret;
         }
@@ -126,7 +136,7 @@ impl<'a> Checker<'a> {
             "any" => self.infer_taskgroup_any(args, span),
             _ => None,
         };
-        *recv_type_out = Some(INTERNAL_TASK_SURFACE_TYPE.to_string());
+        *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
         *resolved_ret_out = ret.clone();
         ret
     }
@@ -467,8 +477,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             body.push(Stmt::Expr(cancel_call(&name, spawn.span)));
-            body.push(Stmt::Expr(join_call(&name, spawn.span)));
-            self.flow.moved.set(&name, spawn.span);
+            body.push(Stmt::Expr(join_drop_call(&name, spawn.span)));
         }
     }
 
@@ -533,6 +542,10 @@ impl<'a> Checker<'a> {
         let saved_esc = self.lambda_escapes;
         let saved_task = self.is_task_spawn;
         let saved_tg = self.in_taskgroup_spawn;
+        let binding = self.current_binding_name.clone();
+        let saved_binding = self.current_binding_name.take();
+        let saved_spawn_binding = self.task_spawn_binding_name.take();
+        self.task_spawn_binding_name = binding.clone();
         self.lambda_escapes = true;
         self.is_task_spawn = true;
         self.in_taskgroup_spawn = true;
@@ -540,6 +553,8 @@ impl<'a> Checker<'a> {
         self.lambda_escapes = saved_esc;
         self.is_task_spawn = saved_task;
         self.in_taskgroup_spawn = saved_tg;
+        self.current_binding_name = saved_binding;
+        self.task_spawn_binding_name = saved_spawn_binding;
 
         let t = match lam_ty {
             Some(Type::Fn { params, ret, .. }) => {
@@ -581,9 +596,14 @@ impl<'a> Checker<'a> {
                 args[0].expr.span(),
             );
         }
-        let binding = self.current_binding_name.clone();
         if let Some(receiver) = receiver {
-            self.register_taskgroup_spawn(receiver, binding, span);
+            // A task created while checking another task body belongs to the
+            // runtime group, not the outer task/result binding. The outer
+            // spawn is registered below its own binding after this lambda
+            // returns; nested branches must never create an auto-join for it.
+            if !saved_tg {
+                self.register_taskgroup_spawn(receiver, binding, span);
+            }
         }
         Some(Type::Apply {
             name: "Task".to_string(),
@@ -610,7 +630,10 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        let arg_ty = self.infer(&mut args[0].expr);
+        // Branch spawns belong to the combinator, not to the binding that
+        // receives its result. Keep that outer binding out of the spawn
+        // registration while inferring the branch list.
+        let arg_ty = self.infer_taskgroup_branches(&mut args[0].expr);
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
@@ -647,7 +670,7 @@ impl<'a> Checker<'a> {
             None => return None,
         };
         self.mark_taskgroup_all_consumed(&args[0].expr);
-        Some(Type::List(Box::new(elem)))
+        Some(Self::task_failure_result(Type::List(Box::new(elem))))
     }
 
     fn infer_taskgroup_race(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
@@ -692,7 +715,7 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        let arg_ty = self.infer(&mut args[0].expr);
+        let arg_ty = self.infer_taskgroup_branches(&mut args[0].expr);
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
@@ -728,7 +751,14 @@ impl<'a> Checker<'a> {
             None => return None,
         };
         self.mark_taskgroup_all_consumed(&args[0].expr);
-        Some(elem)
+        Some(Self::task_failure_result(elem))
+    }
+
+    fn infer_taskgroup_branches(&mut self, expr: &mut Expr) -> Option<Type> {
+        let saved_binding = self.current_binding_name.take();
+        let ty = self.infer(expr);
+        self.current_binding_name = saved_binding;
+        ty
     }
 
     fn mark_taskgroup_all_consumed(&mut self, expr: &Expr) {
@@ -1047,6 +1077,32 @@ fn join_call(name: &str, span: Span) -> Expr {
         owner_type_args: Vec::new(),
         type_args: Vec::new(),
         args: Vec::new(),
+        recv_type: None,
+        resolved_ret: None,
+        checked_widen: false,
+    }
+}
+
+fn join_drop_call(name: &str, span: Span) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(join_call(name, span)),
+        method: Syntax::METHOD_DROP.to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: vec![CallArg {
+            convention: crate::AST::AccessConvention::Read,
+            expr: Expr::Str(
+                vec![crate::AST::StrPart::Lit(
+                    "task group closes the child result".to_string(),
+                )],
+                span,
+            ),
+            span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }],
         recv_type: None,
         resolved_ret: None,
         checked_widen: false,

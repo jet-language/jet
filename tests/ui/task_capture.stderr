@@ -1,7 +1,15 @@
 Error [E1101]: `count` is a mutable value — the new task might outlive this scope
-  --> tests/ui/task_capture.jet:3:10
+  --> tests/ui/task_capture.jet:3:15
     |
   3 |     t :: task {
-    |          ^^^^
+    |               ^
  Why: tasks run concurrently; changing an outer binding inside a task would make ownership unclear
  Fix: create task-local state inside the task, or send updates through a channel
+
+Error [E0402]: this call can fail and nothing checks it
+  --> tests/ui/task_capture.jet:6:7
+    |
+  6 |     t.join()
+    |       ^^^^
+ Why: a fallible result can't be ignored — handle it or say failure is impossible
+ Fix: use `?`, `??`, `panic ...`, or `.drop("reason")` to intentionally discard

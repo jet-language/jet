@@ -1438,8 +1438,14 @@ pub(crate) fn lower_method_call(
             let tasks = lower_expr(&args[0].expr, cx, env);
             let elem = taskgroup_result_elem(&tasks);
             let ty = resolved_ret.cloned().unwrap_or_else(|| match method {
-                "all" => Type::List(Box::new(elem.clone())),
-                _ => elem,
+                "all" => Type::Result {
+                    ok: Box::new(Type::List(Box::new(elem.clone()))),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                },
+                _ => Type::Result {
+                    ok: Box::new(elem),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                },
             });
             let kind = match method {
                 "all" => TExprKind::TaskGroupAll {
@@ -1499,7 +1505,10 @@ pub(crate) fn lower_method_call(
         return TExpr {
             ty: resolved_ret
                 .cloned()
-                .unwrap_or_else(|| Type::List(Box::new(elem))),
+                .unwrap_or_else(|| Type::Result {
+                    ok: Box::new(Type::List(Box::new(elem))),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                }),
             kind: TExprKind::TaskGroupAll {
                 tasks: Box::new(tasks),
             },
@@ -1515,7 +1524,10 @@ pub(crate) fn lower_method_call(
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: resolved_ret.cloned().unwrap_or(elem),
+            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                ok: Box::new(elem),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+            }),
             kind: TExprKind::TaskGroupRace {
                 tasks: Box::new(tasks),
             },
@@ -1531,7 +1543,10 @@ pub(crate) fn lower_method_call(
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: resolved_ret.cloned().unwrap_or(elem),
+            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                ok: Box::new(elem),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+            }),
             kind: TExprKind::TaskGroupAny {
                 tasks: Box::new(tasks),
             },
@@ -3396,7 +3411,7 @@ pub(crate) fn lower_method_call(
     // (Source/Collections.rs), read off the receiver's already-resolved type
     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
     // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
-    // → `T`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
+    // → `T ? TaskFailure`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
@@ -3408,7 +3423,13 @@ pub(crate) fn lower_method_call(
         };
         let elem = elem.unwrap_or_else(unit_type);
         let (op, ty) = match method {
-            "join" => (THandleOp::TaskJoin, elem),
+            "join" => (
+                THandleOp::TaskJoin,
+                resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                    ok: Box::new(elem),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                }),
+            ),
             "detach" => (THandleOp::TaskDetach, unit_type()),
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),
