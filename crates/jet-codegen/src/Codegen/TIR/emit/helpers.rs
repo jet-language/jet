@@ -196,7 +196,7 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
     }
     fmt.push_str("\"");
     if args.is_empty() {
-        format!("{fmt}.to_string()")
+        format!("{fmt}).to_string()")
     } else {
         format!("{fmt}, {})", args.join(", "))
     }

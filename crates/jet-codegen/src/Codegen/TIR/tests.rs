@@ -26,6 +26,12 @@
         assert!(covers("fn guarded() { #Shield { value :: 1 } }", "guarded"));
     }
 
+    #[test]
+    fn empty_string_parts_emit_balanced_format_call() {
+        let cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new());
+        assert_eq!(emit_tir_str(&[], &cx), "format!(\"\").to_string()");
+    }
+
     /// Like `covers`, but runs the FULL front end (sema) on `src` first, so
     /// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
     /// (S57/M9.5) — are present before gating. Builds a single-module bundle the

@@ -185,7 +185,54 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
             map.insert(alias, mangle(stem));
         }
     }
+    for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        map.insert(local, mangle(&bundle.modules[target].alias));
+    }
     map
+}
+
+/// Return selective-import aliases that name a visible bodyless child module.
+/// Sema installs the same child edge in its module-import map; codegen only
+/// projects that edge to the generated Rust module name.
+fn unqualified_file_module_targets(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> Vec<(String, usize)> {
+    let module = &bundle.modules[module_idx];
+    let mut targets = Vec::new();
+    for imp in &module.imports {
+        let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &imp.kind
+        else {
+            continue;
+        };
+        let Some(parent) = file_import_target(bundle, module_idx, module_alias) else {
+            continue;
+        };
+        for (original, local_alias) in items {
+            let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+            let Some(declaration) = bundle.name_ledger.declaration(parent, original) else {
+                continue;
+            };
+            if declaration.kind != "file_module"
+                || !bundle.name_ledger.visible(module_idx, parent, original)
+            {
+                continue;
+            }
+            let Some(target) = bundle
+                .name_ledger
+                .alias(parent, original)
+                .and_then(|alias| alias.target_module)
+            else {
+                continue;
+            };
+            targets.push((local.to_string(), target));
+        }
+    }
+    targets
 }
 
 /// D-MOD4: build the `pub use` re-export call map for `module_idx`. For each
@@ -334,6 +381,10 @@ pub(crate) fn unqualified_import_maps(
 ) -> (HashMap<String, String>, HashMap<String, (String, String)>) {
     let mut inline_map: HashMap<String, String> = HashMap::new();
     let mut file_map: HashMap<String, (String, String)> = HashMap::new();
+    let file_module_locals: HashSet<String> = unqualified_file_module_targets(bundle, module_idx)
+        .into_iter()
+        .map(|(local, _)| local)
+        .collect();
     let module = &bundle.modules[module_idx];
     // Build a set of inline code module aliases for this module.
     let code_mod_aliases: std::collections::HashSet<String> = module
@@ -363,6 +414,9 @@ pub(crate) fn unqualified_import_maps(
         }
         for (orig, alias_opt) in items {
             let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+            if file_module_locals.contains(local) {
+                continue;
+            }
             let Some(name) = bundle.name_ledger.effective_alias(module_idx, local) else {
                 continue;
             };
@@ -684,6 +738,24 @@ pub(crate) fn import_sig_map(
             }
         }
     }
+    for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        for item in &bundle.modules[target].items {
+            if let Item::Func(function) = item {
+                if bundle.name_ledger.visible(module_idx, target, &function.name) {
+                    map.insert(
+                        (local.clone(), function.name.clone()),
+                        function
+                            .params
+                            .iter()
+                            .map(|param| {
+                                (param.convention, qualify_unit_type(bundle, target, &param.ty))
+                            })
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
@@ -765,6 +837,21 @@ pub(crate) fn import_ret_map(
                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
             {
                 map.insert((local, original), ret);
+            }
+        }
+    }
+    for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        for item in &bundle.modules[target].items {
+            if let Item::Func(function) = item {
+                if bundle.name_ledger.visible(module_idx, target, &function.name) {
+                    map.insert(
+                        (local.clone(), function.name.clone()),
+                        function
+                            .return_type
+                            .as_ref()
+                            .map(|ty| qualify_unit_type(bundle, target, ty)),
+                    );
+                }
             }
         }
     }

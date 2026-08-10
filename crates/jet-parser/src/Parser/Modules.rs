@@ -557,7 +557,7 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
         web_target: Option<crate::Syntax::WebBucket>,
     ) -> Result<Item, Diagnostic> {
-        if is_pub {
+        if is_pub && !is_package_pub {
             self.bump(); // consume `pub`
         }
         let start = self.bump().span; // consume `module`
