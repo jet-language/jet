@@ -914,7 +914,25 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
 /// Outside a workspace, falls through to the same project-plan realize path as
 /// `build` (tests ride the package after realize).
 fn run_jet_tests(dir: &std::path::Path) -> bool {
-    match std::process::Command::new(find_jet_binary())
+    // Cargo runs integration-test binaries from `target/debug/deps`, while
+    // the sibling compiler binary stays in `target/debug`. Find that binary
+    // before falling back to the normal installed/PATH lookup.
+    let jet = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let deps = exe.parent()?;
+            (deps.file_name().and_then(|name| name.to_str()) == Some("deps"))
+                .then_some(deps.parent()?.join(if cfg!(windows) {
+                    "jet.exe"
+                } else {
+                    Syntax::BINARY_NAME
+                }))
+        })
+        .filter(|candidate| candidate.is_file())
+        .map(|candidate| candidate.to_string_lossy().into_owned())
+        .unwrap_or_else(find_jet_binary);
+
+    match std::process::Command::new(jet)
         .arg("test")
         .current_dir(dir)
         .status()

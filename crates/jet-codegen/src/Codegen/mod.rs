@@ -2646,15 +2646,35 @@ mod tests {
     }
 }
 
+struct TestCase<'a> {
+    test: &'a TestDef,
+    /// Rust module path that owns the test. `None` means the generated root.
+    module: Option<String>,
+    index: usize,
+}
+
+fn test_fn_path(test: &TestCase<'_>) -> String {
+    let name = format!("jet_test_{}", test.index);
+    test.module
+        .as_deref()
+        .map_or(name.clone(), |module| format!("{module}::{name}"))
+}
+
 /// Emit a test harness binary: all definitions plus one `main` that runs
 /// every `#Test "…" { }` block (M6 phase 2).
 pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
-    let tests: Vec<&TestDef> = prog
+    let tests: Vec<TestCase<'_>> = prog
         .items
         .iter()
         .filter_map(|i| match i {
             Item::Test(t) => Some(t),
             _ => None,
+        })
+        .enumerate()
+        .map(|(index, test)| TestCase {
+            test,
+            module: None,
+            index,
         })
         .collect();
     assert!(!tests.is_empty(), "emit_tests called with no test blocks");
@@ -2776,7 +2796,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         }
     }
 
-    emit_test_fns(&cx, &tests, &mut out);
+    emit_test_fns(&cx, &tests, None, &mut out);
     emit_test_main(&tests, &mut out);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
@@ -2786,7 +2806,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 /// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
 /// (unit or property) is invoked through its `jet_test_N()` entry; the loop is
 /// identical whichever kind it is.
-fn emit_test_main(tests: &[&TestDef], out: &mut String) {
+fn emit_test_main(tests: &[TestCase<'_>], out: &mut String) {
     emit_test_main_cov(tests, &[], out, false)
 }
 
@@ -2806,7 +2826,7 @@ fn emit_test_main(tests: &[&TestDef], out: &mut String) {
 /// Reporting always walks results in (possibly shuffled) `slots` order, so
 /// output is deterministic regardless of which thread finishes first.
 fn emit_test_main_cov(
-    tests: &[&TestDef],
+    tests: &[TestCase<'_>],
     checks: &[&ResolvedOutput],
     out: &mut String,
     coverage: bool,
@@ -2818,16 +2838,20 @@ fn emit_test_main_cov(
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
-    for (i, test) in tests.iter().enumerate() {
+    for test in tests {
+        let def = test.test;
         let name = escape_rust_str(
-            test.name
+            def.name
                 .as_deref()
                 .expect("sema resolves every test marker name before codegen"),
         );
-        let skip = whole_test_skip(test);
+        let skip = whole_test_skip(def);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: jet_test_{} }},\n",
-            name, skip, !test.params.is_empty(), i
+            "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: {} }},\n",
+            name,
+            skip,
+            !def.params.is_empty(),
+            test_fn_path(test),
         ));
     }
     for (i, check) in checks.iter().enumerate() {
@@ -2884,7 +2908,7 @@ fn emit_test_main_cov(
     out.push_str("        match (skip, res) {\n");
     out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); report.skipped += 1; }\n");
     out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } report.passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { let failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { let mut failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); if property { failure.message = msg; } println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
     out.push_str("            (false, None) => unreachable!(),\n");
     out.push_str("        }\n");
     out.push_str("    }\n");
@@ -2912,8 +2936,8 @@ fn emit_output_check_fns(checks: &[&ResolvedOutput], out: &mut String) {
 
 /// Does any test in the set declare property parameters (D-TEST1)? Drives whether
 /// the harness needs `PROP_PRELUDE`.
-fn any_property_test(tests: &[&TestDef]) -> bool {
-    tests.iter().any(|t| !t.params.is_empty())
+fn any_property_test(tests: &[TestCase<'_>]) -> bool {
+    tests.iter().any(|t| !t.test.params.is_empty())
 }
 
 /// D-DOTSCOPE1: is this test whole-test-skipped — i.e. does a `.skip` scope
@@ -2932,12 +2956,23 @@ fn whole_test_skip(test: &TestDef) -> bool {
 /// plus a driver `jet_test_N()` that generates inputs, runs cases, and shrinks
 /// the first failure to a minimal counterexample. Either way `jet_test_N()` is
 /// the single entry the main loop calls, so the reporting loop is shared.
-fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
+fn emit_test_fns(
+    cx: &Cx,
+    tests: &[TestCase<'_>],
+    module: Option<&str>,
+    out: &mut String,
+) {
     const CASES: usize = 200;
     const SHRINK_STEPS: usize = 2000;
-    for (i, test) in tests.iter().enumerate() {
+    let visibility = if module.is_some() { "pub " } else { "" };
+    for test_case in tests {
+        if test_case.module.as_deref() != module {
+            continue;
+        }
+        let test = test_case.test;
+        let i = test_case.index;
         if test.params.is_empty() {
-            out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
+            out.push_str(&format!("{visibility}fn jet_test_{}() -> Result<(), String> {{\n", i));
             emit_test_body(cx, &test.body, out);
             out.push_str("    Ok(())\n");
             out.push_str("}\n\n");
@@ -2952,7 +2987,7 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
             .map(|p| format!("{}: {}", mangle(&p.name), cx.rust_type(&p.ty)))
             .collect();
         out.push_str(&format!(
-            "fn jet_prop_{}({}) -> Result<(), String> {{\n",
+            "{visibility}fn jet_prop_{}({}) -> Result<(), String> {{\n",
             i,
             sig.join(", ")
         ));
@@ -2966,7 +3001,7 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
         let n = test.params.len();
         let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
         let tuple_ty = format!("({},)", types.join(", "));
-        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
+        out.push_str(&format!("{visibility}fn jet_test_{}() -> Result<(), String> {{\n", i));
         out.push_str("    let seed = jet_prop_seed();\n");
         out.push_str("    let mut rng = JetRng::new(seed);\n");
         // call helper that takes the tuple, returns Result
@@ -3283,13 +3318,22 @@ pub fn emit_bundle_tests_cov(
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives =
         crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let tests: Vec<&TestDef> = bundle
+    let tests: Vec<TestCase<'_>> = bundle
         .modules
         .iter()
-        .flat_map(|module| module.items.iter())
-        .filter_map(|i| match i {
-            Item::Test(t) => Some(t),
-            _ => None,
+        .enumerate()
+        .flat_map(|(owner, module)| {
+            let module_path = (owner != bundle.entry).then(|| mangle(&module.alias));
+            module.items.iter().filter_map(move |item| match item {
+                Item::Test(test) => Some((module_path.clone(), test)),
+                _ => None,
+            })
+        })
+        .enumerate()
+        .map(|(index, (module, test))| TestCase {
+            test,
+            module,
+            index,
         })
         .collect();
     let checks = bundle.modules.iter().flat_map(|module| module.items.iter()).filter_map(|item| {
@@ -3344,9 +3388,15 @@ pub fn emit_bundle_tests_cov(
         if i == bundle.entry {
             continue;
         }
-        let ns = module.alias.clone();
-        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
+        let module_path = mangle(&module.alias);
+        out.push_str(&format!("mod {} {{\n", module_path));
         out.push_str(MOD_USE);
+        out.push_str("use super::{jet_proof_record, jet_test_failure, jet_test_print};\n");
+        if tests.iter().any(|test| {
+            test.module.as_deref() == Some(module_path.as_str()) && !test.test.params.is_empty()
+        }) {
+            out.push_str("use super::{jet_prop_seed, JetGen, JetRng};\n");
+        }
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -3383,6 +3433,7 @@ pub fn emit_bundle_tests_cov(
         cx.inline_core_imports = inline_core;
         cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
+        emit_test_fns(&cx, &tests, Some(&module_path), &mut out);
         out.push_str("}\n\n");
     }
 
@@ -3422,7 +3473,7 @@ pub fn emit_bundle_tests_cov(
     cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
-    emit_test_fns(&cx, &tests, &mut out);
+    emit_test_fns(&cx, &tests, None, &mut out);
     emit_output_check_fns(&checks, &mut out);
     emit_test_main_cov(&tests, &checks, &mut out, coverage);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
@@ -3438,16 +3489,16 @@ pub fn emit_bundle_tests_cov(
 ///     a compiler diagnostic, same tier as `run_bench`'s missing-file message).
 ///   - unnamed: exactly one property test in the file is picked automatically;
 ///     zero or more-than-one is an `Err` (the latter lists the candidates).
-fn select_fuzz_target<'a>(
-    tests: &[&'a TestDef],
+fn select_fuzz_target(
+    tests: &[TestCase<'_>],
     test_name: Option<&str>,
 ) -> Result<usize, String> {
     if let Some(name) = test_name {
         match tests
             .iter()
-            .position(|test| test.name.as_deref() == Some(name))
+            .position(|test| test.test.name.as_deref() == Some(name))
         {
-            Some(i) if !tests[i].params.is_empty() => Ok(i),
+            Some(i) if !tests[i].test.params.is_empty() => Ok(i),
             Some(_) => Err(format!(
                 "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
                 name
@@ -3458,7 +3509,7 @@ fn select_fuzz_target<'a>(
         let candidates: Vec<usize> = tests
             .iter()
             .enumerate()
-            .filter(|(_, t)| !t.params.is_empty())
+            .filter(|(_, t)| !t.test.params.is_empty())
             .map(|(i, _)| i)
             .collect();
         match candidates.len() {
@@ -3473,6 +3524,7 @@ fn select_fuzz_target<'a>(
                     .iter()
                     .map(|&index| {
                         tests[index]
+                            .test
                             .name
                             .as_deref()
                             .expect("sema resolves every test marker name before codegen")
@@ -3513,12 +3565,18 @@ pub fn emit_bundle_fuzz(
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives =
         crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let tests: Vec<&TestDef> = entry
+    let tests: Vec<TestCase<'_>> = entry
         .items
         .iter()
         .filter_map(|i| match i {
             Item::Test(t) => Some(t),
             _ => None,
+        })
+        .enumerate()
+        .map(|(index, test)| TestCase {
+            test,
+            module: None,
+            index,
         })
         .collect();
     if tests.is_empty() {
@@ -3639,8 +3697,8 @@ pub fn emit_bundle_fuzz(
     cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
-    emit_test_fns(&cx, &tests, &mut out);
-    emit_fuzz_main(&cx, tests[target], target, file_label, &mut out);
+    emit_test_fns(&cx, &tests, None, &mut out);
+    emit_fuzz_main(&cx, &tests[target], target, file_label, &mut out);
     Ok(strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))))
@@ -3649,8 +3707,15 @@ pub fn emit_bundle_fuzz(
 /// See `emit_bundle_fuzz`'s doc comment for the overall shape. `test` is the
 /// chosen property test, `idx` its position (`jet_prop_{idx}` is its body fn,
 /// already emitted by `emit_test_fns`).
-fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &mut String) {
+fn emit_fuzz_main(
+    cx: &Cx,
+    test_case: &TestCase<'_>,
+    idx: usize,
+    file_label: &str,
+    out: &mut String,
+) {
     const SHRINK_STEPS: usize = 2000;
+    let test = test_case.test;
     let n = test.params.len();
     let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
     let tuple_ty = format!("({},)", types.join(", "));
