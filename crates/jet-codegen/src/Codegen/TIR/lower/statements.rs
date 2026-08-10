@@ -1425,6 +1425,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
             // when bound immutably (its methods take `&mut self`). Mirror
             // `emit_let`'s `is_file_handle` set exactly.
+            // card #1859: `Mailer` (`jet_email::Mailer::send`, Prelude/CoreLib/Email.rs)
+            // takes `&mut self` too and was missing from this set, so a `mailer ::
+            // email.smtp(…)` local kept `let` and rustc rejected `.send()` (E0596, I2).
             let is_file_handle = matches!(
                 &ty,
                 Type::Named(n) if n == "FileReader" || n == "FileWriter"
@@ -1436,6 +1439,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     || n == "Stdout" || n == "Stderr"
                     || n == "TcpStream" || n == "UnixStream" || n == "HTTPRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
+                    || n == "Mailer"
             )
             // D-DATAFLOW1=A: DataStream.next / stream reducers take &mut.
             || matches!(

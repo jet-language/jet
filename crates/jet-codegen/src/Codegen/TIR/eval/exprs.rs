@@ -4120,11 +4120,9 @@ impl<'a> EvalCtx<'a> {
                             let mut sink = sink.lock().expect("evaluator sink poisoned");
                             sink.stderr.push_str(&rendered);
                             sink.exit_code = Some(70);
-                            return Err(Diagnostic::error(
-                                "SOFT_EXIT",
+                            return Err(Diagnostic::soft_exit(
                                 "70".to_string(),
                                 "or-fallback panic stop".to_string(),
-                                String::new(),
                                 Some(self.span()),
                             ));
                         }
@@ -4534,15 +4532,7 @@ impl<'a> EvalCtx<'a> {
                                 .ok_or_else(|| unsupported("shared handle", self.span()))?;
                             let lease = shared
                                 .acquire(editable, self.task_cancel.as_ref())
-                                .ok_or_else(|| {
-                                    Diagnostic::error(
-                                        "TASK_CANCELLED",
-                                        "task cancelled".to_string(),
-                                        "the owning taskgroup stopped this task".to_string(),
-                                        String::new(),
-                                        Some(self.span()),
-                                    )
-                                })?;
+                                .ok_or_else(|| Diagnostic::task_cancelled(Some(self.span())))?;
                             let mut runtime =
                                 self.runtime.lock().expect("evaluator runtime poisoned");
                             let lease_index = runtime.shared_guards.len();
@@ -4593,15 +4583,7 @@ impl<'a> EvalCtx<'a> {
                         let editable = method != "read";
                         let _lease = shared
                             .acquire(editable, self.task_cancel.as_ref())
-                            .ok_or_else(|| {
-                                Diagnostic::error(
-                                    "TASK_CANCELLED",
-                                    "task cancelled".to_string(),
-                                    "the owning taskgroup stopped this task".to_string(),
-                                    String::new(),
-                                    Some(self.span()),
-                                )
-                            })?;
+                            .ok_or_else(|| Diagnostic::task_cancelled(Some(self.span())))?;
                         let shared_value = shared
                             .value
                             .lock()
@@ -5029,11 +5011,9 @@ impl<'a> EvalCtx<'a> {
                     let mut sink = sink.lock().expect("evaluator sink poisoned");
                     sink.stderr.push_str(&rendered);
                     sink.exit_code = Some(70);
-                    return Err(Diagnostic::error(
-                        "SOFT_EXIT",
+                    return Err(Diagnostic::soft_exit(
                         "70".to_string(),
                         "require/panic stop".to_string(),
-                        String::new(),
                         Some(self.span()),
                     ));
                 }
@@ -5995,11 +5975,9 @@ impl<'a> EvalCtx<'a> {
                             .push_str(crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
                         sink.stderr.push('\n');
                         sink.exit_code = Some(70);
-                        return Err(Diagnostic::error(
-                            "SOFT_EXIT",
+                        return Err(Diagnostic::soft_exit(
                             "70".to_string(),
                             crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP.to_string(),
-                            String::new(),
                             Some(self.span()),
                         ));
                     }

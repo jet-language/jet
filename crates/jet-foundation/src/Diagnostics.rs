@@ -227,6 +227,49 @@ impl Diagnostic {
         d
     }
 
+    /// The TIR interpreter's internal control-flow sentinels: each unwinds a
+    /// `Result<_, Diagnostic>` cleanly out of `eval_expr`/a task worker without
+    /// ever meaning to reach a renderer (`SOFT_EXIT`: a `panic`/`require`/
+    /// contract failure or an `E3005` trap, after already writing the rendered
+    /// message and exit code into the shared `DevSink` — Source/Interpreter.rs
+    /// and jet-jit/src/jit/deopt.rs both special-case `code == "SOFT_EXIT"`;
+    /// `TASK_CANCELLED`: a task's wait point observed a pending cancel).
+    /// Deliberately NOT registered rows — they must never surface as a real
+    /// user-facing diagnostic — so this skips `error()`'s registry lookup
+    /// instead of panicking on the code every one of them would otherwise
+    /// trigger by construction.
+    fn internal_sentinel(code: &'static str, what: String, why: String, span: Option<Span>) -> Self {
+        let mut d = Diagnostic {
+            moment: ReportMoment::Run,
+            severity: Severity::Error,
+            code: code.to_string(),
+            what,
+            why,
+            fix: String::new(),
+            span,
+            edit: None,
+            detail: None,
+            structured: None,
+        };
+        d.attach_teaching_edit();
+        d
+    }
+
+    /// See `internal_sentinel`.
+    pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Self {
+        Self::internal_sentinel("SOFT_EXIT", what, why, span)
+    }
+
+    /// See `internal_sentinel`.
+    pub fn task_cancelled(span: Option<Span>) -> Self {
+        Self::internal_sentinel(
+            "TASK_CANCELLED",
+            "task cancelled".to_string(),
+            "the owning taskgroup stopped this task".to_string(),
+            span,
+        )
+    }
+
     pub fn e0956_unsupported(what: &str, span: Span) -> Self {
         Self::error(
             "E0956",

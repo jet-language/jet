@@ -296,12 +296,20 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
-            | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
+            // D-CONC-SPAWN1=D: `task.group name { … }` needs no `use core.X`
+            // import to reach the embedded `jet_std` task runtime (AOT embeds
+            // it, JIT/interpreter compile the same Prelude source) — parsed
+            // syntax, not raw source text, owns the requirement, exactly like
+            // `#Shield` below.
+            Stmt::TaskGroup { body, span, .. } => {
+                note_core_usage(used, spans, "core.concurrency::task", Some(*span));
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
+            }
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
@@ -422,6 +430,16 @@ pub(crate) fn collect_core_expr(
             recv_type,
             ..
         } => {
+            // D-CONC-SPAWN1=D: bare `task expr`/`task.all|race|any { … }` parse
+            // into a method call on the parser-private `INTERNAL_TASK_RECEIVER`
+            // ident (set before sema ever runs), so this is available even
+            // though `recv_type` isn't filled in until inference. Needs the
+            // same embedded `jet_std` runtime as `task.group` above, with no
+            // `use core.X` import required.
+            if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::INTERNAL_TASK_RECEIVER)
+            {
+                note_core_usage(used, spans, "core.concurrency::task", Some(*method_span));
+            }
             // Epoch 3 String surface delegates Unicode classification, title
             // casing, trimming, and display-width padding to the pinned
             // `core.text` implementation. Mark that shared prelude reachable

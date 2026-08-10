@@ -9,16 +9,12 @@ fn slow_one() => Int {
 fn fast_seven() => Int = 7
 
 fn run() {
-    taskgroup race_group {
-        fast :: race_group.task => fast_seven()
-        slow :: race_group.task => slow_one()
-        time.sleep(200)
-        print(race_group.race([slow, fast]))
+    task.group race_group {
+        // Listed slow-first: race still returns the fast branch's value,
+        // proving completion order (not list order) picks the winner.
+        print(task.race { slow_one(), fast_seven() })
     }
-    taskgroup any_group {
-        fast :: any_group.task => fast_seven()
-        slow :: any_group.task => slow_one()
-        time.sleep(200)
-        print(any_group.any([slow, fast]))
+    task.group any_group {
+        print(task.any { slow_one(), fast_seven() })
     }
 }

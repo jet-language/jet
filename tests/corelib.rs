@@ -9764,10 +9764,8 @@ fn slow_one() => Int {
 }
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => slow_one()
-        fast :: g.task => fast_nine()
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race { slow_one(), fast_nine() }
         print(winner)
     }
 }

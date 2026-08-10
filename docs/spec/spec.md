@@ -2335,21 +2335,20 @@ Iterating the handles yourself instead is a different thing: `loop h, hs { … }
 hands you each handle, which takes the list, so the loop must own it. A borrowed
 list is **E0120** and points back at these methods.
 
-### Taskgroups and structured combinators (D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-07-29)
+### Taskgroups and structured combinators (D-CONC-SPAWN1=D, respelling D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1; D-CONCSELECT1; verified 2026-08-10)
 
-Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside
-`taskgroup g { … }`, `g.task => expression` or `g.task => { … }` spawns a
-child owned by the
-group. Unjoined handles at scope exit are cancelled and joined before the block
-returns.
+Structured concurrency uses a scoped `task.group` (D-CONC-SPAWN1=D, respelling
+D-TASKSCOPE1=A). Inside `task.group g { … }`, the bare `task expression` or
+`task { … }` spawns a child owned by the innermost active group. Unjoined
+handles at scope exit are cancelled and joined before the block returns.
 
 `TaskGroup` may also be written as a direct parameter of a named function
 (D-TASKGROUP-PARAM1=A). This lets a lexical group flow down the call stack:
 
 ```jet
 fn add_work(group: TaskGroup, value: Int) {
-    task :: group.task => value + 1
-    print(task.join())
+    handle :: task value + 1
+    print(handle.join() ?? 0)
 }
 ```
 
@@ -2359,7 +2358,9 @@ this frame cannot prove a borrowed owner outlives the loan. `TaskGroup` remains 
 a general value: it is illegal in fields, returns, local declarations, lambda
 parameters, and escaping closures. The parameter carries the lexical group's
 internal collector. A task spawned by a helper therefore remains owned by the
-caller's group and is cancelled and joined at that outer scope's exit.
+caller's group and is cancelled and joined at that outer scope's exit. The bare
+`task` keyword always targets the innermost active group — a function cannot
+take two simultaneous `TaskGroup` parameters and address a specific one.
 
 #### Borrowed captures in a group child (D-TASKBORROW1=A)
 
@@ -2371,12 +2372,11 @@ distinct constant indexes are disjoint, and anything dynamic is treated as
 overlapping. Two children reaching one place is **E1101**.
 
 ```jet
-taskgroup g {
+task.group g {
     left :: &particles[0]
     right :: &particles[2]
-    a :: g.task => { left.position += left.velocity; left.position }
-    b :: g.task => { right.position += right.velocity; right.position }
-    print(g.all([a, b]))
+    result :: task.all { { left.position += left.velocity; left.position }, { right.position += right.velocity; right.position } }
+    print(result)
 }
 ```
 
@@ -2385,19 +2385,23 @@ group's own block drops before the group joins, and a group reached through a
 `TaskGroup` parameter joins in another frame; both stay **E1102**. Detached
 tasks, channels, and `tasks.spawn` are unchanged — they still require ownership.
 
-Combinators are methods on the group handle only (no detached work):
+The fan-out combinators spawn and join their branches in one call — there is no
+separate spawn-then-combine step, so a combinator cannot join handles spawned
+earlier:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `g.all([t1, t2, …]) => [Task]` | Every task must succeed. Fail-fast cancels siblings and exits with `panic: a task panicked` (example `169_all_failfast.jet`). |
-| `g.race([t1, t2, …]) => T` | The first **successful** result wins. Losers are cancelled (D-RACEWIN1; example `167_race_cancel.jet`). |
-| `g.any([t1, t2, …]) => T` | The first **completion** wins, including errors. |
-| `[Task<T>].join_all()` / `.wait_all()` | Both methods consume the list and return results in list order. They use the same fail-fast rule as `g.all`: a failure cancels remaining siblings. |
+| `task.all { e1, e2, … } => [T]` | Every branch must succeed. Fail-fast cancels siblings and exits with `panic: a task panicked` (example `all_failfast.jet`). |
+| `task.race { e1, e2, … } => T` | The first **successful** result wins. Losers are cancelled (D-RACEWIN1; example `race_cancel.jet`). |
+| `task.any { e1, e2, … } => T` | The first **completion** wins, including errors. |
+| `[Task<T>].join_all()` / `.wait_all()` | Both methods consume the list and return results in list order. They use the same fail-fast rule as `task.all`: a failure cancels remaining siblings. |
 | `[Task<T>].cancel_all()` | The method borrows the list and requests cancellation for every task. It does not select a winner or loser and does not wait. Each task unwinds at its next wait point under D-CANCELMODEL1. |
 
 `.join_all()` and `.wait_all()` therefore cancel remaining siblings and fail
-fast like `g.all`; `.cancel_all()` is explicit cancellation of every task, not
-loser selection.
+fast like `task.all`; `.cancel_all()` is explicit cancellation of every task,
+not loser selection. `task.all`/`task.race`/`task.any` also work outside a
+lexical `task.group` — each branch becomes its own detached task for the
+combinator's duration.
 
 - Waiting on several sources at once — a select — is a subjectless `if` table
   whose arm heads are a binding and a source (D-CONC-CHAN2=D; amends

@@ -664,8 +664,8 @@ fn task_join_all_parent_deadline_is_e3003_in_every_tier() {
 use core.tasks as tasks
 fn run() {
     #Context(deadline: 0) {
-        task :: tasks.spawn(() => 10)
-        tasks.join_all([task])
+        handle :: tasks.spawn(() => 10)
+        tasks.join_all([handle])
     }
     print(\"unreachable\")
 }
@@ -764,8 +764,8 @@ fn run() {
     let duplicate = "\
 use core.tasks as tasks
 fn run() {
-    task :: tasks.spawn(() => 10)
-    tasks.join_all([task, task])
+    handle :: tasks.spawn(() => 10)
+    tasks.join_all([handle, handle])
 }
 ";
     let diagnostics = jet::compile(duplicate).expect_err("one handle cannot be joined twice");
@@ -777,9 +777,9 @@ fn run() {
     let reused = "\
 use core.tasks as tasks
 fn run() {
-    task :: tasks.spawn(() => 10)
-    tasks.join_all([task])
-    task.join()
+    handle :: tasks.spawn(() => 10)
+    tasks.join_all([handle])
+    handle.join()
 }
 ";
     let diagnostics = jet::compile(reused).expect_err("joined handle must stay consumed");
@@ -791,8 +791,8 @@ fn run() {
     let borrowed_list = "\
 use core.tasks as tasks
 fn run() {
-    task :: tasks.spawn(() => 10)
-    handles :: [task]
+    handle :: tasks.spawn(() => 10)
+    handles :: [handle]
     tasks.join_all(handles)
 }
 ";
@@ -867,7 +867,7 @@ fn taskgroup_select_receives_from_real_channel() {
     let src = "\
 use core.tasks as tasks
 fn run() {
-    taskgroup g {
+    task.group g {
         (sender, receiver) :: tasks.channel<Int>()
         sender.send(42)
         value :: g.select().recv(receiver).wait()

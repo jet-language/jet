@@ -10,7 +10,7 @@ use std::fs;
 const OUTER_GROUP_HELPER: &str = r#"
 fn spawn_later(group: TaskGroup) => Shared<[Int]> {
     gate :: Shared.new([0])
-    group.task => {
+    task {
         gate.edit((state: [Int]) => state[0] = state[0] + 1)
         loop gate.read((state: [Int]) => state[0]) == 1 {}
         gate.edit((state: [Int]) => state[0] = state[0] + 1)
@@ -23,7 +23,7 @@ fn spawn_later(group: TaskGroup) => Shared<[Int]> {
 }
 
 fn run() {
-    taskgroup group {
+    task.group group {
         gate :: spawn_later(group)
         print("inside")
         gate.edit((state: [Int]) => state[0] = state[0] + 1)
@@ -87,30 +87,41 @@ fn named_function_parameters_spawn_copy_and_owned_captures() {
     if !have_rustc() {
         return;
     }
+    // D-CONC-SPAWN1=D: the bare `task` keyword binds to the innermost active
+    // group (`taskgroup_stack.last()`), so it cannot target a specific one of
+    // two simultaneous `TaskGroup` parameters the way `first.task => …` /
+    // `second.task => …` could under the retired spelling. The ratified text
+    // is silent on multi-group-per-function, so this splits the old
+    // `spawn_both(first, second)` into two single-group helpers instead of
+    // guessing a new qualified-spawn syntax (see card #1854 log).
     let source = r#"
 fn spawn_one(group: TaskGroup, value: Int) {
-    task :: group.task => value + 1
-    print(task.join())
+    handle :: task value + 1
+    print(handle.join() ?? 0)
 }
 
 fn spawn_owned(group: TaskGroup, values: ^[Int]) {
-    task :: group.task => values[0]
-    print(task.join())
+    handle :: task values[0]
+    print(handle.join() ?? 0)
 }
 
-fn spawn_both(first: TaskGroup, second: TaskGroup) {
-    left :: first.task => 20
-    right :: second.task => 22
-    print(left.join() + right.join())
+fn spawn_pair_left(group: TaskGroup) => Task<Int> {
+    return task 20
+}
+
+fn spawn_pair_right(group: TaskGroup) => Task<Int> {
+    return task 22
 }
 
 fn run() {
-    taskgroup group {
+    task.group group {
         spawn_one(group, 41)
         values :: [7, 8, 9]
         spawn_owned(group, ^values)
-        taskgroup inner {
-            spawn_both(group, inner)
+        task.group inner {
+            left :: spawn_pair_left(group)
+            right :: spawn_pair_right(inner)
+            print((left.join() ?? 0) + (right.join() ?? 0))
         }
     }
 }
@@ -154,8 +165,8 @@ fn default_run_joins_helper_spawn_before_outer_exit() {
 fn parameter_spawn_rejects_view_capture() {
     let source = r#"
 fn spawn_view(group: TaskGroup, values: View<Int>) {
-    task :: group.task => values[0]
-    print(task.join())
+    handle :: task values[0]
+    print(handle.join() ?? 0)
 }
 
 fn run() {}
@@ -233,21 +244,15 @@ fn slow_eleven() => Int {
 }
 
 fn run() {
-    taskgroup all_group {
-        one :: all_group.task => 1
-        two :: all_group.task => 2
-        values :: all_group.all([one, two])
+    task.group all_group {
+        values :: task.all { 1, 2 }
         print(values[0] + values[1])
     }
-    taskgroup race_group {
-        seven :: race_group.task => slow_seven()
-        eight :: race_group.task => 8
-        print(race_group.race([seven, eight]))
+    task.group race_group {
+        print(task.race { slow_seven(), 8 })
     }
-    taskgroup any_group {
-        eleven :: any_group.task => slow_eleven()
-        twelve :: any_group.task => 12
-        print(any_group.any([eleven, twelve]))
+    task.group any_group {
+        print(task.any { slow_eleven(), 12 })
     }
 }
 "#;
@@ -304,15 +309,15 @@ use core.tasks as tasks
 use core.time as time
 
 fn wait_in_group(gate: Shared<[Int]>) {
-    taskgroup group {
-        child :: group.task => {
+    task.group group {
+        child :: task {
             gate.edit((state: [Int]) => state[0] = 1)
             total := 0
             loop n, 0..<2000000 { total += n }
             print("settled")
         }
         time.sleep(10000)
-        child.join()
+        child.join().drop("the sleep above never returns before cancellation lands")
     }
 }
 
@@ -321,7 +326,7 @@ fn run() {
     outer :: tasks.spawn(() => wait_in_group(gate))
     loop gate.read((state: [Int]) => state[0]) == 0 {}
     outer.cancel()
-    outer.join()
+    outer.join().drop("the process exits from the cancelled wait before this would matter")
     print("caller")
 }
 "#;
@@ -334,8 +339,8 @@ fn native_deadline_closes_group_before_caller_continues() {
 use core.time as time
 
 fn leave_on_deadline() {
-    taskgroup group {
-        child :: group.task => {
+    task.group group {
+        child :: task {
             total := 0
             loop n, 0..<2000000 { total += n }
             print("settled")
@@ -343,7 +348,7 @@ fn leave_on_deadline() {
         #Context(deadline: time.now() - 1) {
             time.sleep(10000)
         }
-        child.join()
+        child.join().drop("the deadline blows before this would matter")
     }
 }
 
@@ -374,11 +379,10 @@ fn fail_after_start(gate: Shared<[Int]>) => Int {
 
 fn leave_on_wait_panic() {
     gate :: Shared.new([0])
-    taskgroup group {
-        slow :: group.task => slow_value(gate)
-        failed :: group.task => fail_after_start(gate)
-        ignored :: group.any([failed])
-        slow.join()
+    task.group group {
+        slow :: task slow_value(gate)
+        ignored :: task.any { fail_after_start(gate) }
+        slow.join().drop("the any-combinator panic exits before this would matter")
     }
 }
 
@@ -394,11 +398,11 @@ fn run() {
 fn early_return_closes_group_before_caller_continues() {
     let source = r#"
 fn spawn_bad(group: TaskGroup) {
-    bad :: group.task => panic("child")
+    bad :: task panic("child")
 }
 
 fn leave() => Int {
-    taskgroup group {
+    task.group group {
         spawn_bad(group)
         total := 0
         loop n, 0..<2000000 { total += n }

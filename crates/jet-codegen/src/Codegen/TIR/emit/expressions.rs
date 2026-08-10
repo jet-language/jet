@@ -5241,17 +5241,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         },
         // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
+        // D-CONC-FAIL1=A: sema types these combinators as plain `[T]`/`T`, not
+        // `Result` — unwrap the Prelude call's fail-fast outcome so the
+        // generated Rust value matches the Jet-level type (see
+        // `jet_task_outcome_unwrap` in `Prelude/CoreLib/JetStd/MathTaskMem.rs`).
         TExprKind::TaskGroupAll { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!("{}jet_std::jet_task_all({list})", cx.root_prefix)
+            format!(
+                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_all({list}))",
+                root = cx.root_prefix
+            )
         }
         TExprKind::TaskGroupRace { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!("{}jet_std::jet_task_race({list})", cx.root_prefix)
+            format!(
+                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_race({list}))",
+                root = cx.root_prefix
+            )
         }
         TExprKind::TaskGroupAny { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
+            format!(
+                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_any({list}))",
+                root = cx.root_prefix
+            )
         }
         TExprKind::SelectStart => {
             format!("{}jet_std::JetSelectBuilder::start()", cx.root_prefix)

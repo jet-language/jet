@@ -1679,8 +1679,15 @@ fn emit_tir_stmt(
             // deferred edit atomically under all the handles' locks at once. A `?`/early
             // return skips the commit, so the guard's Drop discards the deferred edits.
             if *uses_stm {
+                // `edit_txn(&mut __jet_stm, …)` (emit/expressions.rs) always
+                // takes the STM handle by `&mut` — this compiler-internal
+                // local's mut requirement isn't derived from any user-visible
+                // type, so it must be forced here directly (same rustc-reject
+                // family as card #1859's Mailer fix, a different mechanism:
+                // that one is TIR::Let's `is_file_handle` allowlist, this one
+                // is a hand-emitted `let` with no TIR::Let node at all).
                 out.push_str(&format!(
-                    "{}let __jet_stm = {}jet_stm::begin();\n",
+                    "{}let mut __jet_stm = {}jet_stm::begin();\n",
                     inner_pad, cx.root_prefix
                 ));
             }

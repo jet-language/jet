@@ -610,7 +610,18 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
+        // D-CONC-SPAWN1=D: each branch desugars into its own anonymous `task`
+        // spawn (see `task_surface_expr` in the parser). Those spawns belong
+        // to the combinator, not to whatever name the combinator's own result
+        // is bound to — inferring them under the outer binding name would
+        // register phantom pending group spawns under that name (harmless
+        // for a detached `task.all`, but `append_taskgroup_auto_joins` then
+        // tries to auto-`.cancel()`/`.join()` the combinator's own plain
+        // result value inside a lexical `task.group`). Clear it for the
+        // branch walk, exactly as a nested `check_binding` would.
+        let prev_binding_name = self.current_binding_name.take();
         let arg_ty = self.infer(&mut args[0].expr);
+        self.current_binding_name = prev_binding_name;
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
@@ -692,7 +703,12 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
+        // D-CONC-SPAWN1=D: see the matching comment in `infer_taskgroup_all` —
+        // each branch's anonymous spawn must not inherit the combinator
+        // result's own binding name.
+        let prev_binding_name = self.current_binding_name.take();
         let arg_ty = self.infer(&mut args[0].expr);
+        self.current_binding_name = prev_binding_name;
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {

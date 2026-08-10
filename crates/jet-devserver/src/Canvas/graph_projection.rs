@@ -319,15 +319,20 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
 
 fn task_flow_facts(src: &str) -> Vec<String> {
     let mut facts = Vec::new();
+    // D-CONC-SPAWN1=D: `taskgroup g { … }` / `g.task => …` / `g.all([…])`
+    // respelled as `task.group g { … }` / bare `task …` / `task.all { … }`.
+    // "task " (trailing space) catches the bare spawn keyword without
+    // matching the qualified `task.group`/`task.all`/`task.race`/`task.any`
+    // forms, which are always `task` immediately followed by `.`.
     for (needle, kind) in [
-        ("taskgroup", "structured_task_scope"),
+        ("task.group", "structured_task_scope"),
         ("tasks.spawn", "spawn_task"),
-        (".task =>", "taskgroup_spawn"),
+        ("task ", "taskgroup_spawn"),
         (".join(", "join_task"),
         ("tasks.channel", "channel_create"),
         (".send(", "channel_send"),
         (".receive(", "channel_receive"),
-        (".all(", "taskgroup_join_all"),
+        ("task.all", "taskgroup_join_all"),
         ("#Context", "deadline_context"),
     ] {
         for span in text_matches(src, needle) {
@@ -1380,6 +1385,7 @@ fn project_expr_node(
             method,
             method_span,
             args,
+            recv_type,
             resolved_ret,
             ..
         } => {
@@ -1392,7 +1398,31 @@ fn project_expr_node(
             } else {
                 "function_pure"
             };
-            let title = if variant_like {
+            // D-CONC-SPAWN1=D: `task …`/`task.all { … }`/etc. desugar onto the
+            // compiler-private `INTERNAL_TASK_RECEIVER` (parser-only, never a
+            // real receiver a user typed) — but inside an active `task.group`,
+            // sema rewrites that receiver in place to the group's own name
+            // (`infer_task_surface_method`, CheckerTaskGroup.rs), so by the
+            // time this checked AST reaches canvas the receiver identity is
+            // gone. `recv_type` survives that rewrite: sema always tags the
+            // dispatch with `INTERNAL_TASK_SURFACE_TYPE` (detached) or
+            // `INTERNAL_TASK_GROUP_SURFACE_TYPE` (lexical group), never
+            // `TYPE_TASKGROUP` (a real `TaskGroup` value, e.g. `g.select()`,
+            // which keeps its ordinary `.method` title). Show the surface
+            // spelling the author actually wrote instead of the internal
+            // dispatch method name (`spawn`) or the hidden receiver.
+            let is_task_surface = matches!(
+                recv_type.as_deref(),
+                Some(jet_driver::Syntax::INTERNAL_TASK_SURFACE_TYPE)
+                    | Some(jet_driver::Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+            );
+            let title = if is_task_surface {
+                if method == "spawn" {
+                    "task".to_string()
+                } else {
+                    format!("task.{method}")
+                }
+            } else if variant_like {
                 method.clone()
             } else {
                 format!(".{method}")

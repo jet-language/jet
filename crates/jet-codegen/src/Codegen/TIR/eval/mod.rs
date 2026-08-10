@@ -1142,13 +1142,9 @@ impl<'a> EvalCtx<'a> {
                     Some(self.span()),
                 ))
             }
-            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => Err(Diagnostic::error(
-                "TASK_CANCELLED",
-                "task cancelled".to_string(),
-                "the owning taskgroup stopped this task".to_string(),
-                String::new(),
-                Some(self.span()),
-            )),
+            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => {
+                Err(Diagnostic::task_cancelled(Some(self.span())))
+            }
         }
     }
 
@@ -1771,15 +1767,41 @@ impl<'a> EvalCtx<'a> {
         if tasks.is_empty() {
             return Err(unsupported("empty taskgroup combinator", self.span()));
         }
-        select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()).map(
-            |mut values| {
+        let span = self.span();
+        select_eval_tasks(tasks, mode, span, || self.task_wait_cancel_check())
+            .map(|mut values| {
                 if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
                     CtValue::List(values)
                 } else {
                     values.pop().expect("race/any result missing")
                 }
-            },
-        )
+            })
+            .map_err(|error| self.task_select_failure(error, span))
+    }
+
+    /// D-CONC-FAIL1=A: `task.all`/`task.race`/`task.any` never expose the
+    /// per-branch failure as a `Result` to Jet source — mirrors AOT's
+    /// `jet_task_outcome_unwrap` (Prelude/CoreLib/JetStd/MathTaskMem.rs), which
+    /// panics/soft-exits a second time on top of whatever the failing branch's
+    /// own `panic`/deadline/cancel already rendered, matching the golden fixed
+    /// trailer text (`panic: a task panicked`, `examples/features/expected/
+    /// concurrency/all_failfast.err.out`). A branch failure already wrote its
+    /// own message and `sink.exit_code` via `Diagnostic::soft_exit`; this only
+    /// adds the combinator's own trailing line for that already-caught case —
+    /// an unrelated evaluator error (no sink write yet) passes through as-is.
+    fn task_select_failure(&mut self, error: Diagnostic, span: Span) -> Diagnostic {
+        let Some(sink) = self.sink.as_ref() else {
+            return error;
+        };
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
+        if sink.exit_code.is_none() {
+            return error;
+        }
+        if !sink.stderr.ends_with('\n') {
+            sink.stderr.push('\n');
+        }
+        sink.stderr.push_str("panic: a task panicked\n");
+        Diagnostic::soft_exit("70".to_string(), "task combinator failed".to_string(), Some(span))
     }
 
     fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
@@ -1870,11 +1892,9 @@ impl<'a> EvalCtx<'a> {
                     keyword, message, contract.file, contract.line
                 ));
                 sink.exit_code = Some(70);
-                return Err(Diagnostic::error(
-                    "SOFT_EXIT",
+                return Err(Diagnostic::soft_exit(
                     "70".to_string(),
                     "runtime contract failed".to_string(),
-                    String::new(),
                     Some(contract.span),
                 ));
             }

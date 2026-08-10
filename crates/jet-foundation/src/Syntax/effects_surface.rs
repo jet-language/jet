@@ -152,13 +152,16 @@ pub const TYPE_TASKGROUP: &str = "TaskGroup";
 /// Compiler-private dispatch method for canonical `task` spawn syntax.
 pub const TASKGROUP_SPAWN_METHOD: &str = "spawn";
 
-/// D-NURSERY1=A: join every task handle in a list — `g.all([h1, h2])`.
+/// D-NURSERY1=A, respelled `task.all { … }` by D-CONC-SPAWN1=D: join every
+/// branch, results in order.
 pub const TASKGROUP_ALL_METHOD: &str = "all";
 
-/// D-CONCCOMB1=A: first completed task wins — `g.race([h1, h2])`.
+/// D-CONCCOMB1=A, respelled `task.race { … }` by D-CONC-SPAWN1=D: first
+/// successful branch wins.
 pub const TASKGROUP_RACE_METHOD: &str = "race";
 
-/// D-CONCCOMB1=A: first completed result — `g.any([h1, h2])` (v1: same join race).
+/// D-CONCCOMB1=A, respelled `task.any { … }` by D-CONC-SPAWN1=D: first
+/// completed branch wins (v1: same join race).
 pub const TASKGROUP_ANY_METHOD: &str = "any";
 
 /// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.

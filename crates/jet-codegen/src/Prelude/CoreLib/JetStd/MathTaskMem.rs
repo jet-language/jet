@@ -533,6 +533,35 @@
         super::jet_scheduler_any(jet_task_entries(tasks, "any"))
     }
 
+    /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: `task.all`/`task.race`/`task.any` never
+    /// expose a `Result` to Jet source (unlike `.join()`, which returns
+    /// `T ? TaskFailure` on the explicit fallible rail) — success unwraps to the
+    /// plain value, a losing failure panics the process fail-fast, matching
+    /// `JetTaskGroupRuntime::close_with`'s scope-exit panic propagation and the
+    /// interpreter's `jet_task_select` policy (I9: one meaning, AOT just marshals).
+    ///
+    /// Mirrors `jet_scheduler_fatal`'s exit policy exactly (Prelude/Scheduler.rs):
+    /// a bare `panic!` here would escape `jet_runtime_boundary`'s `JetRuntimeExit`
+    /// catch (it only recognizes that one marker payload) and fall through to
+    /// Rust's default hook — wrong stderr shape and exit code 101, not 70. Inside
+    /// a task, a real unwind is still correct (the enclosing catch expects one);
+    /// otherwise route through the same controlled-exit path every other runtime
+    /// failure uses.
+    pub fn jet_task_outcome_unwrap<T>(
+        outcome: super::JetOutcome<T, super::JetTaskFailure>,
+    ) -> T {
+        let reason = match outcome {
+            Ok(value) => return value,
+            Err(super::JetTaskFailure::Panicked(reason)) => reason,
+            Err(super::JetTaskFailure::Cancelled) => "task cancelled".to_string(),
+            Err(super::JetTaskFailure::DeadlineBlown) => "task deadline exceeded".to_string(),
+        };
+        if super::jet_scheduler_panic_should_unwind() {
+            panic!("{reason}");
+        }
+        super::jet_runtime_diagnostic(format!("panic: {reason}"));
+    }
+
     /// Cooperative yield — park at a wait point with a zero timeout.
     pub fn jet_task_yield() {
         super::jet_scheduler_yield_now();

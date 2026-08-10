@@ -1,4 +1,4 @@
-// 131 — D-TASKSCOPE1=A / D-NURSERY1=A: structured `taskgroup` (c102).
+// 131 — D-CONC-SPAWN1=D: structured `task.group` (c102).
 fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n, first..last { total += n }
@@ -6,16 +6,13 @@ fn sum_range(first: Int, last: Int) => Int {
 }
 
 fn fast_val() => Int = 42
+fn slow_val() => Int = sum_range(1, 500000)
 fn run() {
-    taskgroup g {
+    task.group g {
         print("inside taskgroup")
-        a :: g.task => sum_range(1, 25)
-        b :: g.task => sum_range(26, 50)
-        results :: g.all([a, b])
+        results :: task.all { sum_range(1, 25), sum_range(26, 50) }
         print((results[0] + results[1]))
-        slow :: g.task => sum_range(1, 500000)
-        fast :: g.task => fast_val()
-        winner :: g.race([slow, fast])
+        winner :: task.race { slow_val(), fast_val() }
         print(winner)
     }
 }

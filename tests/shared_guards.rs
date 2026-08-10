@@ -40,10 +40,8 @@ fn run() {
     changed := Condition.new()
     started := Shared.new(0)
     began := Condition.new()
-    taskgroup workers {
-        waiting :: workers.task => wait_until_cancel(shared, changed, started, began)
-        fast :: workers.task => finish_after_start(started, began)
-        print(workers.race([waiting, fast]))
+    task.group workers {
+        print(task.race { wait_until_cancel(shared, changed, started, began), finish_after_start(started, began) })
     }
     reacquired :: shared.guard_edit()
     reacquired.value += 1
@@ -125,11 +123,11 @@ fn increment(counter: Shared<Counter>) {
 
 fn run() {
     counter := Shared.new(Counter.{ value: 0 })
-    taskgroup workers {
-        first := workers.task => increment(counter)
-        second := workers.task => increment(counter)
-        first.join()
-        second.join()
+    task.group workers {
+        first := task increment(counter)
+        second := task increment(counter)
+        first.join().drop("waits for the transaction to land; the task body already ran to completion")
+        second.join().drop("waits for the transaction to land; the task body already ran to completion")
     }
     guard := counter.guard_read()
     print(guard.value.value)

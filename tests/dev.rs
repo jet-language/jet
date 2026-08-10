@@ -1409,7 +1409,7 @@ fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
     ));
     fs::write(
         &unsupported_path,
-        "use core.tasks as tasks\nfn run() {\n    task :: tasks.spawn(() => 1)\n    task.cancel()\n}\n",
+        "use core.tasks as tasks\nfn run() {\n    handle :: tasks.spawn(() => 1)\n    handle.cancel()\n}\n",
     )
     .unwrap();
     let unsupported_file = unsupported_path.to_string_lossy().into_owned();
@@ -8595,7 +8595,7 @@ fn cranelift_unshielded_select_cancel_does_not_unwind_native_frame() {
     let out = run_cranelift_without_fallback(
         r#"use core.tasks as tasks
 fn run() {
-    taskgroup g {
+    task.group g {
         (ready_sender, ready) :: tasks.channel<Int>()
         (_sender, ch) :: tasks.channel<Int>()
         slow :: tasks.spawn(() => {

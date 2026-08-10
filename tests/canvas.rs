@@ -315,11 +315,8 @@ const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() => Int {
 }
 
 fn run() {
-    taskgroup g {
-        t :: g.task => {
-            worker()
-        }
-        result :: g.all([t])
+    task.group g {
+        result :: task.all { worker() }
         print(result[0])
     }
 }
@@ -376,11 +373,11 @@ fn work() => Int {
 
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
-    taskgroup g {
-        t :: g.task => {
-            sender.send(work())
-        }
-        g.all([t])
+    task.group g {
+        sent :: task work()
+        joined :: task.all { work() }
+        sender.send(sent.join() ?? 0)
+        print(joined[0])
         print(ch.receive() ?? panic("channel closed"))
     }
 }
@@ -3726,7 +3723,7 @@ fn canvas_projects_async_task_rail() {
     let path = write_fixture("task_rail", CANVAS_TASK_RAIL_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
 
-    for field in ["\"async\"", "\"kind\":\"taskgroup\"", "\"title\":\".task\""] {
+    for field in ["\"async\"", "\"kind\":\"taskgroup\"", "\"title\":\"task\""] {
         assert!(
             graph.contains(field),
             "task rail graph missing {field}: {graph}"
@@ -3842,7 +3839,7 @@ fn canvas_hardening_projection_suite_covers_blueprint_backlog_constructs() {
             [
                 "\"async\"",
                 "\"kind\":\"taskgroup\"",
-                "\"title\":\".task\"",
+                "\"title\":\"task\"",
                 "\"pins\"",
                 "\"wires\"",
             ],
