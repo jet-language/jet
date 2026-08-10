@@ -6250,7 +6250,15 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.memory.shared_begin
                 };
-                let payload = self.call_host(begin_id, &[handle]);
+                let payload = if transactional {
+                    self.call_host(begin_id, &[handle])
+                } else {
+                    let editable = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(method == "edit"));
+                    self.call_host(begin_id, &[handle, editable])
+                };
                 let TExprKind::Lambda(lambda) = &args[0].kind else {
                     return Err("jit Shared callback must be a lambda".to_string());
                 };

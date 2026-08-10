@@ -1,0 +1,15 @@
+fn acquire(shared: Shared<Int>) => SharedGuard<Int> {
+    return shared.guard_edit()
+}
+
+fn read_returned(shared: Shared<Int>) => Int {
+    guard :: acquire(shared)
+    return guard.value
+}
+
+fn run() {
+    shared := Shared.new(6)
+    print(read_returned(shared))
+    shared.edit(value => value += 1)
+    print(shared.read(value => value))
+}
