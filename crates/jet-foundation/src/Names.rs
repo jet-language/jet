@@ -150,23 +150,7 @@ impl NameLedger {
         span: Span,
         visibility: NameVisibility,
     ) {
-        // A namespace import and its item projection can share a local name
-        // (`use wrap.wrap` with a file module `wrap`). The later item fact is
-        // the useful one at equal visibility; a weaker synthetic file edge
-        // must not erase a public/package re-export.
         let key = (module, name.clone());
-        let rank = |visibility| match visibility {
-            NameVisibility::Private => 0,
-            NameVisibility::Package => 1,
-            NameVisibility::Public => 2,
-        };
-        if self
-            .aliases
-            .get(&key)
-            .is_some_and(|existing| rank(visibility) < rank(existing.visibility))
-        {
-            return;
-        }
         self.aliases.insert(
             key,
             NameAlias {
@@ -184,22 +168,13 @@ impl NameLedger {
         self.aliases.get(&(module, name.to_string()))
     }
 
-    /// Return an import binding unless a declaration has replaced it.
-    /// D-NAME-TREE1 makes an ordinary declaration at the same name win over an
-    /// alias. A file-module marker is structural: the loader pairs it with a
-    /// synthetic file import at the same name, so that marker must not hide the
-    /// resolved module edge.
     pub fn effective_alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
-        match self.declaration(module, name) {
-            Some(declaration) if declaration.kind != "file_module" => None,
-            _ => self.alias(module, name),
-        }
+        self.alias(module, name)
     }
 
     pub fn visible(&self, from_module: usize, target_module: usize, name: &str) -> bool {
         let visibility = self
             .declaration(target_module, name)
-            .filter(|declaration| declaration.kind != "file_module")
             .map(|declaration| declaration.visibility)
             .or_else(|| self.effective_alias(target_module, name).map(|alias| alias.visibility));
         let Some(visibility) = visibility else {
@@ -216,10 +191,7 @@ impl NameLedger {
     }
 
     pub fn exported(&self, module: usize, name: &str) -> bool {
-        if let Some(declaration) = self
-            .declaration(module, name)
-            .filter(|declaration| declaration.kind != "file_module")
-        {
+        if let Some(declaration) = self.declaration(module, name) {
             declaration.visibility.is_exported()
         } else {
             self.effective_alias(module, name)
@@ -228,10 +200,7 @@ impl NameLedger {
     }
 
     pub fn public(&self, module: usize, name: &str) -> bool {
-        if let Some(declaration) = self
-            .declaration(module, name)
-            .filter(|declaration| declaration.kind != "file_module")
-        {
+        if let Some(declaration) = self.declaration(module, name) {
             declaration.visibility == NameVisibility::Public
         } else {
             self.effective_alias(module, name)
@@ -347,8 +316,8 @@ mod tests {
         assert!(ledger.public(0, "Thing"));
         assert_eq!(ledger.alias(0, "Thing").map(|alias| alias.target.as_str()), Some("lib.Thing"));
 
-        // D-NAME-TREE1=A: a declaration attaches at the name and replaces an
-        // alias projection at that same point in the tree.
+        // Declaration visibility governs the public surface; the alias keeps
+        // the import target available to consumers.
         ledger.declare(
             0,
             "Thing".to_string(),
@@ -358,7 +327,65 @@ mod tests {
             NameVisibility::Private,
         );
         assert!(!ledger.exported(0, "Thing"));
-        assert!(ledger.effective_alias(0, "Thing").is_none());
+        assert!(ledger.effective_alias(0, "Thing").is_some());
+    }
+
+    #[test]
+    fn file_module_declaration_keeps_visibility_and_alias_target() {
+        let mut ledger = NameLedger::default();
+        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
+        ledger.set_module(1, "lib".to_string(), "lib.jet".to_string(), "pkg".to_string());
+        ledger.set_module(2, "dep".to_string(), "dep.jet".to_string(), "dep".to_string());
+
+        ledger.declare(
+            1,
+            "helper".to_string(),
+            "lib.helper".to_string(),
+            "file_module".to_string(),
+            span(),
+            NameVisibility::Package,
+        );
+        assert!(ledger.exported(1, "helper"));
+        assert!(!ledger.public(1, "helper"));
+        assert!(ledger.visible(0, 1, "helper"));
+        assert!(!ledger.visible(2, 1, "helper"));
+
+        ledger.record_alias(
+            1,
+            "helper".to_string(),
+            "helper".to_string(),
+            Some(2),
+            span(),
+            NameVisibility::Package,
+        );
+        let alias = ledger.alias(1, "helper").expect("synthetic file alias");
+        assert_eq!(alias.target_module, Some(2));
+        assert!(ledger.effective_alias(1, "helper").is_some());
+    }
+
+    #[test]
+    fn alias_record_replaces_target_even_when_visibility_weakens() {
+        let mut ledger = NameLedger::default();
+        ledger.record_alias(
+            0,
+            "helper".to_string(),
+            "first".to_string(),
+            Some(1),
+            span(),
+            NameVisibility::Public,
+        );
+        ledger.record_alias(
+            0,
+            "helper".to_string(),
+            "second".to_string(),
+            Some(2),
+            span(),
+            NameVisibility::Private,
+        );
+        let alias = ledger.alias(0, "helper").expect("latest alias");
+        assert_eq!(alias.target, "second");
+        assert_eq!(alias.target_module, Some(2));
+        assert_eq!(alias.visibility, NameVisibility::Private);
     }
 
     #[test]

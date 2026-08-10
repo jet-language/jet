@@ -1336,6 +1336,8 @@ fn load_file(
         name: String,
         name_span: crate::Diagnostics::Span,
         span: crate::Diagnostics::Span,
+        is_pub: bool,
+        is_package_pub: bool,
     }
     let code_module_decls: Vec<CmMeta> = modules[module_idx]
         .items
@@ -1347,6 +1349,8 @@ fn load_file(
                         name: cm.name.clone(),
                         name_span: cm.name_span,
                         span: cm.span,
+                        is_pub: cm.is_pub,
+                        is_package_pub: cm.is_package_pub,
                     });
                 }
             }
@@ -1399,8 +1403,8 @@ fn load_file(
             alias: cm.name.clone(),
             alias_span: cm.name_span,
             span: cm.span,
-            is_pub: false,
-            is_package_pub: false,
+            is_pub: cm.is_pub,
+            is_package_pub: cm.is_package_pub,
             inline_version: None,
         };
         modules[module_idx].imports.push(synthetic);

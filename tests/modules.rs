@@ -5,12 +5,76 @@
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+use std::path::Path;
+
 use jet::AST::{Call, Contribution, Expr, Item, Namespace, StrPart};
+use tir_support::{build_and_run_multi, have_rustc, run_default_multi};
 
 fn parse_items(src: &str) -> Vec<Item> {
     let (toks, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
     jet::Parser::parse(&toks).expect("parse").items
+}
+
+fn write_files(root: &Path, files: &[(&str, &str)]) {
+    for (relative, source) in files {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, source).unwrap();
+    }
+}
+
+fn run_forced_interpreter(
+    name: &str,
+    entry: &str,
+    files: &[(&str, &str)],
+) -> (i32, String, String) {
+    let scratch = common::Scratch::new(name);
+    write_files(&scratch.path, files);
+    let path = scratch.join(entry);
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (exit_code, stdout, stderr),
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected {name}: {diags:?}")
+        }
+    }
+}
+
+fn assert_bodyless_module_runs(name: &str, declaration: &str) {
+    let main_src = "module lib;\nuse lib.[helper]\nfn run() { print(helper.value()) }\n";
+    let lib_src = format!("{} module helper;\n", declaration);
+    let files = [
+        ("main.jet", main_src),
+        ("lib.jet", lib_src.as_str()),
+        (
+            "helper.jet",
+            "pub fn value() => String { return \"visible\" }\n",
+        ),
+    ];
+
+    if have_rustc() {
+        let (code, stdout) = build_and_run_multi(name, "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "visible\n");
+    }
+
+    let (code, stdout, stderr) = run_default_multi(name, "main.jet", &files);
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, "visible\n");
+
+    let (code, stdout, stderr) = run_forced_interpreter(name, "main.jet", &files);
+    assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+    assert_eq!(stdout, "visible\n");
 }
 
 #[test]
@@ -429,4 +493,73 @@ module installer {
     assert_eq!(a.contributions[0].namespace, Namespace::System);
     assert_eq!(b.name, "installer");
     assert_eq!(b.contributions[0].namespace, Namespace::Image);
+}
+
+#[test]
+fn bodyless_public_module_is_visible_through_selective_import() {
+    assert_bodyless_module_runs("bodyless_public_module", "pub");
+}
+
+#[test]
+fn bodyless_package_module_is_visible_inside_package() {
+    assert_bodyless_module_runs("bodyless_package_module", "pub(package)");
+}
+
+#[test]
+fn bodyless_private_module_stays_hidden_outside_owner_file() {
+    let scratch = common::Scratch::new("bodyless_private_module");
+    write_files(
+        &scratch.path,
+        &[
+            (
+                "main.jet",
+                "module lib;\nuse lib.[helper]\nfn run() { print(helper.value()) }\n",
+            ),
+            ("lib.jet", "module helper;\n"),
+            (
+                "helper.jet",
+                "pub fn value() => String { return \"private\" }\n",
+            ),
+        ],
+    );
+
+    let entry = scratch.join("main.jet");
+    let diagnostics = jet::check_with_path(entry.to_str().unwrap());
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0609"),
+        "private bodyless module unexpectedly visible: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn bodyless_package_module_stays_hidden_across_packages() {
+    let scratch = common::Scratch::new("bodyless_package_module_external");
+    write_files(
+        &scratch.path,
+        &[
+            (
+                "app/package.jet",
+                "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\n",
+            ),
+            (
+                "app/main.jet",
+                "use dep\nuse dep.[helper]\nfn run() { print(helper.value()) }\n",
+            ),
+            ("dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n"),
+            ("dep/dep.jet", "pub(package) module helper;\n"),
+            (
+                "dep/helper.jet",
+                "pub fn value() => String { return \"hidden\" }\n",
+            ),
+        ],
+    );
+
+    let entry = scratch.join("app/main.jet");
+    let diagnostics = jet::check_with_path(entry.to_str().unwrap());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0609" | "E0611")),
+        "package-private bodyless module unexpectedly crossed package boundary: {diagnostics:?}"
+    );
 }
