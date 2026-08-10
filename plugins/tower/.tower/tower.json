@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1857,
-    "rev": 33116,
+    "rev": 33130,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91919,7 +91919,18 @@
         "c0y4zx0d"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "Fresh-context review of the merged rendering fix: no red findings; confirms same Outcome::jet_render_err path JIT uses (I9 parity closed), no snapshot/exit-code fallout, run_entry quartet unrelated. Two yellow notes are a behavioral no-op redundancy in the malformed-Err fallback; not worth a follow-up."
+        },
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "Recovery: orphaned sweep/bd1528 held an unintegrated I9 gap fix — forced-interpreter told-error rendering now routes through to_jet_err + Outcome::jet_render_err (was bare jet_show). Merged to master 2026-08-10; review in flight."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -92019,8 +92030,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:41.032Z",
-      "updated": "2026-08-09T10:56:59.477Z",
-      "updatedBy": "fable-burndown",
+      "updated": "2026-08-10T11:32:28.331Z",
+      "updatedBy": "fable",
       "workOrder": 150,
       "completedAt": "2026-08-09T10:56:59.477Z"
     },
@@ -92560,6 +92571,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-06T21:34:01.938Z"
+        },
+        {
+          "n": 11,
+          "text": "Explicit process.exit(code) / os stop(code) get one stated cleanup law: docs/reference/core-library.md and the spec say which finalizers run (scope.guard closures, defer-close, atexit handlers) and which are skipped, with a golden example proving the stated order on AOT and jet run",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-10T11:24:14.261Z"
         }
       ],
       "refs": [
@@ -92569,8 +92589,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:58.501Z",
-      "updated": "2026-08-06T21:42:58.438Z",
-      "updatedBy": "audit-apply",
+      "updated": "2026-08-10T11:24:14.262Z",
+      "updatedBy": "fable-mine-video",
       "workOrder": 740
     },
     {
@@ -115626,7 +115646,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
@@ -115636,20 +115656,20 @@
         {
           "n": 1,
           "text": "Root cause of unbounded TIR-eval allocation identified and fixed; no engine-side re-encoding of semantics (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "luna-1849",
-          "verifiedBy": null,
-          "evidence": "Root cause: crates/jet-parser/src/Parser/Items/imports_policy.rs:1359 (script-body fallback arm added in fef006684). stmt() fails on a top-level '}', sync_stmt (crates/jet-parser/src/Parser/mod.rs:361) returns without consuming a '}' at brace depth 0, the item loop continues, and the same token is re-reported forever, pushing a Diagnostic each pass. Abort trace under ASLR-off showed RawVec<Diagnostic>::grow_one requesting 4563402752 bytes from Parser::program via ProjectParts::scan_with_diagnostics. Not TIR eval: the parser hangs while the loader scans sibling .jet files, so any entry in a directory holding a stray-brace file OOMs. Minimal repro found by bisecting 1847 stray /tmp/*.jet files down to one file containing only '    }'. Fix: record self.pos before the arm and bump when nothing consumed a token; no semantics touched, so I9 does not apply. Commit 87119c3cb.",
-          "at": "2026-08-10T11:18:53.305Z"
+          "verifiedBy": "fable",
+          "evidence": "Root cause: parser top-level recovery loop (imports_policy.rs:1359, sync_stmt non-consuming at depth 0), not eval; fix 87119c3cb forces progress; fresh-context review returned no issues; no engine-side semantics re-encoding",
+          "at": "2026-08-10T11:24:48.440Z"
         },
         {
           "n": 2,
           "text": "timeout-bounded runs of taskgroup_params, task_control_tiers, diagnostic_snapshots, encoding_parity, dev pass with normal memory",
-          "status": "met",
+          "status": "verified",
           "metBy": "luna-1849",
-          "verifiedBy": null,
-          "evidence": "All five suites now terminate under a 600s timeout with sane memory (peak RSS sampled every 0.5s over the process tree): task_control_tiers exit 0, 3 passed, peak 48 MB. taskgroup_params completed in 3.6s, peak 31 MB, 5 passed / 7 failed. diagnostic_snapshots completed in 5.1s, peak 57 MB, 2 passed / 2 failed. encoding_parity completed in 0.3s, peak 30 MB, 16 passed / 1 failed. dev no longer allocates (peak under 5 MB) but aborts on separate stack overflows. Before the fix the same binaries grew to a single 4.5 GB allocation and had to be capped with ulimit -v. New regression test tests/run_entry.rs::script_top_level_recovery_always_consumes_a_token passes. Remaining failures are unrelated in-flight debt from the same checkpoint, filed as cards #1854 (unmigrated taskgroup surface), #1855 (dev stack overflows in TIR lowering), #1856 (snapshot and encoding-parity failures).",
-          "at": "2026-08-10T11:19:49.982Z"
+          "verifiedBy": "fable",
+          "evidence": "Bounded runs post-fix: task_control_tiers/taskgroup_params/diagnostic_snapshots/encoding_parity/dev all finish in seconds at 30-60MB peak RSS (builder evidence table); remaining failures are carded content defects #1854-#1856, not runaway memory",
+          "at": "2026-08-10T11:24:48.846Z"
         }
       ],
       "refs": [],
@@ -115657,8 +115677,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T10:36:31.119Z",
-      "updated": "2026-08-10T11:19:49.982Z",
-      "updatedBy": "luna-1849"
+      "updated": "2026-08-10T11:24:49.304Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T11:24:49.304Z"
     },
     {
       "id": "c0l88t71",
@@ -115669,7 +115690,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
@@ -115679,29 +115700,29 @@
         {
           "n": 1,
           "text": "tests/common guard: capped global allocator (JET_TEST_ALLOC_CAP_GB, default well under machine RAM) aborts with clear message",
-          "status": "met",
+          "status": "verified",
           "metBy": "luna-1850",
-          "verifiedBy": null,
-          "evidence": "tests/common/mod.rs:22-64 GuardedAlloc (#[global_allocator] wrapping System, AtomicI64 live-byte counter, JET_TEST_ALLOC_CAP_GB default 10, lazy one-time env read via CAP_INIT_STARTED flag). Tripped explicitly: JET_TEST_ALLOC_CAP_GB=1 timeout 120 scripts/agent/jet-env cargo test --test guard_selftest -- --ignored alloc_cap --test-threads=1 -> 'jet test guard: allocation cap 1 GB exceeded' + SIGABRT.",
-          "at": "2026-08-10T10:53:59.892Z"
+          "verifiedBy": "fable",
+          "evidence": "Reviewed (3 findings fixed in 41c170fa3, recheck clean). On master post-merge 61e12e47d: JET_TEST_ALLOC_CAP_GB=1 alloc_cap self-test SIGABRTs with guard message; garbage env 999999999999999999 stays armed and quiet on healthy run",
+          "at": "2026-08-10T11:23:32.263Z"
         },
         {
           "n": 2,
           "text": "wall-clock watchdog (JET_TEST_DEADLINE_SECS) aborts hung binaries; both guards wired into every tests/*.rs binary",
-          "status": "met",
+          "status": "verified",
           "metBy": "luna-1850",
-          "verifiedBy": null,
-          "evidence": "tests/common/mod.rs:66-100 lazily-spawned watchdog thread (JET_TEST_DEADLINE_SECS, default 900s/15min per owner correction 2026-08-10 - suite budget, not raiseable). Wired mod common; into all 226 tests/*.rs binaries (138 were missing it; 4 needed reordering after a leading #![cfg]/#![allow] inner attribute). Tripped explicitly: JET_TEST_DEADLINE_SECS=3 timeout 60 scripts/agent/jet-env cargo test --test guard_selftest -- --ignored deadline --test-threads=1 -> 'jet test guard: exceeded the 3s suite budget - aborting; this suite must be split or sped up, not given a longer deadline' + SIGABRT.",
-          "at": "2026-08-10T10:54:04.906Z"
+          "verifiedBy": "fable",
+          "evidence": "JET_TEST_DEADLINE_SECS=3 deadline self-test SIGABRTs with 15-min-budget message; grep shows mod common in all 228 tests/*.rs binaries incl. post-sweep bind.rs + comptime_cli_parity.rs",
+          "at": "2026-08-10T11:23:32.665Z"
         },
         {
           "n": 3,
           "text": "guard self-test proves both trip; full targeted proof run stays green",
-          "status": "met",
+          "status": "verified",
           "metBy": "luna-1850",
-          "verifiedBy": null,
-          "evidence": "tests/guard_selftest.rs: alloc_cap_guard_trips + deadline_guard_trips (#[ignore]d, both proven above) and guards_stay_quiet_on_a_healthy_run (passes clean, default caps). Bounded normal-suite proof: timeout 200 scripts/agent/jet-env cargo test --test bitwise_not -> 7 passed; timeout 200 ... --test power_and_exclusive_or -> 10 passed; guards silent, no false trips. Branch bd1850/guards commit c3dbb9e6e in .claude/worktrees/agent-a70856dfe205e1bff (builder worktree was unreachable to a worktree-isolated agent for git ops; released its claim immediately).",
-          "at": "2026-08-10T10:54:10.808Z"
+          "verifiedBy": "fable",
+          "evidence": "guard_selftest 3 passed on master; normal suites bitwise_not 8/8, task_control_tiers runs in 1s at sane memory (its 1 failure is carded #1854 codegen fallout, not guards)",
+          "at": "2026-08-10T11:23:33.044Z"
         }
       ],
       "refs": [],
@@ -115709,8 +115730,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T10:36:34.049Z",
-      "updated": "2026-08-10T10:54:10.808Z",
-      "updatedBy": "luna-1850"
+      "updated": "2026-08-10T11:23:33.497Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-10T11:23:33.496Z"
     },
     {
       "id": "c07zh827",
@@ -115817,7 +115839,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "task_control_tiers::task_control_plane_matches_under_aot fails deterministically on master: generated task_control.rs line ~10740 references jet_std::JetTask for spawn but no jet_std module is emitted/linked — rustc E0433, surfaces as I2 harness failure. Same D-CONC-SPAWN1=D migration gap family. Repro: cargo test --test task_control_tiers task_control_plane_matches_under_aot."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -115843,8 +115871,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:19:22.497Z",
-      "updated": "2026-08-10T11:19:31.570Z",
-      "updatedBy": "luna-1849"
+      "updated": "2026-08-10T11:23:26.854Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c06xk3eb",
@@ -115884,15 +115912,21 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-10",
+          "by": "fable",
+          "text": "run_entry has 4 deterministic failures on master, same checkpoint-batch family: unhandled_crypto_error_exits_70_with_a_redacted_e3001_frame (exits 1 with raw __jet_CryptoError debug + propagation frame instead of redacted E3001 exit 70), script_dev_entry_can_select_declared_dev_without_running_implicit_run, fallible_unit_run_is_the_only_fallible_entrypoint, script_statements_use_one_fallible_run_and_keep_declarations_legal."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:19:41.772Z",
-      "updated": "2026-08-10T11:19:41.773Z",
-      "updatedBy": "luna-1849"
+      "updated": "2026-08-10T11:27:21.886Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -156232,9 +156266,109 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-10T10:57:46.323Z"
+    },
+    {
+      "id": "b0qchrto",
+      "text": "Terminal render-target backend for the Jet UI seam (D-RENDERTGT1/2): TUI apps from the same UI tree. Demand signal: Go CLI-video comments ask for a pure ncurses replacement and complain about opentui memory bloat. Future-epoch surface; idea only until measured demand.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-10T11:24:14.650Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-10T11:32:28.331Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0nb4bwv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:27:22.325Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0nb4bwv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:27:21.886Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dg1d4b",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-10T11:24:49.305Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c08s2exr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T11:24:48.846Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c08s2exr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:24:48.441Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c08s2exr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:24:14.651Z",
+      "by": "fable-mine-video",
+      "action": "idea.add",
+      "ref": "b0qchrto",
+      "note": "Terminal render-target backend for the Jet UI seam (D-RENDER"
+    },
+    {
+      "at": "2026-08-10T11:24:14.262Z",
+      "by": "fable-mine-video",
+      "action": "card.criteria-add",
+      "ref": "c0o7s5iz",
+      "note": "#11 Explicit process.exit(code) / os stop(code) get one stated c"
+    },
+    {
+      "at": "2026-08-10T11:23:33.497Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0l88t71",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-10T11:23:33.044Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0l88t71",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-10T11:23:32.665Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0l88t71",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-10T11:23:32.263Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0l88t71",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-10T11:23:26.854Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0inuw9a",
+      "note": "logEntry"
+    },
     {
       "at": "2026-08-10T11:19:49.982Z",
       "by": "luna-1849",
@@ -159643,97 +159777,6 @@
       "action": "papercut.add",
       "ref": "pc0aw7d63",
       "note": ""
-    },
-    {
-      "at": "2026-08-09T11:19:06.491Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-09T11:19:06.491Z"
-    },
-    {
-      "at": "2026-08-09T11:08:41.203Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c0trabmk",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-09T11:08:40.227Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0trabmk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:38.963Z",
-      "by": "bd26-luna-1715",
-      "action": "card.criteria-meet",
-      "ref": "c0trabmk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-09T11:08:38.029Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0trabmk",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:37.184Z",
-      "by": "bd26-luna-1715",
-      "action": "card.criteria-meet",
-      "ref": "c0trabmk",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-09T11:08:36.167Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0trabmk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:35.809Z",
-      "by": "bd26-luna-1715",
-      "action": "card.criteria-meet",
-      "ref": "c0trabmk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-09T11:08:35.270Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c0yapq7b",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-09T11:08:34.807Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0yapq7b",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-09T11:08:34.438Z",
-      "by": "bd26-luna-1711",
-      "action": "card.criteria-meet",
-      "ref": "c0yapq7b",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-09T11:08:34.045Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0yapq7b",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-09T11:08:33.544Z",
-      "by": "bd26-luna-1711",
-      "action": "card.criteria-meet",
-      "ref": "c0yapq7b",
-      "note": "#5"
     }
   ],
   "nextNum": 368,
