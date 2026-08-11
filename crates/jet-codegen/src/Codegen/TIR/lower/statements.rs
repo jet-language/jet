@@ -632,7 +632,7 @@ pub(crate) struct LowerStmtPlan<'a> {
 }
 
 impl<'a> LowerStmtPlan<'a> {
-    fn ready(stmt: TStmt) -> Self {
+    pub(super) fn ready(stmt: TStmt) -> Self {
         Self {
             bodies: Vec::new(),
             finish: Box::new(move |_| stmt),
@@ -926,13 +926,9 @@ fn const_place_bound(expr: &Expr) -> Option<i64> {
 fn split_owner_key(expr: &Expr) -> Option<String> {
     let mut expr = expr;
     let mut suffixes = Vec::new();
-    let mut root = None;
-    loop {
+    let root = loop {
         match expr {
-            Expr::Ident(name, _) => {
-                root = Some(format!("name:{name}"));
-                break;
-            }
+            Expr::Ident(name, _) => break Some(format!("name:{name}")),
             Expr::Field(base, field, _) => {
                 suffixes.push(format!(".field:{field}"));
                 expr = base;

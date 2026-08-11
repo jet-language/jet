@@ -742,7 +742,7 @@ pub(crate) fn lower_switch<'a>(
     env: &mut LowerEnv,
 ) -> LowerStmtPlan<'a> {
     if crate::AST::is_subjectless_guard(subject, span) {
-        return lower_guard_switch(arms, else_body, cx, env);
+        return lower_guard_switch(arms, else_body, env);
     }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
@@ -772,7 +772,7 @@ pub(crate) fn lower_switch<'a>(
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
         })
     {
-        return lower_guard_switch(arms, else_body, cx, env);
+        return lower_guard_switch(arms, else_body, env);
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
@@ -917,7 +917,6 @@ pub(crate) fn classify_branch(subject: &Expr, arms: &[SwitchArm], cx: &Cx) -> Br
 fn lower_guard_switch<'a>(
     arms: &'a [SwitchArm],
     else_body: &'a Option<Vec<Stmt>>,
-    cx: &'a Cx,
     env: &mut LowerEnv,
 ) -> LowerStmtPlan<'a> {
     // The chain is wrapped from the last arm back toward the first, so the deferred
