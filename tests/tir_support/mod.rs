@@ -88,6 +88,7 @@ pub fn jit_run_with_env_args(
     command
         .arg("run")
         .arg(&jet_path)
+        .current_dir(&dir)
         // Keep every run out of the shared build cache, which is keyed on the
         // AST hash and would otherwise serve a binary built before this change.
         .env("JET_CACHE_DIR", dir.join("cache"));
