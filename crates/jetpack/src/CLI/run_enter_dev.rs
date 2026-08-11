@@ -70,7 +70,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                                 let mut plan = match load_project_plan_with_selections(
                                     theme,
                                     parsed.flags.preset.as_deref(),
-                                    parsed.flags.environment_profile.as_deref(),
+                                    parsed.flags.environment.as_deref(),
                                 ) {
                                     Ok(plan) => plan,
                                     Err(code) => return code,
@@ -148,7 +148,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         None => match load_project_plan_with_selections(
             theme,
             parsed.flags.preset.as_deref(),
-            parsed.flags.environment_profile.as_deref(),
+            parsed.flags.environment.as_deref(),
         ) {
             Ok(plan) => plan,
             Err(code) => return code,
@@ -243,7 +243,7 @@ pub(super) fn run_project_task_with_mode(
         match load_project_plan_with_selections(
             theme,
             parsed.flags.preset.as_deref(),
-            parsed.flags.environment_profile.as_deref(),
+            parsed.flags.environment.as_deref(),
         ) {
             Ok(plan) => plan,
             Err(code) => return code,
@@ -1429,7 +1429,7 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         match load_project_plan_with_selections(
             theme,
             parsed.flags.preset.as_deref(),
-            parsed.flags.environment_profile.as_deref(),
+            parsed.flags.environment.as_deref(),
         ) {
             Ok(plan) => plan,
             Err(code) => return code,
@@ -1526,7 +1526,7 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = match load_project_plan_with_selections(
         theme,
         parsed.flags.preset.as_deref(),
-        parsed.flags.environment_profile.as_deref(),
+        parsed.flags.environment.as_deref(),
     ) {
         Ok(plan) => plan,
         Err(code) => return code,
@@ -1592,7 +1592,7 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = match load_project_plan_with_selections(
         theme,
         parsed.flags.preset.as_deref(),
-        parsed.flags.environment_profile.as_deref(),
+        parsed.flags.environment.as_deref(),
     ) {
         Ok(plan) => plan,
         Err(code) => return code,
@@ -1666,34 +1666,34 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-/// `jet env info`: disclose the selected profile and the typed environment
+/// `jet env info`: disclose the selected preset and the typed environment
 /// facts without realizing packages or executing lifecycle commands.
 fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     let plan = match load_project_plan_with_selections(
         theme,
         parsed.flags.preset.as_deref(),
-        parsed.flags.environment_profile.as_deref(),
+        parsed.flags.environment.as_deref(),
     ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    let profile = plan
+    let preset = plan
         .environment
         .selected_preset
         .as_ref()
-        .map(|profile| profile.name.as_str())
+        .map(|preset| preset.name.as_str())
         .unwrap_or("<none>");
     let selected_presets = plan
         .environment
         .selected_preset
         .as_ref()
-        .map(|profile| profile.selected_presets.clone())
+        .map(|preset| preset.selected_presets.clone())
         .unwrap_or_default();
     let applied_presets = plan
         .environment
         .selected_preset
         .as_ref()
-        .map(|profile| profile.applied.clone())
+        .map(|preset| preset.applied.clone())
         .unwrap_or_default();
     let packages = plan
         .refs
@@ -1722,9 +1722,9 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             sources.push(source);
         }
     };
-    if let Some(profile) = &plan.environment.selected_preset {
-        for name in profile.variables.keys() {
-            add_variable(name, "profile".to_string());
+    if let Some(preset) = &plan.environment.selected_preset {
+        for name in preset.variables.keys() {
+            add_variable(name, "preset".to_string());
         }
     }
     for name in plan.environment.language_expansion.variables.keys() {
@@ -1999,10 +1999,10 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             .join(",");
         println!(
             "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"tasks\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
-            crate::JSON::quote(profile),
+            crate::JSON::quote(preset),
             quote_list(&selected_presets.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_presets.iter().map(String::as_str).collect::<Vec<_>>()),
-            quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
+            quote_list(&plan.environment.presets.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
             package_profiles.join(","),
             quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
             plan.environment
@@ -2034,12 +2034,12 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 0;
     }
-    theme.status(&format!("profile: {profile}"));
+    theme.status(&format!("preset: {preset}"));
     let applied = plan
         .environment
         .selected_preset
         .as_ref()
-        .map(|profile| profile.applied.join(" -> "))
+        .map(|preset| preset.applied.join(" -> "))
         .unwrap_or_else(|| "<none>".to_string());
     let selected = if selected_presets.is_empty() {
         "<none>".to_string()
@@ -2218,7 +2218,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             EnvHook::definition_fingerprint_with_selections(
                 root,
                 parsed.flags.preset.as_deref(),
-                parsed.flags.environment_profile.as_deref(),
+                parsed.flags.environment.as_deref(),
             )
         });
 
@@ -2234,9 +2234,9 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut watched_reload_ready = false;
     if target_s == active_s && target_hash != active_hash {
         if let (Some(root), Some(hash)) = (target.as_ref(), target_hash.as_deref()) {
-            match EnvHook::reload_policy_with_environment_profile(
+            match EnvHook::reload_policy_with_environment(
                 root,
-                parsed.flags.environment_profile.as_deref(),
+                parsed.flags.environment.as_deref(),
             ) {
                 ModuleEval::ReloadPolicy::Never => return 0,
                 ModuleEval::ReloadPolicy::Prompt => {}
@@ -2281,7 +2281,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         let mut plan = match load_project_plan_with_selections(
             theme,
             parsed.flags.preset.as_deref(),
-            parsed.flags.environment_profile.as_deref(),
+            parsed.flags.environment.as_deref(),
         ) {
             Ok(plan) => plan,
             Err(_) => {
@@ -2352,7 +2352,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         if EnvHook::definition_fingerprint_with_selections(
             &root,
             parsed.flags.preset.as_deref(),
-            parsed.flags.environment_profile.as_deref(),
+            parsed.flags.environment.as_deref(),
         )
         .as_deref()
             != target_hash.as_deref()
@@ -2378,7 +2378,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         if EnvHook::definition_fingerprint_with_selections(
             &root,
             parsed.flags.preset.as_deref(),
-            parsed.flags.environment_profile.as_deref(),
+            parsed.flags.environment.as_deref(),
         )
         .as_deref()
             != target_hash.as_deref()
@@ -2453,7 +2453,7 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
                     || !p.lifecycle.on_enter.is_empty()
                     || !p.lifecycle.checks.is_empty()
                     || p.lifecycle.reload_explicit
-                    || !p.profiles.is_empty()
+                    || !p.presets.is_empty()
                     || !p.languages.is_empty()
                     || !p.files.is_empty()
                     || !p.dev_services.is_empty()
@@ -2572,7 +2572,7 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = match load_project_plan_with_selections(
         theme,
         parsed.flags.preset.as_deref(),
-        parsed.flags.environment_profile.as_deref(),
+        parsed.flags.environment.as_deref(),
     ) {
         Ok(plan) => plan,
         Err(code) => return code,
@@ -2859,7 +2859,7 @@ mod tests {
     }
 
     #[test]
-    fn task_cache_key_changes_when_environment_profile_facts_change() {
+    fn task_cache_key_changes_when_environment_module_facts_change() {
         let root = std::env::temp_dir().join(format!(
             "jet-task-cache-environment-{}",
             std::process::id()
@@ -2884,7 +2884,7 @@ mod tests {
             &[],
             &[],
             &table,
-            "profile=dev;var=MODE=one",
+            "preset=dev;var=MODE=one",
         )
         .unwrap();
         let second = task_cache_key(
@@ -2896,7 +2896,7 @@ mod tests {
             &[],
             &[],
             &table,
-            "profile=dev;var=MODE=two",
+            "preset=dev;var=MODE=two",
         )
         .unwrap();
         assert_ne!(first, second);

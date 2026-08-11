@@ -247,12 +247,17 @@ fn ui_snapshots() {
         let jetpack_hangar_digest_mismatch = src
             .lines()
             .any(|line| line.trim() == "// @jetpack_hangar_digest_mismatch");
-        // D-ENV-FACET1 / E1337: environment profile selection is an
+        // D-ENV-FACET1 / E1337: environment module selection is an
         // environment-model diagnostic, so this fixture drives that same
         // evaluator while retaining the ordinary UI snapshot contract.
         let env_facet_missing = src
             .lines()
             .any(|line| line.trim() == "// @env_facet_missing");
+        // D-ENVFLAG1 / E1342: the retired compound selector is a teaching
+        // diagnostic from the real Jetpack command surface.
+        let jetpack_retired_environment_flag = src
+            .lines()
+            .any(|line| line.trim() == "// @jetpack_retired_environment_flag");
         // D-WORKSPACELOCK1 / E1202: persisted workspace identity failures
         // use the same registered diagnostic in tooling and CLI paths.
         let workspace_lock_e1202 = src
@@ -285,13 +290,15 @@ fn ui_snapshots() {
         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
         let actual = if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
+        } else if jetpack_retired_environment_flag {
+            run_jetpack_retired_environment_flag_snapshot()
         } else if env_facet_missing {
-            let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment_profile(
+            let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment(
                 &src,
                 path.parent().expect("environment fixture parent"),
                 Some("missing"),
             )
-            .expect_err("missing environment profile fixture must fail");
+            .expect_err("missing environment module fixture must fail");
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if workspace_lock_e1202 {
             let lock_path = ".jet/lock";
@@ -476,6 +483,33 @@ fn ui_snapshots() {
         "expected the ui suite to contain tests, found {}",
         checked
     );
+}
+
+fn run_jetpack_retired_environment_flag_snapshot() -> String {
+    let scratch = unique_tmp("jet_ui_retired_environment_flag");
+    let root = scratch.join("root");
+    let project = scratch.join("project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev { packages: [nixpkgs.ripgrep] }\nmodule env.full { packages: [nixpkgs.fd] }\n",
+    )
+    .unwrap();
+    let output = Command::new(jetpack_bin())
+        .args(["enter", "info", "--env-profile", "full", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run real jetpack retired environment flag diagnostic fixture");
+    let _ = fs::remove_dir_all(&scratch);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "retired environment selector must fail: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8")
 }
 
 fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {

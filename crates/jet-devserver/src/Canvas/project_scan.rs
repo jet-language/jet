@@ -784,10 +784,10 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
                 .map(|path| json_str(path))
                 .collect::<Vec<_>>()
                 .join(",");
-            let profiles = plan
-                .profiles
+            let presets = plan
+                .presets
                 .iter()
-                .map(|profile| json_str(&profile.name))
+                .map(|preset| json_str(&preset.name))
                 .collect::<Vec<_>>()
                 .join(",");
             let languages = plan
@@ -803,12 +803,12 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
             };
             EnvProjectJson {
                 envs: format!(
-                    "{{\"path\":{},\"prompt\":{},\"environments\":[{}],\"sources\":[{}],\"profiles\":[{}],\"languages\":[{}],\"reload\":{},\"packages\":[{}],\"secrets\":[{}],\"diagnostics\":[]}}",
+                    "{{\"path\":{},\"prompt\":{},\"environments\":[{}],\"sources\":[{}],\"presets\":[{}],\"languages\":[{}],\"reload\":{},\"packages\":[{}],\"secrets\":[{}],\"diagnostics\":[]}}",
                     json_str(jet_driver::Syntax::ENV_FILE),
                     json_str(plan.prompt.as_deref().unwrap_or(jet_driver::Syntax::JETPACK_PROMPT_LABEL)),
                     environments,
                     sources,
-                    profiles,
+                    presets,
                     languages,
                     json_str(&reload),
                     packages,

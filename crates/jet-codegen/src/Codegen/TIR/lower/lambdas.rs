@@ -187,7 +187,11 @@ fn lower_lambda_expecting_with_host_borrow(
             .ty_of(name)
             .unwrap_or_else(|| Type::Named("Unit".to_string()));
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
-        lam_env.bind(name, TLocal::generated(&cap), Some(cap_ty));
+        let slot = match env.origin_of(name) {
+            Some(origin) => TLocal::generated(&cap).with_origin(origin),
+            None => TLocal::generated(&cap),
+        };
+        lam_env.bind(name, slot, Some(cap_ty));
     }
     // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
@@ -360,7 +364,11 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
 
     let mut lam_env = fork_panic(env);
     for cap in &captures {
-        lam_env.bind(&cap.name, TLocal::user(&cap.name), Some(cap.ty.clone()));
+        let slot = match env.origin_of(&cap.name) {
+            Some(origin) => TLocal::user(&cap.name).with_origin(origin),
+            None => TLocal::user(&cap.name),
+        };
+        lam_env.bind(&cap.name, slot, Some(cap.ty.clone()));
     }
     for (i, p) in lam.params.iter().enumerate() {
         let ty = p
@@ -440,7 +448,11 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
             cap,
             env.place_of(name)
         ));
-        lam_env.bind(name, TLocal::generated(&cap), None);
+        let slot = match env.origin_of(name) {
+            Some(origin) => TLocal::generated(&cap).with_origin(origin),
+            None => TLocal::generated(&cap),
+        };
+        lam_env.bind(name, slot, None);
     }
     for p in &lam.params {
         lam_env.bind(&p.name, TLocal::user(&p.name), p.ty.clone());
@@ -496,7 +508,11 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
             cap,
             outer_env.place_of(name)
         ));
-        lam_env.bind(name, TLocal::generated(&cap), outer_env.ty_of(name));
+        let slot = match outer_env.origin_of(name) {
+            Some(origin) => TLocal::generated(&cap).with_origin(origin),
+            None => TLocal::generated(&cap),
+        };
+        lam_env.bind(name, slot, outer_env.ty_of(name));
     }
     let mut inner = String::new();
     prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);

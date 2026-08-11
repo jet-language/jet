@@ -6,7 +6,7 @@ use super::generation::build_generation;
 use super::generations_activation::{
     activate_generation, find_rollback_generation, latest_generation_for, print_help,
 };
-use super::load_validate::load_user_profile_target;
+use super::load_validate::load_user_generation_target;
 use super::nixos_import::cmd_import;
 use super::options_rendering::render_user_profile_json;
 use super::types::{OSFlags, Target};
@@ -55,7 +55,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSF
     let Some(action) = verb else {
         theme.error(
             "user needs an action",
-            "D-JOS-USERAPPLY1=A: standalone user profiles support plan, build, switch, rollback, and prove.",
+            "D-JOS-USERAPPLY1=A: standalone user generations support plan, build, switch, rollback, and prove.",
             "run `jetos user plan <name>`.",
         );
         return 2;
@@ -71,8 +71,8 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSF
     let user = args.first().map_or("", String::as_str);
     if user.is_empty() {
         theme.error(
-            "user action needs a profile name",
-            "D-JOS-USERENV1=A: `user.<name>` or `users.<name>` declares a per-user environment profile.",
+            "user action needs a generation name",
+            "D-JOS-USERENV1=A: `user.<name>` or `users.<name>` declares a per-user generation.",
             "run `jetos user plan nate`.",
         );
         return 2;
@@ -81,7 +81,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSF
         config: default_config_path(),
         host: user.to_string(),
     };
-    let Some((plan, system)) = load_user_profile_target(theme, &target, user) else {
+    let Some((plan, system)) = load_user_generation_target(theme, &target, user) else {
         return 2;
     };
     match action {
@@ -132,7 +132,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSF
                 theme.error(
                     "no user generation is available for rollback",
                     &format!(
-                        "no recorded jetos generation with profile `{user}` exists for `{}`.",
+                        "no recorded jetos generation for user `{user}` exists for `{}`.",
                         system.name
                     ),
                     "run `jetos user build <name>` or `jetos user switch <name>` first.",
@@ -162,7 +162,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSF
                 theme.error(
                     "jetos user proof is missing",
                     &format!(
-                        "no built generation exists for profile `{user}` on `{}`.",
+                        "no built generation exists for user `{user}` on `{}`.",
                         system.name
                     ),
                     "run `jetos user build <name>` first.",
@@ -175,7 +175,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSF
                 theme.error(
                     "jetos user proof is incomplete",
                     &format!(
-                        "generation `{}` lacks the profile/proof files for `{user}`.",
+                        "generation `{}` lacks the user artifact/proof files for `{user}`.",
                         gen.name
                     ),
                     "rebuild the user generation.",

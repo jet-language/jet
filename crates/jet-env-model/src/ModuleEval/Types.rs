@@ -71,8 +71,8 @@ pub struct EvaluatedModule {
     pub adapters: Vec<AdapterPlan>,
     /// D-ENV-LIFECYCLE1: typed lifecycle facts captured from env fields.
     pub lifecycle: EnvironmentLifecycle,
-    /// D-ENV-PROFILE1: named profile contributions.
-    pub profiles: Vec<PresetSpec>,
+    /// D-ENV-PROFILE1: named preset compositions.
+    pub presets: Vec<PresetSpec>,
     /// D-ENV-LANGPACK1: typed language-pack selections from this module.
     pub languages: Vec<LanguageSpec>,
     /// D-ENV-FILES1: managed environment-file declarations.
@@ -81,8 +81,8 @@ pub struct EvaluatedModule {
     /// module and lowered into ordinary environment facts.
     pub integrations: Vec<EnvironmentIntegration>,
     pub environment_names: Vec<String>,
-    /// D-JPK-PROFILE1=D: source-backed package profile declarations. These
-    /// are not active environment profiles and never affect shell selection.
+    /// D-JPK-PROFILE1=D: source-backed package generation declarations. These
+    /// are not environment presets and never affect shell selection.
     pub package_profiles: Vec<PackageProfileSpec>,
 }
 
@@ -386,11 +386,11 @@ pub struct EnvPlan {
     pub secrets: Vec<String>,
     /// Typed lifecycle facts for activation, checks, and reload.
     pub lifecycle: EnvironmentLifecycle,
-    /// Named profiles before CLI/host selection.
-    pub profiles: Vec<PresetSpec>,
+    /// Named preset compositions before CLI/host selection.
+    pub presets: Vec<PresetSpec>,
     /// Typed language-pack selections before catalog expansion.
     pub languages: Vec<LanguageSpec>,
-    /// The profile selected by the evaluator/runtime, if one was requested.
+    /// The preset selected by the evaluator/runtime, if one was requested.
     pub selected_preset: Option<ResolvedPreset>,
     /// One evaluator-owned expansion shared by realization and trust. The
     /// `language_packs` field remains as a compatibility view for existing
@@ -407,14 +407,14 @@ pub struct EnvPlan {
     /// D-ENV-INTEGRATIONS1: typed integrations before host realization.
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
-    /// D-JPK-PROFILE1=D: source-backed package-profile declarations. These
-    /// remain separate from the selected shell environment profile.
+    /// D-JPK-PROFILE1=D: source-backed package-generation declarations. These
+    /// remain separate from the selected environment preset.
     pub package_profiles: Vec<PackageProfileSpec>,
     pub environment_names: Vec<String>,
-    /// The one environment profile whose packages/settings are active for this
+    /// The one environment module whose packages/settings are active for this
     /// plan. `dev` is the deterministic beginner default when present.
     pub active_environment: Option<String>,
-    /// Module names that contributed the selected environment profile, in source order.
+    /// Module names that contributed the selected environment module, in source order.
     pub active_environment_provenance: Vec<String>,
 }
 
@@ -426,7 +426,7 @@ pub struct EnvironmentFacts {
     pub source_files: Vec<String>,
     pub dev_services: Vec<DevServicePlan>,
     pub lifecycle: EnvironmentLifecycle,
-    pub profiles: Vec<PresetSpec>,
+    pub presets: Vec<PresetSpec>,
     pub languages: Vec<LanguageSpec>,
     pub selected_preset: Option<ResolvedPreset>,
     pub language_expansion: LanguageExpansion,

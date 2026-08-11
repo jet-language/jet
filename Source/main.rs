@@ -130,6 +130,10 @@ fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
             "Jet could not complete the named file, tool, or operating-system operation",
             "correct the named problem, then run the command again",
         ),
+        "E3208" => (
+            "header parsing or translation failed in the bind backend",
+            "fix the header or schema, then rerun the matching `jet bind` command",
+        ),
         "E2941" => (
             "jet prove accepts only its registered proof lenses",
             "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`",
@@ -494,6 +498,7 @@ usage:
   {bin} repl  --project <dir>        same, with access to a project's imports
   {bin} repl  --allow-<root>         pre-authorize one Core effect root ({effect_roots})
   {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts ({effect_roots})
+  {bin} bind <schema> ...            generate Jet bindings from a foreign schema
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt                         rewrite all .jet files in the project to canonical style
   {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
@@ -1751,9 +1756,8 @@ fn main() {
         "bind" => {
             // S59 / E2-M14 Phase 4 (D-CBIND2): generate (or refresh) a C binding
             // cache from a header. Shares the bind backend with compile-time
-            // auto-bind. The backend (D-CBIND3 bindgen helper) is not wired in
-            // this build, so this reports E3208 honestly rather than faking a
-            // translation.
+            // auto-bind. Structural failures are rendered through the registered
+            // E3208 diagnostic rather than leaking backend output.
             // Use the unfiltered argv: `bind` takes `--pkg`/`-o` flags that the
             // global `args` filter would otherwise strip.
             let bind_args: Vec<&String> = raw.iter().skip(1).collect();
@@ -2296,17 +2300,10 @@ fn main() {
             // test at a time (matches `--update-snapshots`/`-u`'s existing style
             // of a plain boolean flag).
             let serial = jet_argv.iter().any(|a| a == "--serial");
-            // A directory target is a project root ONLY when it has a
-            // Package root — resolve to that project's single entry
-            // file, same as before (D-CLI1's existing project convenience).
-            // A plain directory of loose `.jet` files (no manifest) is a
-            // test folder instead: pass it straight through so
-            // `run_test_opts` walks it — recursively, D-TESTKIT1=A gap #2 —
-            // rather than erroring "no project entry".
+            // Keep directory targets intact so package tests/checks are
+            // collected together instead of resolving to one run entry.
             let target_path = Path::new(target);
-            let is_project_dir =
-                target_path.is_dir() && jet::Loader::manifest_path(target_path).is_some();
-            let resolved = if target_path.is_dir() && !is_project_dir {
+            let resolved = if target_path.is_dir() {
                 target.to_string()
             } else {
                 resolve_source_path(target)

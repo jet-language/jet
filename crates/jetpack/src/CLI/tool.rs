@@ -105,7 +105,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.get(1) else {
         theme.error(
             "`jetpack tool install` needs a package ref",
-            "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tools-profile generation.",
+            "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tool generation.",
             "try `jetpack tool install ripgrep@nixpkgs`.",
         );
         return 2;
@@ -198,7 +198,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
                     format!(" {version}")
                 };
                 theme.status(&format!(
-                    "installed {}{ver}  ->  {}   (profile \"{}\", generation {})",
+                    "installed {}{ver}  ->  {}   (generation \"{}\", generation {})",
                     theme.bold(spec.short_name()),
                     link.display(),
                     Syntax::TOOL_PROFILE_NAME,
@@ -513,7 +513,7 @@ struct GenerationRecord {
 fn read_generation_record(gen: u64) -> Result<GenerationRecord, String> {
     let path = generations_dir().join(gen.to_string()).join("meta.json");
     if !path.is_file() {
-        return Err(format!("profile generation {gen} has no metadata"));
+        return Err(format!("tool generation {gen} has no metadata"));
     }
     let text = read_bounded(&path).map_err(|error| error.to_string())?;
     let tools = parse_generation_meta(&text, gen)?;
@@ -523,7 +523,7 @@ fn read_generation_record(gen: u64) -> Result<GenerationRecord, String> {
         .join(PROFILE_COMPLETE_FILE);
     let marker = read_bounded(&complete).map_err(|error| error.to_string())?;
     if marker != format!("{witness}\n") {
-        return Err(format!("profile generation {gen} witness mismatch"));
+        return Err(format!("tool generation {gen} witness mismatch"));
     }
     Ok(GenerationRecord { tools, witness })
 }
@@ -630,20 +630,20 @@ fn next_generation() -> io::Result<u64> {
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| io::Error::other("profile generation name is not UTF-8"))?;
+            .map_err(|_| io::Error::other("tool generation name is not UTF-8"))?;
         let generation = name
             .parse::<u64>()
-            .map_err(|_| io::Error::other(format!("invalid profile generation `{name}`")))?;
+            .map_err(|_| io::Error::other(format!("invalid tool generation `{name}`")))?;
         if generation == 0 || !entry.file_type()?.is_dir() {
             return Err(io::Error::other(format!(
-                "invalid profile generation `{name}`"
+                "invalid tool generation `{name}`"
             )));
         }
         maximum = maximum.max(generation);
     }
     maximum
         .checked_add(1)
-        .ok_or_else(|| io::Error::other("profile generation number overflow"))
+        .ok_or_else(|| io::Error::other("tool generation number overflow"))
 }
 
 fn recover_profile_state() -> io::Result<()> {
@@ -654,7 +654,7 @@ fn recover_profile_state() -> io::Result<()> {
             Ok(metadata) if metadata.file_type().is_file() => fs::remove_file(&partial)?,
             Ok(_) => {
                 return Err(io::Error::other(
-                    "profile pointer partial is not a regular file",
+                    "tool generation pointer partial is not a regular file",
                 ))
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -673,7 +673,7 @@ fn recover_profile_state() -> io::Result<()> {
                     .file_name()
                     .to_string_lossy()
                     .parse::<u64>()
-                    .map_err(|_| io::Error::other("invalid profile generation name"))
+                    .map_err(|_| io::Error::other("invalid tool generation name"))
             })
             .collect::<io::Result<Vec<_>>>()?;
         generations.sort();
@@ -688,7 +688,7 @@ fn recover_profile_state() -> io::Result<()> {
             let metadata = read_bounded(&generations_dir().join(generation.to_string()).join("meta.json"))?;
             let witness = generation_record_witness(&metadata, generation).map_err(io::Error::other)?;
             if read_bounded(&complete)?.trim() != witness {
-                return Err(io::Error::other("profile generation witness mismatch"));
+                return Err(io::Error::other("tool generation witness mismatch"));
             }
             validate_generation_bins(generation, &tools)?;
             if !tools.is_empty() {
@@ -721,14 +721,14 @@ fn migrate_legacy_generations_locked() -> io::Result<()> {
     for entry in fs::read_dir(generations_dir())? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
-            return Err(io::Error::other("invalid profile generation entry"));
+            return Err(io::Error::other("invalid tool generation entry"));
         }
         let generation = entry
             .file_name()
             .to_str()
             .and_then(|name| name.parse::<u64>().ok())
             .filter(|generation| *generation != 0)
-            .ok_or_else(|| io::Error::other("invalid profile generation name"))?;
+            .ok_or_else(|| io::Error::other("invalid tool generation name"))?;
         if !entry.path().join(PROFILE_COMPLETE_FILE).is_file()
             || !entry.path().join("meta.json").is_file()
         {
@@ -737,7 +737,7 @@ fn migrate_legacy_generations_locked() -> io::Result<()> {
         let metadata = read_bounded(&entry.path().join("meta.json"))?;
         let parsed = JSON::parse(&metadata).map_err(io::Error::other)?;
         let JSON::JSONValue::Object(root) = parsed else {
-            return Err(io::Error::other("profile metadata root is not an object"));
+            return Err(io::Error::other("tool metadata root is not an object"));
         };
         if !root.contains_key("schema") {
             legacy.push((generation, entry.path(), metadata));
@@ -754,7 +754,7 @@ fn migrate_legacy_generations_locked() -> io::Result<()> {
         let marker = read_bounded(&path.join(PROFILE_COMPLETE_FILE))?;
         if marker != "complete\n" && marker != format!("{witness}\n") {
             return Err(io::Error::other(format!(
-                "legacy profile generation {generation} witness mismatch; remove only after auditing `{}`",
+                "legacy tool generation {generation} witness mismatch; remove only after auditing `{}`",
                 path.display()
             )));
         }
@@ -939,7 +939,7 @@ fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Res
         })
         .collect::<io::Result<std::collections::BTreeSet<_>>>()?;
     if actual != expected {
-        return Err(io::Error::other("profile generation bin projection mismatch"));
+        return Err(io::Error::other("tool generation bin projection mismatch"));
     }
     for tool in tools {
         if tool.bins.len() != tool.member_digests.len() {
