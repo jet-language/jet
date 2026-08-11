@@ -5,7 +5,7 @@ use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
-    TPlace, TStrPart,
+    TOrFallback, TPlace, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{
@@ -1840,11 +1840,491 @@ impl<'a> EvalCtx<'a> {
             transparent_depth += 1;
             expr = inner;
         }
-        let result = self.eval_expr_inner(expr, scope);
+        let result = match self.eval_expr_special(expr, scope) {
+            Some(result) => result,
+            None => self.eval_expr_inner(expr, scope),
+        };
         for _ in 0..=transparent_depth {
             self.leave_source_nesting();
         }
         result
+    }
+
+    fn eval_expr_special(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        match &expr.kind {
+            TExprKind::CoreCall {
+                module,
+                method,
+                args,
+                source_span,
+                ..
+            } => Some(self.eval_core_call_expr(
+                expr,
+                module,
+                method,
+                args,
+                *source_span,
+                scope,
+            )),
+            TExprKind::ListLit(elems) => Some(self.eval_list_lit_expr(expr, elems, scope)),
+            TExprKind::OrFallback { value, fallback } => {
+                Some(self.eval_or_fallback_expr(value, fallback, scope))
+            }
+            _ => None,
+        }
+    }
+
+    fn eval_list_lit_expr(
+        &mut self,
+        expr: &'a TExpr,
+        elems: &'a [TExpr],
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        self.burn()?;
+        if let [inner] = elems {
+            // Early typed-list lowering wraps `T.{ value }` in one ListLit. Preserve
+            // the value when it already has T.
+            if expr.ty == inner.ty {
+                return self.eval_expr(inner, scope);
+            }
+        }
+        let mut out = Vec::with_capacity(elems.len());
+        for e in elems {
+            out.push(self.eval_expr(e, scope)?);
+        }
+        Ok(CtValue::List(out))
+    }
+
+    fn eval_or_fallback_expr(
+        &mut self,
+        value: &'a TExpr,
+        fallback: &'a TOrFallback,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        self.burn()?;
+        let v = self.eval_expr(value, scope)?;
+        // D-FAIL-CARRIER1=A: one carrier — the report side is the miss,
+        // whether the report is a clean absence or a failure.
+        let miss = matches!(
+            v,
+            CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_))
+        );
+        if !miss {
+            return match v {
+                CtValue::Present(inner) => Ok(*inner),
+                other => Ok(other),
+            };
+        }
+        match fallback {
+            TOrFallback::Value(fb) => self.eval_expr(fb, scope),
+            TOrFallback::Return(Some(fb)) => {
+                let ret = self.eval_expr(fb, scope)?;
+                self.pending_return = Some(ret);
+                Ok(CtValue::Unit)
+            }
+            TOrFallback::Return(None) => {
+                self.pending_return = Some(CtValue::Unit);
+                Ok(CtValue::Unit)
+            }
+            TOrFallback::Panic { msg, loc } => {
+                let message = self.eval_expr(msg, scope)?.jet_show();
+                let file = loc.file.trim_matches('"');
+                let fn_name = loc.fn_name.trim_matches('"');
+                let src_line = loc.src_line.trim_matches('"');
+                let line_s = loc.line.to_string();
+                let margin = line_s.len();
+                let pad = " ".repeat(margin);
+                let col_offset = loc.col.saturating_sub(1) as usize;
+                let caret = "^".repeat(loc.caret.max(1) as usize);
+                let rendered = format!(
+                    "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+                    loc.line,
+                    " ".repeat(col_offset)
+                );
+                if let Some(sink) = self.sink.as_ref() {
+                    let mut sink = sink.lock().expect("evaluator sink poisoned");
+                    sink.stderr.push_str(&rendered);
+                    sink.exit_code = Some(70);
+                    return Err(Diagnostic::soft_exit(
+                        "70".to_string(),
+                        "or-fallback panic stop".to_string(),
+                        Some(self.span()),
+                    ));
+                }
+                Err(unsupported("or-fallback panic", self.span()))
+            }
+            _ => Err(unsupported("or-fallback form", self.span())),
+        }
+    }
+
+    fn eval_core_call_expr(
+        &mut self,
+        expr: &'a TExpr,
+        module: &'a str,
+        method: &'a str,
+        args: &'a [TExpr],
+        source_span: Span,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        self.burn()?;
+        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+            if !row.accepts_arity(args.len()) {
+                return Err(unsupported(
+                    &format!(
+                        "{}.{}(): expected {}..{} argument(s), got {}",
+                        module,
+                        method,
+                        row.arity(),
+                        row.signature.max_arity,
+                        args.len()
+                    ),
+                    source_span,
+                ));
+            }
+        }
+        if module == "core.data" {
+            return self.eval_core_data_call(method, args, &expr.ty, scope);
+        }
+        if module == "core.compute" {
+            return self.eval_core_compute_call(method, args, &expr.ty, source_span, scope);
+        }
+        if module == "core.services" {
+            return self.eval_core_services_call(method, args, source_span, scope);
+        }
+        // D-PIN1 / S58: `mem.address_of(place)` is an inert address cast.
+        // AOT lowers to the same stable non-zero identity contract; the
+        // evaluator only mints it during real execution.
+        if module == "core.mem" && method == "address_of" && args.len() == 1 {
+            if !self.runtime_execution {
+                return Err(unsupported(
+                    "`mem.address_of` at compile time",
+                    source_span,
+                ));
+            }
+            let key = tir_place_address_key(&args[0]);
+            return Ok(CtValue::Int(stable_place_address(&key)));
+        }
+        if module == "core.tasks" && method == "channel" {
+            if !self.runtime_execution {
+                return Err(unsupported("`tasks.channel` at compile time", source_span));
+            }
+            let capacity = args
+                .first()
+                .map(|arg| self.eval_expr(arg, scope))
+                .transpose()?
+                .map(|value| as_int(&value, self.span()))
+                .transpose()?;
+            return Ok(self.new_eval_channel(capacity));
+        }
+        if module == "core.tasks" && method == "yield_now" && args.is_empty() {
+            std::thread::yield_now();
+            return Ok(CtValue::Unit);
+        }
+        if module == "core.tasks" && method == "current_task" && args.is_empty() {
+            return Ok(CtValue::Str(
+                jet_foundation::StructuralDebug::jet_task_control_trace(false, false),
+            ));
+        }
+        if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
+            let pointer = self.eval_expr(&args[0], scope)?;
+            let value = self.eval_expr(&args[1], scope)?;
+            let CtValue::Struct { type_name, fields } = pointer else {
+                return Err(unsupported("raw pointer carrier", self.span()));
+            };
+            if type_name != "__JetRawLocal" {
+                return Err(unsupported("raw pointer target", self.span()));
+            }
+            let name = fields.iter().find_map(|(field, value)| {
+                match (field.as_str(), value) {
+                    ("name", CtValue::Str(name)) => Some(name.clone()),
+                    _ => None,
+                }
+            });
+            let Some(name) = name else {
+                return Err(unsupported("raw pointer local", self.span()));
+            };
+            scope.insert(name, value);
+            return Ok(CtValue::Unit);
+        }
+        if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
+            let pointer = self.eval_expr(&args[0], scope)?;
+            let CtValue::Struct { type_name, fields } = pointer else {
+                return Err(unsupported("raw pointer carrier", self.span()));
+            };
+            if type_name != "__JetRawLocal" {
+                return Err(unsupported("raw pointer target", self.span()));
+            }
+            let name = fields.iter().find_map(|(field, value)| {
+                match (field.as_str(), value) {
+                    ("name", CtValue::Str(name)) => Some(name.as_str()),
+                    _ => None,
+                }
+            });
+            return name
+                .and_then(|name| scope.get(name).cloned())
+                .ok_or_else(|| unsupported("raw pointer local", self.span()));
+        }
+        let mut argv = Vec::with_capacity(args.len());
+        for a in args {
+            argv.push(self.eval_expr(a, scope)?);
+        }
+        let progress_known_total = if module == "core.io" && method == "progress" {
+            if let Some((items, known_total)) = argv.first().and_then(progress_iter_parts) {
+                if let Some(source) = argv.first_mut() {
+                    *source = CtValue::List(items);
+                }
+                Some(known_total)
+            } else {
+                match args.first().map(|arg| &arg.ty) {
+                    Some(Type::List(_)) | Some(Type::FixedList { .. }) => Some(true),
+                    Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_ITER => Some(
+                        args.first()
+                            .is_some_and(progress_source_has_exact_total),
+                    ),
+                    _ => None,
+                }
+            }
+        } else {
+            None
+        };
+        // AOT reflection uses the resolved user-struct layout. Keep that fact
+        // in the erased TIR carrier so `.fields()` cannot guess from a value.
+        if module == "core.reflect" && method == "of" && args.len() == 1 {
+            let value = argv
+                .pop()
+                .ok_or_else(|| unsupported("reflect value", source_span))?;
+            let field_names = match &args[0].ty {
+                Type::Named(type_name) => self
+                    .struct_fields
+                    .get(type_name)
+                    .or_else(|| {
+                        self.struct_fields.get(
+                            type_name
+                                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                .unwrap_or(type_name),
+                        )
+                    })
+                    .map(|fields| {
+                        CtValue::List(
+                            fields
+                                .iter()
+                                .map(|(name, _)| CtValue::Str(name.clone()))
+                                .collect(),
+                        )
+                    }),
+                _ => None,
+            };
+            let mut fields = vec![("value".to_string(), value)];
+            if let Some(field_names) = field_names {
+                fields.push(("field_names".to_string(), field_names));
+            }
+            return Ok(CtValue::Struct {
+                type_name: "__Reflect".to_string(),
+                fields,
+            });
+        }
+        if module == "core.web" && matches!(method, "app" | "page") {
+            return self.eval_web_core_call(method, argv);
+        }
+        if module == "core.http.server" && method == "json" && args.len() == 2 {
+            let tree = self.eval_serde_encode_value(argv[1].clone(), &args[1].ty)?;
+            argv[1] = CtValue::Str(crate::Comptime::render_datatree_for_tir(&tree));
+        }
+        if module == "core.encoding.cbor"
+            && matches!(method, "to_bytes" | "to_bytes_canonical")
+        {
+            let value = argv.first().ok_or_else(|| {
+                unsupported("core.encoding.cbor encoder missing its value", source_span)
+            })?;
+            let tree = self.eval_serde_encode_value(value.clone(), &args[0].ty)?;
+            let fields = HashMap::new();
+            return Ok(match crate::Comptime::cbor_encode_typed_for_tir(
+                &tree,
+                &Type::Named("DataTree".to_string()),
+                &fields,
+                method == "to_bytes_canonical",
+            ) {
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
+                    type_name: "CBORError".to_string(),
+                    fields: vec![
+                        (
+                            "kind".to_string(),
+                            CtValue::Enum {
+                                type_name: "CBORErrorKind".to_string(),
+                                variant: "Unsupported".to_string(),
+                                args: Vec::new(),
+                            },
+                        ),
+                        ("byte_offset".to_string(), CtValue::Int(0)),
+                        ("path".to_string(), CtValue::Str("$".to_string())),
+                        ("reason".to_string(), CtValue::Str(reason)),
+                    ],
+                })),
+            });
+        }
+        // D-MIGRATE3=A: typed text-codec decode uses the resolved return type.
+        if matches!(
+            module,
+            "core.encoding.json"
+                | "core.encoding.toml"
+                | "core.encoding.yaml"
+                | "core.encoding.csv"
+        ) && matches!(method, "decode" | "decode_traced")
+        {
+            return self.eval_typed_codec_decode(module, method, &expr.ty, &argv, source_span);
+        }
+        if module == "core.encoding.cbor" && method == "decode" {
+            let Type::Result { ok, .. } = &expr.ty else {
+                return Err(unsupported(
+                    "core.encoding.cbor.decode resolved return type",
+                    source_span,
+                ));
+            };
+            let bytes = match argv.first() {
+                Some(CtValue::Bytes(bytes)) => bytes.clone(),
+                Some(CtValue::List(values)) => values
+                    .iter()
+                    .map(|value| match value {
+                        CtValue::Int(byte) => u8::try_from(*byte).map_err(|_| {
+                            unsupported(
+                                "core.encoding.cbor.decode byte argument",
+                                source_span,
+                            )
+                        }),
+                        _ => Err(unsupported(
+                            "core.encoding.cbor.decode byte argument",
+                            source_span,
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => {
+                    return Err(unsupported(
+                        "core.encoding.cbor.decode byte argument",
+                        source_span,
+                    ))
+                }
+            };
+            let tree = match crate::Comptime::cbor_parse_for_tir(&bytes, argv.get(1), true) {
+                Ok(tree) => tree,
+                Err(error) => {
+                    return Ok(CtValue::failed(Box::new(
+                        crate::Comptime::cbor_decode_source_error_for_tir(error),
+                    )))
+                }
+            };
+            return Ok(match self.eval_datatree_decode(tree, ok)? {
+                CtValue::Present(value) => CtValue::Present(value),
+                CtValue::Failed(CtReport::Told(error)) => CtValue::Failed(CtReport::Told(error)),
+                _ => unreachable!("Decode protocol returns Result"),
+            });
+        }
+        // Nominal `core.crypto` values are opaque FFI carriers. Keep these
+        // helpers on the shared core-call adapter: runtime ambient evaluation
+        // supplies the canonical structural carrier, while pure comptime
+        // evaluation either uses an explicitly pure CorePureParity carrier
+        // or declines the opaque call. In particular, never turn `SigningKey`
+        // into a CtValue::Int — ListLit and OrFallback must receive the
+        // carrier produced by that adapter.
+        if module == "core.browser" && self.runtime_execution {
+            return super::browser::core_call(method, argv, source_span);
+        }
+        if !self.runtime_execution && module == "core.net" && method == "fetch" {
+            return crate::Comptime::eval_net_fetch(
+                &argv,
+                self.embed_inputs.as_deref_mut(),
+                source_span,
+            );
+        }
+        if !self.runtime_execution && module == "core.vault" {
+            return Err(crate::Comptime::vault_comptime_denied(
+                module,
+                method,
+                source_span,
+            ));
+        }
+        if !self.runtime_execution
+            && !self.repl_mode
+            && module == "core.random"
+            && method != "rng"
+        {
+            return Err(unsupported(
+                &format!("`{module}.{method}()` at compile time"),
+                source_span,
+            ));
+        }
+        if self.should_decline_ambient_fold(module, method) {
+            return Err(unsupported(
+                &format!("`{module}.{method}()` at compile time"),
+                source_span,
+            ));
+        }
+        let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
+        if !is_tier2 {
+            return apply_core_call(module, method, argv, source_span, self.repl_mode).map(|value| {
+                mark_unknown_progress_total(value, module, method, args, progress_known_total)
+            });
+        }
+        if self.repl_mode {
+            let mut sink = self
+                .sink
+                .as_ref()
+                .map(|sink| sink.lock().expect("evaluator sink poisoned"));
+            apply_repl_authorized_core_call(
+                module,
+                method,
+                argv,
+                source_span,
+                &self.base_dir,
+                sink.as_deref_mut(),
+                &self.repl_grants,
+                reborrow_repl_authorizer(&mut self.repl_authorizer),
+            )
+            .map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
+        } else if self.impure_depth > 0 && self.allow_impure {
+            let mut sink = self
+                .sink
+                .as_ref()
+                .map(|sink| sink.lock().expect("evaluator sink poisoned"));
+            let result = apply_impure_core_call(
+                module,
+                method,
+                argv,
+                source_span,
+                &self.base_dir,
+                sink.as_deref_mut(),
+                false,
+                None,
+                None,
+            );
+            result.map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
+        } else if self.impure_depth == 0 {
+            Err(Diagnostic::error(
+                "E3410",
+                format!(
+                    "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                ),
+                "ambient I/O and storeful Core APIs are not allowed in pure comptime evaluation"
+                    .to_string(),
+                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime"
+                    .to_string(),
+                Some(source_span),
+            ))
+        } else {
+            Err(Diagnostic::error(
+                "E3411",
+                format!(
+                    "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
+                ),
+                "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
+                "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
+                Some(source_span),
+            ))
+        }
     }
 
     fn eval_expr_inner(
@@ -2947,442 +3427,7 @@ impl<'a> EvalCtx<'a> {
                 args,
                 source_span,
                 ..
-            } => {
-                if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-                    if !row.accepts_arity(args.len()) {
-                        return Err(unsupported(
-                            &format!(
-                                "{}.{}(): expected {}..{} argument(s), got {}",
-                                module,
-                                method,
-                                row.arity(),
-                                row.signature.max_arity,
-                                args.len()
-                            ),
-                            *source_span,
-                        ));
-                    }
-                }
-                if module == "core.data" {
-                    return self.eval_core_data_call(method, args, &expr.ty, scope);
-                }
-                if module == "core.compute" {
-                    return self.eval_core_compute_call(method, args, &expr.ty, *source_span, scope);
-                }
-                if module == "core.services" {
-                    return self.eval_core_services_call(method, args, *source_span, scope);
-                }
-                // D-PIN1 / S58: `mem.address_of(place)` is an inert address cast.
-                // AOT lowers to `(&place as *const _ as usize as i64)`. The
-                // interpreter has no real addresses, so mint a stable non-zero
-                // identity from the place path (I9: same non-zero / inequality
-                // facts a program can observe) — but ONLY when this evaluator is
-                // actually running the program (`runtime_execution`). A sema-time
-                // comptime fold (D-VERDICT-1308-1's implicit fold, or an explicit
-                // `#Known`) calls this exact same code path to *try* folding the
-                // binding; baking the synthetic identity as an AOT `i64` literal
-                // there would compile a wild-pointer dereference into the
-                // program — a real memory-safety bug, not just a wrong value.
-                // Refuse so the fold declines and the call lowers to real runtime
-                // codegen instead (I1).
-                if module == "core.mem" && method == "address_of" && args.len() == 1 {
-                    if !self.runtime_execution {
-                        return Err(unsupported(
-                            "`mem.address_of` at compile time",
-                            *source_span,
-                        ));
-                    }
-                    let key = tir_place_address_key(&args[0]);
-                    return Ok(CtValue::Int(stable_place_address(&key)));
-                }
-                if module == "core.tasks" && method == "channel" {
-                    if !self.runtime_execution {
-                        return Err(unsupported("`tasks.channel` at compile time", *source_span));
-                    }
-                    let capacity = args
-                        .first()
-                        .map(|arg| self.eval_expr(arg, scope))
-                        .transpose()?
-                        .map(|value| as_int(&value, self.span()))
-                        .transpose()?;
-                    return Ok(self.new_eval_channel(capacity));
-                }
-                if module == "core.tasks" && method == "yield_now" && args.is_empty() {
-                    std::thread::yield_now();
-                    return Ok(CtValue::Unit);
-                }
-                if module == "core.tasks" && method == "current_task" && args.is_empty() {
-                    // Outside a spawned evaluator task: idle defaults match Prelude.
-                    return Ok(CtValue::Str(
-                        jet_foundation::StructuralDebug::jet_task_control_trace(false, false),
-                    ));
-                }
-                if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
-                    let pointer = self.eval_expr(&args[0], scope)?;
-                    let value = self.eval_expr(&args[1], scope)?;
-                    let CtValue::Struct { type_name, fields } = pointer else {
-                        return Err(unsupported("raw pointer carrier", self.span()));
-                    };
-                    if type_name != "__JetRawLocal" {
-                        return Err(unsupported("raw pointer target", self.span()));
-                    }
-                    let name = fields.iter().find_map(|(field, value)| {
-                        match (field.as_str(), value) {
-                            ("name", CtValue::Str(name)) => Some(name.clone()),
-                            _ => None,
-                        }
-                    });
-                    let Some(name) = name else {
-                        return Err(unsupported("raw pointer local", self.span()));
-                    };
-                    scope.insert(name, value);
-                    return Ok(CtValue::Unit);
-                }
-                if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
-                    let pointer = self.eval_expr(&args[0], scope)?;
-                    let CtValue::Struct { type_name, fields } = pointer else {
-                        return Err(unsupported("raw pointer carrier", self.span()));
-                    };
-                    if type_name != "__JetRawLocal" {
-                        return Err(unsupported("raw pointer target", self.span()));
-                    }
-                    let name = fields.iter().find_map(|(field, value)| {
-                        match (field.as_str(), value) {
-                            ("name", CtValue::Str(name)) => Some(name.as_str()),
-                            _ => None,
-                        }
-                    });
-                    return name
-                        .and_then(|name| scope.get(name).cloned())
-                        .ok_or_else(|| unsupported("raw pointer local", self.span()));
-                }
-                let mut argv = Vec::with_capacity(args.len());
-                for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
-                }
-                let progress_known_total = if module == "core.io" && method == "progress" {
-                    if let Some((items, known_total)) =
-                        argv.first().and_then(progress_iter_parts)
-                    {
-                        if let Some(source) = argv.first_mut() {
-                            *source = CtValue::List(items);
-                        }
-                        Some(known_total)
-                    } else {
-                        match args.first().map(|arg| &arg.ty) {
-                            Some(Type::List(_)) | Some(Type::FixedList { .. }) => Some(true),
-                            Some(Type::Apply { name, .. })
-                                if name == crate::Syntax::TYPE_ITER => Some(
-                                    args.first()
-                                        .is_some_and(progress_source_has_exact_total),
-                                ),
-                            _ => None,
-                        }
-                    }
-                } else {
-                    None
-                };
-                // AOT reflection uses the resolved user-struct layout. Keep
-                // that static fact in the erased TIR carrier so `.fields()`
-                // cannot expose implementation fields from built-ins or
-                // guess from a runtime `CtValue::Struct` alone.
-                if module == "core.reflect" && method == "of" && args.len() == 1 {
-                    let value = argv
-                        .pop()
-                        .ok_or_else(|| unsupported("reflect value", *source_span))?;
-                    let field_names = match &args[0].ty {
-                        Type::Named(type_name) => self
-                            .struct_fields
-                            .get(type_name)
-                            .or_else(|| {
-                                self.struct_fields
-                                    .get(type_name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name))
-                            })
-                            .map(|fields| {
-                                CtValue::List(
-                                    fields
-                                        .iter()
-                                        .map(|(name, _)| CtValue::Str(name.clone()))
-                                        .collect(),
-                                )
-                            }),
-                        _ => None,
-                    };
-                    let mut fields = vec![("value".to_string(), value)];
-                    if let Some(field_names) = field_names {
-                        fields.push(("field_names".to_string(), field_names));
-                    }
-                    return Ok(CtValue::Struct {
-                        type_name: "__Reflect".to_string(),
-                        fields,
-                    });
-                }
-                if module == "core.web" && matches!(method.as_str(), "app" | "page") {
-                    return self.eval_web_core_call(method, argv);
-                }
-                if module == "core.http.server" && method == "json" && args.len() == 2 {
-                    let tree =
-                        self.eval_serde_encode_value(argv[1].clone(), &args[1].ty)?;
-                    argv[1] = CtValue::Str(crate::Comptime::render_datatree_for_tir(&tree));
-                }
-                if module == "core.encoding.cbor"
-                    && matches!(method.as_str(), "to_bytes" | "to_bytes_canonical")
-                {
-                    let value = argv.first().ok_or_else(|| {
-                        unsupported("core.encoding.cbor encoder missing its value", *source_span)
-                    })?;
-                    let tree = self.eval_serde_encode_value(value.clone(), &args[0].ty)?;
-                    let fields = HashMap::new();
-                    return Ok(match crate::Comptime::cbor_encode_typed_for_tir(
-                        &tree,
-                        &Type::Named("DataTree".to_string()),
-                        &fields,
-                        method == "to_bytes_canonical",
-                    ) {
-                        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                        Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
-                            type_name: "CBORError".to_string(),
-                            fields: vec![
-                                (
-                                    "kind".to_string(),
-                                    CtValue::Enum {
-                                        type_name: "CBORErrorKind".to_string(),
-                                        variant: "Unsupported".to_string(),
-                                        args: Vec::new(),
-                                    },
-                                ),
-                                ("byte_offset".to_string(), CtValue::Int(0)),
-                                ("path".to_string(), CtValue::Str("$".to_string())),
-                                ("reason".to_string(), CtValue::Str(reason)),
-                            ],
-                        })),
-                    });
-                }
-                // D-MIGRATE3=A: the text codecs' typed decode. `TExprKind::CoreCall`
-                // carries no type arguments, so the target comes from the call's
-                // resolved return type — `Result<T, [FieldError]>` for `decode`,
-                // `Result<DecodeResult<T>, [FieldError]>` for `decode_traced`.
-                if matches!(
-                    module.as_str(),
-                    "core.encoding.json"
-                        | "core.encoding.toml"
-                        | "core.encoding.yaml"
-                        | "core.encoding.csv"
-                ) && matches!(method.as_str(), "decode" | "decode_traced")
-                {
-                    return self.eval_typed_codec_decode(
-                        module,
-                        method,
-                        &expr.ty,
-                        &argv,
-                        *source_span,
-                    );
-                }
-                if module == "core.encoding.cbor" && method == "decode" {
-                    let Type::Result { ok, .. } = &expr.ty else {
-                        return Err(unsupported(
-                            "core.encoding.cbor.decode resolved return type",
-                            *source_span,
-                        ));
-                    };
-                    let bytes = match argv.first() {
-                        Some(CtValue::Bytes(bytes)) => bytes.clone(),
-                        Some(CtValue::List(values)) => values
-                            .iter()
-                            .map(|value| match value {
-                                CtValue::Int(byte) => u8::try_from(*byte).map_err(|_| {
-                                    unsupported(
-                                        "core.encoding.cbor.decode byte argument",
-                                        *source_span,
-                                    )
-                                }),
-                                _ => Err(unsupported(
-                                    "core.encoding.cbor.decode byte argument",
-                                    *source_span,
-                                )),
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                        _ => {
-                            return Err(unsupported(
-                                "core.encoding.cbor.decode byte argument",
-                                *source_span,
-                            ))
-                        }
-                    };
-                    let tree = match crate::Comptime::cbor_parse_for_tir(
-                        &bytes,
-                        argv.get(1),
-                        true,
-                    ) {
-                        Ok(tree) => tree,
-                        Err(error) => {
-                            return Ok(CtValue::failed(Box::new(
-                                crate::Comptime::cbor_decode_source_error_for_tir(error),
-                            )))
-                        }
-                    };
-                    return Ok(match self.eval_datatree_decode(tree, ok)? {
-                        CtValue::Present(value) => CtValue::Present(value),
-                        CtValue::Failed(CtReport::Told(error)) => CtValue::Failed(CtReport::Told(error)),
-                        _ => unreachable!("Decode protocol returns Result"),
-                    });
-                }
-                if module == "core.crypto"
-                    && method == "__signing_generate"
-                    && argv.is_empty()
-                {
-                    return Ok(CtValue::Present(Box::new(CtValue::Int(1))));
-                }
-                if module == "core.crypto"
-                    && method == "__signing_public"
-                    && argv.len() == 1
-                {
-                    return Ok(argv.remove(0));
-                }
-                if module == "core.browser" && self.runtime_execution {
-                    return super::browser::core_call(method, argv, *source_span);
-                }
-                if !self.runtime_execution && module == "core.net" && method == "fetch" {
-                    return crate::Comptime::eval_net_fetch(
-                        &argv,
-                        self.embed_inputs.as_deref_mut(),
-                        *source_span,
-                    );
-                }
-                if !self.runtime_execution && module == "core.vault" {
-                    return Err(crate::Comptime::vault_comptime_denied(
-                        module,
-                        method,
-                        *source_span,
-                    ));
-                }
-                // #1788: `core.random` (besides `.rng`, a pure function of its
-                // explicit seed argument) reads/writes ambient PRNG state — the
-                // real runtime `Rand` when this evaluator is truly running the
-                // program (`runtime_execution`) or a live REPL session
-                // (`repl_mode`, which *is* the one execution), but a throwaway
-                // interpreter-only stream otherwise. That "otherwise" is a
-                // sema-time D-VERDICT-1308-1 implicit `::` fold or an explicit
-                // `$`/#Known demand (same call path as the `mem.address_of`
-                // guard above): baking its draw as a literal would freeze a
-                // value that never resyncs with whatever `random.seed()` the
-                // compiled program's Prelude RNG sees at real runtime. Decline
-                // plainly so the fold backs off to ordinary runtime codegen
-                // (D-VERDICT-1308-1: failure is silent); an explicit demand
-                // surfaces this as a normal "not available at compile time"
-                // error. Do not route through the Tier-2 `#Impure` gate below —
-                // random stays outside that gate (D-META-EFFECT1).
-                if !self.runtime_execution
-                    && !self.repl_mode
-                    && module == "core.random"
-                    && method != "rng"
-                {
-                    return Err(unsupported(
-                        &format!("`{module}.{method}()` at compile time"),
-                        *source_span,
-                    ));
-                }
-                if self.should_decline_ambient_fold(module, method) {
-                    return Err(unsupported(
-                        &format!("`{module}.{method}()` at compile time"),
-                        *source_span,
-                    ));
-                }
-                let is_tier2 =
-                    crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
-                if !is_tier2 {
-                    return apply_core_call(module, method, argv, *source_span, self.repl_mode)
-                        .map(|value| {
-                            mark_unknown_progress_total(
-                                value,
-                                module,
-                                method,
-                                args,
-                                progress_known_total,
-                            )
-                        });
-                }
-                // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
-                // ambient I/O matches AOT (env/fs/process/auth store). Pure
-                // comptime keeps depth 0 and must reject — never fall through
-                // to `apply_core_call`, which still hosts AuthLite/SyncLite
-                // and would const-fold storeful Ok(literals) (I9).
-                // parity: guard tests/dev.rs::dev_default_matches_compiled_binary
-                if self.repl_mode {
-                    let mut sink = self
-                        .sink
-                        .as_ref()
-                        .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-                    apply_repl_authorized_core_call(
-                        module,
-                        method,
-                        argv,
-                        *source_span,
-                        &self.base_dir,
-                        sink.as_deref_mut(),
-                        &self.repl_grants,
-                        reborrow_repl_authorizer(&mut self.repl_authorizer),
-                    )
-                    .map(|value| {
-                        mark_unknown_progress_total(
-                            value,
-                            module,
-                            method,
-                            args,
-                            progress_known_total,
-                        )
-                    })
-                } else if self.impure_depth > 0 && self.allow_impure {
-                    let mut sink = self
-                        .sink
-                        .as_ref()
-                        .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-                    let result = apply_impure_core_call(
-                        module,
-                        method,
-                        argv,
-                        *source_span,
-                        &self.base_dir,
-                        sink.as_deref_mut(),
-                        false,
-                        None,
-                        None,
-                    );
-                    result.map(|value| {
-                        mark_unknown_progress_total(
-                            value,
-                            module,
-                            method,
-                            args,
-                            progress_known_total,
-                        )
-                    })
-                } else if self.impure_depth == 0 {
-                    Err(Diagnostic::error(
-                        "E3410",
-                        format!(
-                            "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
-                        ),
-                        "ambient I/O and storeful Core APIs are not allowed in \
-                         pure comptime evaluation"
-                            .to_string(),
-                        "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
-                         pass `--allow-impure` to the build, or keep the call at runtime"
-                            .to_string(),
-                        Some(*source_span),
-                    ))
-                } else {
-                    Err(Diagnostic::error(
-                        "E3411",
-                        format!(
-                            "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
-                        ),
-                        "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
-                        "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
-                        Some(*source_span),
-                    ))
-                }
-            }
+            } => self.eval_core_call_expr(expr, module, method, args, *source_span, scope),
             TExprKind::StructLit {
                 fields, as_trait, ..
             } => {
@@ -3578,20 +3623,7 @@ impl<'a> EvalCtx<'a> {
                     _ => Err(unsupported("field recv", self.span())),
                 }
             }
-            TExprKind::ListLit(elems) => {
-                if let [inner] = elems.as_slice() {
-                    // Early typed-list lowering wraps `T.{ value }` in one
-                    // ListLit. Preserve the value when it already has T.
-                    if expr.ty == inner.ty {
-                        return self.eval_expr(inner, scope);
-                    }
-                }
-                let mut out = Vec::with_capacity(elems.len());
-                for e in elems {
-                    out.push(self.eval_expr(e, scope)?);
-                }
-                Ok(CtValue::List(out))
-            }
+            TExprKind::ListLit(elems) => self.eval_list_lit_expr(expr, elems, scope),
             TExprKind::Clone(inner) => self.eval_expr(inner, scope),
             TExprKind::Present(inner) => {
                 Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?)))
@@ -4081,56 +4113,7 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::OrFallback { value, fallback } => {
-                let v = self.eval_expr(value, scope)?;
-                // D-FAIL-CARRIER1=A: one carrier — the report side is the miss,
-                // whether the report is a clean absence or a failure.
-                let miss = matches!(v, CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_)));
-                if !miss {
-                    return match v {
-                        CtValue::Present(inner) => Ok(*inner),
-                        other => Ok(other),
-                    };
-                }
-                match fallback {
-                    crate::Codegen::TIR::TOrFallback::Value(fb) => self.eval_expr(fb, scope),
-                    crate::Codegen::TIR::TOrFallback::Return(Some(fb)) => {
-                        let ret = self.eval_expr(fb, scope)?;
-                        self.pending_return = Some(ret);
-                        Ok(CtValue::Unit)
-                    }
-                    crate::Codegen::TIR::TOrFallback::Return(None) => {
-                        self.pending_return = Some(CtValue::Unit);
-                        Ok(CtValue::Unit)
-                    }
-                    crate::Codegen::TIR::TOrFallback::Panic { msg, loc } => {
-                        let message = self.eval_expr(msg, scope)?.jet_show();
-                        let file = loc.file.trim_matches('"');
-                        let fn_name = loc.fn_name.trim_matches('"');
-                        let src_line = loc.src_line.trim_matches('"');
-                        let line_s = loc.line.to_string();
-                        let margin = line_s.len();
-                        let pad = " ".repeat(margin);
-                        let col_offset = loc.col.saturating_sub(1) as usize;
-                        let caret = "^".repeat(loc.caret.max(1) as usize);
-                        let rendered = format!(
-                            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-                            loc.line,
-                            " ".repeat(col_offset)
-                        );
-                        if let Some(sink) = self.sink.as_ref() {
-                            let mut sink = sink.lock().expect("evaluator sink poisoned");
-                            sink.stderr.push_str(&rendered);
-                            sink.exit_code = Some(70);
-                            return Err(Diagnostic::soft_exit(
-                                "70".to_string(),
-                                "or-fallback panic stop".to_string(),
-                                Some(self.span()),
-                            ));
-                        }
-                        Err(unsupported("or-fallback panic", self.span()))
-                    }
-                    _ => Err(unsupported("or-fallback form", self.span())),
-                }
+                self.eval_or_fallback_expr(value, fallback, scope)
             }
             TExprKind::EnumLit {
                 enum_type,
