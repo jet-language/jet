@@ -653,7 +653,7 @@ impl<'a> Checker<'a> {
             self.expected_type.as_ref(),
         ) {
                     Ok(subst) => {
-                        for param in &declared {
+                        for param in &sig.type_params {
                             let Some(concrete) = subst.get(&param.name) else {
                                 continue;
                             };
