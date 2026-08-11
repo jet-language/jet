@@ -15,6 +15,7 @@ use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_forin_collection;
 use crate::Codegen::TIR::lower::lower_string_view_init;
+use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
@@ -641,9 +642,12 @@ impl<'a> LowerStmtPlan<'a> {
 }
 
 pub(crate) fn deferred_stmt<'a>(
-    bodies: Vec<LowerBody<'a>>,
+    mut bodies: Vec<LowerBody<'a>>,
     finish: impl FnOnce(Vec<Vec<TStmt>>) -> TStmt + 'a,
 ) -> LowerStmtPlan<'a> {
+    // Plans are consumed from the end so each deferred body advances in source
+    // order without shifting the remaining work on every step.
+    bodies.reverse();
     LowerStmtPlan {
         bodies,
         finish: Box::new(finish),
@@ -798,7 +802,7 @@ fn lower_body_chain<'a>(
     carried_env: Option<LowerEnv>,
 ) -> LowerTask<'a> {
     let LowerStmtPlan { mut bodies, finish } = plan;
-    let mut body = bodies.remove(0);
+    let mut body = bodies.pop().expect("deferred statement plan has no body");
     // An inherited body starts from its own planned env until a preceding body
     // explicitly carries one (the counted-loop step is the carried case).
     let mut child_env = match (body.inherit_env, carried_env) {
@@ -2171,7 +2175,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 vec![LowerBody::scoped(body, branch)],
                 move |mut lowered| TStmt::Loop {
                     label,
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("loop body was deferred"),
                 },
             );
         }
@@ -2186,7 +2190,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 move |mut lowered| TStmt::While {
                     label,
                     cond,
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("while body was deferred"),
                 },
             );
         }
@@ -2225,8 +2229,17 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             bodies.push(LowerBody::inherited(body, scoped));
             let label = label_name(label);
             return deferred_stmt(bodies, move |mut lowered| {
-                let step = has_step.then(|| Box::new(lowered.remove(0).remove(0)));
-                let body = lowered.remove(0);
+                let body = lowered.pop().expect("counted-loop body was deferred");
+                let step = has_step.then(|| {
+                    Box::new(
+                        lowered
+                            .pop()
+                            .expect("counted-loop step was deferred")
+                            .into_iter()
+                            .next()
+                            .expect("counted-loop step was empty"),
+                    )
+                });
                 TStmt::CountedLoop {
                     label,
                     init: init_stmt,
@@ -2265,7 +2278,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         end,
                         step,
                         exclusive,
-                        body: lowered.remove(0),
+                        body: lowered.pop().expect("range body was deferred"),
                     },
                 );
             }
@@ -2303,7 +2316,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             end: zero(),
                             step,
                             exclusive: false,
-                            body: lowered.remove(0),
+                            body: lowered.pop().expect("range body was deferred"),
                         },
                     );
                 }
@@ -2429,7 +2442,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         method_kind,
                         columnar,
                         by_value,
-                        body: lowered.remove(0),
+                        body: lowered.pop().expect("for-in body was deferred"),
                     },
                 );
             }
@@ -2465,7 +2478,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::DebugOnly(lowered.remove(0)),
+                |mut lowered| TStmt::DebugOnly(lowered.pop().expect("debug body was deferred")),
             );
         }
         // Lexical-scope rule: whenever `emit_tir_stmt` opens a Rust `{ ... }`, lower
@@ -2493,7 +2506,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::inline(chosen, scoped)],
-                |mut lowered| TStmt::Inline(lowered.remove(0)),
+                |mut lowered| TStmt::Inline(lowered.pop().expect("comptime-if body was deferred")),
             );
         }
         // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
@@ -2505,7 +2518,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Unsafe(lowered.remove(0)),
+                |mut lowered| TStmt::Unsafe(lowered.pop().expect("unsafe body was deferred")),
             );
         }
         // D-CTEFFECT1: preserve the policy gate for canonical comptime evaluation.
@@ -2514,13 +2527,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Impure(lowered.remove(0)),
+                |mut lowered| TStmt::Impure(lowered.pop().expect("impure body was deferred")),
             );
         }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
         Stmt::Reactive { body, span, .. } => {
-            let closure = render_reactive_block_closure(body, cx, env);
+            let outer_env = clone_env(env);
+            let body_env = reactive_block_env(body, cx, env);
             // Synthetic zero-arg lambda so JIT can compile the body with captures.
             let synthetic = crate::AST::Lambda {
                 take_names: Vec::new(),
@@ -2532,7 +2546,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     let mut meta = crate::AST::LambdaMeta::default();
                     meta.cloned_captures = reads
                         .into_iter()
-                        .filter(|n| env.locals.contains_key(n))
+                        .filter(|n| outer_env.locals.contains_key(n))
                         .collect();
                     meta.cloned_captures.sort();
                     meta.needs_fn_mut = true;
@@ -2540,14 +2554,28 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     meta
                 },
             };
-            let executable = Box::new(crate::Codegen::TIR::lower_lambda(&synthetic, cx, env));
-            let jit_lambda =
-                crate::Codegen::TIR::lower_spawn_lambda_for_jit(&synthetic, cx, env);
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-            TStmt::Reactive {
-                closure,
-                executable,
-            }
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, body_env)],
+                move |mut lowered| {
+                    let lowered = lowered.pop().expect("reactive body was deferred");
+                    let closure = render_reactive_block_closure(body, &lowered, cx, &outer_env);
+                    let executable = Box::new(crate::Codegen::TIR::lower_lambda(
+                        &synthetic,
+                        cx,
+                        &outer_env,
+                    ));
+                    let jit_lambda = crate::Codegen::TIR::lower_spawn_lambda_for_jit(
+                        &synthetic,
+                        cx,
+                        &outer_env,
+                    );
+                    cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                    TStmt::Reactive {
+                        closure,
+                        executable,
+                    }
+                },
+            );
         }
         // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
         Stmt::Shield { body, .. } => {
@@ -2555,7 +2583,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
                 |mut lowered| TStmt::Shield {
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("shield body was deferred"),
                 },
             );
         }
@@ -2565,14 +2593,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Region(lowered.remove(0)),
+                |mut lowered| TStmt::Region(lowered.pop().expect("region body was deferred")),
             );
         }
         Stmt::Policy { body, .. } => {
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Region(lowered.remove(0)),
+                |mut lowered| TStmt::Region(lowered.pop().expect("policy body was deferred")),
             );
         }
         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
@@ -2588,7 +2616,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 move |mut lowered| TStmt::TaskGroup {
                     group,
                     limit,
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("task-group body was deferred"),
                 },
             );
         }
@@ -2611,7 +2639,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 move |mut lowered| TStmt::Layout {
                     handle,
                     label,
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("layout body was deferred"),
                 },
             );
         }
@@ -2621,7 +2649,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Region(lowered.remove(0)),
+                |mut lowered| TStmt::Region(lowered.pop().expect("caps body was deferred")),
             );
         }
         // D-SCAP1: a `#grant(FS) { caps -> … }` grant region. The capability handle
@@ -2632,7 +2660,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Region(lowered.remove(0)),
+                |mut lowered| TStmt::Region(lowered.pop().expect("grant body was deferred")),
             );
         }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
@@ -2648,7 +2676,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 vec![LowerBody::scoped(body, scoped)],
                 move |mut lowered| TStmt::ContextBlock {
                     guards,
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("context body was deferred"),
                 },
             );
         }
@@ -2658,7 +2686,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
                 |mut lowered| TStmt::Live {
-                    body: lowered.remove(0),
+                    body: lowered.pop().expect("live body was deferred"),
                 },
             );
         }
@@ -2675,7 +2703,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let scoped = clone_env(env);
                 return deferred_stmt(
                     vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Region(lowered.remove(0)),
+                    |mut lowered| TStmt::Region(lowered.pop().expect("scope body was deferred")),
                 );
             }
             let kind = if name == Syntax::SCOPE_TEST_SETUP {
@@ -2697,7 +2725,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             };
             return deferred_stmt(vec![body_plan], move |mut lowered| TStmt::ScopeMember {
                 kind,
-                body: lowered.remove(0),
+                body: lowered.pop().expect("scope member body was deferred"),
             });
         }
         // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
@@ -2707,7 +2735,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Region(lowered.remove(0)),
+                |mut lowered| TStmt::Region(lowered.pop().expect("determinism body was deferred")),
             );
         }
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
@@ -2763,7 +2791,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         handle,
                         snapshots,
                         uses_stm,
-                        body: lowered.remove(0),
+                        body: lowered.pop().expect("transaction body was deferred"),
                     }
                 },
             );

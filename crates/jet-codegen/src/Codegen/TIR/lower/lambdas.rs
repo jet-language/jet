@@ -24,6 +24,7 @@ use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::unit_type;
 use std::collections::HashSet;
 
@@ -487,7 +488,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
 /// Render a `#Reactive { … }` block as a `move || { … }` closure for
 /// `jet_reactive_effect`. Outer locals read inside the block are cloned into
 /// `__jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
-pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> String {
+fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, LowerEnv) {
     let reads = crate::Sema::block_free_var_reads(stmts);
     let mut caps: Vec<String> = reads
         .into_iter()
@@ -514,10 +515,24 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
         };
         lam_env.bind(name, slot, outer_env.ty_of(name));
     }
-    let mut inner = String::new();
+    (prep, lam_env)
+}
+
+pub(super) fn reactive_block_env(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> LowerEnv {
+    let (_, mut lam_env) = reactive_capture_setup(stmts, outer_env);
     prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
-    let lowered = lower_stmts(stmts, cx, &mut lam_env);
-    emit_tir_stmts(&lowered, cx, &mut inner, 1);
+    lam_env
+}
+
+pub(super) fn render_reactive_block_closure(
+    stmts: &[Stmt],
+    lowered: &[TStmt],
+    _cx: &Cx,
+    outer_env: &LowerEnv,
+) -> String {
+    let (prep, _) = reactive_capture_setup(stmts, outer_env);
+    let mut inner = String::new();
+    emit_tir_stmts(lowered, _cx, &mut inner, 1);
     let closure = format!("move || {{ {} }}", inner);
     if prep.is_empty() {
         closure

@@ -16,7 +16,7 @@ use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::lower::bool_and_chain;
 use crate::Codegen::TIR::lower_enum_match;
-use crate::Codegen::TIR::lower::{deferred_stmt, lower_stmts, LowerBody, LowerStmtPlan};
+use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
@@ -945,8 +945,9 @@ fn lower_guard_switch<'a>(
     }
     let has_else = else_body.is_some();
     deferred_stmt(bodies, move |mut lowered| {
+        let mut lowered = lowered.into_iter();
         let mut chain = if has_else {
-            lowered.remove(0)
+            lowered.next().expect("guard else body was deferred")
         } else {
             Vec::new()
         };
@@ -958,7 +959,7 @@ fn lower_guard_switch<'a>(
                 .borrow_mut()
                 .take()
                 .expect("guard condition prepared before body");
-            prefix.extend(lowered.remove(0));
+            prefix.extend(lowered.next().expect("guard arm body was deferred"));
             chain = vec![TStmt::If {
                 cond,
                 then_body: prefix,
@@ -1030,45 +1031,73 @@ pub(crate) fn lower_mixed_switch<'a>(
 ) -> LowerStmtPlan<'a> {
     let subject_expr = lower_expr(subject, cx, env);
     let subject_ty = subject_expr.ty.clone();
-    let mut arm_plans = Vec::new();
+    let mut arm_states = Vec::with_capacity(arms.len());
+    let mut bodies = Vec::with_capacity(arms.len() + if else_body.is_some() { 1 } else { 0 });
     for arm in arms {
-        let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
-        let str_match_pat = arm_str_match_pattern(cx, &arm.cond, subject);
-        let bin_match_pat = arm_bin_match_pattern(cx, &arm.cond, subject);
-        let cond_expr = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
-            range_inclusive_cond(&subject_ty, lo, hi)
-        } else if let Some(pattern) = struct_pat.as_ref() {
-            struct_pattern_cond_expr(pattern, &subject_ty, cx, env)
-        } else if let Some(pattern) = str_match_pat.as_ref() {
-            str_match_pattern_cond_expr(pattern, cx)
-        } else if let Some(pattern) = bin_match_pat.as_ref() {
-            bin_match_pattern_cond_expr(pattern, cx)
-        } else {
-            lower_branch_condition(&arm.cond, subject, &subject_ty, cx, env)
-        };
-        // Each arm body has its own lexical bindings.
-        let mut branch = clone_env(env);
-        let mut prefix = if let Some(pattern) = struct_pat.as_ref() {
-            lower_struct_pattern_bindings(pattern, &subject_ty, cx, &mut branch)
-        } else if let Some(pattern) = str_match_pat.as_ref() {
-            lower_str_match_pattern_bindings(pattern, cx, &mut branch)
-        } else if let Some(pattern) = bin_match_pat.as_ref() {
-            lower_bin_match_pattern_bindings(pattern, cx, &mut branch)
-        } else {
-            Vec::new()
-        };
-        prefix.extend(lower_stmts(&arm.body, cx, &mut branch));
-        arm_plans.push((cond_expr, prefix));
+        let state = Rc::new(RefCell::new(None));
+        let state_for_prepare = Rc::clone(&state);
+        // Keep the condition and pattern-binding prefix in the same deferred
+        // work item as its arm body. This preserves arm order while keeping all
+        // body descent on the heap worklist.
+        let branch = clone_env(env);
+        bodies.push(
+            LowerBody::scoped(&arm.body, branch).prepare(move |cx, branch| {
+                let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
+                let str_match_pat = arm_str_match_pattern(cx, &arm.cond, subject);
+                let bin_match_pat = arm_bin_match_pattern(cx, &arm.cond, subject);
+                let cond_expr = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
+                    range_inclusive_cond(&subject_ty, lo, hi)
+                } else if let Some(pattern) = struct_pat.as_ref() {
+                    struct_pattern_cond_expr(pattern, &subject_ty, cx, branch)
+                } else if let Some(pattern) = str_match_pat.as_ref() {
+                    str_match_pattern_cond_expr(pattern, cx)
+                } else if let Some(pattern) = bin_match_pat.as_ref() {
+                    bin_match_pattern_cond_expr(pattern, cx)
+                } else {
+                    lower_branch_condition(&arm.cond, subject, &subject_ty, cx, branch)
+                };
+                let prefix = if let Some(pattern) = struct_pat.as_ref() {
+                    lower_struct_pattern_bindings(pattern, &subject_ty, cx, branch)
+                } else if let Some(pattern) = str_match_pat.as_ref() {
+                    lower_str_match_pattern_bindings(pattern, cx, branch)
+                } else if let Some(pattern) = bin_match_pat.as_ref() {
+                    lower_bin_match_pattern_bindings(pattern, cx, branch)
+                } else {
+                    Vec::new()
+                };
+                *state_for_prepare.borrow_mut() = Some((cond_expr, prefix));
+            }),
+        );
+        arm_states.push(state);
     }
     let has_else = else_body.is_some();
-    let else_lowered = else_body
-        .as_ref()
-        .map(|body| lower_stmts(body, cx, &mut clone_env(env)));
-    LowerStmtPlan::ready(TStmt::MixedSwitch {
-        subject: subject_expr,
-        class,
-        arms: arm_plans,
-        else_body: has_else.then_some(else_lowered.expect("else body was present")),
+    if let Some(body) = else_body {
+        bodies.push(LowerBody::scoped(body, clone_env(env)));
+    }
+    deferred_stmt(bodies, move |mut lowered| {
+        let mut lowered = lowered.into_iter();
+        let arms = arm_states
+            .into_iter()
+            .map(|state| {
+                let (cond, mut prefix) = state
+                    .borrow_mut()
+                    .take()
+                    .expect("mixed-switch arm prepared before body");
+                prefix.extend(lowered.next().expect("mixed-switch arm body was deferred"));
+                (cond, prefix)
+            })
+            .collect();
+        let else_body = has_else.then(|| {
+            lowered
+                .next()
+                .expect("mixed-switch else body was deferred")
+        });
+        TStmt::MixedSwitch {
+            subject: subject_expr,
+            class,
+            arms,
+            else_body,
+        }
     })
 }
 

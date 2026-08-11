@@ -1,6 +1,6 @@
 use crate::AST::{
-    AccessConvention, BinOp, EnumLitArg, Expr, IndexKind, OrFallback, StrPart, TryConvert, Type,
-    TypedLitBody,
+    AccessConvention, BinOp, CallArg, EnumLitArg, Expr, IndexKind, OrFallback, Stmt, StrPart,
+    TryConvert, Type, TypedLitBody,
 };
 use crate::Codegen::Cx;
 use crate::Codegen::emit_named_fn_value;
@@ -184,6 +184,8 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 struct ExprWorklistCache {
     active: bool,
     values: HashMap<usize, VecDeque<TExpr>>,
+    types: HashMap<usize, Type>,
+    bodies: HashMap<usize, VecDeque<Vec<TStmt>>>,
 }
 
 impl Default for ExprWorklistCache {
@@ -191,6 +193,8 @@ impl Default for ExprWorklistCache {
         Self {
             active: false,
             values: HashMap::new(),
+            types: HashMap::new(),
+            bodies: HashMap::new(),
         }
     }
 }
@@ -313,6 +317,8 @@ fn expr_cache_begin() -> bool {
         } else {
             cache.active = true;
             cache.values.clear();
+            cache.types.clear();
+            cache.bodies.clear();
             true
         }
     })
@@ -323,6 +329,8 @@ fn expr_cache_end() {
         let mut cache = cache.borrow_mut();
         cache.active = false;
         cache.values.clear();
+        cache.types.clear();
+        cache.bodies.clear();
     });
 }
 
@@ -350,8 +358,9 @@ fn expr_cache_take(expr: &Expr) -> Option<TExpr> {
 
 fn expr_cache_put(expr: &Expr, value: TExpr) {
     EXPR_WORKLIST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.types.insert(expr_key(expr), value.ty.clone());
         cache
-            .borrow_mut()
             .values
             .entry(expr_key(expr))
             .or_default()
@@ -359,11 +368,57 @@ fn expr_cache_put(expr: &Expr, value: TExpr) {
     });
 }
 
-/// Return the children whose lowering is plain expression lowering. Contextual
-/// call arguments that are lambdas stay opaque so `lower_one_call_arg` can apply
-/// the expected function type; every other child goes through this same heap-
-/// scheduled entry point.
-fn expr_children(expr: &Expr) -> Vec<&Expr> {
+fn expr_cache_type(expr: &Expr) -> Option<Type> {
+    let expr = strip_expr_parens(expr);
+    EXPR_WORKLIST_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        cache.active.then(|| cache.types.get(&expr_key(expr)).cloned()).flatten()
+    })
+}
+
+fn expr_cache_put_body(expr: &Expr, body: Vec<TStmt>) {
+    EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .bodies
+            .entry(expr_key(expr))
+            .or_default()
+            .push_back(body);
+    });
+}
+
+fn expr_cache_take_body(expr: &Expr) -> Option<Vec<TStmt>> {
+    EXPR_WORKLIST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.active {
+            return None;
+        }
+        let key = expr_key(expr);
+        let body = cache
+            .bodies
+            .get_mut(&key)
+            .and_then(|bodies| bodies.pop_front());
+        if cache
+            .bodies
+            .get(&key)
+            .is_some_and(|bodies| bodies.is_empty())
+        {
+            cache.bodies.remove(&key);
+        }
+        body
+    })
+}
+
+pub(crate) fn take_scheduled_expr(expr: &Expr) -> Option<TExpr> {
+    expr_cache_take(expr).or_else(|| {
+        let stripped = strip_expr_parens(expr);
+        (!std::ptr::eq(expr, stripped)).then(|| expr_cache_take(stripped)).flatten()
+    })
+}
+
+/// Return the non-call children of an expression. Calls use the unified work
+/// item path below so argument context and source order stay explicit.
+fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Str(parts, _) => parts
             .iter()
@@ -452,36 +507,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             })
             .collect(),
         Expr::PatternTest { subject, .. } => vec![subject.as_ref()],
-        Expr::Call(call) => call
-            .args
-            .iter()
-            .filter_map(|arg| (!matches!(&arg.expr, Expr::Lambda(_))).then_some(&arg.expr))
-            .collect(),
-        Expr::CallValue { callee, args, .. } => {
-            let mut children = Vec::with_capacity(args.len() + 1);
-            children.push(callee.as_ref());
-            children.extend(
-                args.iter()
-                    .filter_map(|arg| (!matches!(&arg.expr, Expr::Lambda(_))).then_some(&arg.expr)),
-            );
-            children
-        }
-        Expr::MethodCall { .. } => {
-            let mut calls = Vec::new();
-            let mut cursor = expr;
-            while let Expr::MethodCall { receiver, args, .. } = cursor {
-                calls.push(args);
-                cursor = receiver;
-            }
-            let mut children = vec![cursor];
-            for args in calls.into_iter().rev() {
-                children.extend(
-                    args.iter()
-                        .filter_map(|arg| (!matches!(&arg.expr, Expr::Lambda(_))).then_some(&arg.expr)),
-                );
-            }
-            children
-        }
+        Expr::Call(_) | Expr::CallValue { .. } | Expr::MethodCall { .. } => Vec::new(),
         Expr::TypedLit { body, .. } => {
             let mut children = Vec::new();
             body.for_each_expr(|value| children.push(value));
@@ -523,9 +549,237 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
+enum ExprArgMode<'a> {
+    Plain,
+    Convention(Option<(AccessConvention, Type)>),
+    CallValue { callee: &'a Expr, index: usize },
+}
+
+struct ExprWorkArg<'a> {
+    arg: &'a CallArg,
+    mode: ExprArgMode<'a>,
+}
+
+enum ExprWorkChild<'a> {
+    Expr(&'a Expr),
+    Arg(ExprWorkArg<'a>),
+}
+
+fn source_arg_indices(args: &[CallArg]) -> Vec<usize> {
+    let Some(order) = source_arg_order(args) else {
+        return (0..args.len()).collect();
+    };
+    let mut seen = vec![false; args.len()];
+    let mut indices = Vec::with_capacity(args.len());
+    for index in order {
+        seen[index] = true;
+        indices.push(index);
+    }
+    indices.extend(
+        seen.into_iter()
+            .enumerate()
+            .filter_map(|(index, seen)| (!seen).then_some(index)),
+    );
+    indices
+}
+
+fn direct_call_conventions(
+    call: &crate::AST::Call,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> Option<Vec<(AccessConvention, Type)>> {
+    if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+        return match env.ty_of(&call.name) {
+            Some(Type::Fn { params, .. }) => Some(
+                params
+                    .iter()
+                    .cloned()
+                    .map(|ty| (AccessConvention::Read, ty))
+                    .collect(),
+            ),
+            _ => Some(Vec::new()),
+        };
+    }
+    if let Some(sig) = cx.sigs.get(&call.name) {
+        return Some(sig.clone());
+    }
+    let inline_mangled = cx
+        .inline_unqualified
+        .get(&env.fn_name)
+        .and_then(|scope| scope.get(&call.name))
+        .or_else(|| cx.unqualified_inline.get(&call.name));
+    if let Some(mangled) = inline_mangled {
+        return cx.sigs.get(mangled).cloned();
+    }
+    let inline_file = cx
+        .inline_unqualified_file
+        .get(&env.fn_name)
+        .and_then(|scope| scope.get(&call.name))
+        .or_else(|| cx.unqualified_file.get(&call.name));
+    inline_file.and_then(|(_, function)| {
+        cx.import_sigs
+            .get(&(call.name.clone(), function.clone()))
+            .cloned()
+    })
+}
+
+fn method_arg_mode(
+    method: &str,
+    recv_type: &Option<String>,
+    owner_type_args: &[Type],
+    type_args: &[Type],
+    index: usize,
+    cx: &Cx,
+) -> ExprArgMode<'static> {
+    if owner_type_args.is_empty() && type_args.is_empty() {
+        if let Some(ty) = recv_type {
+            if let Some(sig) = cx.method_sigs.get(&(ty.clone(), method.to_string())) {
+                return ExprArgMode::Convention(sig.get(index).cloned());
+            }
+        }
+    }
+    ExprArgMode::Plain
+}
+
+fn inline_loop_body(expr: &Expr) -> Option<&[Stmt]> {
+    let Expr::CallValue { callee, args, .. } = expr else {
+        return None;
+    };
+    if !args.is_empty() {
+        return None;
+    }
+    let Expr::Lambda(lam) = callee.as_ref() else {
+        return None;
+    };
+    if !(lam.meta.collecting_loop || lam.meta.result_loop) {
+        return None;
+    }
+    let crate::AST::LambdaBody::Block(body) = &lam.body else {
+        return None;
+    };
+    Some(body)
+}
+
+fn expr_children<'a>(expr: &'a Expr, cx: &Cx, env: &LowerEnv) -> Vec<ExprWorkChild<'a>> {
+    match expr {
+        Expr::Call(call) => {
+            let conventions = direct_call_conventions(call, cx, env);
+            source_arg_indices(&call.args)
+                .into_iter()
+                .map(|index| ExprWorkChild::Arg(ExprWorkArg {
+                    arg: &call.args[index],
+                    mode: conventions
+                        .as_ref()
+                        .map(|sig| ExprArgMode::Convention(sig.get(index).cloned()))
+                        .unwrap_or(ExprArgMode::Plain),
+                }))
+                .collect()
+        }
+        Expr::CallValue { callee, args, .. } => {
+            let mut children = Vec::with_capacity(args.len() + 1);
+            if inline_loop_body(expr).is_none() {
+                children.push(ExprWorkChild::Expr(callee.as_ref()));
+                children.extend(source_arg_indices(args).into_iter().map(|index| {
+                    ExprWorkChild::Arg(ExprWorkArg {
+                        arg: &args[index],
+                        mode: ExprArgMode::CallValue {
+                            callee: callee.as_ref(),
+                            index,
+                        },
+                    })
+                }));
+            }
+            children
+        }
+        Expr::MethodCall { .. } => {
+            let mut calls = Vec::new();
+            let mut cursor = expr;
+            while let Expr::MethodCall {
+                receiver,
+                method,
+                owner_type_args,
+                type_args,
+                args,
+                recv_type,
+                ..
+            } = cursor
+            {
+                calls.push((
+                    receiver.as_ref(),
+                    method.as_str(),
+                    owner_type_args.as_slice(),
+                    type_args.as_slice(),
+                    args,
+                    recv_type,
+                ));
+                cursor = receiver;
+            }
+            let mut children = vec![ExprWorkChild::Expr(cursor)];
+            for (_, method, owner_type_args, type_args, args, recv_type) in calls.into_iter().rev() {
+                children.extend(source_arg_indices(args).into_iter().map(|index| {
+                    ExprWorkChild::Arg(ExprWorkArg {
+                        arg: &args[index],
+                        mode: method_arg_mode(
+                            method,
+                            recv_type,
+                            owner_type_args,
+                            type_args,
+                            index,
+                            cx,
+                        ),
+                    })
+                }));
+            }
+            children
+        }
+        _ => plain_expr_children(expr)
+            .into_iter()
+            .map(ExprWorkChild::Expr)
+            .collect(),
+    }
+}
+
 enum ExprWork<'a> {
     Enter(&'a Expr),
+    EnterArg(ExprWorkArg<'a>),
     Build(&'a Expr),
+    BuildArg(ExprWorkArg<'a>),
+    LowerInlineBody {
+        expr: &'a Expr,
+        body: &'a [Stmt],
+    },
+}
+
+fn push_expr_children<'a>(
+    work: &mut Vec<ExprWork<'a>>,
+    children: Vec<ExprWorkChild<'a>>,
+) {
+    for child in children.into_iter().rev() {
+        match child {
+            ExprWorkChild::Expr(child) => {
+                let child = strip_expr_parens(child);
+                if !matches!(child, Expr::If { .. }) {
+                    work.push(ExprWork::Enter(child));
+                }
+            }
+            ExprWorkChild::Arg(arg) => work.push(ExprWork::EnterArg(arg)),
+        }
+    }
+}
+
+fn push_expr_work<'a>(
+    work: &mut Vec<ExprWork<'a>>,
+    expr: &'a Expr,
+    cx: &Cx,
+    env: &LowerEnv,
+) {
+    let expr = strip_expr_parens(expr);
+    work.push(ExprWork::Build(expr));
+    if let Some(body) = inline_loop_body(expr) {
+        work.push(ExprWork::LowerInlineBody { expr, body });
+    } else {
+        push_expr_children(work, expr_children(expr, cx, env));
+    }
 }
 
 fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TExpr {
@@ -538,16 +792,45 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 if matches!(expr, Expr::If { .. }) {
                     continue;
                 }
-                work.push(ExprWork::Build(expr));
-                for child in expr_children(expr).into_iter().rev() {
-                    let child = strip_expr_parens(child);
-                    if !matches!(child, Expr::If { .. }) {
-                        work.push(ExprWork::Enter(child));
-                    }
-                }
+                push_expr_work(&mut work, expr, cx, env);
             }
             ExprWork::Build(expr) => {
                 expr_cache_put(expr, lower_expr_node(expr, cx, env));
+            }
+            ExprWork::EnterArg(arg) => {
+                let expr = strip_expr_parens(&arg.arg.expr);
+                work.push(ExprWork::BuildArg(arg));
+                if let Some(body) = inline_loop_body(expr) {
+                    work.push(ExprWork::LowerInlineBody { expr, body });
+                } else {
+                    push_expr_children(&mut work, expr_children(expr, cx, env));
+                }
+            }
+            ExprWork::BuildArg(arg) => {
+                let value = match arg.mode {
+                    ExprArgMode::Plain => lower_expr(&arg.arg.expr, cx, env),
+                    ExprArgMode::Convention(conv) => {
+                        crate::Codegen::TIR::lower_call_arg_value(arg.arg, conv, env, cx)
+                    }
+                    ExprArgMode::CallValue { callee, index } => {
+                        let conv = expr_cache_type(callee).and_then(|ty| match ty {
+                            Type::Fn { params, .. } => params
+                                .get(index)
+                                .cloned()
+                                .map(|ty| (AccessConvention::Read, ty)),
+                            _ => None,
+                        });
+                        if conv.is_none() && matches!(&arg.arg.expr, Expr::Lambda(_)) {
+                            continue;
+                        }
+                        crate::Codegen::TIR::lower_call_arg_value(arg.arg, conv, env, cx)
+                    }
+                };
+                expr_cache_put(strip_expr_parens(&arg.arg.expr), value);
+            }
+            ExprWork::LowerInlineBody { expr, body } => {
+                let mut block_env = clone_env(env);
+                expr_cache_put_body(expr, lower_stmts(body, cx, &mut block_env));
             }
         }
     }
@@ -556,12 +839,19 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
 
 type ExprIfResume<'a> =
     Box<dyn FnOnce(TExpr, LowerEnv, &'a Cx) -> ExprIfTask<'a> + 'a>;
+type ExprBodyResume<'a> =
+    Box<dyn FnOnce(Vec<TStmt>, LowerEnv, &'a Cx) -> ExprIfTask<'a> + 'a>;
 
 enum ExprIfTask<'a> {
     Lower {
         expr: &'a Expr,
         env: LowerEnv,
         resume: ExprIfResume<'a>,
+    },
+    LowerBody {
+        stmts: &'a [Stmt],
+        env: LowerEnv,
+        resume: ExprBodyResume<'a>,
     },
     Done { value: TExpr, env: LowerEnv },
 }
@@ -576,40 +866,54 @@ fn lower_if_expr_after_condition<'a>(
     else_value: &'a Expr,
     base_env: LowerEnv,
     resume: ExprIfResume<'a>,
-    cx: &'a Cx,
 ) -> ExprIfTask<'a> {
     let mut then_env = clone_env(&base_env);
     for (name, place, ty) in bindings {
         then_env.bind(&name, place, ty);
     }
-    then_prefix.extend(lower_stmts(then_body, cx, &mut then_env));
     let else_base = clone_env(&base_env);
-    let resume_then: ExprIfResume<'a> = Box::new(move |then_value, _, cx| {
-        let mut else_env = clone_env(&else_base);
-        let lowered_else_body = lower_stmts(else_body, cx, &mut else_env);
-        let resume_else: ExprIfResume<'a> = Box::new(move |else_value, _, cx| {
-            let value = TExpr {
-                ty: then_value.ty.clone(),
-                kind: TExprKind::IfExpr {
-                    cond: Box::new(condition),
-                    then_body: then_prefix,
-                    then_value: Box::new(then_value),
-                    else_body: lowered_else_body,
-                    else_value: Box::new(else_value),
+    let resume_then_body: ExprBodyResume<'a> = Box::new(move |lowered_then, then_env, cx| {
+        then_prefix.extend(lowered_then);
+        let resume_then: ExprIfResume<'a> = Box::new(move |then_value, _, cx| {
+            let else_env = clone_env(&else_base);
+            let resume_else_body: ExprBodyResume<'a> = Box::new(
+                move |lowered_else, else_env, cx| {
+                    let resume_else: ExprIfResume<'a> = Box::new(move |else_value, _, cx| {
+                        let value = TExpr {
+                            ty: then_value.ty.clone(),
+                            kind: TExprKind::IfExpr {
+                                cond: Box::new(condition),
+                                then_body: then_prefix,
+                                then_value: Box::new(then_value),
+                                else_body: lowered_else,
+                                else_value: Box::new(else_value),
+                            },
+                        };
+                        resume(value, base_env, cx)
+                    });
+                    ExprIfTask::Lower {
+                        expr: else_value,
+                        env: else_env,
+                        resume: resume_else,
+                    }
                 },
-            };
-            resume(value, base_env, cx)
+            );
+            ExprIfTask::LowerBody {
+                stmts: else_body,
+                env: else_env,
+                resume: resume_else_body,
+            }
         });
         ExprIfTask::Lower {
-            expr: else_value,
-            env: else_env,
-            resume: resume_else,
+            expr: then_value,
+            env: then_env,
+            resume: resume_then,
         }
     });
-    ExprIfTask::Lower {
-        expr: then_value,
+    ExprIfTask::LowerBody {
+        stmts: then_body,
         env: then_env,
-        resume: resume_then,
+        resume: resume_then_body,
     }
 }
 
@@ -652,7 +956,6 @@ fn lower_if_expr_worklist<'a>(expr: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) ->
                             else_value,
                             env,
                             resume,
-                            cx,
                         )
                     }
                     _ => {
@@ -660,6 +963,14 @@ fn lower_if_expr_worklist<'a>(expr: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) ->
                         resume(value, env, cx)
                     }
                 }
+            }
+            ExprIfTask::LowerBody {
+                stmts,
+                mut env,
+                resume,
+            } => {
+                let body = lower_stmts(stmts, cx, &mut env);
+                resume(body, env, cx)
             }
         };
     }
@@ -1100,7 +1411,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let Expr::Lambda(lam) = callee.as_ref() else {
                 unreachable!("collecting loop guard requires a lambda")
             };
-            let crate::AST::LambdaBody::Block(body) = &lam.body else {
+            let crate::AST::LambdaBody::Block(_) = &lam.body else {
                 unreachable!("collecting loops always carry a block")
             };
             let ty = if lam.meta.collecting_loop {
@@ -1110,10 +1421,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             } else {
                 lam.meta.loop_result_type.clone().unwrap_or(Type::Int)
             };
-            let mut block_env = clone_env(env);
             TExpr {
                 ty,
-                kind: TExprKind::InlineBlock(lower_stmts(body, cx, &mut block_env)),
+                kind: TExprKind::InlineBlock(
+                    expr_cache_take_body(e).expect("generated loop body was deferred"),
+                ),
             }
         }
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The

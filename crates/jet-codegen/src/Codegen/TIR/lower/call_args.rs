@@ -138,20 +138,16 @@ pub(crate) fn lower_method_args(
 ///      ` as <fn-type>` when already wrapped);
 ///   3. the borrow wrapper (`&(…)` for a `Read` non-scalar non-Fn, `&mut (…)` for a
 ///      `Mutate`).
-pub(crate) fn lower_one_call_arg(
+pub(crate) fn lower_call_arg_value(
     a: &crate::AST::CallArg,
     conv: Option<(AccessConvention, Type)>,
     env: &mut LowerEnv,
     cx: &Cx,
-) -> TCallArg {
-    let resource_move = matches!(
-        (&a.expr, &conv),
-        (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
-    );
+) -> TExpr {
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
-    let value = match (&a.expr, &conv) {
+    match (&a.expr, &conv) {
         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
             TExpr {
                 ty: ty.clone(),
@@ -188,7 +184,21 @@ pub(crate) fn lower_one_call_arg(
             }
         }
         _ => lower_expr(&a.expr, cx, env),
-    };
+    }
+}
+
+pub(crate) fn lower_one_call_arg(
+    a: &crate::AST::CallArg,
+    conv: Option<(AccessConvention, Type)>,
+    env: &mut LowerEnv,
+    cx: &Cx,
+) -> TCallArg {
+    let resource_move = matches!(
+        (&a.expr, &conv),
+        (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
+    );
+    let value = super::take_scheduled_expr(&a.expr)
+        .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx));
     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
     let value = match (&conv, value) {
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {

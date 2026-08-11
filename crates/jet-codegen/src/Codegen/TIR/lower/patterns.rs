@@ -373,11 +373,12 @@ pub(crate) fn lower_fallible_match<'a>(
     }
     deferred_stmt(bodies, move |mut lowered| {
         let else_lowered = has_else.then(|| lowered.pop().unwrap());
+        let mut lowered = lowered.into_iter();
         let tarms = tarms
             .into_iter()
             .map(|pattern| TMatchArm {
                 pattern,
-                body: lowered.remove(0),
+                body: lowered.next().expect("fallible match body was deferred"),
             })
             .collect();
         // No explicit `else` → the AST path (`emit_pattern_match_switch`) appends
@@ -486,11 +487,12 @@ pub(crate) fn lower_enum_match<'a>(
     }
     deferred_stmt(bodies, move |mut lowered| {
         let else_lowered = has_else.then(|| lowered.pop().unwrap());
+        let mut lowered = lowered.into_iter();
         let tarms = patterns
             .into_iter()
             .map(|pattern| TMatchArm {
                 pattern,
-                body: lowered.remove(0),
+                body: lowered.next().expect("enum match body was deferred"),
             })
             .collect();
         // No explicit `else` → the AST path appends `_ => unreachable!(…)` so rustc
@@ -524,9 +526,16 @@ pub(crate) fn lower_range_switch<'a>(
     bodies.push(LowerBody::scoped(else_body, clone_env(env)));
     deferred_stmt(bodies, move |mut lowered| {
         let else_lowered = lowered.pop().unwrap();
+        let mut lowered = lowered.into_iter();
         let arms = ranges
             .into_iter()
-            .map(|(lo, hi)| (lo, hi, lowered.remove(0)))
+            .map(|(lo, hi)| {
+                (
+                    lo,
+                    hi,
+                    lowered.next().expect("range switch body was deferred"),
+                )
+            })
             .collect();
         TStmt::RangeSwitch {
             subject: subject_expr,
