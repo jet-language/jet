@@ -6,6 +6,8 @@
 //! used to hand-type their own copy of the clock function and the
 //! thread-local deadline cell; this guard fails if a second copy reappears.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -14,7 +14,7 @@ struct Boundary {
 }
 
 pub fn dev_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
-    boundary_scan(bundle).map(|boundary| dev_boundary_diagnostic(boundary.feature, boundary.span))
+    boundary_scan(bundle, false).map(|boundary| dev_boundary_diagnostic(boundary.feature, boundary.span))
 }
 
 pub fn dev_boundary_diagnostic(feature: impl Into<String>, span: Option<Span>) -> Diagnostic {
@@ -28,7 +28,7 @@ pub fn dev_boundary_diagnostic(feature: impl Into<String>, span: Option<Span>) -
 }
 
 pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
-    boundary_scan(bundle).map(|boundary| {
+    boundary_scan(bundle, true).map(|boundary| {
         Diagnostic::error(
             "E2203",
             format!("`jet debug` can't step through this program yet — it {}", boundary.feature),
@@ -39,7 +39,7 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
     })
 }
 
-fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
+fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary> {
     for module in &bundle.modules {
         let interpreted_functions: HashSet<&str> = module
             .items
@@ -53,7 +53,7 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
             .collect();
         for import in &module.imports {
             if let ImportKind::Module(name, span) = &import.kind {
-                if let Some(feature) = native_module_feature(name) {
+                if let Some(feature) = native_module_feature(name, debug_impure) {
                     return Some(Boundary { feature: feature.to_string(), span: Some(*span) });
                 }
             }
@@ -103,10 +103,10 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
     None
 }
 
-fn native_module_feature(name: &str) -> Option<&'static str> {
+fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str> {
     match name {
         "core.mem" => Some("uses the low-level `core.mem` tier"),
-        "core.files" => Some("reads or writes files"),
+        "core.files" if debug_impure => Some("reads or writes files"),
         "core.env" => Some("reads the environment"),
         "core.process" => Some("runs another process or exits early"),
         // `core.time` / `core.random` are allowed: deterministic `Clock`/`Rng`

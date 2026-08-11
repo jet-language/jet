@@ -907,14 +907,14 @@ mod tests {
     #[test]
     fn split_keeps_header_before_cached_runtime_import() {
         let generated = format!(
-            "#![allow(warnings)]\nconst __JET_PACKAGE_EDITION: u16 = 2027;\nextern crate helper;\n{BEGIN}pub trait user_Display {{}}\n{END}use user_Display;\n"
+            "#![allow(warnings)]\nconst __JET_PACKAGE_EDITION: u16 = 2027;\nextern crate helper;\n{BEGIN}pub trait __jet_Display {{}}\n{END}use __jet_Display;\n"
         );
         let (_, program) = split_generated(&generated).unwrap().unwrap();
         let edition = program.find("__JET_PACKAGE_EDITION").unwrap();
         let helper = program.find("extern crate helper;").unwrap();
         let runtime = program.find("extern crate jet_runtime;").unwrap();
         let import = program.find("use jet_runtime::*;").unwrap();
-        let tail = program.find("use user_Display;").unwrap();
+        let tail = program.find("use __jet_Display;").unwrap();
         assert!(edition < helper && helper < runtime && runtime < import && import < tail);
     }
 

@@ -13,14 +13,8 @@ fn slow_commit() => Int {
 
 fn fast_seven() => Int = 7
 fn run() {
-    taskgroup g {
-        slow :: g.task => {
-            slow_commit()
-        }
-        fast :: g.task => {
-            fast_seven()
-        }
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race { slow_commit(), fast_seven() }
         print(winner)
     }
 }

@@ -440,6 +440,29 @@ pub(crate) fn run_compile_cmd(
     }
 
     let package_manifest = load_pkg_manifest(file);
+    let library_output = if cmd == "build" && !is_web && !is_plugin {
+        package_manifest.as_ref().and_then(|(_, manifest)| {
+            let selected = output_name
+                .and_then(|name| manifest.outputs.get(name).map(|_| name.to_string()))
+                .or_else(|| {
+                    let names = manifest
+                        .outputs
+                        .iter()
+                        .filter(|(_, output)| output.kind == jet::Package::PackageOutputKind::Library)
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>();
+                    (names.len() == 1).then(|| names[0].clone())
+                })?;
+            manifest
+                .outputs
+                .get(&selected)
+                .filter(|output| output.kind == jet::Package::PackageOutputKind::Library)
+                .map(|_| selected)
+        })
+    } else {
+        None
+    };
+    let is_library = library_output.is_some();
 
     // D-LINTPOLICY1=A (the override law): visible lints from this compile,
     // captured here (out of the `match` arm's scope) so the `policy.lints`
@@ -448,7 +471,9 @@ pub(crate) fn run_compile_cmd(
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
 
-    let compile_result = if let Some(output) = output_name {
+    let compile_result = if is_library {
+        jet::compile_library(file, library_output.as_deref())
+    } else if let Some(output) = output_name {
         jet::compile_output_with_options(
             file,
             output,
@@ -496,7 +521,17 @@ pub(crate) fn run_compile_cmd(
         // that triple builds for (host OS when the flag is absent).
         jet::compile_with_target(&src, file, cross_target)
     };
-    let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report, plugin_out) =
+    let (
+        rust_code,
+        ffi_link,
+        clinks,
+        capabilities,
+        web_out,
+        web_partition_report,
+        plugin_out,
+        library_out,
+        library_config,
+    ) =
         match compile_result {
             Ok(out) => {
                 // D-A11YGATE1=B (c134 Phase 6): a11y lints (E2930/E2931) are opt-in
@@ -537,14 +572,17 @@ pub(crate) fn run_compile_cmd(
                         exit(ExitCodes::USER_ERROR);
                     }
                 };
+                let library_rust = out.library.as_ref().map(|library| library.rust.clone());
                 (
-                    out.rust,
+                    library_rust.unwrap_or(out.rust),
                     out.ffi,
                     clinks,
                     out.capabilities,
                     out.web,
                     out.web_partition_report,
                     out.plugin,
+                    out.library,
+                    out.library_config,
                 )
             }
             Err(diags) => {
@@ -642,6 +680,62 @@ pub(crate) fn run_compile_cmd(
 
     match cmd {
         "build" => {
+            if is_library {
+                let library = library_out.as_ref().unwrap_or_else(|| {
+                    eprintln!(
+                        "{}",
+                        jet::Diagnostics::render_ice_report(
+                            "missing Library codegen output",
+                            "",
+                            false,
+                        )
+                    );
+                    exit(ExitCodes::ICE);
+                });
+                let config = library_config.as_ref().unwrap_or_else(|| {
+                    eprintln!(
+                        "{}",
+                        jet::Diagnostics::render_ice_report(
+                            "missing Library output configuration",
+                            "",
+                            false,
+                        )
+                    );
+                    exit(ExitCodes::ICE);
+                });
+                let paths = build_library(
+                    file,
+                    &rust_code,
+                    library,
+                    config,
+                    profile,
+                    verbose,
+                    mode,
+                );
+                if !mode.quiet {
+                    if let Some(shared) = &paths.shared {
+                        println!("built: {}", shared.display());
+                    }
+                    if let Some(staticlib) = &paths.staticlib {
+                        println!("built: {}", staticlib.display());
+                    }
+                    if let Some(header) = &paths.header {
+                        println!("built: {}", header.display());
+                    }
+                    if let Some(loadable) = &paths.loadable {
+                        println!("built: {}", loadable.display());
+                    }
+                    for binding in &paths.bindings {
+                        println!("built: {}", binding.display());
+                    }
+                }
+                if capabilities_json {
+                    println!("{}", capabilities.to_json());
+                } else {
+                    println!("{}", capabilities.summary());
+                }
+                return;
+            }
             let artifact_path=bin_path(file);
             let budget_profile=profile.budget_name().to_string();
             build(
@@ -1456,7 +1550,7 @@ pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
 /// With `coverage`, the harness is built with line/function probes (D-COV1) and
 /// a per-function coverage report prints after the test results. A directory
 /// target recurses into every subdirectory (D-TESTKIT1=A gap #2), running every
-/// `.jet` file found, in sorted path order.
+/// non-reserved `.jet` file found, in sorted path order.
 pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
@@ -1492,8 +1586,8 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
 }
 
 /// D-TESTKIT1=A gap #2: walk every subdirectory under `dir`, collecting `.ext`
-/// files. `build/` and dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped —
-/// a project's build output and VCS metadata are never test sources.
+/// files. `build/` and dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped,
+/// as are reserved package/env/workspace/config files.
 fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -1506,7 +1600,15 @@ fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
                 continue;
             }
             collect_test_files_recursive(&path, ext, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+        } else if path.extension().and_then(|e| e.to_str()) == Some(ext)
+            && !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("package.jet")
+                    | Some("env.jet")
+                    | Some("workspace.jet")
+                    | Some("config.jet")
+            )
+        {
             out.push(path);
         }
     }
@@ -2566,18 +2668,19 @@ fn native_toolchain_identity() -> &'static str {
 fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
     let mut interfaces = Vec::new();
     for (dependency, root) in &bundle.dep_roots {
-        for module in &bundle.modules {
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
             if !module.path.starts_with(root) { continue; }
             for item in &module.items {
-                let public = match item {
-                    jet::AST::Item::Func(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Struct(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Enum(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Trait(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::Tag(def) => def.is_pub || def.is_package_pub,
-                    jet::AST::Item::CodeModule(def) => def.is_pub || def.is_package_pub,
-                    _ => false,
+                let name = match item {
+                    jet::AST::Item::Func(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Struct(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Enum(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Trait(def) => Some(def.name.as_str()),
+                    jet::AST::Item::Tag(def) => Some(def.name.as_str()),
+                    jet::AST::Item::CodeModule(def) => Some(def.name.as_str()),
+                    _ => None,
                 };
+                let public = name.is_some_and(|name| bundle.name_ledger.exported(module_idx, name));
                 if public {
                     interfaces.push((dependency.clone(), module.display.clone(), jet::CanonicalAST::canonical_fragment(item)));
                 }
@@ -3204,6 +3307,191 @@ pub(crate) fn write_plugin_artifacts(
         core_wasm: core_wasm_path,
         component_wasm: component_wasm_path,
     })
+}
+
+struct LibraryBuildPaths {
+    shared: Option<PathBuf>,
+    staticlib: Option<PathBuf>,
+    header: Option<PathBuf>,
+    loadable: Option<PathBuf>,
+    bindings: Vec<PathBuf>,
+}
+
+fn library_stem(name: &str) -> String {
+    let mut stem = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if stem.is_empty() {
+        stem.push_str("library");
+    }
+    if stem.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        stem.insert(0, '_');
+    }
+    stem
+}
+
+fn library_rustc(
+    source: &Path,
+    crate_type: &str,
+    output: &Path,
+    profile: BuildProfile,
+    verbose: bool,
+) {
+    let mut command = Command::new("rustc");
+    command
+        .arg("--edition")
+        .arg("2021")
+        .arg("--crate-type")
+        .arg(crate_type)
+        .arg(source)
+        .arg("-o")
+        .arg(output);
+    let config = profile.config();
+    if matches!(profile, BuildProfile::Release) {
+        command.arg("--cfg").arg("jet_release");
+    }
+    command.args(config.rustc_args(false));
+    if verbose {
+        eprintln!("[build] rustc {} -> {}", source.display(), output.display());
+    }
+    let result = command.output().unwrap_or_else(|error| {
+        crate::cli_error!(
+            "E2105",
+            "couldn't start rustc for the Library output: {}",
+            error
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    if !result.status.success() {
+        eprintln!(
+            "{}",
+            jet::Diagnostics::render_ice_report(
+                "rustc rejected generated Library code",
+                &String::from_utf8_lossy(&result.stderr),
+                true,
+            )
+        );
+        exit(ExitCodes::ICE);
+    }
+}
+
+fn build_library(
+    file: &str,
+    rust_code: &str,
+    artifacts: &jet::Codegen::LibraryArtifacts,
+    config: &jet::LibraryExport::LibraryConfig,
+    profile: BuildProfile,
+    verbose: bool,
+    _mode: OutputMode,
+) -> LibraryBuildPaths {
+    let stem = library_stem(&config.name);
+    let target = PathBuf::from("target");
+    let needs_shared = config.native || config.loadable;
+    let shared = needs_shared.then(|| {
+        target.join(format!(
+            "lib{stem}.{}",
+            if cfg!(target_os = "macos") {
+                "dylib"
+            } else if cfg!(target_os = "windows") {
+                "dll"
+            } else {
+                "so"
+            }
+        ))
+    });
+    let staticlib = config.native.then(|| target.join(format!("lib{stem}.a")));
+    let header = config.native.then(|| target.join(format!("{stem}.h")));
+    let bindings_dir = config.native.then(|| target.join("bindings"));
+
+    if needs_shared {
+        fs::create_dir_all(&target).unwrap_or_else(|error| {
+            crate::cli_error!(
+                "E2105",
+                "couldn't create the Library output directory: {}",
+                error
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+        let source = target.join(format!("{stem}.rs"));
+        fs::write(&source, rust_code).unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't write {}: {}", source.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        });
+        let shared_path = shared.as_ref().expect("shared path for native Library");
+        library_rustc(&source, "cdylib", shared_path, profile.clone(), verbose);
+        if let Some(staticlib_path) = &staticlib {
+            library_rustc(&source, "staticlib", staticlib_path, profile.clone(), verbose);
+        }
+    }
+
+    if let Some(header_path) = &header {
+        fs::write(header_path, &artifacts.header).unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't write {}: {}", header_path.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        });
+    }
+
+    let mut binding_paths = Vec::new();
+    if let Some(bindings_dir) = bindings_dir {
+        fs::create_dir_all(&bindings_dir).unwrap_or_else(|error| {
+            crate::cli_error!(
+                "E2105",
+                "couldn't create the Library bindings directory: {}",
+                error
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+        for (language, text) in &artifacts.bindings {
+            let extension = match language.as_str() {
+                "c" => "h",
+                "python" => "py",
+                "swift" => "swift",
+                _ => continue,
+            };
+            let path = bindings_dir.join(format!("{stem}.{extension}"));
+            fs::write(&path, text).unwrap_or_else(|error| {
+                crate::cli_error!("E2105", "couldn't write {}: {}", path.display(), error);
+                exit(ExitCodes::USER_ERROR);
+            });
+            binding_paths.push(path);
+        }
+    }
+
+    let loadable = if config.loadable {
+        let path = target.join(format!("{stem}.jetlib"));
+        let shared_path = shared.as_ref().expect("loadable Library has shared payload");
+        let payload = fs::read(shared_path).unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't read {}: {}", shared_path.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        });
+        let artifact = jet::JetLibArtifact {
+            stamp: jet::JetLibStamp::for_this_compiler(config.declared_effects.clone()),
+            payload,
+        };
+        fs::write(&path, artifact.encode()).unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't write {}: {}", path.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        });
+        Some(path)
+    } else {
+        None
+    };
+
+    let _ = file;
+    LibraryBuildPaths {
+        shared,
+        staticlib,
+        header,
+        loadable,
+        bindings: binding_paths,
+    }
 }
 
 pub(crate) fn build(

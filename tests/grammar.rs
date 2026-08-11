@@ -9,6 +9,8 @@
 //! The test does NOT rewrite the grammar — it is a tripwire so that a keyword
 //! addition that wasn't mirrored in the grammar fails loudly.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 

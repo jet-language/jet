@@ -1,5 +1,7 @@
 //! Structural guard for the independently compiled TIR feature-family targets.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 

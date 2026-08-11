@@ -1,6 +1,8 @@
 //! Card #1716: every package-root lookup routes through Loader's one walk.
 //! The guard keeps a second filename list or parent walk from returning.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

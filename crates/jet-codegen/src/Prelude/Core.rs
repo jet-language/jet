@@ -103,14 +103,7 @@ impl JetParaRuntimeFailure {
                 clause_kw,
                 msg,
             } => jet_contract_fail(&file, line, &clause_kw, &msg),
-            // The scheduler prelude is emitted only when task support is used,
-            // while the parallel carrier is part of the always-present core
-            // prelude.  Reproduce the scheduler's ordinary fatal boundary here
-            // without creating a generated-code dependency on an optional item.
-            Self::SchedulerFatal { msg } => {
-                eprintln!("panic: {}", msg);
-                std::process::exit(70);
-            }
+            Self::SchedulerFatal { msg } => jet_runtime_diagnostic(format!("panic: {msg}")),
         }
     }
 }
@@ -953,6 +946,21 @@ impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
     }
 }
 
+fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
+    match std::sync::Arc::try_unwrap(m.0) {
+        Ok(map) => {
+            let mut entries = Vec::with_capacity(map.len());
+            entries.extend(map);
+            entries
+        }
+        Err(shared) => {
+            let mut entries = Vec::with_capacity(shared.len());
+            entries.extend(shared.iter().map(|(k, v)| (k.clone(), v.clone())));
+            entries
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum JetRemoveBy {
     Val,
@@ -1110,14 +1118,7 @@ fn jet_priority_queue_remove_value<T: Ord>(
     pq: &mut std::collections::BinaryHeap<T>,
     value: T,
 ) -> JetOutcome<T, JetAbsent> {
-    let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
-    items.reverse();
-    let found = items
-        .iter()
-        .position(|item| *item == value)
-        .map(|index| items.remove(index));
-    *pq = items.into_iter().collect();
-    jet_outcome_of(found)
+    jet_priority_queue_remove_value_kernel(pq, value)
 }
 
 fn jet_priority_queue_remove_slot<T: Ord>(
@@ -1126,22 +1127,10 @@ fn jet_priority_queue_remove_slot<T: Ord>(
     file: &str,
     line: u32,
 ) -> JetOutcome<T, JetAbsent> {
-    let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
-    items.reverse();
-    let len = items.len() as i64;
-    if i < 0 || i >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "the priority queue has {} items, so position {} doesn't exist",
-                len, i
-            ),
-        );
+    match jet_priority_queue_remove_slot_kernel(pq, i, file, line) {
+        Ok(outcome) => outcome,
+        Err(message) => jet_panic(file, line, &message),
     }
-    let removed = items.remove(i as usize);
-    *pq = items.into_iter().collect();
-    jet_present(removed)
 }
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
@@ -1304,11 +1293,11 @@ where
 }
 
 // #1477 Map ledger surface
-fn jet_map_copy<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> { m.clone() }
-fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: &JetMap<K, V>, b: &JetMap<K, V>) -> bool { a == b }
-fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> { jet_outcome_of(m.keys().next().cloned()) }
+fn jet_map_copy<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> { jet_map_copy_kernel(m) }
+fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: &JetMap<K, V>, b: &JetMap<K, V>) -> bool { jet_map_equal_kernel(a, b) }
+fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> { jet_map_first_key_kernel(m) }
 fn jet_map_to_list<K: Ord + Clone, V: Clone, R>(m: &JetMap<K, V>, build: impl Fn(K, V) -> R) -> Vec<R> {
-    m.iter().map(|(k, v)| build(k.clone(), v.clone())).collect()
+    jet_map_entries_kernel(m).into_iter().map(|(k, v)| build(k, v)).collect()
 }
 fn jet_map_any<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&K, &V) -> bool {
     m.iter().any(|(k, v)| f(k, v))
@@ -1342,25 +1331,20 @@ where F: FnMut(&K, &V) -> JetMap<K, V> {
     }
     out
 }
-fn jet_map_max_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_outcome_of(m.values().max().cloned()) }
-fn jet_map_min_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_outcome_of(m.values().min().cloned()) }
+fn jet_map_max_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_map_max_value_kernel(m) }
+fn jet_map_min_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_map_min_value_kernel(m) }
 fn jet_map_intersection<K: Ord + Clone, V: Clone>(left: &JetMap<K, V>, right: &JetMap<K, V>) -> JetMap<K, V> {
-    JetMap(std::sync::Arc::new(left.iter().filter(|(k,_)| right.contains_key(k)).map(|(k,v)|(k.clone(),v.clone())).collect()))
+    jet_map_intersection_kernel(left, right)
 }
 fn jet_map_slice_keys<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>, keys: Vec<K>) -> JetMap<K, V> {
-    let mut out = JetMap::new();
-    for k in keys { if let Some(v) = m.get(&k) { out.insert(k, v.clone()); } }
-    out
+    jet_map_slice_keys_kernel(m, keys)
 }
 fn jet_map_from_keys<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetMap<K, V> {
-    let mut out = JetMap::new();
-    for k in keys { out.insert(k, default.clone()); }
-    out
+    jet_map_from_keys_kernel(keys, default)
 }
 fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
-    m.values().any(|v| v == needle)
+    jet_map_contains_value_kernel(m, needle)
 }
 fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
-    let Some(key) = m.keys().next().cloned() else { return Err(JetAbsent) };
-    jet_outcome_of(m.remove(&key))
+    jet_map_pop_first_kernel(m)
 }

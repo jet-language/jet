@@ -1,6 +1,8 @@
 //! E4-JP0 truth stop-line: every done Epoch 4 card has an explicit completion
 //! boundary, and partial substrate cannot silently become a shipped claim.
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;

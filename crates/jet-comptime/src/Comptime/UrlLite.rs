@@ -1,5 +1,7 @@
 //! CtValue adapters over the canonical Prelude URL/MIME kernel.
 
+include!("../../../jet-foundation/src/TypedHeads.rs");
+
 mod url_kernel {
     #[derive(Clone, Debug, PartialEq)]
     pub struct JetURL {

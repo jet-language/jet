@@ -883,9 +883,9 @@ fn validate_core_usage(
 
     let available = machine.max_runtime_layer();
     for api in &usage.core_apis {
-        let required = core_usage_layer(api)
-            .or_else(|| core_module_layer(api))
-            .unwrap_or(RuntimeLayer::Std);
+        let Some(required) = core_api_runtime_layer(api) else {
+            continue;
+        };
         if required > available {
             errors.push(TargetMachineError::CoreApiUnavailable {
                 api: api.clone(),
@@ -894,6 +894,20 @@ fn validate_core_usage(
             });
         }
     }
+}
+
+/// Sema adds closure markers for Core source/intrinsic reachability. They are
+/// codegen provenance, not additional machine capabilities; their direct API
+/// entries already carry the required runtime layer.
+fn core_api_runtime_layer(api: &str) -> Option<RuntimeLayer> {
+    if api.starts_with("__core_source::") || api.starts_with("__core_intrinsic::") {
+        return None;
+    }
+    Some(
+        core_usage_layer(api)
+            .or_else(|| core_module_layer(api))
+            .unwrap_or(RuntimeLayer::Std),
+    )
 }
 
 fn validate_mmio(
@@ -968,9 +982,9 @@ fn unavailable_core_json(machine: &TargetMachine, usage: &TargetMachineUse) -> S
     let available = machine.max_runtime_layer();
     let mut unavailable = Vec::new();
     for api in &usage.core_apis {
-        let required = core_usage_layer(api)
-            .or_else(|| core_module_layer(api))
-            .unwrap_or(RuntimeLayer::Std);
+        let Some(required) = core_api_runtime_layer(api) else {
+            continue;
+        };
         if required > available {
             unavailable.push(api.as_str());
         }

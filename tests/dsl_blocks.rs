@@ -1,6 +1,8 @@
 //! D-DSLBLOCK1: fixed stdlib DSL blocks are syntax islands with ordinary Jet
 //! checking inside them.
 
+mod common;
+
 #[test]
 fn sql_and_html_blocks_compile_and_formatter_round_trip() {
     let source = r#"
@@ -59,6 +61,46 @@ fn run() {
 }
 "#;
     jet::compile(source).expect("typed domain text should compile through one checked path");
+}
+
+#[test]
+fn boundary_typed_heads_validate_and_compile() {
+    let source = r#"
+fn run() {
+    service :: "ada/../etc"
+    endpoint :: URL.{"https://api.example.com/v2/{service}"}
+    log_path :: Path.{"/var/log/{service}.log"}
+    stamp :: DateTime.{"2026-08-07T12:00:00Z"}
+}
+"#;
+    jet::compile(source).expect("URL, Path, and DateTime heads should compile");
+
+    let invalid_url = jet::compile(
+        r#"fn run() {
+    bad :: URL.{"https://[bad"}
+}
+"#,
+    )
+    .expect_err("an invalid URL head must fail in sema");
+    assert!(
+        invalid_url.iter().any(|diagnostic| diagnostic.code == "E0155"),
+        "invalid URL head should use E0155: {invalid_url:?}"
+    );
+
+    let datetime_hole = jet::compile(
+        r#"fn run() {
+    hour :: "12"
+    bad :: DateTime.{"2026-08-07T{hour}:00:00Z"}
+}
+"#,
+    )
+    .expect_err("DateTime heads must reject interpolation");
+    assert!(
+        datetime_hole
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0155"),
+        "DateTime interpolation should use E0155: {datetime_hole:?}"
+    );
 }
 
 #[test]

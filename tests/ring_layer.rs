@@ -1,5 +1,7 @@
 //! D-RINGLAYER1=A M1: runtime profile inference and package ceilings.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

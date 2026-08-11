@@ -7,6 +7,8 @@
 //! silently under-reported real Core use. The sema-derived path does not depend
 //! on lowered-Rust spelling at all, which is the point of the card.
 
+mod common;
+
 use jet::Capabilities;
 
 fn caps(src: &str) -> Capabilities {

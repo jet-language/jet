@@ -1,8 +1,8 @@
 use super::*;
 use crate::AST::{
     AccessConvention, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn, ExternRustBlock, Field,
-    Func, ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, StructDef,
-    StructLayout, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
+    Func, ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern,
+    StructDef, StructLayout, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -146,6 +146,14 @@ impl<'a> Fmt<'a> {
             // D-META-NAME1/FORM1: emitted verbatim, like `EffectDecl` — parse-only
             // (card #1456); canonical reformatting is #1457's/#1458's job.
             Item::MarkerDecl(declaration) => {
+                let text = self.src[declaration.span.start..declaration.span.end].to_string();
+                self.write(&text);
+                self.newline();
+                self.skip_verbatim_comments(declaration.span.end);
+            }
+            // D-FACTDECL1=A: fact declarations keep their source spelling;
+            // they erase before TIR like marker declarations.
+            Item::FactDecl(declaration) => {
                 let text = self.src[declaration.span.start..declaration.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -574,7 +582,24 @@ impl<'a> Fmt<'a> {
         self.write(&f.name);
         self.fmt_type_params(&f.type_params);
         self.write("(");
-        self.fmt_param_list(&f.params);
+        if let Some(Pattern::Variant {
+            variant, bindings, ..
+        }) = &f.head_pattern
+        {
+            self.write(variant);
+            if !bindings.is_empty() {
+                self.write("(");
+                for (index, param) in f.params.iter().enumerate() {
+                    if index > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_param(param);
+                }
+                self.write(")");
+            }
+        } else {
+            self.fmt_param_list(&f.params);
+        }
         self.write(")");
         // D-ARROW-CONTROL1: effect row lives inside the callable arrow.
         if let Some(effects) = &f.declared_effects {
@@ -1274,16 +1299,24 @@ impl<'a> Fmt<'a> {
                         orig.clone()
                     }
                 };
-                if items.len() == 1 {
+                // The dotless single-item spelling (`use math.clamp`) only means
+                // the same thing when nothing else in the path carries a dot or
+                // an alias: `use core.math.[abs]` and `use math.[abs as a]`
+                // would both re-read as a module import.
+                let collapses = items.len() == 1
+                    && items[0].1.is_none()
+                    && !items[0].0.contains('.')
+                    && !module_alias.contains('.');
+                if collapses {
                     self.write(module_alias);
                     self.write(".");
                     self.write(&fmt_item(&items[0]));
                 } else {
                     self.write(module_alias);
-                    self.write(".{");
+                    self.write(".[");
                     let rendered: Vec<String> = items.iter().map(fmt_item).collect();
                     self.write(&rendered.join(", "));
-                    self.write("}");
+                    self.write("]");
                 }
             }
         }

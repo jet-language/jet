@@ -1726,6 +1726,7 @@ fn expand_alias(
             is_pub: alias.is_pub,
             is_package_pub: alias.is_package_pub,
             body: Some(body),
+            imports: template.imports.clone(),
             web_target: None,
             instance_identity: None,
             span: alias.span,
@@ -2005,7 +2006,7 @@ pub(crate) fn expand_generic_module_aliases(
                 .collect()
         })
         .collect();
-    // `use alias.Item` has its own span and therefore no `import_targets`
+    // `use alias.Item` has its own span and therefore no file-import edge
     // entry. Resolve it through the namespace import which established
     // `alias`, exactly like the later ordinary-import registration pass.
     let import_bindings: Vec<HashMap<String, usize>> = bundle
@@ -2019,9 +2020,8 @@ pub(crate) fn expand_generic_module_aliases(
                 .filter(|import| !matches!(import.kind, ImportKind::Unqualified { .. }))
                 .filter_map(|import| {
                     bundle
-                        .import_targets
-                        .get(&(module_idx, import.span))
-                        .copied()
+                        .name_ledger
+                        .import_target(module_idx, import.span)
                         .map(|target| (import.import_alias(), target))
                 })
                 .collect()
@@ -2090,7 +2090,7 @@ pub(crate) fn expand_generic_module_aliases(
                     continue;
                 };
                 consumed.insert(original.clone());
-                let local = alias.as_deref().unwrap_or(original);
+                let local = crate::AST::import_item_alias(original, alias.as_deref());
                 if !source.def.is_pub && !source.def.is_package_pub {
                     denied_templates.insert(local.to_string());
                     diags.push(Diagnostic::error(
@@ -2320,7 +2320,7 @@ mod instance_collision_tests {
             ffi_callback_fns: HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
-            import_targets: HashMap::new(),
+            name_ledger: crate::AST::NameLedger::default(),
             layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core,
             web_partitions: HashMap::new(),

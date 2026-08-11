@@ -8,6 +8,8 @@
 //! language. The fact guard checks both law columns against the one registry.
 //! The source scan rejects second Rust copies.
 
+mod common;
+
 use std::collections::BTreeSet;
 
 use jet::AST::{Item, MarkerDecl};
@@ -127,12 +129,24 @@ fn every_effect_root_is_one_written_declaration() {
 /// empty gate list for a row that has no written escape.
 #[test]
 fn every_fact_row_carries_its_law_columns() {
+    let parsed: Vec<_> = declarations(Registry::FACT_SOURCE)
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::FactDecl(declaration) => Some(declaration),
+            _ => None,
+        })
+        .collect();
     let written: Vec<&str> = Registry::FACT_SOURCE
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with("fact "))
         .collect();
     let declarations = Registry::fact_declarations();
+    assert_eq!(
+        parsed.iter().map(|declaration| declaration.name.as_str()).collect::<Vec<_>>(),
+        declarations.iter().map(|declaration| declaration.name).collect::<Vec<_>>(),
+        "the real parser and the foundation reader must see the same fact rows"
+    );
     assert_eq!(declarations.len(), written.len(), "every fact declaration is read");
 
     let declaration_names: BTreeSet<_> = declarations.iter().map(|declaration| declaration.name).collect();

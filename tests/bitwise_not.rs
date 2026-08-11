@@ -2,6 +2,8 @@
 //! `Bool`, or every bit of a whole number. Operands arrive through `bits` so
 //! the work really happens in the built program rather than folding away.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

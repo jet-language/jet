@@ -41,6 +41,28 @@ fn jet_test_example_output() {
 }
 
 #[test]
+fn jet_test_package_collects_imported_module_tests() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let package = root.join("examples/features/tooling/test_package_modules");
+    let out = Command::new(&jet).arg("test").arg(&package).output().unwrap();
+    assert!(
+        out.status.success(),
+        "package test failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let expected = fs::read_to_string(
+        root.join("examples/features/expected/tooling/test_package_modules.test.out"),
+    )
+    .expect("test_package_modules.test.out");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+}
+
+#[test]
 fn concurrent_jet_test_same_file_is_process_isolated() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();

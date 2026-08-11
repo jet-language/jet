@@ -277,7 +277,7 @@ fn lower_archive_source_call(
             .unwrap_or_else(unit_type),
         kind: TExprKind::ModuleCall {
             form: TModuleCallForm::Qualified {
-                rust_mod: "user_core_archive".to_string(),
+                rust_mod: "__jet_core_archive".to_string(),
                 rust_fn: mangle(method).to_string(),
             },
             type_args: type_args.to_vec(),
@@ -392,6 +392,188 @@ fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
             )
         })
         .collect()
+}
+
+fn crypto_helper_return_ty(helper: &str) -> Type {
+    let u8_list = Type::List(Box::new(Type::IntN {
+        signed: false,
+        bits: 8,
+    }));
+    match helper {
+        "__digest256_hex" | "__digest512_hex" | "__x25519_public_text" | "__password_text" => {
+            Type::String
+        }
+        "__signing_public" => Type::Named("VerifyKey".into()),
+        "__x25519_public" => Type::Named("X25519PublicKey".into()),
+        "__signing_generate" => Type::Result {
+            ok: Box::new(Type::Named("SigningKey".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__x25519_generate" => Type::Result {
+            ok: Box::new(Type::Named("X25519SecretKey".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__secret_from_text" | "__secret_from_bytes" => Type::Result {
+            ok: Box::new(Type::Named("Secret".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__verify_key_from_bytes" => Type::Result {
+            ok: Box::new(Type::Named("VerifyKey".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__x25519_public_from_bytes" | "__x25519_public_from_text" => Type::Result {
+            ok: Box::new(Type::Named("X25519PublicKey".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__signature_from_bytes" => Type::Result {
+            ok: Box::new(Type::Named("Signature".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__sealed_from_bytes" => Type::Result {
+            ok: Box::new(Type::Named("Sealed".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__wrapped_from_bytes" => Type::Result {
+            ok: Box::new(Type::Named("WrappedKey".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__vault_wrapped_from_bytes" => Type::Result {
+            ok: Box::new(Type::Named("WrappedVaultKey".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__password_parse" => Type::Result {
+            ok: Box::new(Type::Named("PasswordHash".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        },
+        "__vault_unlock_recipient" | "__vault_unlock_passphrase" => {
+            Type::Named("KeyUnlock".into())
+        }
+        "__verify_key_bytes"
+        | "__x25519_public_bytes"
+        | "__signature_bytes"
+        | "__sealed_bytes"
+        | "__wrapped_bytes"
+        | "__vault_wrapped_bytes"
+        | "__digest256_bytes"
+        | "__digest512_bytes" => u8_list,
+        _ => unit_type(),
+    }
+}
+
+fn crypto_instance_helper(kind: &str, method: &str) -> Option<&'static str> {
+    match (kind, method) {
+        ("SigningKey", "public_key") => Some("__signing_public"),
+        ("X25519SecretKey", "public_key") => Some("__x25519_public"),
+        ("VerifyKey", "bytes") => Some("__verify_key_bytes"),
+        ("X25519PublicKey", "bytes") => Some("__x25519_public_bytes"),
+        ("X25519PublicKey", "text") => Some("__x25519_public_text"),
+        ("Signature", "bytes") => Some("__signature_bytes"),
+        ("Sealed", "bytes") => Some("__sealed_bytes"),
+        ("WrappedKey", "bytes") => Some("__wrapped_bytes"),
+        ("WrappedVaultKey", "bytes") => Some("__vault_wrapped_bytes"),
+        ("Digest256", "bytes") => Some("__digest256_bytes"),
+        ("Digest512", "bytes") => Some("__digest512_bytes"),
+        ("Digest256", "hex") => Some("__digest256_hex"),
+        ("Digest512", "hex") => Some("__digest512_hex"),
+        ("PasswordHash", "text") => Some("__password_text"),
+        _ => None,
+    }
+}
+
+/// Keep the generic `core.crypto` call off the large method-dispatch frame.
+/// This is the same resolved CoreCall shape as the full dispatcher below; the
+/// sema fixed-signature fact makes the narrow route total.
+fn lower_core_crypto_alias_fast(
+    receiver: &Expr,
+    method: &str,
+    method_span: Span,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    let Expr::Ident(alias, _) = receiver else {
+        return None;
+    };
+    if env.locals.contains_key(alias) {
+        return None;
+    }
+    let target = cx
+        .core_import_module_for_function(&env.fn_name, alias)
+        .map(|module| (module.to_owned(), method.to_owned()))
+        .or_else(|| {
+            cx.inline_reexport_core
+                .get(&(alias.clone(), method.to_owned()))
+                .cloned()
+        });
+    let Some((module, core_method)) = target else {
+        return None;
+    };
+    if module != "core.crypto"
+        || crate::Sema::core_fixed_sig(&module, &core_method).is_none()
+    {
+        return None;
+    }
+    let targs: Vec<TExpr> = args
+        .iter()
+        .map(|arg| lower_expr(&arg.expr, cx, env))
+        .collect();
+    let widen_to_vec = core_widen_to_vec(&module, &core_method, &targs);
+    let ty = core_call_return_ty(&module, &core_method);
+    demand_generic_serde_codec(cx, &env.fn_name, &module, &core_method, &targs, &ty);
+    Some(TExpr {
+        ty,
+        kind: TExprKind::CoreCall {
+            module,
+            method: core_method,
+            args: targs,
+            source_span: method_span,
+            widen_to_vec,
+        },
+    })
+}
+
+/// Lower crypto nominal receiver methods without retaining the full dispatcher
+/// frame while the receiver itself is lowered.
+fn lower_crypto_instance_fast(
+    receiver: &Expr,
+    method: &str,
+    method_span: Span,
+    recv_type: &Option<String>,
+    resolved_ret: Option<&Type>,
+    lowered_receiver: &mut Option<TExpr>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    if static_call_type_name_lower(receiver, env).is_some() {
+        return None;
+    }
+    if matches!(receiver, Expr::Ident(name, _) if env.is_gc(name)) {
+        return None;
+    }
+    let kind = recv_type
+        .as_deref()?
+        .rsplit('.')
+        .next()
+        .unwrap_or_default();
+    let helper = crypto_instance_helper(kind, method)?;
+    let recv = lowered_receiver
+        .take()
+        .unwrap_or_else(|| lower_expr(receiver, cx, env));
+    let args = vec![recv];
+    let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
+    let ty = resolved_ret
+        .cloned()
+        .unwrap_or_else(|| crypto_helper_return_ty(helper));
+    Some(TExpr {
+        ty,
+        kind: TExprKind::CoreCall {
+            module: "core.crypto".to_string(),
+            method: helper.to_string(),
+            args,
+            source_span: method_span,
+            widen_to_vec,
+        },
+    })
 }
 
 fn lower_serde_encode_node(recv: TExpr, cx: &Cx) -> TExpr {
@@ -602,6 +784,54 @@ pub(crate) fn lower_empty_zip_family(resolved_ret: &Type, method: &str) -> TExpr
 /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
 /// or a user instance method on a covered type; resolve every dispatch fact here.
 pub(crate) fn lower_method_call(
+    receiver: &Expr,
+    method: &str,
+    method_span: Span,
+    owner_type_args: &[Type],
+    type_args: &[Type],
+    args: &[crate::AST::CallArg],
+    recv_type: &Option<String>,
+    resolved_ret: Option<&Type>,
+    checked_widen: bool,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
+) -> TExpr {
+    if let Some(lowered) =
+        lower_core_crypto_alias_fast(receiver, method, method_span, args, cx, env)
+    {
+        return lowered;
+    }
+    let mut lowered_receiver = lowered_receiver;
+    if let Some(lowered) = lower_crypto_instance_fast(
+        receiver,
+        method,
+        method_span,
+        recv_type,
+        resolved_ret,
+        &mut lowered_receiver,
+        cx,
+        env,
+    ) {
+        return lowered;
+    }
+    lower_method_call_impl(
+        receiver,
+        method,
+        method_span,
+        owner_type_args,
+        type_args,
+        args,
+        recv_type,
+        resolved_ret,
+        checked_widen,
+        cx,
+        env,
+        lowered_receiver,
+    )
+}
+
+fn lower_method_call_impl(
     receiver: &Expr,
     method: &str,
     method_span: Span,
@@ -946,6 +1176,7 @@ pub(crate) fn lower_method_call(
                     };
                 }
             }
+
             lower_expr(expr, cx, env)
         };
 
@@ -1174,71 +1405,6 @@ pub(crate) fn lower_method_call(
         };
         Some(helper)
     });
-    fn crypto_helper_return_ty(helper: &str) -> Type {
-        let u8_list = Type::List(Box::new(Type::IntN {
-            signed: false,
-            bits: 8,
-        }));
-        match helper {
-            "__digest256_hex" | "__digest512_hex" | "__x25519_public_text" | "__password_text" => {
-                Type::String
-            }
-            "__signing_public" => Type::Named("VerifyKey".into()),
-            "__x25519_public" => Type::Named("X25519PublicKey".into()),
-            "__signing_generate" => Type::Result {
-                ok: Box::new(Type::Named("SigningKey".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__x25519_generate" => Type::Result {
-                ok: Box::new(Type::Named("X25519SecretKey".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__secret_from_text" | "__secret_from_bytes" => Type::Result {
-                ok: Box::new(Type::Named("Secret".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__verify_key_from_bytes" => Type::Result {
-                ok: Box::new(Type::Named("VerifyKey".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__x25519_public_from_bytes" | "__x25519_public_from_text" => Type::Result {
-                ok: Box::new(Type::Named("X25519PublicKey".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__signature_from_bytes" => Type::Result {
-                ok: Box::new(Type::Named("Signature".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__sealed_from_bytes" => Type::Result {
-                ok: Box::new(Type::Named("Sealed".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__wrapped_from_bytes" => Type::Result {
-                ok: Box::new(Type::Named("WrappedKey".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__vault_wrapped_from_bytes" => Type::Result {
-                ok: Box::new(Type::Named("WrappedVaultKey".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__password_parse" => Type::Result {
-                ok: Box::new(Type::Named("PasswordHash".into())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            },
-            "__vault_unlock_recipient" | "__vault_unlock_passphrase" => {
-                Type::Named("KeyUnlock".into())
-            }
-            "__verify_key_bytes"
-            | "__x25519_public_bytes"
-            | "__signature_bytes"
-            | "__sealed_bytes"
-            | "__wrapped_bytes"
-            | "__vault_wrapped_bytes"
-            | "__digest256_bytes"
-            | "__digest512_bytes" => u8_list,
-            _ => unit_type(),
-        }
-    }
     if let Some(helper) = crypto_static {
         let module = "core.crypto";
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -1252,23 +1418,7 @@ pub(crate) fn lower_method_call(
         .as_deref()
         .map(|name| name.rsplit('.').next().unwrap_or(name))
     {
-        let helper = match (kind, method) {
-            ("SigningKey", "public_key") => Some("__signing_public"),
-            ("X25519SecretKey", "public_key") => Some("__x25519_public"),
-            ("VerifyKey", "bytes") => Some("__verify_key_bytes"),
-            ("X25519PublicKey", "bytes") => Some("__x25519_public_bytes"),
-            ("X25519PublicKey", "text") => Some("__x25519_public_text"),
-            ("Signature", "bytes") => Some("__signature_bytes"),
-            ("Sealed", "bytes") => Some("__sealed_bytes"),
-            ("WrappedKey", "bytes") => Some("__wrapped_bytes"),
-            ("WrappedVaultKey", "bytes") => Some("__vault_wrapped_bytes"),
-            ("Digest256", "bytes") => Some("__digest256_bytes"),
-            ("Digest512", "bytes") => Some("__digest512_bytes"),
-            ("Digest256", "hex") => Some("__digest256_hex"),
-            ("Digest512", "hex") => Some("__digest512_hex"),
-            ("PasswordHash", "text") => Some("__password_text"),
-            _ => None,
-        };
+        let helper = crypto_instance_helper(kind, method);
         if let Some(helper) = helper {
             let recv = lower_expr(receiver, cx, env);
             let args = vec![recv];
@@ -1407,8 +1557,60 @@ pub(crate) fn lower_method_call(
             }
         }
     }
-    // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    // D-CONC-SPAWN1=D: parser-created `task` nodes use the existing spawn and
+    // combinator TIR nodes. The receiver is compiler-private and is never emitted.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE) {
+        if method == "spawn" {
+            if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+                let body_ty = lambda_body_ty(lam, cx, env);
+                let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+                cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                let spawn_closure = render_spawn_lambda(lam, cx, env);
+                return TExpr {
+                    ty: Type::Apply {
+                        name: "Task".to_string(),
+                        args: vec![body_ty],
+                    },
+                    kind: TExprKind::CoreClosureCall {
+                        kind: TCoreClosureKind::Spawn {
+                            group: None,
+                            site,
+                            spawn_closure,
+                            scoped: lam.meta.scoped_task_borrow,
+                        },
+                    },
+                };
+            }
+        }
+        if args.len() == 1 {
+            let tasks = lower_expr(&args[0].expr, cx, env);
+            let elem = taskgroup_result_elem(&tasks);
+            let ty = resolved_ret.cloned().unwrap_or_else(|| match method {
+                "all" => Type::List(Box::new(elem.clone())),
+                _ => elem,
+            });
+            let kind = match method {
+                "all" => TExprKind::TaskGroupAll {
+                    tasks: Box::new(tasks),
+                },
+                "race" => TExprKind::TaskGroupRace {
+                    tasks: Box::new(tasks),
+                },
+                "any" => TExprKind::TaskGroupAny {
+                    tasks: Box::new(tasks),
+                },
+                _ => return TExpr { ty, kind: TExprKind::Unit },
+            };
+            return TExpr { ty, kind };
+        }
+    }
+
+    // D-CONC-SPAWN1=D: compiler-private methods behind canonical `task.group`.
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_SPAWN_METHOD
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
@@ -1434,40 +1636,51 @@ pub(crate) fn lower_method_call(
             };
         }
     }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_ALL_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: Type::List(Box::new(elem)),
+            ty: resolved_ret
+                .cloned()
+                .unwrap_or_else(|| Type::List(Box::new(elem))),
             kind: TExprKind::TaskGroupAll {
                 tasks: Box::new(tasks),
             },
         };
     }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_RACE_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: elem,
+            ty: resolved_ret.cloned().unwrap_or(elem),
             kind: TExprKind::TaskGroupRace {
                 tasks: Box::new(tasks),
             },
         };
     }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    if matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    )
         && method == Syntax::TASKGROUP_ANY_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: elem,
+            ty: resolved_ret.cloned().unwrap_or(elem),
             kind: TExprKind::TaskGroupAny {
                 tasks: Box::new(tasks),
             },
@@ -1577,7 +1790,7 @@ pub(crate) fn lower_method_call(
     // type. The receiver is the bound handle ident → its mangled Rust place.
     if method == Syntax::TXN_ON_COMMIT && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
         // The handle is always a bound ident (sema typed it `Transaction` from a
-        // `#Transact(name)` binding); its mangled place is `user_<name>`.
+        // `#Transact(name)` binding); its mangled place is `__jet_<name>`.
         let handle = match receiver {
             Expr::Ident(name, _) => mangle(name),
             // Defensive: a non-ident receiver can't be a transaction handle, but
@@ -2000,7 +2213,9 @@ pub(crate) fn lower_method_call(
     if method == "set" && args.len() == 2 && !super::is_eval_fragment() {
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias)
-                && cx.core_imports.get(alias).is_some_and(|module| module == "core.env")
+                && cx
+                    .core_import_module_for_function(&env.fn_name, alias)
+                    .is_some_and(|module| module == "core.env")
             {
                 let name = lower_expr(&args[0].expr, cx, env);
                 let value = lower_expr(&args[1].expr, cx, env);
@@ -2029,7 +2244,16 @@ pub(crate) fn lower_method_call(
     // would otherwise fall through to `StaticCall { User(alias) }` and E0956.
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
-            if let Some(module) = cx.core_imports.get(alias).cloned() {
+            let core_target = cx
+                .core_import_module_for_function(&env.fn_name, alias)
+                .map(|module| (module.to_owned(), method.to_owned()))
+                .or_else(|| {
+                    cx.inline_reexport_core
+                        .get(&(alias.clone(), method.to_owned()))
+                        .cloned()
+                });
+            if let Some((module, core_method)) = core_target {
+                let method = core_method.as_str();
                 if module == "core.archive" {
                     if let Some(source_call) = lower_archive_source_call(
                         method,
@@ -2057,26 +2281,6 @@ pub(crate) fn lower_method_call(
                             args: vec![joined],
                             source_span: method_span,
                             widen_to_vec: vec![false],
-                        },
-                    };
-                }
-                if module == "core.tasks" && method == "join_all" && args.len() == 1 {
-                    let tasks = lower_expr(&args[0].expr, cx, env);
-                    let elem = taskgroup_result_elem(&tasks);
-                    return TExpr {
-                        ty: Type::List(Box::new(elem)),
-                        kind: TExprKind::TaskGroupAll {
-                            tasks: Box::new(tasks),
-                        },
-                    };
-                }
-                if module == "core.tasks" && method == "wait_any" && args.len() == 1 {
-                    let tasks = lower_expr(&args[0].expr, cx, env);
-                    let elem = taskgroup_result_elem(&tasks);
-                    return TExpr {
-                        ty: elem,
-                        kind: TExprKind::TaskGroupAny {
-                            tasks: Box::new(tasks),
                         },
                     };
                 }
@@ -2191,7 +2395,7 @@ pub(crate) fn lower_method_call(
     }
     if recv_type.is_none() {
         if matches!(receiver, Expr::Field(..)) {
-            if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
+            if let Some(submodule) = core_module_path_from_receiver(receiver, cx, env)
             {
                 if submodule == "core.archive" {
                     if let Some(source_call) = lower_archive_source_call(
@@ -2261,6 +2465,24 @@ pub(crate) fn lower_method_call(
                 // The gate proved the alias is a re-export / import_mod / code_module.
                 // Mirror `emit_method_call`'s arms IN ORDER (reexport, import_mods,
                 // code_modules) — resolving the path pieces here so emit decides nothing.
+                if let Some(mangled_key) = cx
+                    .inline_reexport_inline
+                    .get(&(alias.clone(), method.to_string()))
+                    .cloned()
+                {
+                    let sig = cx.sigs.get(&mangled_key).cloned();
+                    let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                    return TExpr {
+                        ty: call_return_type_with_args(cx, &mangled_key, type_args, &targs),
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::InlineMangled {
+                                mangled: mangled_key,
+                            },
+                            type_args: type_args.to_vec(),
+                            args: targs,
+                        },
+                    };
+                }
                 if let Some((real_mod, real_fn)) = cx
                     .reexport_calls
                     .get(&(alias.clone(), method.to_string()))
@@ -2344,7 +2566,7 @@ pub(crate) fn lower_method_call(
                     };
                 }
                 if cx.code_modules.contains(alias.as_str()) {
-                    let mangled_key = format!("{}__{}", alias, method);
+                    let mangled_key = jet_foundation::Names::member_name(alias, method);
                     let sig = cx.sigs.get(&mangled_key).cloned();
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     return TExpr {
@@ -3351,34 +3573,17 @@ pub(crate) fn lower_method_call(
     // from `Collections::builtin_method_return`'s `Type::Apply` arms
     // (Source/Collections.rs), read off the receiver's already-resolved type
     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
-    // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`/`wait`
-    // → `T`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit; `trace` → `String`;
+    // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
+    // → `Result<T, TaskFailure>`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
-    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+    if recv_type.is_none()
+        && (is_concurrency_method_name(method, args.len())
+            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
+    {
         // D-VERDICT-1323-1 / I8: `handles.wait_all()` and `handles.join_all()` are
         // the method spelling of `tasks.join_all`, so they lower to the same node
         // every engine already drives. No second mechanism.
-        if matches!(method, "wait_all" | "join_all") {
-            let tasks = lower_expr(receiver, cx, env);
-            let elem = taskgroup_result_elem(&tasks);
-            return TExpr {
-                ty: Type::List(Box::new(elem)),
-                kind: TExprKind::TaskGroupAll {
-                    tasks: Box::new(tasks),
-                },
-            };
-        }
-        if method == "wait_any" {
-            let tasks = lower_expr(receiver, cx, env);
-            let elem = taskgroup_result_elem(&tasks);
-            return TExpr {
-                ty: elem,
-                kind: TExprKind::TaskGroupAny {
-                    tasks: Box::new(tasks),
-                },
-            };
-        }
         let recv_t = lower_expr(receiver, cx, env);
         // The element type `T` from the receiver's `Apply<T>` (the first type arg).
         let elem = match &recv_t.ty {
@@ -3387,18 +3592,18 @@ pub(crate) fn lower_method_call(
         };
         let elem = elem.unwrap_or_else(unit_type);
         let (op, ty) = match method {
-            "join" | "wait" => (THandleOp::TaskJoin, elem),
+            "join" => (
+                THandleOp::TaskJoin,
+                resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                    ok: Box::new(elem),
+                    err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
+                }),
+            ),
+            Syntax::METHOD_TASK_SCOPE_JOIN => (THandleOp::TaskScopeJoin, elem),
             "detach" => (THandleOp::TaskDetach, unit_type()),
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
-            "trace" => (THandleOp::TaskTrace, Type::String),
-            "exception" => (THandleOp::TaskException, Type::String),
-            "detach_all" => (THandleOp::TaskDetachAll, unit_type()),
-            "cancel_all" => (THandleOp::TaskCancelAll, unit_type()),
-            "pause_all" => (THandleOp::TaskPauseAll, unit_type()),
-            "resume_all" => (THandleOp::TaskResumeAll, unit_type()),
-            "trace_all" => (THandleOp::TaskTraceAll, Type::List(Box::new(Type::String))),
             "receive" => (
                 THandleOp::ChannelReceive,
                 Type::Result {
@@ -3973,18 +4178,27 @@ pub(crate) fn lower_method_call(
     // on the AST side, where `recv_type` is always `Some` for these).
     if let Some(numeric_name) = recv_type {
         if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
-            if let Some(op) = resolve_numeric_op(method, numeric_name) {
-                let op = match op {
-                    TNumericOp::Origin(_) => TNumericOp::Origin(match receiver {
-                        Expr::Ident(name, _) => env.tracked_float_origin(name),
-                        _ => None,
-                    }),
-                    other => other,
-                };
+            // `origin` needs the lowered receiver's binding metadata, so complete
+            // that payload here instead of letting a tier rediscover it.
+            let resolved_op = resolve_numeric_op(method, numeric_name);
+            if method == "origin" || resolved_op.is_some() {
                 let mut recv_t = lower_expr(receiver, cx, env);
                 // Sema's width is authoritative — Call/OrFallback lowering can
                 // fall back to Unit/Int and would silently widen bit queries.
                 recv_t.ty = recv_ty.clone();
+                let op = match resolved_op {
+                    Some(op) => op,
+                    None => TNumericOp::Origin {
+                        origin: recv_t
+                            .binding_origin()
+                            .map(|origin| {
+                                crate::Codegen::TIR::lower::render_tracked_float_origin(
+                                    origin, cx,
+                                )
+                            })
+                            .unwrap_or_else(|| "untracked".to_string()),
+                    },
+                };
                 let result_ty = builtin_result_ty(method, args.len(), Some(&recv_ty));
                 return TExpr {
                     ty: result_ty,
@@ -4325,7 +4539,7 @@ pub(crate) fn lower_method_call(
         }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding")
             {
                 return TExpr {
                     ty: Type::Named("EncodingLimits".to_string()),
@@ -4339,7 +4553,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "DataLimits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.data")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.data")
             {
                 return TExpr {
                     ty: Type::Named("DataLimits".to_string()),
@@ -4353,7 +4567,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "DataLimits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.data")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.data")
             {
                 return TExpr {
                     ty: Type::Named("DataLimits".to_string()),
@@ -4367,7 +4581,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "CBOROptions"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.cbor")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding.cbor")
             {
                 return TExpr {
                     ty: Type::Named("CBOROptions".to_string()),
@@ -4381,7 +4595,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if matches!(leaf.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions")
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.xml")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding.xml")
             {
                 return TExpr {
                     ty: Type::Named(leaf.clone()),
@@ -4395,7 +4609,7 @@ pub(crate) fn lower_method_call(
                 };
             }
             if leaf == "Limits"
-                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.email")
+                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.email")
             {
                 return TExpr {
                     ty: Type::Named("Limits".to_string()),
@@ -5335,7 +5549,7 @@ pub(crate) fn lower_method_call(
     }
     // A user instance method on a covered type. `recv_type` is total (gate proved
     // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
-    // name (trait-impl methods keep their bare name; others get the `user_` mangle).
+    // name (trait-impl methods keep their bare name; others get the `__jet_` mangle).
     let Some(ty_name) = recv_type.clone() else {
         // Comptime may evaluate before sema writes `recv_type`; recover precise
         // numeric methods from the lowered receiver type.

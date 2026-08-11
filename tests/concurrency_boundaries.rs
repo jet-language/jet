@@ -1,3 +1,5 @@
+mod common;
+
 fn error_codes(source: &str) -> Vec<String> {
     jet::compile(source)
         .expect_err("adversarial data-race source must not compile")
@@ -335,10 +337,10 @@ fn mutable_state_cannot_cross_task_or_taskgroup_boundaries() {
 use core.tasks
 fn run() {
     count := 0
-    task :: tasks.spawn(() => {
+    handle :: tasks.spawn(() => {
         count += 1
     })
-    task.join()
+    handle.join()
 }
 "#,
         "E1101",
@@ -348,11 +350,11 @@ fn run() {
         r#"
 fn run() {
     count := 0
-    taskgroup group {
-        task :: group.task => {
+    task.group group {
+        handle :: task {
             count += 1
         }
-        task.join()
+        handle.join()
     }
 }
 "#,
@@ -449,12 +451,12 @@ use core.tasks
 struct Counter { value: Int }
 fn run() {
     counter := Shared.new(Counter.{ value: 0 })
-    task :: tasks.spawn(() => {
+    handle :: tasks.spawn(() => {
         counter.edit((value) => {
             value.value += 1
         })
     })
-    task.join()
+    handle.join().drop("synchronizes with the read below; the edit already landed")
     print(counter.read((value) => value.value))
 }
 "#;
@@ -494,10 +496,10 @@ fn taskgroup_child_reads_borrowed_stack_data() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         window :: particles[0..1]
-        a :: g.task => window[0].position
-        print(g.all([a]))
+        a :: task window[0].position
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -511,18 +513,11 @@ fn taskgroup_children_borrow_disjoint_write_places() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
-    taskgroup g {{
+    task.group g {{
         left :: &particles[0]
         right :: &particles[2]
-        a :: g.task => {{
-            left.position += left.velocity
-            left.position
-        }}
-        b :: g.task => {{
-            right.position += right.velocity
-            right.position
-        }}
-        print(g.all([a, b]))
+        result :: task.all {{ {{ left.position += left.velocity; left.position }}, {{ right.position += right.velocity; right.position }} }}
+        print(result)
     }}
 }}
 "#
@@ -540,18 +535,17 @@ fn taskgroup_children_writing_one_place_are_rejected() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         one :: &particles[0]
         two :: &particles[0]
-        a :: g.task => {{
+        a :: task {{
             one.position += 1
             one.position
         }}
-        b :: g.task => {{
+        b :: task {{
             two.position += 1
             two.position
         }}
-        print(g.all([a, b]))
     }}
 }}
 "#
@@ -565,15 +559,14 @@ fn taskgroup_read_and_write_of_one_place_are_rejected() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         writer :: &particles[0]
         reader :: particles[0..1]
-        a :: g.task => {{
+        a :: task {{
             writer.position += 1
             writer.position
         }}
-        b :: g.task => reader[0].position
-        print(g.all([a, b]))
+        b :: task reader[0].position
     }}
 }}
 "#
@@ -603,21 +596,21 @@ fn nested_taskgroups_track_their_own_borrows() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
-    taskgroup outer {{
+    task.group outer {{
         left :: &particles[0]
-        a :: outer.task => {{
+        a :: task {{
             left.position += 1
             left.position
         }}
-        taskgroup inner {{
+        task.group inner {{
             right :: &particles[2]
-            b :: inner.task => {{
+            b :: task {{
                 right.position += 1
                 right.position
             }}
-            print(inner.all([b]))
+            print(b.join() ?? 0)
         }}
-        print(outer.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -631,14 +624,14 @@ fn a_group_cannot_lend_an_owner_declared_inside_its_own_block() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    taskgroup g {{
+    task.group g {{
         particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
         left :: &particles[0]
-        a :: g.task => {{
+        a :: task {{
             left.position += 1
             left.position
         }}
-        print(g.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -656,15 +649,15 @@ fn a_lent_owner_cannot_be_moved_before_the_group_joins() {
 fn eat(ps: ^[Particle]) => Int = ps.len()
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         left :: &particles[0]
-        a :: g.task => {{
+        a :: task {{
             left.position += left.velocity
             left.position
         }}
         n :: eat(^particles)
         print(n)
-        print(g.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -679,14 +672,14 @@ fn a_lent_place_cannot_be_written_by_the_parent_before_the_group_joins() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         left :: &particles[0]
-        a :: g.task => {{
+        a :: task {{
             left.position += left.velocity
             left.position
         }}
         particles[0].position = 99
-        print(g.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -702,14 +695,14 @@ fn a_write_lent_place_cannot_be_read_by_the_parent_before_the_group_joins() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         left :: &particles[0]
-        a :: g.task => {{
+        a :: task {{
             left.position += left.velocity
             left.position
         }}
         print(particles[0].position)
-        print(g.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -724,11 +717,11 @@ fn a_read_lent_place_stays_readable_by_the_parent() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         window :: particles[0..1]
-        a :: g.task => window[0].position
+        a :: task window[0].position
         print(particles[0].position)
-        print(g.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -744,14 +737,14 @@ fn a_place_the_group_never_lent_stays_writable() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    taskgroup g {{
+    task.group g {{
         left :: &particles[0]
-        a :: g.task => {{
+        a :: task {{
             left.position += left.velocity
             left.position
         }}
         particles[1].position = 99
-        print(g.all([a]))
+        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -765,8 +758,8 @@ fn a_taskgroup_parameter_cannot_lend_a_borrow() {
     // borrowed owner outlives it.
     let source = r#"
 fn spawn_view(group: TaskGroup, values: View<Int>) {
-    task :: group.task => values[0]
-    print(task.join())
+    handle :: task values[0]
+    print(handle.join() ?? 0)
 }
 fn run() {}
 "#;

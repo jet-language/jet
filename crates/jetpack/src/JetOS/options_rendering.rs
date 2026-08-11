@@ -167,7 +167,7 @@ pub(super) fn option_doc(key: &str) -> String {
         "network" => "Network identity, DNS, wireless, and firewall policy.",
         "services" => "System service declaration projected to systemd units and proof.",
         "users" => "System account identity used by login and generated roots.",
-        "user" => "Per-user environment profile applied by jetos-user-apply.",
+        "user" => "Per-user generation applied by jetos-user-apply.",
         "filesystem" => "Mounted filesystems, swap, timezone, and root projection.",
         "storage" => "Installer and activation storage tree.",
         "boot" | "kernel" => "Bootloader, kernel, initrd, firmware, and driver selection.",

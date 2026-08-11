@@ -694,6 +694,11 @@ fn ambient_stream_take_file_reader(handle: i64) -> Result<runtime::JetFileReader
     })
 }
 
+/// Move a core.files reader into a shared Prelude body adapter.
+pub(crate) fn take_file_reader_for_http(handle: i64) -> Result<runtime::JetFileReader, String> {
+    ambient_stream_take_file_reader(handle)
+}
+
 fn ambient_stream_take_file_writer(handle: i64) -> Result<runtime::JetFileWriter, String> {
     let Some(index) = ambient_stream_id(&CtValue::Int(handle)) else {
         return Err("bad FileWriter".to_string());
@@ -714,6 +719,11 @@ fn ambient_stream_take_file_writer(handle: i64) -> Result<runtime::JetFileWriter
             }
         }
     })
+}
+
+/// Move a core.files writer into a shared Prelude body adapter.
+pub(crate) fn take_file_writer_for_http(handle: i64) -> Result<runtime::JetFileWriter, String> {
+    ambient_stream_take_file_writer(handle)
 }
 
 fn ambient_ok(value: CtValue) -> CtValue {

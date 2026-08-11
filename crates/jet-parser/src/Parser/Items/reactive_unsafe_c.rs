@@ -86,6 +86,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 meta: None,
                 type_params,
+                head_pattern: None,
                 params,
                 return_type,
                 return_type_span,

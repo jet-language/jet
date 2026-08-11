@@ -38,10 +38,8 @@ fn jet_process_spec_capabilities(
     _spec: &jet_std::ProcessSpec,
 ) -> std::collections::HashSet<String> {
     let mut facts = std::collections::HashSet::new();
-    if jet_process_pty::supported() {
-        facts.insert("terminal".to_string());
-        facts.insert("resize".to_string());
-        facts.insert("raw".to_string());
+    for fact in jet_process_policy::terminal_facts(jet_process_pty::supported()) {
+        facts.insert((*fact).to_string());
     }
     facts
 }

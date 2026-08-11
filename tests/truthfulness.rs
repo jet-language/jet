@@ -6,6 +6,8 @@
 //!
 //! Run: `cargo test --test truthfulness`
 
+mod common;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};

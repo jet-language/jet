@@ -14,4 +14,26 @@ fn mismatch() => Int {
     result
 }
 
+fn routed_missing() => Int {
+    result :: loop {
+        found :: loop value, [1] {
+            if value == 2 { break value }
+        } ?? break(result)
+        break found
+    }
+    result
+}
+
+fn fallible() => Int ? String {
+    return Err("failed")
+}
+
+fn fallback_routed_missing() => Int {
+    result :: loop {
+        fallible() ?? break(result)
+        break 1
+    }
+    result
+}
+
 fn run() {}

@@ -4,6 +4,8 @@
 //! a true ancestor arm, and — the case the inline `starts_with` copy could get wrong —
 //! does not fire for a sibling group whose name merely shares a text prefix.
 
+mod common;
+
 fn codes(source: &str) -> Vec<String> {
     let dir = std::env::temp_dir().join(format!(
         "jet_tag_group_pattern_coverage_{}_{}",

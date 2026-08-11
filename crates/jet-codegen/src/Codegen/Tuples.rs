@@ -27,7 +27,7 @@ pub(crate) fn tuple_struct_name(fields: &[(String, Type)]) -> String {
         name.hash(&mut hasher);
         ty.name().hash(&mut hasher);
     }
-    format!("JetTup_{:x}", hasher.finish())
+    crate::Syntax::generated_name(&format!("JetTup_{:x}", hasher.finish()))
 }
 
 pub(crate) fn tuple_fields_plain(fields: &[(String, Box<Type>)]) -> Vec<(String, Type)> {
@@ -515,6 +515,7 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
             }
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
             | Item::CodeModule(_) | Item::Distinct(_) | Item::TypeAlias(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase

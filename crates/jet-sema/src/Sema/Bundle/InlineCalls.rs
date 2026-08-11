@@ -158,7 +158,7 @@ pub(crate) fn rewrite_inline_calls_expr(
     match expr {
         Expr::Call(c) => {
             if siblings.contains(&c.name) {
-                c.name = format!("{}__{}", modname, c.name);
+                c.name = jet_foundation::Names::member_name(modname, &c.name);
             }
             for a in c.args.iter_mut() {
                 rewrite_inline_calls_expr(&mut a.expr, siblings, modname);

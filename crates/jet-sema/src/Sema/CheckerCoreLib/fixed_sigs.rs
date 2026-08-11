@@ -2837,6 +2837,15 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::Named("Plugin".to_string())),
         )),
+        // D-LIB-CALLGRANT1=A: the grant is label-only so the load site cannot
+        // accidentally swap path and authority by position.
+        ("core.mod", "load") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Named("ModGrant".to_string())),
+            ],
+            Some(result_ty(Type::Named("Mod".to_string()), Type::String)),
+        )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
         // returns `[Byte] ? String` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
@@ -3097,6 +3106,19 @@ pub fn core_fixed_sig(
     }
 }
 
+/// Project the typed sema signature for a foundation Core-call row.
+///
+/// The foundation owns the erased ABI and the sema owns Jet `Type` values.
+/// Keeping this adapter here makes the dependency boundary explicit while
+/// rejecting a row whose typed parameter count has drifted from its ABI.
+pub fn core_fixed_sig_for_row(
+    row: &Syntax::CoreCallRecord,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let signature = core_fixed_sig(row.module, row.member)?;
+    (signature.0.len() == row.arity() && row.signature.max_arity == row.arity())
+        .then_some(signature)
+}
+
 /// D-APILABEL1=A: the public call contract of a Core library function.
 ///
 /// The signature table above carries only conventions and types, so a Core
@@ -3190,6 +3212,14 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
                 optional("limits", ENCODING_LIMITS_DEFAULT),
             ])
         }
+        ("core.mod", "load") => Some(vec![
+            required("path"),
+            CoreParam {
+                label: "grant",
+                zone: crate::AST::ParamZone::LabelOnly,
+                default: None,
+            },
+        ]),
         _ => None,
     }
 }

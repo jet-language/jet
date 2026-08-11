@@ -12,7 +12,7 @@ pub mod Parser;
 
 #[cfg(test)]
 mod generic_module_tests {
-    use super::{AST::{GenericModuleParam, Item, ModuleArg, Type}, Lexer, Parser};
+    use super::{AST::{GenericModuleParam, Item, ModuleArg, Type}, Formatter, Lexer, Parser};
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
@@ -47,5 +47,22 @@ mod generic_module_tests {
         let Item::Struct(data) = &def.body[0] else { panic!("struct") };
         assert!(matches!(&data.fields[0].ty, Type::FixedList { len_symbol: Some((name, _)), .. } if name == "capacity"));
         assert!(matches!(&def.body[1], Item::CodeModule(module) if module.name == "stats"));
+    }
+
+    #[test]
+    fn script_statements_survive_items_and_formatter() {
+        let source = "print(\"first\")\nfn helper() {}\nprint(\"last\")\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("script should parse");
+        assert_eq!(program.script_body.len(), 2);
+        assert!(program.items.iter().any(|item| matches!(
+            item,
+            Item::Func(function) if function.name == "helper"
+        )));
+        let formatted = Formatter::format_source(source).expect("script should format");
+        assert!(formatted.contains("print(\"first\")"), "{formatted}");
+        assert!(formatted.contains("print(\"last\")"), "{formatted}");
+        assert!(!formatted.contains("fn run"), "formatter must keep script syntax: {formatted}");
     }
 }

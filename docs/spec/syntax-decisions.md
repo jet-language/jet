@@ -156,6 +156,16 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
+**D-ENTRY-SCRIPT1=B / D-ENTRY-ORDER1=B — script entry sugar** *(ratified
+2026-08-08, card #1808)*: bare top-level statements in a direct entry file
+are the body of one implicit fallible `fn run()`. Top-level declarations stay
+file-wide declarations; loose statements keep written execution order and
+their bindings are local to that body. `jet run`, `jet dev`, and `jet test`
+use the same entry law. An explicit `fn run` alongside loose statements is
+E0621 with the `jet fix` auto-wrap; an imported file with loose statements is
+E0620 and never executes as an import. `fn dev`, `fn build`, and `#Test`
+declarations remain legal beside script statements.
+
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
 bare argv in declaration order. Boolean flags and optional/defaulted fields stay
@@ -1076,6 +1086,15 @@ One-shot `core.regex` calls take `Regex` and return their match value directly.
 A bare `String` is E0152. Runtime text remains fallible through
 `core.regex.compile` or `compile_with`.
 
+**D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(ratified
+2026-08-07)*: `URL.{"…"}`, `Path.{"…"}`, and `DateTime.{"…"}` are checked
+typed values, not fallible runtime constructors. Sema validates the complete
+literal skeleton and emits E0155 for an invalid head. A URL hole is percent
+encoded; a Path hole is one encoded component, including `.` and `..`; a
+DateTime head cannot contain holes. Runtime strings keep the existing
+fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
+and D-CORE-PATH1; no compatibility spelling is retained.
+
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
@@ -1260,13 +1279,26 @@ use "./lib"                      // file path, namespace lib
 use "grades/scoring" as g        // file path, alias
 module math                      // finds math.jet, then math/module.jet (E0607)
 use math.clamp                   // selective import
-use math.{sin, cos as c}         // grouped + aliased selective import
+use math.[sin, cos as c]         // grouped + aliased selective import
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
 Re-export is `pub use` (D-MOD4); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
+
+`.[ ]` has one prefix-member law. In expression position, entries remain
+members and produce their values (`point.[x, y]`); after `use`, entries produce
+aliases (`use math.[sin, cos as c]`). The expression grammar keeps member
+entries, while the import grammar additionally permits `as` aliases and dotted
+paths. The prefix itself may be dotted at any depth, so
+`use core.encoding.[json, csv]` walks the same members as
+`use core.[encoding.json, encoding.csv]`.
+
+**D-NAME-WALK1=A** *(ratified 2026-08-07, card #1803)*: a module body is a
+namespace like any other, so `use` and `pub use` are legal inside
+`module name { }`. They resolve in the enclosing file's scope and bind only
+inside that body.
 
 **S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
 default; `pub` exports. `#PubFile` flips a file to public-by-default with
@@ -1296,14 +1328,15 @@ name — `module env.dev { packages: […] }`, `module image.server { … }`.
 (`name: target@provider` or bare-path entries, merged by key) and `imports:` are fields
 inside `module name { … }`, never file top-level.
 
-**D-ENV-FACET1=A — environment profiles use the profile noun** *(ratified by
-owner 2026-08-03, card #1104)*: a typed environment may declare multiple
-`env.<name>` contributions, but one contribution is active at a time. The
-beginner default is `dev`, then `default`, then lexical order. Experts select
-one explicitly with `jet env info --env-profile <name>` (the flag applies to
-all Jetpack commands that load an environment plan). `--profile` remains the
-selector for a named workflow profile inside that environment; JetOS profile
-commands keep their own namespace and state.
+**D-ENV-FACET1=A — environment modules use the environment noun** *(ratified by
+owner 2026-08-03, card #1104; selector amended by D-ENVFLAG1=A, card #1619)*:
+a typed environment may declare multiple `env.<name>` contributions, but one
+contribution is active at a time. The beginner default is `dev`, then `default`,
+then lexical order. Experts select one explicitly with `jet env info --env
+<name>`; the selector applies to all Jetpack commands that load an environment
+plan. `--preset` selects a named environment composition. The build
+`--profile` flag remains the optimize bundle; JetOS generation commands keep
+their own namespace and state.
 
 **U4 — Import-tree discovery**: `imports: find("./modules")` auto-discovers
 `.jet` files and merges typed contributions; no manual lists.
@@ -1358,7 +1391,8 @@ generic nested modules, and aliases. Names outside the template resolve in the
 template's definition-site lexical scope. A specialization gains no additional
 authority from its application site.
 
-Inline `use`/`pub use` remains excluded until ordinary modules admit it.
+Inline `use`/`pub use` is admitted, on the same terms ordinary module bodies
+admit it (D-NAME-WALK1=A).
 File/package/build/FFI/C-module/generated-binding/role-module/policy/protocol/
 state/migration/user-derive/generic-package declarations remain in their
 existing homes. Existing markers apply only to their already-legal declaration
@@ -2041,9 +2075,16 @@ ordered commit law of D-CONC-STM1=A.
 card #1505)*: the surface is `task f()`, `task.all { … }`, `task.race { … }`,
 `task.any { … }`, and `task.group g(limit: n) { … }`. Only `task` is reserved;
 `all`, `race`, `any`, and `group` remain free identifiers. Scope-end joins,
-fail-fast, cancel-losers, and first-`Ok` laws stay. It respells the surfaces of
-D-TASKSCOPE1, D-NURSERY1, D-CONCCOMB1, and D-TASKGROUP-PARAM1 without changing
-their lifetime laws. This is the final spelling for the spawn surface.
+fail-fast, cancel-losers, first-`Ok`, and same-completion source-order
+tie-break laws stay. It respells the surfaces of D-TASKSCOPE1, D-NURSERY1,
+D-CONCCOMB1, and D-TASKGROUP-PARAM1 without changing their lifetime laws. The
+parser recognizes a spawn only at the complete `task` surface shape; otherwise
+a local named `task` keeps ordinary identifier syntax. In particular, `task`
+followed by `(`, `[`, `.`, or an operator is a local call, index, member, or
+ordinary expression; the bare-spawn operand form starts with an atom or control
+expression instead. A parenthesized or list operand can use `task { … }` or a
+named function when a local named `task` must remain visible. This is the final
+spelling for the spawn surface.
 
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
@@ -2265,8 +2306,8 @@ evaluation cannot complete. A bare mark opens the execution block (`$ { … }`,
 the Jai `#run` analog) and precedes the compile-time verbs `$if` and
 `$loop`. Sema treats the mark as part of the identifier, so a plain name and
 a marked name can never denote the same binding, and codegen keeps them apart:
-a marked name spells `userct_<name>` in generated Rust where a plain name
-spells `user_<name>`.
+a marked name spells `__jet_ct_<name>` in generated Rust where a plain name
+spells `__jet_<name>`.
 
 Because the name is the same name inside and outside a compile-time block,
 there is nothing to carry out. **D-CTMARKER1 retires outright** — the splice
@@ -2356,6 +2397,16 @@ Address-of is `mem.address_of(x)`. `mem.cast_ptr<T>(p)` is the cast primitive
 (D-CASTPTR1); no compact pointer-chain syntax (D-POINTERCHAIN1).
 Generated `unsafe` appears only inside user-gated regions + vetted internals
 (I1). Onboarding never mentions any of it.
+
+The tier rule is simple: use the import gate when sema can prove that an item
+stays within Jet's safe ownership and value model; use the audit gate when use
+can create, dereference, or access raw or foreign memory. Owning allocators and
+address-stable pins are import-gated because they cannot corrupt memory by
+existing. Raw-pointer construction, raw-pointer dereference, and MMIO are
+audit-gated because their use can. The canonical named-item table is
+`CORE_MEM_GATE_TIERS` in `crates/jet-foundation/src/Syntax/core_surface.rs`.
+The `jet-sema` gate test requires every current `core.mem` export to have one
+tier.
 
 **D-UNSAFE-OBLIG1=A — gate-only default with optional typed obligations and
 per-site control**
@@ -4491,12 +4542,12 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   Studio and CI replay. String shell commands are explicit fallback assertions,
   never the default.
 - **D-JOS-USERENV1=A**: `user.<name>` declarations are the canonical per-user
-  environment source. A profile can apply standalone or attach to
+  environment source. A user generation can apply standalone or attach to
   `system.<host>`; host-specific overrides live where the host composes the
-  profile.
+  generation.
 - **D-JOS-USERAPPLY1=A**: `jetos user plan|build|switch|rollback|prove` is
-  the standalone user-profile path, and `jet os switch` invokes the same
-  user-generation engine when a host imports user profiles.
+  the standalone user-generation path, and `jet os switch` invokes the same
+  user-generation engine when a host imports user generations.
 - **D-JOS-CONTAINER1=A**: isolated workloads use one `workload.<name>`
   mechanism. The backend enum selects Container or MicroVM; shared fields cover
   image/package, ports, mounts, secrets, health, resources, proof, and
@@ -4983,16 +5034,17 @@ and locked with its exact inputs for deterministic offline replay. Build steps
 cannot read the store or invoke resolution. Imported Nix IFD stays isolated in
 the compatibility engine under the same limits.
 
-**D-JPK-PROFILE1=D — one profile generation engine**: `profile.<name>` is the
-single package-profile declaration; `user.<name>` composes profiles by reference.
+**D-JPK-PROFILE1=D — one package/user generation engine**: `profile.<name>` is
+the single package-generation declaration; `user.<name>` composes package
+generations by reference.
 `jet profile plan/build/switch/rollback/generations` and `jetos user` share one
-identity, atomic-switch, history, collision, and GC-root engine. Composed profiles
+identity, atomic-switch, history, collision, and GC-root engine. Composed generations
 have one history across both product views; non-jetos platforms retain parity.
 
 **D-JPK-PROFILECOLLISION1=A — exact-path provider map** *(ratified 2026-07-16,
 card #425)*: when composed packages provide different files at the same path,
 the plan fails and names every contender with its content digest; the
-profile's `collisions:` map selects one provider per exact path. A selection
+generation's `collisions:` map selects one provider per exact path. A selection
 is recorded with all contender digests in the lock; if a contender's file
 changes, the pick is stale and refused (exit 2) until re-reviewed.
 Byte-identical files deduplicate, directories merge recursively, and
@@ -5110,8 +5162,8 @@ record Jetpack digest plus NarHash/signed fingerprint. Nix URI spellings are
 endpoint addresses, not canonical Jetpack vocabulary.
 
 **D-JPK-RESOLVEMODE1=D — one resolution strategy vocabulary**: resolver modes
-are `conservative`, `latest`, `lowest`, and `lowest-direct`; named source
-profiles may bundle these with platform matrices. `jet update <pkg>` defaults
+are `conservative`, `latest`, `lowest`, and `lowest-direct`; named resolver
+configurations may bundle these with platform matrices. `jet update <pkg>` defaults
 conservative, moves only the named subtree, and records rationale. Realize verbs
 never resolve. `jet prove --lens dependencies` emits non-mutating `.jetproof`
 matrix artifacts; unrelated lock records remain byte-identical.
@@ -5200,9 +5252,9 @@ row carries through the bound transform unchanged.
 requires an explicit seed. A `VjpRun` also destructures positionally as
 `(value, pull)`.
 
-**D-COMPUTE-BACKEND1=D — portable profiles and CPU oracle**: default compute
+**D-COMPUTE-BACKEND1=D — portable policies and CPU oracle**: default compute
 policy is F32Strict + Reproducible. Fast math, reassociation, and nondeterministic
-reductions require named recorded profiles. Typed capability negotiation fails
+reductions require named recorded policies. Typed capability negotiation fails
 before launch. Every tier backend differentially conforms to the CPU oracle;
 dev and AOT use the same backend, policy, and cache identity.
 
@@ -5212,7 +5264,7 @@ provider after it checks the kernel metadata and differential reference. The
 contract is opaque to safe Jet, is accepted only inside `#Unsafe`, and is
 carried through TIR into the launch receipt. A reason string, arity, or ordinary
 record is never a proof. With no raw-device provider in the Epoch 3 CPU
-profile, the built-in constructor fails closed; it must not fabricate a token.
+policy, the built-in constructor fails closed; it must not fabricate a token.
 
 **D-SERVICE1=D — sema-known structured service tree**: typed builders promote
 ordinary functions into named workers/groups; sema validates topology, endpoint
@@ -5403,7 +5455,7 @@ remains a future card, not a corner cut here.
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the
 nix-only `jetpack run pkg@nixpkgs` bridge); `jetpack tool install <ref>`
-adds it to the user's default profile (D-JPK-PROFILE1) and projects its
+adds it to the user's default generation (D-JPK-PROFILE1) and projects its
 bins onto PATH as its own generation; `jetpack tool list`/`uninstall`
 manage them. A name collision with a project-local task (D-JPK-TASKRUN1)
 is a checked error naming both.
@@ -5457,7 +5509,7 @@ fields with every other workload kind.
 beginner app-store view is a first-class Apps view inside Studio (not a
 second GUI app, not Studio-external): full storefront browse (featured,
 categories, screenshots), one-click Install writes the declarative
-`user.<name>.packages` diff and applies through the profile engine
+`user.<name>.packages` diff and applies through the generation engine
 (D-JOS-USERAPPLY1) — never an imperative side-channel — with the exact
 generated source diff visible on demand ("View source"), never forced.
 
@@ -5543,6 +5595,15 @@ every source-written double-underscore identifier is rejected. The namespace is
 reserved for compiler-generated binders, debugger and serializer metadata, and
 tools; user code has no escape spelling.
 
+**D-NAME-SIGIL1=A — one underscore ladder and `__jet` machine names**
+*(ratified 2026-08-07)*: zero leading underscores is an ordinary name; one
+leading underscore is the human-facing discard/internal rung; two leading
+underscores are machine space and have no user meaning. Dunder and sunder
+shapes are intentionally meaningless. Every compiler-generated symbol visible
+to generated-code review, diagnostics, traces, debuggers, serializers, or other
+tools begins with the single reserved `__jet_` prefix (for example,
+`__jet_lambda_7`). There is no source escape for that namespace.
+
 **D-ECO-JETOS2=A — Systems and Fleets are Outputs of the Package graph**
 *(ratified 2026-07-15)*: Package, environment, image, System, and Fleet share
 locked identity, policy, cache, explanation, and receipts. JetOS consumes that
@@ -5568,7 +5629,7 @@ Fleet Outputs. It supersedes D-CLI-SURFACE3's `jet os push` grouping and leaves
 *(ratified 2026-07-15)*: the exact commands are
 `jet hangar register-external-root`, `jet hangar unregister-external-root`, and
 `jet hangar list-external-roots`. They retain closures lacking any automatic
-Package, profile, process, build, toolchain, System, or Generation owner.
+Package, package/user generation, process, build, toolchain, System, or Generation owner.
 
 **D-ECO-HANGARPATH1=A — Hangar defaults to native per-user data paths**
 *(ratified 2026-07-15)*: Linux uses `$XDG_DATA_HOME/jet/hangar` or
@@ -6116,6 +6177,64 @@ is added because it remains an ordinary identifier.
 
 Amends: none.
 
+**2026-08-06 — D-AUTHORITY-MODEL1=A / D-AUTHORITY-ROOTS1=A /
+D-AUTHORITY-MEM1=B / D-AUTHORITY-NAME1=A / D-AUTHORITY-SCOPE1=A /
+D-AUTHORITY-MANIFEST1=A / D-AUTHORITY-GATE1=A / D-AUTHORITY-WORD1=A /
+D-AUTHORITY-MEM2=A** *(card #1500, proposal
+`docs/proposals/authority-one-model.md`)*. The authority slate records one
+relation: a scope holds rights, nested scopes only shrink them, and every
+widening is written and audited.
+
+- **D-AUTHORITY-MODEL1=A**: effects, caps, policy, budgets, trust, sandbox,
+  REPL, build and boundary checks read one rights tree, holds relation,
+  tighten rule and gate record. No user-facing spelling changes in the
+  substrate slice. Implementation: #1566.
+- **D-AUTHORITY-ROOTS1=A**: the closed table has thirteen roots — the ratified
+  ten plus `FFI`, `Browser` and `Secret`. FFI languages are leaves such as
+  `FFI.Go`; flat language roots are deleted. This amends D-EFF4/D-EFF5 and the
+  FFI effect clauses. Implementation: #1567.
+- **D-AUTHORITY-MEM1=B**: memory floors leave `#Policy` and become effect
+  denials such as `=[!Mem.Alloc]=>` and manifest `deny: [Mem.Alloc]`.
+  `#Policy` keeps non-memory arguments. This amends D-MEM-FACTS1 and
+  D-POLICY-WORD1. Implementation: #1568.
+- **D-AUTHORITY-MEM2=A**: denial rows accept an optional `above: Bytes`
+  argument, for example `=[!Mem.Alloc(above: 65536)]=>` and manifest
+  `deny: [Mem.Alloc(above: 65536)]`. Record-only outcome; it closes the
+  bounded-arena gate in #1568 criterion 4.
+- **D-AUTHORITY-NAME1=A**: `Authority` is the one nameable rights value at
+  process, plugin and session boundaries; `ProcessAuthority` becomes
+  `Authority`, while `ProcessPlan` and `ProcessReceipt` stay. Implementation:
+  #1569.
+- **D-AUTHORITY-SCOPE1=A**: `#Caps` is the one block marker. A bare list
+  narrows (`#Caps(FS, Net)`); a name-before-list head binds the handle
+  (`#Caps(g: FS, Net)`). `#Grant` is deleted, and its error points to
+  `#Caps`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
+  #1573.
+- **D-AUTHORITY-MANIFEST1=A**: one `authority:` block holds package bounds,
+  dependency grants, trust defaults and provider bounds; replaced keys are
+  migrated and deleted. This amends D-EFFBUDGET1,
+  D-JPK-POLICYSURFACE1 and D-JPK-GRANTSCHEMA1. Implementation: #1570.
+- **D-AUTHORITY-GATE1=A**: every authority gate records in one provenance-
+  carrying ledger; `jet inspect authority` reads the rights view and existing
+  views remain filters. Implementation: #1571.
+- **D-AUTHORITY-WORD1=A**: `capability` leaves user-facing surfaces; borrow
+  diagnostics say `write access`, the rights value is `Authority`, and the
+  product claim surface is `feature claims`. Implementation: #1572.
+
+Outcome-to-card map:
+
+| Decision | Outcome | Delivery |
+| --- | --- | --- |
+| D-AUTHORITY-MODEL1 | A | #1566 |
+| D-AUTHORITY-ROOTS1 | A | #1567 |
+| D-AUTHORITY-MEM1 | B | #1568 |
+| D-AUTHORITY-MEM2 | A | record-only; #1568 criterion 4 |
+| D-AUTHORITY-NAME1 | A | #1569 |
+| D-AUTHORITY-MANIFEST1 | A | #1570 |
+| D-AUTHORITY-GATE1 | A | #1571 |
+| D-AUTHORITY-WORD1 | A | #1572 |
+| D-AUTHORITY-SCOPE1 | A | #1573 |
+
 **D-VERDICT-1455-1 — Mandatory registration (law zero)** *(ratified
 2026-08-05, card #1455)*: a marker exists if and only if it is a row in
 `Policy::APPLIED_RULES`. No marker may be parsed, checked, formatted,
@@ -6179,8 +6298,8 @@ tiers see one folded program.
 
 **D-CONF-KEY1=A — declared typed settings** *(ratified 2026-08-06, card
 #1519)*: a package declares each setting with a Tier-0 type and a default in a
-`settings:` block. Profiles and the command line contribute values by the
-contribution law. `#Known if` can fold on a setting, and a fact read is a
+`settings:` block. Optimization bundles and the command line contribute
+values by the contribution law. `#Known if` can fold on a setting, and a fact read is a
 constant. Undeclared settings are compile errors. `--set key=value` is the CLI
 spelling. `features:` and `env:` are deleted from `Build.{}`. This amends
 D-BUILDPROFILE1. The setting value set is Bool, Int, Char, String, and
@@ -6190,8 +6309,8 @@ fieldless enum, as ratified by D-GENMOD-VALUE1.
 *(ratified 2026-08-06, card #1520)*: one contribution law has two halves. In
 source scopes, the nearest scope wins across item, block, function, module,
 file, and package. Across layers, the most explicit writer wins:
-declaration, profile, workspace, environment, system, fleet, and CLI. Two
-writers at one layer with different values remain a hard error that names both
+declaration, optimization bundle, workspace, environment, system, fleet, and
+CLI. Two writers at one layer with different values remain a hard error that names both
 sources. At system and fleet layers, `.Force` pins a value against later
 layers, including the CLI, and `jet explain` names the pin. This extends
 D-MARK-SCOPE1 and amends the Config composition conflict rule so cross-layer
@@ -6226,8 +6345,8 @@ argument, so the final module spelling can read
 `module tuned :: cache<Int>($build.settings.cache_slots)`. The closed-
 expression rule in D-GENMOD-VALUE1 admits facts as value arguments. The
 ratified `[T#capacity]` layout carve-out admits fact-fed `Int` parameters. A
-profile change produces a different cached specialization. Defaults and named
-arguments remain forbidden in the parameter list. S26 still says values
+change to the optimization bundle produces a different cached specialization.
+Defaults and named arguments remain forbidden in the parameter list. S26 still says values
 specialize bodies and the one layout slot, never type identity or dispatch.
 D-CONF-GENSPELL1 owns the punctuation; this decision owns the shared
 substrate.
@@ -6271,10 +6390,11 @@ The board identity is a machine description and uses the machine vocabulary.
 (D-TGT1-4) and build-graph targets (D-BUILDTARGET1) keep their own words, and
 E1216 is unchanged.
 
-Under D-ENV-PROFILE1, environment `profiles:` becomes `presets:`. Under
-D-ENV-FACET1, `--env-profile` and the environment `--profile` become
-`--preset`. Under D-JPK-PROFILE1, package and user profile prose uses
-`generation`. These renames do not change behavior.
+Under D-ENV-PROFILE1, the retired environment `profiles:` spelling becomes
+`presets:` and `--preset` selects that composition. Under D-ENV-FACET1,
+`--env <name>` selects the declared `env.<name>` module. Under
+D-JPK-PROFILE1, package and user prose uses `generation`. These renames do
+not change behavior.
 
 **D-META-ONE1=A — compile time is one Jet program** *(ratified 2026-08-06,
 card #1539)*: Compiler rules are Jet declarations in the Prelude program. Marker

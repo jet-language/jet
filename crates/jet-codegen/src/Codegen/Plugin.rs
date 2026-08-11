@@ -4,7 +4,7 @@
 //! embedded via the FFI bridge). Reuses the ordinary whole-program `emit_bundle`
 //! output verbatim (I3: codegen stays dumb, no second lowering path) and
 //! appends one `#[export_name = "…"] pub extern "C" fn` wrapper per exported
-//! `pub fn`, calling straight into the already-emitted `user_<name>` — the
+//! `pub fn`, calling straight into the already-emitted `__jet_<name>` — the
 //! same naming convention every other Jet top-level function gets.
 //!
 //! v1 scope, both real (working end-to-end) and deliberately narrow — a
@@ -19,7 +19,7 @@
 //!     enforcement point.
 //!   - only the entry file's TOP-LEVEL `pub fn` items are walked — a `pub fn`
 //!     nested inside a `module <name> { … }` body isn't (yet) collected. A
-//!     top-level function is always emitted as `user_<name>` in the whole-
+//!     top-level function is always emitted as `__jet_<name>` in the whole-
 //!     program Rust this module calls straight into; a module-scoped one may
 //!     get a different mangled name, which needs verifying (not guessing)
 //!     before this recurses into `Item::CodeModule` bodies the way
@@ -28,6 +28,7 @@
 //!     files, which is already a complete, useful shape.
 
 use crate::AST::{Item, ProgramBundle, Type};
+use jet_foundation::Names::mangle;
 
 /// One exported plugin function's homogeneous scalar shape.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -159,7 +160,7 @@ pub fn emit_plugin(
 
     for item in entry_items {
         let Item::Func(f) = item else { continue };
-        if !f.is_pub {
+        if !bundle.name_ledger.public(bundle.entry, &f.name) {
             continue;
         }
         let Some(scalar) = plugin_export_shape(f) else {
@@ -184,13 +185,14 @@ pub fn emit_plugin(
             .map(|(i, _)| format!("p{i}: {}", scalar.rust_ty()))
             .collect();
         let call_args: Vec<String> = (0..f.params.len()).map(|i| format!("p{i}")).collect();
+        let wrapper_name = crate::Syntax::generated_name(&format!("plugin_export_{}", f.name));
         wrapper_fns.push_str(&format!(
-            "#[export_name = \"{kebab}\"]\npub extern \"C\" fn __jet_plugin_export_{}({}) -> {} {{ user_{}({}) }}\n",
-            f.name,
-            rust_params.join(", "),
-            scalar.rust_ty(),
-            f.name,
-            call_args.join(", "),
+            "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {callee}({call_args}) }}\n",
+            wrapper_name = wrapper_name,
+            rust_params = rust_params.join(", "),
+            ret = scalar.rust_ty(),
+            callee = mangle(&f.name),
+            call_args = call_args.join(", "),
         ));
         exported.push(f.name.clone());
     }

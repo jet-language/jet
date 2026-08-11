@@ -287,6 +287,17 @@ fn jet_zoned_add_duration(z: &JetZonedDateTime, d: &crate::jet_std::Duration) ->
 fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
     crate::jet_std::JetURL::parse(s)
 }
+
+/// D-BOUND-HEAD1=A: DateTime heads are complete RFC3339 values. Sema has
+/// already rejected holes that could make the literal invalid.
+fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateTime {
+    let text = jet_typed_datetime_interpolate(literals, &holes);
+    match JetDateTime::parse_rfc3339(&text) {
+        Ok(value) => value,
+        Err(error) => unreachable!("sema accepted an invalid DateTime typed head: {error}"),
+    }
+}
+
 fn jet_url_from_parts(
     scheme: &String,
     host: &String,

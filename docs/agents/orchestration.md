@@ -53,19 +53,41 @@ board — the orchestrator owns every proof and every board write.
    a test run.
 3. Merge the ready queue sequentially, resolving conflicts as you go.
 4. ONE combined `cargo test -p jet --test <targets…>` over the union of the batch's gates.
-   Never run `--test cli`, `--test golden`, or `--test corelib` whole; each takes 45–90
-   minutes because it compiles and runs real programs. Confirm `pgrep -fc "rustc|cargo"`
-   is 0 first — a second cargo blocks on the build lock.
+   Every test command is `timeout`-wrapped. No test binary may exceed the 15-minute suite
+   budget; the harness guard in `tests/common` aborts one that does, and a binary that
+   trips it is a defect to split or speed, never a limit to raise. Filter within the big
+   suites (`--test cli`, `--test golden`, `--test corelib`) while they remain over budget.
+   Confirm `pgrep -fc "rustc|cargo"` is 0 first — a second cargo blocks on the build lock.
 5. Batch-close on green. Per-card proof still gates each close.
 6. A regression keeps its own card open and gets a fixer. Never mint a new card to fix an
    existing one; never revert-and-defer to keep master clean.
 
 ## Board hygiene
 
-The open count must fall. No discovery-minting during a burndown — probe existing cards
-before minting, and use one umbrella per root cause rather than one card per symptom.
+The count must be **honest** and it must **fall**. Honest beats flattering in both
+directions: a stated remaining count that turns out to be 56 is the same failure as one
+that turns out to be 10. Never quote a number you have not measured, and never let a
+quoted number grow.
+
+Before minting anything:
+
+1. **Probe first.** Re-run the failure. A cause that is already fixed gets the card
+   retargeted or closed, never duplicated.
+2. **Retarget, don't close-and-remint.** When a test stays red for a new reason, update
+   that card's title, body, and log. One card per persistent problem, retargeted as causes
+   peel off. Close-and-remint churns the count while hiding that nothing was fixed.
+3. **Group by work slice, not by symptom.** Defects one worker fixes in one pass with one
+   proof run are ONE card with a discrete exit criterion per defect. Splitting them costs a
+   dispatch, a build, a review, and a merge each. Log absorbed content on the surviving
+   card so nothing is hidden, then delete the folded cards.
+4. **Mint only genuinely separate, uncovered work.** Then say so plainly.
+
+Front-load discovery instead of streaming it: one full-corpus census (every test binary,
+every tier) converts unknown into known once, so scope is measured rather than discovered
+card by card. Quote scope numbers only after a census, and say which cards are counted.
+
 Every card is homed (epoch, sidequest, or frozen). Deleting legitimate work to improve a
-metric requires owner approval.
+metric requires owner approval; folding duplicates into one work-slice card does not.
 
 ## Owner gates
 

@@ -838,8 +838,8 @@ impl<'a> Checker<'a> {
         self.registry
             .struct_fields(&name)?
             .iter()
-            .find(|(candidate, _, _, _)| candidate == field)
-            .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+            .find(|(candidate, _, _)| candidate == field)
+            .map(|(_, _, ty)| substitute_type(ty, &subst))
     }
 
     fn method_receiver_access(&self, receiver: &Expr, method: &str) -> ViewAccess {
@@ -2617,7 +2617,7 @@ impl<'a> Checker<'a> {
                         if name == "View"
                             && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
                 ) || matches!(ty, Type::Named(name) if self.registry.struct_fields(name).is_some_and(|fields| {
-                    fields.iter().any(|(_, _, field_ty, _)| matches!(
+                    fields.iter().any(|(_, _, field_ty)| matches!(
                         field_ty,
                         Type::Apply { name, args }
                             if name == "View"
@@ -3185,7 +3185,7 @@ impl<'a> Checker<'a> {
                 }
                 Type::Named(name) | Type::Apply { name, .. } if seen.insert(name.clone()) => {
                     if let Some(fields) = checker.registry.struct_fields(name) {
-                        for (field, _, field_ty, _) in fields {
+                        for (field, _, field_ty) in fields {
                             path.push(field.clone());
                             walk(checker, field_ty, path, seen, out);
                             path.pop();
@@ -3381,7 +3381,7 @@ impl<'a> Checker<'a> {
             let found = registry.struct_fields(name).is_some_and(|fields| {
                 fields
                     .iter()
-                    .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
+                    .any(|(_, _, field_ty)| contains(registry, field_ty, seen))
             }) || registry.enum_variants(name).is_some_and(|variants| {
                 variants
                     .values()
@@ -4233,6 +4233,97 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A callback retained by `core.os.on_interrupt` needs a stronger fact than
+    /// an ordinary escaping closure. In particular, `Type::Fn` normally lowers
+    /// to `Rc`, and moving that value is not enough for the native `Arc<dyn
+    /// Fn() + Send + Sync>` boundary. Named functions and aliases that were
+    /// already proven to contain such a representation carry the dedicated
+    /// local fact; every other function capture is rejected here.
+    pub(crate) fn lambda_interrupt_sendable(&self, lam: &Lambda, fn_ty: &Type) -> bool {
+        if lam.meta.needs_fn_mut {
+            return false;
+        }
+        let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
+        let mut read_caps = HashSet::new();
+        let mut mut_caps = HashSet::new();
+        lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
+        for name in read_caps.iter().chain(mut_caps.iter()) {
+            if param_names.contains(name) {
+                continue;
+            }
+            let Some(info) = self.lookup(name) else {
+                // A top-level function or module item is emitted as a static
+                // wrapper, not as a captured Rc local.
+                continue;
+            };
+            if matches!(info.ty, Type::Fn { .. }) {
+                if !info.interrupt_sendable {
+                    return false;
+                }
+                continue;
+            }
+            if !info.sendable
+                || self
+                    .sendability_problem(&info.ty, true)
+                    .is_some()
+                || matches!(
+                    info.param_conv,
+                    Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                )
+            {
+                return false;
+            }
+        }
+        match fn_ty {
+            Type::Fn { ret: Some(ret), .. } => self.sendability_problem(ret, true).is_none(),
+            Type::Fn { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Reject a local function value that would otherwise reach the callback
+    /// host as an ordinary Rc. Direct named functions and callback-safe aliases
+    /// are admitted; function parameters and all other local function values
+    /// receive the normal E1102 product diagnostic before codegen.
+    pub(crate) fn check_interrupt_callback_expr(&mut self, expr: &Expr, ty: &Type) {
+        if self.interrupt_callback_depth == 0 || !matches!(ty, Type::Fn { .. }) {
+            return;
+        }
+        fn ident(expr: &Expr) -> Option<&str> {
+            match expr {
+                Expr::Ident(name, _) => Some(name),
+                Expr::Paren(inner, _) => ident(inner),
+                _ => None,
+            }
+        }
+        let Some(name) = ident(expr) else {
+            return;
+        };
+        if self
+            .lookup(name)
+            .map(|info| info.interrupt_sendable)
+            .unwrap_or_else(|| {
+                self.funcs.contains_key(name)
+                    || self.unqualified.contains_key(name)
+                    || self.unqualified_file.contains_key(name)
+            })
+        {
+            return;
+        }
+        let problem = self.sendability_problem(ty, false).unwrap_or(SendabilityProblem {
+            root: None,
+            path: Vec::new(),
+            kind: SendProblemKind::ClosureCaptures,
+        });
+        self.report_unsendable(
+            name,
+            ty,
+            problem,
+            SendCrossing::InterruptCallback,
+            expr.span(),
+        );
+    }
+
     pub(crate) fn sendability_problem(
         &self,
         ty: &Type,
@@ -4347,7 +4438,7 @@ impl<'a> Checker<'a> {
             self.struct_subst(name, args)
         };
         let found = match self.registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty)| {
                 let actual = self.trait_reg.instantiate_type(ty, &subst);
                 self.type_contains_cell_guard_inner(&actual, seen)
             }),
@@ -4444,7 +4535,7 @@ impl<'a> Checker<'a> {
             self.struct_subst(name, args)
         };
         let found = match self.registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty)| {
                 let actual = self.trait_reg.instantiate_type(ty, &subst);
                 self.type_contains_local_cell_inner(&actual, seen)
             }),
@@ -4613,7 +4704,7 @@ impl<'a> Checker<'a> {
         };
         let found = match self.registry.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => {
-                for (field_name, _, field_ty, _) in fields {
+                for (field_name, _, field_ty) in fields {
                     let actual_ty = self.trait_reg.instantiate_type(field_ty, &subst);
                     if let Some(problem) = self.sendability_problem_inner(&actual_ty, true, seen) {
                         return Some(prepend_send_path(name, field_name, problem));
@@ -4725,11 +4816,21 @@ impl<'a> Checker<'a> {
                     value_text, type_name
                 )
             }
+            (SendCrossing::InterruptCallback, _) => {
+                format!(
+                    "{} can't be registered as an interrupt callback because `{}` isn't sendable",
+                    value_text, type_name
+                )
+            }
         };
-        let why = format!(
-            "{}; tasks and channels move owned values between threads",
-            describe_sendability_problem(&problem)
-        );
+        let why = if matches!(crossing, SendCrossing::InterruptCallback) {
+            "core.os.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe".to_string()
+        } else {
+            format!(
+                "{}; tasks and channels move owned values between threads",
+                describe_sendability_problem(&problem)
+            )
+        };
         let local_cell = matches!(
             &problem.kind,
             SendProblemKind::ThreadConfined(name)
@@ -4745,11 +4846,17 @@ impl<'a> Checker<'a> {
             (true, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state"
             }
+            (true, SendCrossing::InterruptCallback) => {
+                "pass a named function, or capture only owned sendable values in the callback"
+            }
             (false, SendCrossing::ChannelSend) => {
                 "send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`"
             }
             (false, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "give the task plain owned data, or rebuild the value as an owned copy before spawning"
+            }
+            (false, SendCrossing::InterruptCallback) => {
+                "pass a named function, or capture only owned sendable values in the callback"
             }
         };
         // D-DETACH1: if this E1102 fires in a task spawn context, record the task

@@ -1,6 +1,8 @@
 //! E2-M15 cross-compilation and freestanding profile tests.
 //! Tests E3301 (std API in freestanding build).
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -149,7 +151,7 @@ fn e3301_snapshot() {
 /// `WebBucket`, E2-M15's cross-compile flag reused, no new flag). The
 /// compiler-synthesized `JetShow`/`JetDebug`/`JetDisplay` impls for both
 /// structs are NOT filtered (only the user's own OS-gated `impl` is) — this
-/// asserts on the specific `impl user_Backend for user_<Type>` line, not a
+/// asserts on the specific `impl __jet_Backend for __jet_<Type>` line, not a
 /// bare substring count of the type name.
 fn os_target_gating_path() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -174,12 +176,12 @@ fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
             )
         });
     assert!(
-        out.rust.contains("impl user_Backend for user_LinuxBackend"),
+        out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"),
         "Linux triple should keep the OS.Linux impl:\n{}",
         out.rust
     );
     assert!(
-        !out.rust.contains("impl user_Backend for user_MacosBackend"),
+        !out.rust.contains("impl __jet_Backend for __jet_MacosBackend"),
         "Linux triple should strip the OS.MacOS impl:\n{}",
         out.rust
     );
@@ -211,12 +213,12 @@ fn os_target_gating_emits_only_macos_impl_for_macos_triple() {
         },
     );
     assert!(
-        out.rust.contains("impl user_Backend for user_MacosBackend"),
+        out.rust.contains("impl __jet_Backend for __jet_MacosBackend"),
         "macOS triple should keep the OS.MacOS impl:\n{}",
         out.rust
     );
     assert!(
-        !out.rust.contains("impl user_Backend for user_LinuxBackend"),
+        !out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"),
         "macOS triple should strip the OS.Linux impl:\n{}",
         out.rust
     );
@@ -247,7 +249,7 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
     // This repo's dev shell / CI host is Linux (see env: `jet::OSTarget::host()`).
     let host_is_linux = jet::Syntax::OSTarget::host() == jet::Syntax::OSTarget::Linux;
     assert_eq!(
-        out.rust.contains("impl user_Backend for user_LinuxBackend"),
+        out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"),
         host_is_linux,
         "no --target= should default to the host OS:\n{}",
         out.rust

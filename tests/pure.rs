@@ -1,5 +1,7 @@
 //! E2-M16 pure evaluation tests (S60, D-PURE1/D-PURE2/D-PURE3).
 
+mod common;
+
 use std::path::Path;
 use std::sync::Mutex;
 

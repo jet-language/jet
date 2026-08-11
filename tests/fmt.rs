@@ -1,5 +1,7 @@
 //! M6 phase 1: `jet fmt` idempotence — fmt(fmt(x)) == fmt(x).
 
+mod common;
+
 use std::fs;
 
 #[test]
@@ -26,6 +28,17 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
         .expect("package field spacing should format");
     assert!(formatted.contains("name: \"demo\""), "{formatted}");
     assert!(!formatted.contains("name :"), "{formatted}");
+}
+
+#[test]
+fn fmt_preserves_script_and_declaration_source_order() {
+    let source = "message :: \"script entry\"\nprint(message)\n\nfn helper() => Int {\n    return 42\n}\n";
+    let once = jet::format_source(source).expect("mixed script source should format");
+    let message = once.find("message ::").expect("script binding should remain");
+    let helper = once.find("fn helper").expect("declaration should remain");
+    assert!(message < helper, "formatter reordered source items:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted source should reformat");
+    assert_eq!(once, twice, "mixed script formatting must be idempotent");
 }
 
 #[test]
@@ -102,6 +115,16 @@ fn repr_c_enum_surface_is_stable() {
     assert!(once.contains("Data(x: I32, y: I32) = 7"));
     let twice = jet::format_source(&once).expect("formatted C-layout enum should parse");
     assert_eq!(once, twice, "C-layout enum formatting must be stable");
+}
+
+#[test]
+fn multi_head_function_surface_round_trips() {
+    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float = r * r\nfn area(Rect(w: Float, h: Float)) => Float = w * h\n";
+    let once = jet::format_source(src).expect("multi-head functions should format");
+    assert!(once.contains("fn area(Circle(r: Float)) => Float = r * r"));
+    assert!(once.contains("fn area(Rect(w: Float, h: Float)) => Float = w * h"));
+    let twice = jet::format_source(&once).expect("formatted multi-head functions should parse");
+    assert_eq!(once, twice, "multi-head formatting must be stable");
 }
 
 #[test]
@@ -2110,6 +2133,10 @@ fn run() {
     let once = jet::format_source(src).expect("fmt should accept loop values");
     let twice = jet::format_source(&once).expect("second loop-value fmt should succeed");
     assert_eq!(once, twice, "loop-value fmt must be idempotent");
+    assert!(
+        !once.contains("__jet_"),
+        "formatter must hide compiler-generated machine labels: {once}"
+    );
 }
 
 #[test]
@@ -2233,7 +2260,7 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
 
 #[test]
 fn fmt_selective_import_d_selimport1_stability() {
-    // D-SELIMPORT1=A: `use mod.{a, b as c}` must survive fmt unchanged.
+    // D-SELIMPORT1=A: `use mod.[a, b as c]` must survive fmt unchanged.
     let src = "\
 module math {
     pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
@@ -2243,7 +2270,7 @@ module math {
     }
 }
 
-use math.{clamp, clamp as c2}
+use math.[clamp, clamp as c2]
 
 fn run() {
     print(clamp(15, 0, 10))
@@ -2252,7 +2279,7 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["use math.{clamp, clamp as c2}"],
+        &["use math.[clamp, clamp as c2]"],
         "selective import with alias",
     );
     let once = jet::format_source(src).expect("fmt should accept selective imports");
@@ -2516,6 +2543,9 @@ fn run() {
     arg :: \"two words;*.jet\"
     expected :: Sh.{\"printf <%s> {arg}\"}
     audited_cmd :: Sh.raw(\"printf raw\")
+    endpoint :: URL.{\"https://api.example.com/v2/{name}\"}
+    log_path :: Path.{\"/var/log/{name}.log\"}
+    stamp :: DateTime.{\"2026-08-07T12:00:00Z\"}
 }
 ";
     assert_fmt_stable(src, "typed text");

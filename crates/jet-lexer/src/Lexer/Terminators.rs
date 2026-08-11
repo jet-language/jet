@@ -204,7 +204,7 @@ fn leading_dot_variant_token(kind: &TokKind) -> bool {
 /// `.{ … } ->` — rather than a fluent chain step? Without a terminator, a
 /// braceless prior arm body would glue onto the next `.Variant` as a field
 /// access and then choke on `->`.
-fn dispatch_arm_starts_at(toks: &[Token], i: usize) -> bool {
+fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
     if !matches!(toks.get(i).map(|t| &t.kind), Some(TokKind::Dot)) {
         return false;
     }
@@ -263,6 +263,30 @@ fn dispatch_arm_starts_at(toks: &[Token], i: usize) -> bool {
             }
             j += 1;
         }
+    }
+    // D-IFDIST1: a braceless arm may add a Boolean guard after its variant
+    // payload (`.Key(key) && key == "b" -> ...`). Scan that guard only on its
+    // source line; an unrelated arrow on a later line must not turn a fluent
+    // chain into a new arm.
+    if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::AndAnd | TokKind::OrOr)) {
+        let guard_start = toks[j].span.start;
+        let mut depth = 0usize;
+        while let Some(token) = toks.get(j) {
+            match &token.kind {
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                }
+                TokKind::Arrow if depth == 0 => {
+                    return src
+                        .get(guard_start..token.span.start)
+                        .is_some_and(|guard| !guard.contains('\n'));
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        return false;
     }
     matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Arrow))
 }
@@ -357,7 +381,7 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                     // D-IF3 / D-ENUMDOT1: `.Variant ->` / `.Variant(x) ->` /
                     // `.{ … } ->` at line start is the next dispatch arm, not a
                     // field chain off the previous braceless arm body.
-                    || dispatch_arm_starts_at(toks, i))
+                    || dispatch_arm_starts_at(src, toks, i))
                     // A closing `)` / `]` on its own line never begins a
                     // statement, so a terminator before it is never grammatical
                     // (multi-line call args / list / map). Suppress it. A `}` is

@@ -14,17 +14,9 @@ pub(crate) const RESOURCE_CLEANUP_MARKER: &str = "__JET_RESOURCE_CLEANUP__";
 /// marker with those cleanups before the return.
 pub(crate) const STREAM_CANCEL_MARKER: &str = "__JET_STREAM_CANCEL_RETURN__";
 
-pub(crate) fn expr_ast_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
-    match e {
-        Expr::Ident(name, _) => env.ty_of(name),
-        _ => None,
-    }
-}
-
 pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
-        tracked_float_origins: env.tracked_float_origins.clone(),
         fn_name: env.fn_name.clone(),
         ret_ty: env.ret_ty.clone(),
         self_owner: env.self_owner.clone(),
@@ -36,6 +28,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         gc_return: env.gc_return,
         split_view_handles: env.split_view_handles.clone(),
         cloned_types: env.cloned_types.clone(),
+        send_fn_locals: env.send_fn_locals.clone(),
     }
 }
 

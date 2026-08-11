@@ -328,7 +328,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    if is_foreign_type_name(name, cx) {
+    if foreign_type_module(name, cx).is_some() {
         return false;
     }
     // The base must be a known user struct (not an enum/trait/foreign/prelude type).
@@ -390,6 +390,11 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
             || cx.current_type_params.borrow().contains(n.as_str()))
 }
 
+/// Resolve a user nominal through the one canonical codegen import map.
+pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
+    cx.foreign_types.get(name).map(String::as_str)
+}
+
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
 /// These all render through `cx.rust_type` already (a prelude handle/core struct → its
 /// `Jet…`/`jet_std::…` Rust name), so passing/binding/returning one is byte-identical to
@@ -406,13 +411,13 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         return false;
     };
     // c109 Phase 19: a FOREIGN (imported user) struct/enum used as a value type. It
-    // renders via `cx.rust_type` to `{root}{mod}::user_<Name>` (Context.rs), and a field
+    // renders via `cx.rust_type` to `{root}{mod}::__jet_<Name>` (Context.rs), and a field
     // read on it mangles (`(n).user_title`) exactly as `mangle` produces — byte-identical
     // to the AST path with no new emit. Construction (`alias.Note { … }`) routes via the
     // `import_ns` StructLit shape; a method on it is still out of subset, so a fn that
     // calls one is excluded by that call (the recurring "cover the value type, let the next
     // uncovered node exclude its fn" seam).
-    if is_foreign_type_name(name, cx) {
+    if foreign_type_module(name, cx).is_some() {
         return true;
     }
     // D-REGEXENGINE1=A: a regex `Match` value (`if m == value(mat)` binds
@@ -461,26 +466,6 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         || layout_handle_rust_type(name).is_some()
 }
 
-/// A foreign type may be referenced by its bare leaf or by its source-qualified
-/// import alias (`note.Note`). Qualified shape keys are authoritative: they keep
-/// same-named exports from different modules distinct.
-pub(crate) fn is_foreign_type_name(name: &str, cx: &Cx) -> bool {
-    if cx.foreign_types.contains_key(name) {
-        return true;
-    }
-    let Some((alias, leaf)) = name.rsplit_once('.') else {
-        return false;
-    };
-    let qualified = crate::Codegen::TIR::imported_type_name(alias, leaf);
-    if cx.import_mods.contains_key(alias) && cx.struct_fields.contains_key(&qualified) {
-        return true;
-    }
-    cx.import_mods
-        .get(alias)
-        .zip(cx.foreign_types.get(leaf))
-        .is_some_and(|(import_mod, foreign_mod)| import_mod == foreign_mod)
-}
-
 /// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the
 /// HTTP request/response types (`net_handle_rust_type` + the `is_prelude_struct` branch in
 /// `emit_struct_lit`). These get a Rust head `<root>Jet…` with PLAIN (unmangled) fields,
@@ -516,16 +501,19 @@ pub(crate) fn foreign_struct_lit_in_subset(
     import_ns: Option<&str>,
     cx: &Cx,
 ) -> bool {
-    let Some(alias) = import_ns else {
+    let alias = import_ns.unwrap_or("");
+    let Some(qualified) = cx.foreign_type_identity(alias, type_name) else {
         return false;
     };
-    let Some(import_mod) = cx.import_mods.get(alias) else {
-        return false;
-    };
-    let qualified = crate::Codegen::TIR::imported_type_name(alias, type_name);
-    if cx.foreign_types.get(&qualified) != Some(import_mod)
-        && !cx.struct_fields.contains_key(&qualified)
-    {
+    if let Some(alias) = import_ns {
+        let Some(import_mod) = cx.import_mods.get(alias) else {
+            return false;
+        };
+        if cx.foreign_types.get(&qualified) != Some(import_mod) {
+            return false;
+        }
+    }
+    if !cx.struct_fields.contains_key(&qualified) {
         return false;
     }
     type_args

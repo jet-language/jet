@@ -129,8 +129,6 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
             methods.insert(
                 "apply".to_string(),
                 MethodSig {
-                    name_span: s.name_span,
-                    is_pub: s.is_pub,
                     params: vec![
                         (AccessConvention::Read, base_ty.clone()),
                         (AccessConvention::Move, patch_ty.clone()),
@@ -150,8 +148,6 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
             methods.insert(
                 "diff".to_string(),
                 MethodSig {
-                    name_span: s.name_span,
-                    is_pub: s.is_pub,
                     params: vec![
                         (AccessConvention::Move, base_ty.clone()),
                         (AccessConvention::Move, base_ty),
@@ -176,8 +172,6 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
             methods.insert(
                 "merge".to_string(),
                 MethodSig {
-                    name_span: s.name_span,
-                    is_pub: s.is_pub,
                     params: vec![
                         (AccessConvention::Read, patch_ty.clone()),
                         (AccessConvention::Move, patch_ty),

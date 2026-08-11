@@ -1,5 +1,7 @@
 //! D-IMPACT1 integration tests for blast-radius queries.
 
+mod common;
+
 use std::path::PathBuf;
 
 #[test]

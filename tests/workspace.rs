@@ -5,6 +5,8 @@
 //! - E0996: `members:` evaluated to something other than `[String]`
 //! - E0997: `find("…")` names a missing directory
 
+mod common;
+
 use jetpack::WorkspaceFile;
 use std::path::{Path, PathBuf};
 

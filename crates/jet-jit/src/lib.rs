@@ -49,6 +49,27 @@ macro_rules! host_fns {
             $( $( pub(crate) $extra_field: $extra_ty, )* )?
         }
 
+        impl $StructName {
+            /// Resolve a registered host symbol without adding another
+            /// per-module lookup table in lowering. The macro input is the
+            /// one declaration/registration source for both operations.
+            pub(crate) fn lookup(&self, symbol: &str) -> Option<cranelift_module::FuncId> {
+                match symbol {
+                    $( $symbol => Some(self.$field), )*
+                    _ => {
+                        $(
+                            $(
+                                if let Some(id) = self.$extra_field.lookup(symbol) {
+                                    return Some(id);
+                                }
+                            )*
+                        )?
+                        None
+                    }
+                }
+            }
+        }
+
         pub(crate) fn $register_fn(builder: &mut cranelift_jit::JITBuilder) {
             $(
                 $(
@@ -144,6 +165,7 @@ mod Math;
 mod MathExtra;
 mod Ffi;
 mod Memory;
+mod Mod;
 mod net_http_rt;
 mod Net;
 mod Numeric;
@@ -272,8 +294,8 @@ pub use api_debug::{
     cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,
     jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,
     jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail,
-    resident_jit_safe_bundle, resident_jit_safe_bundle_detail, tir_lower_fail_reason,
-    tir_lowers_bundle, try_compile_bundle,
+    resident_jit_safe_bundle, resident_jit_safe_bundle_detail, run_resident_strict_for_test,
+    tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle,
 };
 pub use backend::CraneliftBackend;
 pub use backend::plan_bundle_tiers;

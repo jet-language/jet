@@ -45,6 +45,7 @@ pub(crate) use lower::*;
 pub(crate) use subset::*;
 
 use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp, VariantPayload};
+use crate::Codegen::{mangle, mangle_variant, user_type_rust};
 
 thread_local! {
     static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
@@ -95,7 +96,7 @@ pub struct JitProgram {
     pub struct_type_params: std::collections::HashMap<String, Vec<String>>,
     /// M5: mangled variant names per enum type (discriminant order).
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
-    /// M5: payload field types per `user_Type::user_Variant` pattern prefix.
+    /// M5: payload field types per `__jet_Type::__jet_Variant` pattern prefix.
     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
     /// Functions whose typed decode must use the canonical TIR migration plan.
     pub canonical_deopt: std::collections::HashSet<String>,
@@ -198,12 +199,43 @@ fn register_enum_variants(
         enum_name.to_string(),
         variants
             .iter()
-            .map(|variant| format!("user_{}", variant.name))
+            .map(|variant| mangle_variant(&variant.name))
             .collect(),
     );
     for variant in variants {
-        let pattern = format!("user_{enum_name}::user_{}", variant.name);
+        let pattern = format!("{}::{}", user_type_rust(enum_name), mangle_variant(&variant.name));
         enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
+    }
+}
+
+fn register_imported_enum_variants(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    enum_name: &str,
+    variants: &[crate::AST::Variant],
+    enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
+    enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
+) {
+    let identity = crate::Codegen::TIR::imported_type_name(owner, enum_name);
+    enum_variants.insert(
+        identity.clone(),
+        variants
+            .iter()
+            .map(|variant| mangle_variant(&variant.name))
+            .collect(),
+    );
+    for variant in variants {
+        let pattern = format!(
+            "{}::{}",
+            user_type_rust(&identity),
+            mangle_variant(&variant.name)
+        );
+        let payload = payload_types_for_variant(&variant.payload)
+            .into_iter()
+            .map(|ty| crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, &ty))
+            .collect();
+        enum_variant_payload_types.insert(pattern, payload);
     }
 }
 
@@ -362,16 +394,25 @@ pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
     })
 }
 
-/// Rust local place for JIT variable lookup (`user_x`).
+/// Rust local place for JIT variable lookup (`__jet_x`).
 pub fn local_place(name: &str) -> String {
     super::mangle(name)
 }
 
+/// Source identity for a tracked Float binding. Keep the sema binding facts
+/// intact until the `.origin()` operation is lowered; the operation is the
+/// single place that formats the user-facing note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TBindingOrigin {
+    pub name: String,
+    pub span: crate::Diagnostics::Span,
+}
+
 /// One local or parameter slot, carried as structure instead of a Rust place
-/// string. Every engine resolves a slot from these three facts alone.
+/// string. Every engine resolves a slot from these facts alone.
 ///
 /// `name` is the slot's identity: a user binding carries its Jet name, which Rust
-/// spells `user_<name>`; a compiler-generated temp (`generated`) carries its own
+/// spells `__jet_<name>`; a compiler-generated temp (`generated`) carries its own
 /// reserved identifier, which can never collide with a mangled user name.
 /// `deref` records a by-reference slot, which Rust reads through `(*…)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -379,6 +420,9 @@ pub struct TLocal {
     pub name: String,
     pub generated: bool,
     pub deref: bool,
+    /// D-PROVENANCE1=B: source identity for the exact `#Track` Float binding.
+    /// The metadata travels with the slot until TIR lowers `.origin()`.
+    pub origin: Option<TBindingOrigin>,
     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
@@ -392,6 +436,7 @@ impl TLocal {
             name: name.into(),
             generated: false,
             deref: false,
+            origin: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -403,9 +448,16 @@ impl TLocal {
             name: name.into(),
             generated: true,
             deref: false,
+            origin: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
+    }
+
+    /// Preserve the source identity when a lowering path rebinds this slot.
+    pub fn with_origin(mut self, origin: TBindingOrigin) -> TLocal {
+        self.origin = Some(origin);
+        self
     }
 
     pub fn as_uninit_scalar(mut self) -> TLocal {
@@ -718,16 +770,16 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             .map(|(param, arg)| (param.name.clone(), arg.clone()))
             .collect();
         for item in items {
-            let (method, trait_name, generated_serde) = match item {
+            let (method, trait_name) = match item {
                 Item::Struct(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
-                        Some(method) => (method, None, false),
+                        Some(method) => (method, None),
                         None => continue,
                     }
                 }
                 Item::Enum(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
-                        Some(method) => (method, None, false),
+                        Some(method) => (method, None),
                         None => continue,
                     }
                 }
@@ -737,11 +789,11 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                         continue;
                     };
                     match &imp.trait_name {
-                        None => (method, None, false),
+                        None => (method, None),
                         Some(t)
                             if t == crate::Generics::ENCODE || t == crate::Generics::DECODE =>
                         {
-                            (method, Some(t.as_str()), imp.is_generated_serde)
+                            (method, Some(t.as_str()))
                         }
                         Some(_) => continue,
                     }
@@ -749,11 +801,15 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 _ => continue,
             };
             let mut subst = owner_subst.clone();
-            // Built-in serde expansion keeps the owner's type parameters on the
-            // generated method so the source remains an ordinary Jet impl. A
-            // concrete owner such as `Wrap<Int>` binds those parameters; they
-            // are not independent method arguments to discard.
-            let owner_binds_method_params = generated_serde
+            // A codec impl keeps the owner's type parameters on its ordinary
+            // method. A concrete owner such as `Wrap<Int>` binds those
+            // parameters; they are not independent method arguments to discard.
+            let owner_binds_method_params = trait_name.is_some_and(|trait_name| {
+                matches!(
+                    trait_name,
+                    crate::Generics::ENCODE | crate::Generics::DECODE
+                )
+            }) && !owner_subst.is_empty()
                 && method
                 .type_params
                 .iter()
@@ -1166,21 +1222,28 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             }
             Item::CodeModule(cm) => {
                 let Some(body) = &cm.body else { continue };
+                let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
                 for inner in body {
                     match inner {
                         Item::Func(f) => {
                             if !f.type_params.is_empty() || !tir_covers(f, &cx) {
                                 continue;
                             }
-                            let mut lowered = lower_func(f, &cx);
-                            lowered.name = format!("{}__{}", cm.name, f.name);
-                            funcs.push(lowered);
+                            // Match the AOT inline-module path: lower against the
+                            // emitted module-qualified function name so body-local
+                            // import scopes select `cm__function` while preserving
+                            // the same canonical TIR call form for tier 0.
+                            let member = jet_foundation::Names::member_name(&cm.name, &f.name);
+                            let mut mangled_f = f.clone();
+                            mangled_f.name = member.clone();
+                            let mut lowered = lower_func(&mangled_f, &cx);
+                            lowered.name = member;                            funcs.push(lowered);
                         }
                         Item::Struct(s) => {
-                            let type_name = if s.name.starts_with(&format!("{}__", cm.name)) {
+                            let type_name = if s.name.starts_with(&member_prefix) {
                                 s.name.clone()
                             } else {
-                                format!("{}__{}", cm.name, s.name)
+                                jet_foundation::Names::member_name(&cm.name, &s.name)
                             };
                             for method in &s.methods {
                                 if !tir_covers_method(method, &type_name, &cx) {
@@ -1194,11 +1257,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         Item::Impl(imp) => {
                             let type_name = if imp
                                 .type_name
-                                .starts_with(&format!("{}__", cm.name))
+                                .starts_with(&member_prefix)
                             {
                                 imp.type_name.clone()
                             } else {
-                                format!("{}__{}", cm.name, imp.type_name)
+                                jet_foundation::Names::member_name(&cm.name, &imp.type_name)
                             };
                             for method in &imp.methods {
                                 let mut lowered = if let Some(trait_name) = &imp.trait_name {
@@ -1257,10 +1320,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     if function.type_params.is_empty() && tir_covers(function, &imported_cx) =>
                 {
                     imported_cx.jit_local_call_prefix =
-                        Some(format!("user_{}::", imported.alias));
+                        Some(format!("{}::", mangle(&imported.alias)));
                     let mut lowered = lower_func(function, &imported_cx);
                     lowered.name =
-                        format!("user_{}::{}", imported.alias, mangle(&function.name));
+                        format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
                     funcs.push(lowered);
                 }
                 Item::CodeModule(code_module) => {
@@ -1277,10 +1340,15 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             continue;
                         }
                         imported_cx.jit_local_call_prefix =
-                            Some(format!("user_{}::", code_module.name));
-                        let mut lowered = lower_func(function, &imported_cx);
-                        lowered.name =
-                            format!("user_{}::{}", code_module.name, mangle(&function.name));
+                            Some(format!("{}::", mangle(&code_module.name)));
+                        // Keep inline body-local import lookup aligned with the
+                        // emitted `code_module__function` name. The final TIR
+                        // symbol remains the imported module's Rust-qualified ABI.
+                        let mut mangled_function = function.clone();
+                        mangled_function.name =
+                            jet_foundation::Names::member_name(&code_module.name, &function.name);
+                        let mut lowered = lower_func(&mangled_function, &imported_cx);                        lowered.name =
+                            format!("{}::{}", mangle(&code_module.name), mangle(&function.name));
                         funcs.push(lowered);
                     }
                 }
@@ -1327,7 +1395,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut enum_variant_payload_types = std::collections::HashMap::new();
     enum_variants.insert(
         crate::Syntax::TYPE_ORDERING.to_string(),
-        ["user_Less", "user_Equal", "user_Greater"]
+        ["__jet_Less", "__jet_Equal", "__jet_Greater"]
             .into_iter()
             .map(str::to_string)
             .collect(),
@@ -1351,7 +1419,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     s.name.clone(),
                     s.fields
                         .iter()
-                        .map(|f| format!("user_{}", f.name))
+                        .map(|f| mangle(&f.name))
                         .collect(),
                 );
                 struct_field_types.insert(
@@ -1412,19 +1480,20 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             }
             Item::CodeModule(cm) => {
                 if let Some(body) = &cm.body {
+                    let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
                     for inner in body {
                         match inner {
                             Item::Struct(s) if s.type_params.is_empty() => {
-                                let name = if s.name.starts_with(&format!("{}__", cm.name)) {
+                                let name = if s.name.starts_with(&member_prefix) {
                                     s.name.clone()
                                 } else {
-                                    format!("{}__{}", cm.name, s.name)
+                                    jet_foundation::Names::member_name(&cm.name, &s.name)
                                 };
                                 struct_fields.insert(
                                     name.clone(),
                                     s.fields
                                         .iter()
-                                        .map(|f| format!("user_{}", f.name))
+                                        .map(|f| mangle(&f.name))
                                         .collect(),
                                 );
                                 struct_field_types.insert(
@@ -1433,10 +1502,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 );
                             }
                             Item::Enum(e) if e.type_params.is_empty() => {
-                                let name = if e.name.starts_with(&format!("{}__", cm.name)) {
+                                let name = if e.name.starts_with(&member_prefix) {
                                     e.name.clone()
                                 } else {
-                                    format!("{}__{}", cm.name, e.name)
+                                    jet_foundation::Names::member_name(&cm.name, &e.name)
                                 };
                                 register_enum_variants(
                                     &name,
@@ -1448,7 +1517,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             Item::Const(c) => {
                                 if let Some(value) = &c.ct {
                                     constants.insert(
-                                        format!("{}__{}", cm.name, c.name),
+                                        jet_foundation::Names::member_name(&cm.name, &c.name),
                                         value.clone(),
                                     );
                                 }
@@ -1460,7 +1529,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     },
                                 };
                                 if let Some(value) = value {
-                                    int_constants.insert(format!("{}__{}", cm.name, c.name), value);
+                                    int_constants.insert(
+                                        jet_foundation::Names::member_name(&cm.name, &c.name),
+                                        value,
+                                    );
                                 }
                             }
                             _ => {}
@@ -1488,12 +1560,22 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             name.clone(),
                             s.fields
                                 .iter()
-                                .map(|field| format!("user_{}", field.name))
+                                .map(|field| mangle(&field.name))
                                 .collect(),
                         );
                         struct_field_types.insert(
                             name,
-                            s.fields.iter().map(|field| field.ty.clone()).collect(),
+                            s.fields
+                                .iter()
+                                .map(|field| {
+                                    crate::Codegen::TIR::qualify_imported_type(
+                                        bundle,
+                                        module_idx,
+                                        &owner,
+                                        &field.ty,
+                                    )
+                                })
+                                .collect(),
                         );
                     }
                     for field in &s.fields {
@@ -1505,12 +1587,17 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     }
                 }
                 Item::Enum(e) if e.type_params.is_empty() => {
-                    register_enum_variants(
-                        &e.name,
-                        &e.variants,
-                        &mut enum_variants,
-                        &mut enum_variant_payload_types,
-                    );
+                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                        register_imported_enum_variants(
+                            bundle,
+                            module_idx,
+                            &owner,
+                            &e.name,
+                            &e.variants,
+                            &mut enum_variants,
+                            &mut enum_variant_payload_types,
+                        );
+                    }
                 }
                 Item::CodeModule(code_module) => {
                     let Some(body) = &code_module.body else {
@@ -1523,7 +1610,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     s.name.clone(),
                                     s.fields
                                         .iter()
-                                        .map(|field| format!("user_{}", field.name))
+                                        .map(|field| mangle(&field.name))
                                         .collect(),
                                 );
                                 struct_field_types.insert(
@@ -1565,7 +1652,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             tuple_ty.name(),
             fields
                 .iter()
-                .map(|(name, _)| format!("user_{}", name))
+                .map(|(name, _)| mangle(name))
                 .collect(),
         );
         struct_field_types.insert(
@@ -1856,18 +1943,18 @@ pub enum SerdeCodec {
 pub enum TFuncKind {
     /// A module-level free function — `pub fn name(params) { … }`.
     TopLevel,
-    /// An inherent method inside `impl user_<T> { … }`. `self_conv` is the receiver
+    /// An inherent method inside `impl __jet_<T> { … }`. `self_conv` is the receiver
     /// convention for an instance method (`Read`→`&self`, `Mutate`→`&mut self`,
     /// `Move`→`self`), or `None` for a STATIC (associated) method (no `self`
-    /// parameter). The method name is mangled (`user_<name>`) and emitted with `pub`.
+    /// parameter). The method name is mangled (`__jet_<name>`) and emitted with `pub`.
     Method {
         self_conv: Option<AccessConvention>,
         owner_type: Type,
     },
-    /// c109 Phase 12: a trait-impl method inside `impl Trait for user_<T> { … }` (the
+    /// c109 Phase 12: a trait-impl method inside `impl Trait for __jet_<T> { … }` (the
     /// caller `emit_trait_impl`/`emit_external_trait_impl` opened the block). Distinct
     /// from an inherent `Method`: the method name is BARE (the trait owns it — no
-    /// `user_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
+    /// `__jet_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
     /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`) — D-MUTSELF1: a `mut self`
     /// trait method gets `&mut self` and may mutate the receiver in place. `is_unsafe`
     /// reproduces the `unsafe fn` prefix for an `#Unsafe fn` trait method (S58/D-LL1 —
@@ -1877,7 +1964,7 @@ pub enum TFuncKind {
         self_conv: AccessConvention,
         /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
-        /// with Jet-facing signatures, but the Rust `user_Encode`/`user_Decode`
+        /// with Jet-facing signatures, but the Rust `__jet_Encode`/`__jet_Decode`
         /// traits declare `jet_encode(&self) -> DataTree` /
         /// `jet_decode(tree: &DataTree) -> Result<Self, [FieldError]>`. This bridges
         /// the name + signature internally (I2: a sema-accepted hand impl must
@@ -1887,7 +1974,7 @@ pub enum TFuncKind {
     /// c109 Phase 15: a DELEGATION trait method (`using field`) — `emit_delegation_method`
     /// (Source/Codegen/Items.rs). The whole method is structural: a forwarding call
     /// `(self).<field>.<method>(<args>)` to the delegated field, with the BARE trait
-    /// method name (no `user_` mangle). There is NO body to lower — the forward string is
+    /// method name (no `__jet_` mangle). There is NO body to lower — the forward string is
     /// resolved at lowering. The signature reproduces `emit_delegation_method`'s exact
     /// shape (a quirky two-space `  {` before the brace, `&self` receiver, no `pub`).
     /// `has_return` decides whether the forward line ends in `;` (unit) or not (returns).
@@ -1907,14 +1994,14 @@ pub enum TFuncKind {
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
 pub enum TForInMethod {
-    /// `loop c; s.chars()` — char iteration: `for _jet_c in ({recv}).chars()`,
-    /// binding `let <var> = _jet_c;`.
+    /// `loop c; s.chars()` — char iteration: `for __jet_c in ({recv}).chars()`,
+    /// binding `let <var> = __jet_c;`.
     Chars,
     /// `loop line; reader.lines()` on a `FileReader` — streaming `BufRead::lines`
     /// over the reader's `inner`, with a mid-stream-error panic (line `0`, `cx.file`).
     LinesFile,
     /// `loop line; io.stdin().lines()` / a `StdinHandle` — the same streaming read,
-    /// but the receiver is materialised into a `_jet_stdin_h` local inside an extra
+    /// but the receiver is materialised into a `__jet_stdin_h` local inside an extra
     /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
     /// extra closing brace.
     LinesStdin,
@@ -2067,12 +2154,12 @@ pub enum THostCall {
         inner: Box<TExpr>,
         kind: TOptionProbe,
     },
-    /// D-PARSESTR1: str-match scan against `_jet_switch_subject`; emit builds the IIFE.
+    /// D-PARSESTR1: str-match scan against `__jet_switch_subject`; emit builds the IIFE.
     StrMatchScan {
         parts: Vec<crate::AST::StrMatchPart>,
         probe: TMatchProbe,
     },
-    /// D-BINPAT1: binary-pattern scan against `_jet_switch_subject`.
+    /// D-BINPAT1: binary-pattern scan against `__jet_switch_subject`.
     BinMatchScan {
         parts: Vec<crate::AST::BinMatchPart>,
         probe: TMatchProbe,
@@ -2082,7 +2169,7 @@ pub enum THostCall {
         base: Box<TExpr>,
         index: usize,
     },
-    /// Struct-pattern subject field: `((*_jet_switch_subject).{field})`
+    /// Struct-pattern subject field: `((*__jet_switch_subject).{field})`
     SwitchSubjectField {
         field: String,
     },
@@ -2092,7 +2179,7 @@ pub enum THostCall {
     YieldSend {
         value: Box<TExpr>,
     },
-    /// SQL/HTML/Sh typed-text constructor from literals + hole exprs.
+    /// SQL/HTML/Sh and URL/Path/DateTime typed constructors from literals + hole exprs.
     TypedTextInterp {
         kind: TTypedTextInterpKind,
         literals: Vec<String>,
@@ -2186,6 +2273,9 @@ pub enum TTypedTextInterpKind {
     SQL,
     HTML,
     Sh,
+    URL,
+    Path,
+    DateTime,
 }
 
 /// Let binding type annotation. Emit spells the `: …` clause (I3: no Rust text here).
@@ -2202,6 +2292,9 @@ pub enum TLetTy {
     },
     /// Pattern-binding tuple annotation spelled `(T0, T1, …)`.
     Tuple(Vec<Type>),
+    /// A function local whose value crosses the native interrupt boundary.
+    /// Emit uses Arc-backed `Send + Sync` storage instead of ordinary `Rc`.
+    SendFn(Type),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2397,10 +2490,11 @@ pub enum TStmt {
     Return(Option<TExpr>),
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
-    /// D-TASKSCOPE1=A: a lexical structured-concurrency scope. Engines create
+    /// D-CONC-SPAWN1=D: a lexical structured-concurrency scope. Engines create
     /// one group, run `body`, and close it on every exit path.
     TaskGroup {
         group: TLocal,
+        limit: Option<TExpr>,
         body: Vec<TStmt>,
     },
     /// D-SHAPE-RESOURCE2=A: one sema-checked `defer close(^resource)` action.
@@ -2492,12 +2586,12 @@ pub enum TStmt {
     /// c109 Phase 4: a `when`/match whose arms are all arm-head *range* patterns
     /// (`0..59 -> …`) over a scalar subject, plus a required `else`. The AST path
     /// (`emit_mixed_switch`) lowers this to an `if/else if … else` chain wrapped in
-    /// a block that binds `_jet_switch_subject` to a borrow of the subject (the
+    /// a block that binds `__jet_switch_subject` to a borrow of the subject (the
     /// binding is unused in this form but emitted for parity). Each arm's `(lo, hi)`
     /// becomes `(subj >= lo && subj <= hi)`, reading the subject's resolved place.
     RangeSwitch {
         /// The matched subject expression. Emit borrows it for the
-        /// `_jet_switch_subject` binding and re-emits it in each range test.
+        /// `__jet_switch_subject` binding and re-emits it in each range test.
         subject: TExpr,
         arms: Vec<(i64, i64, Vec<TStmt>)>,
         else_body: Vec<TStmt>,
@@ -2587,7 +2681,7 @@ pub enum TStmt {
     /// arms are NOT all-variant (that is shape A, a Rust `match`), NOT all-range (shape
     /// B, `RangeSwitch`), and NOT all-fallible (shape C). Each arm head is a plain
     /// comparison/Bool expression. The AST path wraps the chain in a block that binds
-    /// `_jet_switch_subject = &(subject)` (emitted for parity even when unused), then an
+    /// `__jet_switch_subject = &(subject)` (emitted for parity even when unused), then an
     /// `if/else if …` chain over each arm's condition, with the `else`/fallthrough form
     /// reproduced exactly. Each arm's condition is resolved to a Rust string at lowering
     /// (emit makes no decision). `else_body` is the optional `else` arm.
@@ -2804,6 +2898,18 @@ pub enum ListSpreadPart {
 pub struct TExpr {
     pub ty: Type,
     pub kind: TExprKind,
+}
+
+impl TExpr {
+    /// The binding-level provenance carried by a local read or a value copy.
+    pub fn binding_origin(&self) -> Option<&TBindingOrigin> {
+        match &self.kind {
+            TExprKind::Local(local) => local.origin.as_ref(),
+            TExprKind::Clone(inner) => inner.binding_origin(),
+            TExprKind::Borrow { place, .. } => place.binding_origin(),
+            _ => None,
+        }
+    }
 }
 
 pub enum TExprKind {
@@ -3230,7 +3336,7 @@ pub enum TExprKind {
     /// covered struct/enum. All dispatch facts are resolved at lowering (totality):
     /// `recv` is the lowered receiver (emitted as the AST path emits it — autoref
     /// handles `&self`/`&mut self`/`self`); `method_rust` is the already-resolved
-    /// Rust method name (mangled `user_<m>`, or the bare name for a trait-impl
+    /// Rust method name (mangled `__jet_<m>`, or the bare name for a trait-impl
     /// method, decided here from `cx.trait_methods`); each arg carries its
     /// borrow/clone decisions, mirroring `emit_call_args`.
     MethodCall {
@@ -3252,7 +3358,7 @@ pub enum TExprKind {
     /// c109 Phase 27: a CALL THROUGH a fn-typed struct field — `w.step(4)` where `step`
     /// is a `fn(...)` FIELD (not a user method). Emits `(({recv}).{field_rust})({args})`,
     /// byte-for-byte the AST `emit_method_call` fn-field branch (Expression.rs ~L1573).
-    /// `field_rust` is the mangled `user_<field>`; args emit PLAINLY (the AST passes
+    /// `field_rust` is the mangled `__jet_<field>`; args emit PLAINLY (the AST passes
     /// `None` to `emit_call_args` — no param convention, only each arg's own clone flags).
     FnFieldCall {
         recv: Box<TExpr>,
@@ -3261,8 +3367,8 @@ pub enum TExprKind {
         args: Vec<TCallArg>,
     },
     /// c109 Phase 7: a STATIC (associated) method call `Type.make(args)`. Resolved
-    /// at lowering to `user_<Type>::user_<method>(args)` — `type_prefix` is the
-    /// already-resolved Rust type head (`user_<Type>`), `method_rust` the mangled
+    /// at lowering to `__jet_<Type>::__jet_<method>(args)` — `type_prefix` is the
+    /// already-resolved Rust type head (`__jet_<Type>`), `method_rust` the mangled
     /// method name. Mirrors the AST type-name dispatch (Expression.rs ~L1644).
     StaticCall {
         owner: TStaticOwner,
@@ -3385,7 +3491,7 @@ pub enum TExprKind {
     /// c109 Phase 11: a lambda/closure literal (`Expr::Lambda`). Every capture/
     /// escape/Fn-vs-FnMut decision is the TOTAL sema fact (`Lambda.meta`), resolved
     /// at lowering — emit reads them, never recomputes capture analysis (I3). The
-    /// `prep` holds the per-`cloned_capture` `let _jet_cap_<n> = (place).clone();`
+    /// `prep` holds the per-`cloned_capture` `let __jet_cap_<n> = (place).clone();`
     /// prelude (resolved from the *outer* env at lowering, since the cap's source
     /// place is an outer local); `params` is the already-rendered `name[: ty]` list;
     /// `body` is the lowered closure body; `is_move`/`boxed` reproduce the AST path's
@@ -3556,10 +3662,10 @@ pub enum TExprKind {
 pub enum TModuleCallForm {
     /// `import_mods` qualified call (`mod.fn()`) and `reexport_calls` (`pub use`) —
     /// both emit `{root}{rust_mod}::{rust_fn}(args)`. `rust_mod` is the resolved Rust
-    /// module name (`user_<stem>`); `rust_fn` is the mangled function name.
+    /// module name (`__jet_<stem>`); `rust_fn` is the mangled function name.
     Qualified { rust_mod: String, rust_fn: String },
     /// `code_modules` qualified call (`alias.method()`) and unqualified inline import —
-    /// both emit `{root}user_{mangled}(args)` where `mangled` is `alias__method`.
+    /// both emit `{root}__jet_{mangled}(args)` where `mangled` is `alias__method`.
     InlineMangled { mangled: String },
 }
 
@@ -3587,14 +3693,11 @@ pub enum TCoreClosureKind {
         /// so it launches through the group's scoped path (loan closed at join).
         scoped: bool,
     },
-    /// D-VERDICT-1323-1: `tasks.spawn_group(n, f)` → n tasks from one callable.
-    SpawnGroup {
-        count: Box<TExpr>,
-        site: usize,
-        spawn_closure: String,
-    },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
+    /// `core.os.on_interrupt(<callback>)` crosses the shared Send-safe runtime
+    /// boundary. Engines only marshal this lowered callback to their adapter.
+    OnInterrupt { callback: Box<TExpr> },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.
     Guard {
         closure: String,
@@ -3663,8 +3766,9 @@ pub enum TNumericOp {
     /// `width` is the receiver's bit width (baked at lowering — TirBridge may
     /// evaluate before locals carry `IntN` types).
     BitCount { method: String, width: u32 },
-    /// `origin` on a Float receiver → resolved binding note or `"untracked"`.
-    Origin(Option<String>),
+    /// `origin` on a Float receiver. TIR resolves the final user-facing note
+    /// once; every engine consumes this payload without receiver policy.
+    Origin { origin: String },
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// D-NUMWIDEN-CROSS1=E: an implicit integer-to-float crossing whose source
@@ -3796,7 +3900,7 @@ pub enum TClosureOp {
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
-/// `Lambda.meta`. `prep` is the rendered clone-capture prelude (`let _jet_cap_<n> =
+/// `Lambda.meta`. `prep` is the rendered clone-capture prelude (`let __jet_cap_<n> =
 /// (place).clone();\n    ` per cloned capture); `params` the rendered `name[: ty]`
 /// param list; `body` the rendered closure body string (an expression body, or a
 /// `{ … }` block) — rendered at lowering from the lowered body so emit stays a pure
@@ -4552,6 +4656,10 @@ pub enum THandleOp {
     /// built-in method `join` arm — shared with list no-arg join, but here it's the
     /// JetTask method. Returns the task's value `T`.
     TaskJoin,
+    /// Compiler-generated task-group scope join. It consumes the task and
+    /// unwraps `TaskFailure` instead of exposing the explicit `.join()` Result
+    /// rail to a discarded cleanup expression.
+    TaskScopeJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.
     TaskDetach,
@@ -4770,6 +4878,8 @@ pub enum THandleOp {
     /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call_int(name, args)` →
     /// `Result<Int, String>`, the `[Int]` sibling of `PluginCall`.
     PluginCallInt,
+    /// D-LIB-CALLGRANT1=A: `mod.on_tick(dt)` → the checked native entry point.
+    ModOnTick,
     /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor →
     /// `{root}jet_reader_over(&(recv))` → `JetReader`. `recv` is the `[U8]`
     /// argument (same "arg becomes the recv slot" shape as `PathFrom`).

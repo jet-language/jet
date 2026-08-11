@@ -26,6 +26,11 @@ pub struct CompileOutput {
     /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): plugin guest artifacts when
     /// `--target=plugin` (the `.wit` world + wasm32 guest Rust source).
     pub plugin: Option<crate::Codegen::PluginArtifacts>,
+    /// D-LIB-EXPORT1=C: native Library Rust wrappers and foreign projections.
+    pub library: Option<crate::Codegen::LibraryArtifacts>,
+    /// D-LIB-NAME1=A / D-LIB-DYNTRUST1=A: the checked output configuration
+    /// carried beside the generated projections for the native build adapter.
+    pub library_config: Option<crate::LibraryExport::LibraryConfig>,
     /// D-RINGLAYER1=A M2: minimum runtime profile inferred from imports + helpers.
     pub inferred_layer: crate::Syntax::RuntimeLayer,
     /// D-RINGLAYER1=A: optional `runtime:` ceiling from `pkg.jet`.

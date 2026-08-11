@@ -3,6 +3,8 @@
 //!
 //! Run: `cargo test --test tir_exhaustive_match`
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

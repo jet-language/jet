@@ -51,11 +51,12 @@ mod shared_protocol {
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
+use crate::Codegen::mangle;
 use super::Cx;
 use crate::Codegen::TIR::{
     self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
@@ -77,6 +78,66 @@ pub fn set_native_call_hook(hook: Option<NativeCallHook>) {
 
 pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
+}
+
+static INTERPRETER_INTERRUPT_PENDING: AtomicUsize = AtomicUsize::new(0);
+static INTERPRETER_INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
+
+fn note_interpreter_interrupt() {
+    INTERPRETER_INTERRUPT_PENDING.fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(unix)]
+extern "C" fn interpreter_unix_mark(_: i32) {
+    note_interpreter_interrupt();
+}
+
+fn install_interpreter_interrupt_handler() -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+        }
+        const SIGINT: i32 = 2;
+        let previous = unsafe { signal(SIGINT, interpreter_unix_mark) };
+        return if previous == usize::MAX {
+            Err("could not install the SIGINT handler".to_string())
+        } else {
+            Ok(())
+        };
+    }
+    #[cfg(windows)]
+    {
+        unsafe extern "system" fn mark(kind: u32) -> i32 {
+            if kind == 0 {
+                note_interpreter_interrupt();
+                1
+            } else {
+                0
+            }
+        }
+        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
+        extern "system" {
+            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
+        }
+        unsafe { SetConsoleCtrlHandler(None, 0) };
+        return if unsafe { SetConsoleCtrlHandler(Some(mark), 1) } == 0 {
+            Err("could not install the Windows console Ctrl-C handler".to_string())
+        } else {
+            Ok(())
+        };
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err("interrupt handling is unavailable on this target".to_string())
+    }
+}
+
+fn ensure_interpreter_interrupt_handler() -> Result<(), String> {
+    match INTERPRETER_INTERRUPT_HANDLER.get_or_init(install_interpreter_interrupt_handler) {
+        Ok(()) => Ok(()),
+        Err(message) => Err(message.clone()),
+    }
 }
 
 pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
@@ -518,7 +579,7 @@ fn project_list_place<'a>(
                 .iter()
                 .find(|(name, _)| {
                     name == field
-                        || name.strip_prefix("user_") == Some(field.as_str())
+                        || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
                         || name == &crate::Codegen::mangle(field)
                 })
                 .map(|(_, value)| value)
@@ -551,7 +612,7 @@ fn replace_list_place(
             let mangled = crate::Codegen::mangle(field);
             let slot = fields.iter_mut().find(|(name, _)| {
                 name == field
-                    || name.strip_prefix("user_") == Some(field.as_str())
+                    || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
                     || name == &mangled
             });
             let Some((_, value)) = slot else {
@@ -876,6 +937,7 @@ struct EvalChannel {
 
 struct EvalRuntime<'a> {
     callables: Vec<EvalCallable<'a>>,
+    interrupt_handlers: Vec<usize>,
     streams: Vec<EvalStream<'a>>,
     shared_values: Vec<Arc<EvalSharedState>>,
     shared_guards: Vec<Arc<shared_protocol::JetSharedPermit>>,
@@ -883,6 +945,7 @@ struct EvalRuntime<'a> {
     clocks: Vec<i64>,
     channels: Vec<EvalChannel>,
     task_groups: Vec<Vec<usize>>,
+    task_group_limits: Vec<Option<i64>>,
     tasks: Vec<Option<EvalTask>>,
     web_apps: Vec<EvalWebApp>,
     completion_order: AtomicU64,
@@ -1035,6 +1098,7 @@ impl EvalRuntime<'_> {
     fn new() -> Self {
         Self {
             callables: Vec::new(),
+            interrupt_handlers: Vec::new(),
             streams: Vec::new(),
             shared_values: Vec::new(),
             shared_guards: Vec::new(),
@@ -1042,6 +1106,7 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             channels: Vec::new(),
             task_groups: Vec::new(),
+            task_group_limits: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
@@ -1077,13 +1142,9 @@ impl<'a> EvalCtx<'a> {
                     Some(self.span()),
                 ))
             }
-            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => Err(Diagnostic::error(
-                "TASK_CANCELLED",
-                "task cancelled".to_string(),
-                "the owning taskgroup stopped this task".to_string(),
-                String::new(),
-                Some(self.span()),
-            )),
+            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => {
+                Err(Diagnostic::task_cancelled(Some(self.span())))
+            }
         }
     }
 
@@ -1380,14 +1441,27 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
-    fn new_taskgroup(&mut self) -> CtValue {
+    fn new_taskgroup(
+        &mut self,
+        limit: Option<&'a TExpr>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let limit = match limit {
+            Some(limit) => match self.eval_expr(limit, scope)? {
+                CtValue::Int(value) if value > 0 => Some(value),
+                CtValue::Int(_) => return Err(unsupported("non-positive task-group limit", self.span())),
+                _ => return Err(unsupported("task-group limit", self.span())),
+            },
+            None => None,
+        };
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.task_groups.len();
         runtime.task_groups.push(Vec::new());
-        CtValue::Struct {
+        runtime.task_group_limits.push(limit);
+        Ok(CtValue::Struct {
             type_name: "__JetTirTaskGroup".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
-        }
+        })
     }
 
     fn select_builder_value(
@@ -1693,15 +1767,41 @@ impl<'a> EvalCtx<'a> {
         if tasks.is_empty() {
             return Err(unsupported("empty taskgroup combinator", self.span()));
         }
-        select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()).map(
-            |mut values| {
+        let span = self.span();
+        select_eval_tasks(tasks, mode, span, || self.task_wait_cancel_check())
+            .map(|mut values| {
                 if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
                     CtValue::List(values)
                 } else {
                     values.pop().expect("race/any result missing")
                 }
-            },
-        )
+            })
+            .map_err(|error| self.task_select_failure(error, span))
+    }
+
+    /// D-CONC-FAIL1=A: `task.all`/`task.race`/`task.any` never expose the
+    /// per-branch failure as a `Result` to Jet source — mirrors AOT's
+    /// `jet_task_outcome_unwrap` (Prelude/CoreLib/JetStd/MathTaskMem.rs), which
+    /// panics/soft-exits a second time on top of whatever the failing branch's
+    /// own `panic`/deadline/cancel already rendered, matching the golden fixed
+    /// trailer text (`panic: a task panicked`, `examples/features/expected/
+    /// concurrency/all_failfast.err.out`). A branch failure already wrote its
+    /// own message and `sink.exit_code` via `Diagnostic::soft_exit`; this only
+    /// adds the combinator's own trailing line for that already-caught case —
+    /// an unrelated evaluator error (no sink write yet) passes through as-is.
+    fn task_select_failure(&mut self, error: Diagnostic, span: Span) -> Diagnostic {
+        let Some(sink) = self.sink.as_ref() else {
+            return error;
+        };
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
+        if sink.exit_code.is_none() {
+            return error;
+        }
+        if !sink.stderr.ends_with('\n') {
+            sink.stderr.push('\n');
+        }
+        sink.stderr.push_str("panic: a task panicked\n");
+        Diagnostic::soft_exit("70".to_string(), "task combinator failed".to_string(), Some(span))
     }
 
     fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
@@ -1792,11 +1892,9 @@ impl<'a> EvalCtx<'a> {
                     keyword, message, contract.file, contract.line
                 ));
                 sink.exit_code = Some(70);
-                return Err(Diagnostic::error(
-                    "SOFT_EXIT",
+                return Err(Diagnostic::soft_exit(
                     "70".to_string(),
                     "runtime contract failed".to_string(),
-                    String::new(),
                     Some(contract.span),
                 ));
             }
@@ -1864,7 +1962,7 @@ impl<'a> EvalCtx<'a> {
         let guard_mark = self.scope_guards.len();
         self.local_cells.enter_frame();
         for (i, (name, _, _)) in func.params.iter().enumerate() {
-            let jet = name.strip_prefix("user_").unwrap_or(name.as_str());
+            let jet = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name.as_str());
             let value = args.get(i).cloned().unwrap_or(CtValue::Unit);
             scope.insert(jet.to_string(), value.clone());
             if jet != name {
@@ -1924,6 +2022,13 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    fn callable_value(index: usize) -> CtValue {
+        CtValue::Struct {
+            type_name: "__JetTirCallable".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+        }
+    }
+
     fn callable_index(value: &CtValue) -> Option<usize> {
         let CtValue::Struct { type_name, fields } = value else {
             return None;
@@ -1935,6 +2040,69 @@ impl<'a> EvalCtx<'a> {
             ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
             _ => None,
         })
+    }
+
+    pub(super) fn register_interrupt_callback(
+        &mut self,
+        callback: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        ensure_interpreter_interrupt_handler().map_err(|message| {
+            unsupported(&format!("core.os.on_interrupt: {message}"), self.span())
+        })?;
+        let value = self.eval_expr(callback, scope)?;
+        let index = Self::callable_index(&value)
+            .ok_or_else(|| unsupported("core.os.on_interrupt callback", self.span()))?;
+        self.runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .interrupt_handlers
+            .push(index);
+        Ok(CtValue::Unit)
+    }
+
+    pub(super) fn dispatch_pending_interrupts(
+        &mut self,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let count = INTERPRETER_INTERRUPT_PENDING.swap(0, Ordering::Acquire);
+        if count == 0 {
+            return Ok(());
+        }
+        let handlers = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .interrupt_handlers
+            .clone();
+        let mut deferred_panic = None;
+        for _ in 0..count {
+            for index in &handlers {
+                let value = Self::callable_value(*index);
+                match self.call_callable(&value, Vec::new()) {
+                    Ok(_) => {}
+                    Err(error) if error.code == "SOFT_EXIT" => {
+                        let panic_stop = self.sink.as_ref().is_some_and(|sink| {
+                            sink.lock()
+                                .expect("evaluator sink poisoned")
+                                .exit_code
+                                == Some(70)
+                        });
+                        if panic_stop {
+                            deferred_panic.get_or_insert(error);
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        if let Some(error) = deferred_panic {
+            return Err(error);
+        }
+        let _ = scope;
+        Ok(())
     }
 
     fn store_stream(&mut self, func: &'a TFunc, args: Vec<CtValue>) -> CtValue {
@@ -2361,13 +2529,40 @@ fn collect_struct_field_types(
             }
         }
     }
+    insert_core_struct_field_types(&mut out);
     out
+}
+
+fn insert_core_struct_field_types(
+    fields: &mut HashMap<String, Vec<(String, crate::AST::Type)>>,
+) {
+    fields.insert(
+        crate::Syntax::TYPE_IO_CONTEXT.to_string(),
+        vec![
+            (
+                "operation".to_string(),
+                Type::Named(crate::Syntax::TYPE_IO_OPERATION.to_string()),
+            ),
+            (
+                "resource".to_string(),
+                Type::Option(Box::new(Type::String)),
+            ),
+            (
+                "os_code".to_string(),
+                Type::Option(Box::new(Type::Int)),
+            ),
+            (
+                "cause".to_string(),
+                Type::Option(Box::new(Type::String)),
+            ),
+        ],
+    );
 }
 
 fn normalize_struct_field_types(
     structs: &HashMap<String, &crate::AST::StructDef>,
 ) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
-    structs
+    let mut out = structs
         .iter()
         .map(|(name, definition)| {
             (
@@ -2379,13 +2574,15 @@ fn normalize_struct_field_types(
                     .collect(),
             )
         })
-        .collect()
+        .collect();
+    insert_core_struct_field_types(&mut out);
+    out
 }
 
 fn program_struct_field_types(
     program: &JitProgram,
 ) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
-    program
+    let mut out = program
         .struct_field_types
         .iter()
         .filter_map(|(type_name, types)| {
@@ -2397,14 +2594,16 @@ fn program_struct_field_types(
                     .zip(types)
                     .map(|(name, ty)| {
                         (
-                            name.strip_prefix("user_").unwrap_or(name).to_string(),
+                            name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name).to_string(),
                             ty.clone(),
                         )
                     })
                     .collect(),
             ))
         })
-        .collect()
+        .collect();
+    insert_core_struct_field_types(&mut out);
+    out
 }
 
 pub fn run_program(
@@ -2523,6 +2722,7 @@ fn run_program_with_structs_on_stack(
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
+    insert_core_struct_field_types(&mut struct_field_types);
     for (name, fields) in program_struct_field_types(program) {
         struct_field_types.entry(name).or_insert(fields);
     }
@@ -2714,7 +2914,7 @@ fn run_bundle_at_stage(
         // Dev-tier only: surface reset / migration notes on stderr.
         eprintln!("{msg}");
     }
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Const(c) = item {
                 let value = if c.is_persist {
@@ -2733,16 +2933,28 @@ fn run_bundle_at_stage(
                     globals.entry(c.name.clone()).or_insert_with(|| v.clone());
                     // ConstRef sometimes carries the Rust-mangled spelling.
                     globals
-                        .entry(format!("user_{}", c.name))
+                        .entry(mangle(&c.name))
                         .or_insert(v);
                 }
             }
         }
         for imp in &module.imports {
-            if let Some(core_module) = imp.core_module_path() {
-                core_imports
-                    .entry(imp.import_alias())
-                    .or_insert(core_module);
+            if let crate::AST::ImportKind::Unqualified { items, .. } = &imp.kind {
+                for (original, alias) in items {
+                    let local = crate::AST::import_item_alias(original, alias.as_deref());
+                    if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, local) {
+                        if binding.target == "core" || binding.target.starts_with("core.") {
+                            core_imports
+                                .entry(local.to_string())
+                                .or_insert_with(|| binding.target.clone());
+                        }
+                    }
+                }
+            } else if let Some(core_module) = imp.core_module_path() {
+                let alias = imp.import_alias();
+                if bundle.name_ledger.effective_alias(module_idx, &alias).is_some() {
+                    core_imports.entry(alias).or_insert(core_module);
+                }
             }
         }
     }

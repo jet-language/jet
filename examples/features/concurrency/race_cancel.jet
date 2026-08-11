@@ -10,10 +10,8 @@ fn slow_one() => Int {
 fn fast_seven() => Int = 7
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => slow_one()
-        fast :: g.task => fast_seven()
-        winner :: g.race([slow, fast])
+    task.group g {
+        winner :: task.race { slow_one(), fast_seven() }
         print(winner)
     }
 }

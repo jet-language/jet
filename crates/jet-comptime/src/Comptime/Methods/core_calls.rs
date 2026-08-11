@@ -12,6 +12,15 @@ use super::repl_process::run_repl_process;
 
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
+
+/// The foundation row decides whether a plain Core call may use the pure
+/// comptime evaluator. Unknown rows remain available for the typed/internal
+/// forms that have not entered the plain-call registry yet.
+fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) -> bool {
+    row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None
+        && !row.is_receiver()
+        && row.effect().is_none()
+}
 #[path = "core_calls/regex.rs"]
 mod regex;
 use self::regex::*;
@@ -86,6 +95,12 @@ mod sketch_kernel {
 
 mod time_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+}
+
+/// D-BOUND-HEAD1: typed DateTime heads validate against the same pure Prelude
+/// parser used by the runtime `core.time.parse_rfc3339` call.
+pub(crate) fn validate_datetime_literal(value: &str) -> Result<(), String> {
+    time_kernel::JetDateTime::parse_rfc3339(value).map(|_| ())
 }
 
 pub(super) mod duration_kernel {
@@ -335,7 +350,7 @@ fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
         CtValue::Struct { fields, .. } => Some(
             fields
                 .iter()
-                .map(|(name, _)| name.strip_prefix("user_").unwrap_or(name).to_string())
+                .map(|(name, _)| name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name).to_string())
                 .collect::<Vec<_>>(),
         ),
         _ => None,
@@ -363,7 +378,7 @@ fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
                 .map(|key| {
                     fields
                         .iter()
-                        .find(|(name, _)| name.strip_prefix("user_").unwrap_or(name) == key)
+                        .find(|(name, _)| name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name) == key)
                         .map(|(_, value)| cell(value))
                         .unwrap_or_default()
                 })
@@ -896,8 +911,31 @@ pub fn apply_core_call(
     span: Span,
     repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
-    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
-        return result;
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+        if !row.accepts_arity(args.len()) {
+            return Err(unsupported(
+                &format!(
+                    "{}.{}(): expected {}..{} argument(s), got {}",
+                    module,
+                    method,
+                    row.arity(),
+                    row.signature.max_arity,
+                    args.len()
+                ),
+                span,
+            ));
+        }
+    }
+    // The foundation row owns the effect classification for every plain
+    // symbol call. Only effect-free rows may enter the pure parity evaluator;
+    // this prevents a new effectful row from accidentally gaining a second
+    // comptime implementation.
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method)
+        .filter(|row| core_call_allows_pure_parity(row))
+    {
+        if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
+            return result;
+        }
     }
     if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
     {
@@ -2548,10 +2586,29 @@ pub fn apply_impure_core_call(
     pinned_executable: Option<&std::fs::File>,
     verified_root: Option<&std::fs::File>,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+        if !row.accepts_arity(args.len()) {
+            return Err(unsupported(
+                &format!(
+                    "{}.{}(): expected {}..{} argument(s), got {}",
+                    module,
+                    method,
+                    row.arity(),
+                    row.signature.max_arity,
+                    args.len()
+                ),
+                span,
+            ));
+        }
+    }
     // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
     // must still resolve under ambient impure depth — same as apply_core_call.
-    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
-        return result;
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method)
+        .filter(|row| core_call_allows_pure_parity(row))
+    {
+        if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
+            return result;
+        }
     }
     if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
     {
@@ -2846,11 +2903,9 @@ pub fn apply_impure_core_call(
             // jet dev). Soft-exit via the sink; bare comptime keeps hard exit.
             if let Some(s) = sink {
                 s.exit_code = Some(code as i32);
-                return Err(Diagnostic::error(
-                    "SOFT_EXIT",
+                return Err(Diagnostic::soft_exit(
                     code.to_string(),
                     "process.exit requested".to_string(),
-                    String::new(),
                     Some(span),
                 ));
             }

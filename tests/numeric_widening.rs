@@ -1,3 +1,5 @@
+mod common;
+
 mod tir_support;
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
@@ -244,7 +246,7 @@ fn run() {
 "#,
     );
 
-    assert!(output.rust.contains("fn user_increment"));
+    assert!(output.rust.contains("fn __jet_increment"));
 }
 
 #[test]

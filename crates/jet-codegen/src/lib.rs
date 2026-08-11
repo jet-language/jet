@@ -19,6 +19,8 @@ pub mod scheduler {
     // Emitted programs carry `Prelude/TaskGroup.rs` as `mod jet_std`; in-crate
     // it is `crate::task_group`. Same source either way.
     use crate::task_group as jet_std;
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::{JetOutcome, JetTaskFailure};
     include!("Prelude/Deadline.rs");
     include!("SchedulerHost.rs");
     include!("Prelude/Scheduler.rs");

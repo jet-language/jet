@@ -13,6 +13,7 @@ import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
 import { ConfigError, DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
+import { findDuplicateCandidates } from './card-matching.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
 
@@ -44,11 +45,11 @@ const COMMAND_FLAGS = {
   init: ['name', 'dir'],
   import: ['dir', 'name', 'force'],
   serve: ['port', 'open', 'noWatch'],
-  status: [],
+  status: ['days', 'window'],
   state: [],
   card: ['title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
     'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag',
-    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'evidence', 'handoff', 'expectRev'],
+    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'handoff', 'expectRev', 'force'],
   decision: ['id', 'cardId', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild',
     'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy', 'draft', 'ready', 'outcome',
     'comment', 'quote', 'open', 'expectRev'],
@@ -177,8 +178,15 @@ function cmdInit({ flags }) {
 }
 
 function cmdStatus(store, { flags }) {
-  const s = store.project();
-  if (flags.json) return out(flags, null, { meta: s.meta, counts: s.counts });
+  const raw = store.load();
+  const history = store.loadHistory();
+  const s = db.project(raw, store.config, history);
+  const rawWindow = flags.days ?? flags.window ?? 7;
+  const windowDays = Number(rawWindow);
+  if (typeof rawWindow === 'boolean' || !Number.isInteger(windowDays) || windowDays < 1)
+    throw new TowerError('E_USAGE', '--days/--window must be a positive whole number');
+  const trend = db.openCountTrend(raw, history, windowDays);
+  if (flags.json) return out(flags, null, { meta: s.meta, counts: s.counts, trend });
   const t = Theme(flags);
   const bar = (n) => t.success('█'.repeat(Math.min(12, n))) + t.border('░'.repeat(Math.max(0, 12 - n)));
   const phase = (id, text) => ({ done: t.success, verify: t.warn, deciding: t.error }[id] || t.accent)(text);
@@ -187,6 +195,9 @@ function cmdStatus(store, { flags }) {
     const n = s.counts.byPhase[ph.id];
     if (n) console.log(`  ${phase(ph.id, ph.label.padEnd(9))} ${bar(n)} ${t.dim(String(n))}`);
   }
+  const delta = `${trend.delta > 0 ? '+' : ''}${trend.delta}`;
+  const deltaText = trend.delta > 0 ? t.error(delta) : trend.delta < 0 ? t.success(delta) : t.dim(delta);
+  console.log(`  ${t.accent('OPEN TREND')}        ${trend.openAtStart} → ${trend.openNow}  ${deltaText} ${t.dim(`over ${trend.windowDays}d`)}`);
   console.log(`\n  ${t.error('BLOCKED ON OWNER')}  ${t.warn(String(s.counts.decide))} decisions`);
   console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(verify / build / implement / plan)')}`);
   console.log(`  ${t.dim('open questions')}    ${t.warn(String(s.counts.openQuestions))}   ${t.dim(`sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}`)}\n`);
@@ -250,11 +261,28 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'add': {
       const p = readPayload(flags) || {};
+      const title = flags.title ?? p.title;
+      const body = flags.body ?? p.body;
+      const candidates = !flags.force
+        ? findDuplicateCandidates(store.load().cards, { title, body })
+        : [];
+      if (candidates.length) {
+        const message = [
+          'possible duplicate cards (pass --force to create anyway):',
+          ...candidates.map(c => `  ${c.id ?? '(no id)'}  #${c.num ?? '?'}  [${c.phase}]  ${c.title}`),
+        ].join('\n');
+        if (flags.json) {
+          console.log(JSON.stringify({ error: 'E_DUPLICATE', message, candidates }, null, 2));
+          process.exitCode = 1;
+          return;
+        }
+        throw new TowerError('E_DUPLICATE', message);
+      }
       const tags = flags.addTag || flags.tags
         ? String(flags.addTag || flags.tags).split(',')
         : p.tags;
       const { result } = store.mutate((s, cfg) => db.addCard(s, {
-        title: flags.title ?? p.title, body: flags.body ?? p.body, kind: flags.kind ?? p.kind,
+        title, body, kind: flags.kind ?? p.kind,
         track: flags.track ?? p.track, epoch: flags.epoch ?? p.epoch, milestoneId: flags.milestone ?? p.milestoneId,
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
@@ -290,6 +318,10 @@ function cmdCard(store, { pos, flags }) {
       return out(flags, `updated card #${result.num} → ${db.laneOf(result, state.decisions, state.cards).lane}`, result);
     }
     case 'criteria': {
+      if (flags.reopen !== undefined) {
+        const { result } = store.mutate((s) => db.reopenCriterion(s, ref, flags.reopen, { reason: flags.reason, by }));
+        return out(flags, 'criterion #' + result.n + ' reopened on card #' + result.cardNum, result);
+      }
       if (flags.add !== undefined) {
         const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
@@ -909,8 +941,8 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             board UI + HTTP API; self-restarts
                                             when Tower's own source changes
                                             (--no-watch disables that)
-  tower status [--json] [--color=auto|always|never]
-                                            terminal snapshot
+  tower status [--days N|--window N] [--json] [--color=auto|always|never]
+                                            terminal snapshot + open-card trend
   tower state                               full projected state (JSON)
   tower next [--epoch E] [--track T] [--agent A] [--limit N]
              [--burndown | --ready-across-epochs | --parallel]
@@ -926,7 +958,10 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             board (done-without-evidence,
                                             claimed-idle, missing-attribution,
                                             ballot-gaps, stale-draft, orphan-
-                                            blockers, blocker-unpopulated);
+                                            blockers, blocker-unpopulated,
+                                            duplicate-suspect,
+                                            criteria-evidence-conflict,
+                                            criteria-phase-drift);
                                             --docs also flags a ratified
                                             decision id still listed in
                                             docs/ballots/*.md; exit 1 on any
@@ -951,12 +986,13 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower card     list|show|add|update|claim|release|delete
   tower card list [--lane L] [--phase P] [--epoch E] [--track T] [--kind K]
                   [--tag T] [--untagged] [--parent '#N'] [--milestone M] [--json]
-  tower card add|update … [--add-tag T] [--remove-tag T] [--tags a,b] [--parent '#N']
+  tower card add|update … [--add-tag T] [--remove-tag T] [--tags a,b] [--parent '#N'] [--force]
   tower card update <ref> --needs-acceptance true|false   flag for owner accept ballot on close
   tower card update <ref> --refs "docs/a.md,examples/b.jet"   explicit doc-path pointers
   tower card criteria <ref> --add "text" --by X           add an exit criterion
                             --meet n --evidence "…" --by X    builder: mark met
                             --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
+                            --reopen n --reason "…" --by X     reopen met/verified criterion
                             --list                            show the checklist
   tower card release <ref> --by X [--handoff "…"]         --handoff required if the card is building
   tower decision list|show|add|update|ratify|reopen|delete

@@ -2,6 +2,8 @@
 //!
 //! Run: `UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -117,8 +119,13 @@ fn collect_ui_cases(ui_dir: &Path) -> BTreeMap<String, (PathBuf, Vec<ParsedDiag>
     by_code
 }
 
-fn render_page(code: &str, jet_rel: &str, diag: &ParsedDiag, has_fixed: bool) -> String {
-    let title = format!("{code}: {}", diag.what);
+fn render_page(
+    code: &str,
+    jet_rel: &str,
+    row: &jet_foundation::Registry::DiagnosticRow,
+    has_fixed: bool,
+) -> String {
+    let title = format!("{code}: {}", row.what);
     let fixed = if has_fixed {
         let fixed_rel = jet_rel.replace(".jet", ".fixed.jet");
         format!("\n## Fixed program\n\nSee [`{fixed_rel}`](../../../{fixed_rel}).\n")
@@ -141,9 +148,9 @@ fn render_page(code: &str, jet_rel: &str, diag: &ParsedDiag, has_fixed: bool) ->
          [Back to diagnostics registry](../../spec/diagnostics.md)\n",
         title = title,
         code = code,
-        what = diag.what,
-        why = diag.why,
-        fix = diag.fix,
+        what = row.what,
+        why = row.why,
+        fix = row.fix,
         jet_rel = jet_rel,
         fixed = fixed,
     )
@@ -210,7 +217,10 @@ fn gen_error_pages() {
             .find(|(c, _)| c == code)
             .map(|(_, p)| *p)
             .unwrap_or_else(|| panic!("missing PREFERRED_UI entry for {code}"));
-        let diag = load_preferred_diag(&root, code, jet_rel);
+        let _snapshot_diag = load_preferred_diag(&root, code, jet_rel);
+        let row = jet_foundation::Registry::diagnostic(code)
+            .unwrap_or_else(|| panic!("missing typed diagnostic row for {code}"));
+        let _ = (&_snapshot_diag.what, &_snapshot_diag.why, &_snapshot_diag.fix);
         let jet_path = root.join(jet_rel);
         let fixed_path = jet_path.with_file_name(
             jet_path
@@ -219,7 +229,7 @@ fn gen_error_pages() {
                 .to_string_lossy()
                 .replace(".jet", ".fixed.jet"),
         );
-        let page = render_page(code, jet_rel, &diag, fixed_path.is_file());
+        let page = render_page(code, jet_rel, row, fixed_path.is_file());
         let out_path = out_dir.join(format!("{code}.md"));
         if std::env::var("UPDATE_DOCS").is_ok() {
             fs::create_dir_all(&out_dir).unwrap();

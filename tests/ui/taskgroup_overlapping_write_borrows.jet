@@ -8,17 +8,16 @@ fn run() {
         .{position: 10, velocity: 2},
         .{position: 20, velocity: 3}
     }
-    taskgroup g {
+    task.group g {
         one :: &particles[0]
         two :: &particles[0]
-        a :: g.task => {
+        a :: task {
             one.position += 1
             one.position
         }
-        b :: g.task => {
+        b :: task {
             two.position += 1
             two.position
         }
-        print(g.all([a, b]))
     }
 }

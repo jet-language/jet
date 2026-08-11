@@ -5,6 +5,10 @@
     // routed through `f64`, which would lose precision above 2^53). A `Row` is
     // `Map<String, DBValue>` — the built-in `Map` type already gives `.get`/
     // `.keys`/`.values`, so no separate nominal `Row` type is needed (I8).
+    // Keep the Rust carrier behind one adapter alias so generated callers never
+    // depend on the backing map implementation.
+    pub(super) type JetDBRow = super::JetMap<String, DBValue>;
+
     #[derive(Clone, Debug, PartialEq)]
     pub enum DBValue {
         Null,
@@ -62,7 +66,7 @@
     }
 
     pub fn jet_db_row_value(
-        row: &std::collections::BTreeMap<String, DBValue>,
+        row: &JetDBRow,
         key: &String,
     ) -> Result<DBValue, String> {
         row.get(key)
@@ -71,28 +75,28 @@
     }
 
     pub fn jet_db_row_int(
-        row: &std::collections::BTreeMap<String, DBValue>,
+        row: &JetDBRow,
         key: &String,
     ) -> Result<i64, String> {
         jet_db_row_value(row, key).and_then(|v| v.int())
     }
 
     pub fn jet_db_row_float(
-        row: &std::collections::BTreeMap<String, DBValue>,
+        row: &JetDBRow,
         key: &String,
     ) -> Result<f64, String> {
         jet_db_row_value(row, key).and_then(|v| v.float())
     }
 
     pub fn jet_db_row_text(
-        row: &std::collections::BTreeMap<String, DBValue>,
+        row: &JetDBRow,
         key: &String,
     ) -> Result<String, String> {
         jet_db_row_value(row, key).and_then(|v| v.text())
     }
 
     pub fn jet_db_row_bool(
-        row: &std::collections::BTreeMap<String, DBValue>,
+        row: &JetDBRow,
         key: &String,
     ) -> Result<bool, String> {
         jet_db_row_value(row, key).and_then(|v| v.bool())
@@ -624,7 +628,7 @@
     /// Decode the `"O:" + rows`/`"E:" + message` wire produced by `jet_db_query`.
     pub fn jet_db_decode_query_result(
         wire: &str,
-    ) -> Result<Vec<std::collections::BTreeMap<String, DBValue>>, DBError> {
+    ) -> Result<Vec<JetDBRow>, DBError> {
         if wire.len() > DB_MAX_WIRE_BYTES {
             return Err(DBError {
                 message: "database result exceeds the wire-size limit".to_string(),
@@ -682,7 +686,7 @@
                 });
             }
             pos += col_colon + 1;
-            let mut row = std::collections::BTreeMap::new();
+            let mut row = JetDBRow::new();
             for _ in 0..col_count {
                 let (tag, name) = db_read_tagged(bytes, &mut pos).map_err(|message| DBError {
                     message,
@@ -717,6 +721,12 @@
             });
         }
         Ok(rows)
+    }
+
+    /// Map a query result to the canonical `query_one` outcome. Adapters only
+    /// marshal this outcome; first-row and absent-row meaning lives here.
+    pub fn jet_db_first_row(rows: Vec<JetDBRow>) -> JetOutcome<JetDBRow, JetAbsent> {
+        jet_outcome_of(rows.into_iter().next())
     }
 
     /// Decode the `"O:" + count`/`"E:" + message` wire produced by `jet_db_execute`.
@@ -783,7 +793,7 @@
             sql: &String,
             params: &Vec<DBValue>,
             allow_schema: bool,
-        ) -> Result<Vec<std::collections::BTreeMap<String, DBValue>>, DBError>;
+        ) -> Result<Vec<JetDBRow>, DBError>;
     }
 
     pub fn jet_db_transaction<B: JetDBBackend>(

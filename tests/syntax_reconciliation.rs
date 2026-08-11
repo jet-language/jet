@@ -1,6 +1,8 @@
 //! D-CANON-SOURCE1 / D-RECONCILE-SCOPE1: live examples, reference surface,
 //! and agent memory must not reintroduce retired syntax spellings.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -10,7 +12,9 @@ fn identifier_prefix_contract_is_canonical() {
 
     assert_eq!(classify_identifier("name"), IdentifierClass::Ordinary);
     assert_eq!(classify_identifier("_name"), IdentifierClass::SoftPublic);
+    assert_eq!(classify_identifier("_name_"), IdentifierClass::SoftPublic);
     assert_eq!(classify_identifier("__name"), IdentifierClass::Reserved);
+    assert_eq!(classify_identifier("__name__"), IdentifierClass::Reserved);
     assert_eq!(classify_identifier("__"), IdentifierClass::Reserved);
     assert_eq!(classify_identifier("_"), IdentifierClass::Ordinary);
 }
@@ -40,6 +44,15 @@ fn compiler_generated_identifiers_use_the_reserved_lane() {
     assert!(user_diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
     assert!(generated_diagnostics.is_empty(), "{generated_diagnostics:#?}");
     assert!(jet::Parser::parse(&tokens).is_ok());
+}
+
+#[test]
+fn generated_symbol_ladder_has_one_canonical_prefix() {
+    use jet::Syntax::{generated_name, generated_path, generated_suffix};
+
+    assert_eq!(generated_name("lambda_7"), "__jet_lambda_7");
+    assert_eq!(generated_path("scoring.letter"), "__jet_scoring__letter");
+    assert_eq!(generated_suffix("__jet_lambda_7"), "lambda_7");
 }
 
 const ROOTS: &[&str] = &[

@@ -6,7 +6,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::arg_conv_in_subset;
 use crate::Codegen::TIR::enum_is_covered;
-use crate::Codegen::TIR::foreign_struct_lit_in_subset;
+use crate::Codegen::TIR::{foreign_struct_lit_in_subset, foreign_type_module};
 use crate::Codegen::TIR::is_covered_generic_struct_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -184,7 +184,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && cx.sigs.contains_key(&c.name)
                 && !cx.extern_funcs.contains_key(&c.name)
                 && !cx.unqualified_inline.contains_key(&c.name)
-                && !cx.unqualified_file.contains_key(&c.name);
+                && !cx.unqualified_file.contains_key(&c.name)
+                && !cx.inline_import_names.contains(&c.name);
             // c109 Phase 23: a DISTINCT-type constructor `UserId(expr)` (D-DIST1) is a
             // bare `Expr::Call` whose name is a distinct type (not in `cx.sigs` — so the
             // AST `emit_call` falls through to `user_<Name>(args)` with NO sig, plain args).
@@ -226,10 +227,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let is_extern = !locals.contains(&c.name) && cx.extern_funcs.contains_key(&c.name);
             let is_unqual_inline = !locals.contains(&c.name)
                 && !cx.extern_funcs.contains_key(&c.name)
-                && cx.unqualified_inline.contains_key(&c.name);
+                && (cx.unqualified_inline.contains_key(&c.name)
+                    || cx.inline_import_names.contains(&c.name));
             let is_unqual_file = !locals.contains(&c.name)
                 && !cx.extern_funcs.contains_key(&c.name)
-                && cx.unqualified_file.contains_key(&c.name);
+                && cx.unqualified_file.contains_key(&c.name)
+                && !cx.inline_import_names.contains(&c.name);
             // c109 Phase 13: a callee with a **Fn-typed parameter** is now covered.
             // The arg routes through `emit_call_args`'s `Box::new(…) as <fn-type>`
             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
@@ -311,16 +314,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             ..
         } => {
             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
+                cx.any_core_import_module(alias) == Some(crate::Syntax::CORE_EMAIL_MODULE)
                     && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")
+                cx.any_core_import_module(alias) == Some("core.encoding.cbor")
                     && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
                     && type_args.is_empty()
             });
             let core_encoding_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding")
+                cx.any_core_import_module(alias) == Some("core.encoding")
                     && matches!(
                         type_name.as_str(),
                         "EncodingLimits" | "EncodingCause" | "EncodingError"
@@ -328,7 +331,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     && type_args.is_empty()
             });
             let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
-                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
+                cx.any_core_import_module(alias) == Some("core.encoding.xml")
                     && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
                     && type_args.is_empty()
             });
@@ -392,7 +395,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // (`cx.foreign_types`); the field VALUES are checked in-subset below. (A
             // foreign type is NOT a `is_covered_struct_ty` — its fields live in another
             // module — so this needs its own admission.)
-            if cx.foreign_types.contains_key(type_name) {
+            if foreign_type_module(type_name, cx).is_some() {
                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
             // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse) — the
@@ -866,7 +869,7 @@ pub(crate) fn orfallback_rhs_in_subset(
 /// all total (`Lambda.meta`), so nothing is re-derived; the gate only proves the
 /// body lowers. A `take_names` capture is an outer local (already in `locals`); a
 /// param shadows. The body sees: outer locals (captures resolve via them — the AST
-/// rebinds a cloned capture to `_jet_cap_<n>` but the *name* stays in scope) plus
+/// rebinds a cloned capture to `__jet_cap_<n>` but the *name* stays in scope) plus
 /// the params.
 pub(crate) fn lambda_in_subset(lam: &Lambda, cx: &Cx, locals: &HashSet<String>) -> bool {
     let mut body_locals = locals.clone();

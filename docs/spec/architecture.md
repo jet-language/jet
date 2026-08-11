@@ -517,9 +517,12 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   internal-compiler-error banner owned by `Source/CmdCompile.rs`, exits 101,
   and is treated as a P0 bug. rustc's stderr is shown only inside that banner.
   Missing rustc, linker, or C library is a tool/user diagnostic, not an ICE.
-- **R6 — Name mangling.** User identifiers are emitted as `user_<name>`
+- **R6 — Name mangling.** User identifiers are emitted as `__jet_<name>`
   (`main` excepted) so user code can never collide with Rust keywords,
-  macros, or std items.
+  macros, or std items. The sema-owned `NameLedger` is the single source for
+  declaration paths, aliases, visibility, and reference origins; all Rust-name
+  projections use its canonical mangle functions. This implements ratified
+  D-NAME-TREE1 without adding a user-facing spelling.
 - **R7 — Backend is swappable.** Rust emission stays in
   `crates/jet-codegen/src/`; native rustc invocation and ICE classification
   stay in `Source/CmdCompile.rs`. The lexer, parser, and sema crates do not

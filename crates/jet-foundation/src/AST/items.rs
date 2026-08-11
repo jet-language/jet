@@ -1,6 +1,6 @@
 use super::{
-    AccessConvention, ConstDef, CtValue, Dimension, ErrorConvDef, Expr, MetaAttr, MigrationDecl,
-    Stmt, Type,
+    AccessConvention, ConstDef, CtValue, Dimension, ErrorConvDef, Expr, ImportDecl, MetaAttr,
+    MigrationDecl, Pattern, Stmt, Type,
 };
 use crate::Diagnostics::Span;
 use std::collections::BTreeMap;
@@ -84,6 +84,10 @@ pub enum Item {
     /// parsed declaration into the runtime registry row the rest of the
     /// compiler consumes is #1457's and #1458's job.
     MarkerDecl(MarkerDecl),
+    /// D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` declares one
+    /// non-code registry row. It erases before TIR after the registry has read
+    /// the same source declaration.
+    FactDecl(FactDecl),
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +128,16 @@ pub struct MarkerDeclParam {
     pub variadic: bool,
 }
 
+/// D-FACTDECL1=A: one `fact Name(params…)` declaration. Fact columns reuse the
+/// marker declaration parameter shape; every fact column is `$`-marked.
+#[derive(Debug, Clone)]
+pub struct FactDecl {
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<MarkerDeclParam>,
+    pub span: Span,
+}
+
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
 #[derive(Debug, Clone)]
 pub struct CodeModule {
@@ -134,6 +148,9 @@ pub struct CodeModule {
     pub is_package_pub: bool,
     /// None = file declaration (`module math;`), Some = inline body.
     pub body: Option<Vec<Item>>,
+    /// D-NAME-WALK1=A: imports declared inside an inline module body. They
+    /// have the enclosing module's namespace scope and do not leak outward.
+    pub imports: Vec<ImportDecl>,
     /// D-WASM1: `module name js { … }` / `module name wasm { … }` ceiling override.
     pub web_target: Option<crate::WebPartition::WebBucket>,
     /// #91: applicative generic-module identity. Ordinary code modules carry
@@ -218,6 +235,8 @@ pub struct GenericModuleDef {
     pub is_pub: bool,
     pub is_package_pub: bool,
     pub params: Vec<GenericModuleParam>,
+    /// D-NAME-WALK1=A: imports declared inside the generic module body.
+    pub imports: Vec<ImportDecl>,
     pub body: Vec<Item>,
     pub span: Span,
 }
@@ -345,7 +364,7 @@ pub enum ContribValue {
     Fleet(FleetLit),
     /// `vmtest.<name>:` — a VM scenario record (D-JOS-VMTEST1).
     VmTest(VmTestLit),
-    /// D-JPK-PROFILE1=D: a source-backed package profile declaration.
+    /// D-JPK-PROFILE1=D: a source-backed package generation declaration.
     Profile(ProfileLit),
     /// D-PERFBUDGET-GRAMMAR1=A: `module perf.<role> { budgets: [...] }`.
     Perf(PerfLit),
@@ -380,7 +399,7 @@ pub struct PerfLit {
 }
 
 /// D-JPK-PROFILE1=D: `profile.<name>`'s source fields. The module evaluator
-/// lowers these fields into the shared package-profile fact graph; no
+/// lowers these fields into the shared package-generation fact graph; no
 /// generation or provider-specific state is stored in the AST.
 #[derive(Debug, Clone)]
 pub struct ProfileLit {
@@ -629,7 +648,7 @@ pub enum Namespace {
     VmTest,
     /// `perf` → typed performance-policy declarations.
     Perf,
-    /// `profile` → source-backed package-profile declarations.
+    /// `profile` → source-backed package-generation declarations.
     Profile,
 }
 
@@ -926,6 +945,10 @@ pub struct Func {
     pub meta: Option<MetaAttr>,
     /// S45 (M9): `<T: Bound>` after the function name.
     pub type_params: Vec<TypeParam>,
+    /// S83 / D-CHOOSE-HEADS1=A: a multi-head declaration keeps its bare
+    /// argument-shape pattern until sema folds the ordered heads into one
+    /// ordinary pattern table. `None` is the post-fold form.
+    pub head_pattern: Option<Pattern>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub return_type_span: Option<Span>,
@@ -1046,6 +1069,68 @@ pub struct Func {
     /// and explain — so none of them has to rebuild a marker from flags.
     pub markers: Vec<Marker>,
     pub body: Vec<Stmt>,
+}
+
+impl Func {
+    /// D-ENTRY-SCRIPT1=B: build the ordinary function used for a script's
+    /// implicit entry. Keeping this as a normal `Func` preserves one entry
+    /// mechanism through sema, TIR, AOT, JIT, and interpreter lowering.
+    pub fn implicit_run(body: Vec<Stmt>, span: Span) -> Self {
+        let name = "run".to_string();
+        Self {
+            span,
+            is_pub: false,
+            is_package_pub: false,
+            external_type: None,
+            name,
+            name_span: span,
+            meta: None,
+            type_params: Vec::new(),
+            head_pattern: None,
+            params: Vec::new(),
+            return_type: Some(Type::Result {
+                ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+            }),
+            return_type_span: None,
+            return_view_provenance: None,
+            declared_return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
+            is_unsafe: false,
+            unsafe_reason: None,
+            unsafe_span: None,
+            is_pure: false,
+            is_sanitizer: false,
+            scrub_tag: None,
+            declared_effects: None,
+            effect_via: None,
+            state_requires: None,
+            state_transition: None,
+            is_reactive: false,
+            reactive_upgrades: Vec::new(),
+            is_replayable: false,
+            replayable_span: None,
+            is_task: false,
+            task_span: None,
+            task_metadata: None,
+            every: None,
+            is_must_use: false,
+            must_use_span: None,
+            maturity: None,
+            maturity_span: None,
+            kernel: None,
+            is_inline: false,
+            is_inline_always: false,
+            inline_span: None,
+            web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
+            inline_foreign: None,
+            markers: Vec::new(),
+            body,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1969,7 +2054,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                         let Some(body) = &module.body else {
                             continue;
                         };
-                        let prefix = format!("{}__", module.name);
+                        let prefix = crate::Names::member_name(&module.name, "");
                         if let Some(inner) = name.strip_prefix(&prefix) {
                             if let Some(shapes) = named(body, inner, args, seen) {
                                 return Some(shapes);

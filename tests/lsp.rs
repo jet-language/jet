@@ -9,6 +9,8 @@
 //!
 //! Tests skip gracefully if the `jet` binary is not built.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -1413,7 +1415,7 @@ fn lsp_completion_returns_items() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    \n}\n";
+    let source = "fn greet(name: String) {\n    print(name);\n}\nfn connect(host: String, /, *, timeout seconds: Int = 30) => String {\n    return host;\n}\nfn run() {\n    \n}\n";
     let uri = "file:///tmp/lsp_completion_test.jet";
 
     run_transcript(
@@ -1435,10 +1437,16 @@ fn lsp_completion_returns_items() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":4}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":7,"character":4}}}}}}"#,
                     uri
                 ),
-                expect_contains: Some(vec!["items".to_string(), "greet".to_string()]),
+                expect_contains: Some(vec![
+                    "items".to_string(),
+                    "greet".to_string(),
+                    "connect".to_string(),
+                    "fn connect(host: String, /, *, timeout seconds: Int) =[]=> String"
+                        .to_string(),
+                ]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
@@ -1726,8 +1734,13 @@ fn lsp_signature_help_returns_active_parameter() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) => Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
+    let source = "fn connect(host: String, /, timeout seconds: Int = 30, *, tls enabled: Bool = true) => String {\n    return host;\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n";
     let uri = "file:///tmp/lsp_signature_help_test.jet";
+    let call_start = source.find("connect(\"db\", tls: true, timeout: 5)").unwrap();
+    let tls_end = call_start + "connect(\"db\", tls: true".len();
+    let timeout_end = call_start + "connect(\"db\", tls: true, timeout: 5".len();
+    let tls_position = jet::LSP::byte_offset_to_lsp(source, tls_end);
+    let timeout_position = jet::LSP::byte_offset_to_lsp(source, timeout_end);
 
     run_transcript(
         source,
@@ -1748,13 +1761,24 @@ fn lsp_signature_help_returns_active_parameter() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":16}}}}}}"#,
-                    uri
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+                    uri, tls_position.line, tls_position.character
                 ),
                 expect_contains: Some(vec![
-                    "fn add(a: Int, b: Int) =[]=> Int".to_string(),
+                    "fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool) =[]=> String"
+                        .to_string(),
+                    "\"activeParameter\":2".to_string(),
+                    "tls enabled: Bool".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+                    uri, timeout_position.line, timeout_position.character
+                ),
+                expect_contains: Some(vec![
                     "\"activeParameter\":1".to_string(),
-                    "b: Int".to_string(),
+                    "timeout seconds: Int".to_string(),
                 ]),
             },
             TranscriptStep::Send {

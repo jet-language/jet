@@ -447,6 +447,7 @@ impl<'a> Checker<'a> {
                         route_span,
                     ));
                 } else {
+                    self.check_break_without_value(Some((&name, route_span)), route_span);
                     attach_value_loop_route(&mut value, Stmt::BreakLabel(name, route_span));
                 }
             }
@@ -624,6 +625,8 @@ impl<'a> Checker<'a> {
                         &self.loop_labels,
                         *span,
                     ));
+                } else {
+                    self.check_break_without_value(Some((name, *span)), *span);
                 }
                 Some(payload)
             }
@@ -644,6 +647,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
+        self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);
         match expr {
             Expr::Call(call) => match self.check_call(call, false) {

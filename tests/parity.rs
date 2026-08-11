@@ -18,6 +18,8 @@
 //! comptime handles them as a whole via the `is_tier2` wildcard (E3410
 //! `#Impure` gate), not per-method.
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 

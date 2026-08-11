@@ -292,7 +292,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         // D-DEP-WASM1=A (c81): loading a sandboxed plugin executes foreign
         // code, even though the sandbox makes it memory-safe — same bucket as
         // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
-        "core.plugin" | "jet.plugin" => Effect::Exec,
+        "core.plugin" | "jet.plugin" | "core.mod" => Effect::Exec,
         "jet.log" => Effect::Log,
         "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
             Effect::Browser

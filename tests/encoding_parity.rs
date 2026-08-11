@@ -1133,30 +1133,77 @@ fn assert_aot_dev_stream_parity_inner(label: &str, source: &str) {
 
 #[test]
 fn json_stream_reader_writer_matches_aot_and_default_dev() {
-    let body = r#"
-use core.encoding.json as json
+    on_encoding_stack(|| {
+        assert!(
+            common::have_rustc(),
+            "criterion 5 requires rustc: the canonical encoding_json_stream example must execute across all tiers"
+        );
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let jet_path = root.join("examples/features/serde/encoding_json_stream.jet");
+        let python_path = root.join("examples/features/serde/encoding_json_stream.py");
+        let expected_path = root.join("examples/features/expected/serde/encoding_json_stream.out");
+        let expected = fs::read_to_string(&expected_path).expect("canonical encoding golden");
+        let expected_json = "{\"a\":1,\"b\":2}";
+        let expected_events =
+            "event:ObjectStart\nevent:Key:a\nevent:Int:1\nevent:Key:b\nevent:Int:2\nevent:ObjectEnd\n";
+        let expected_runtime = format!("{expected_events}read-count:6\neof\n{expected_json}\n");
+        assert_eq!(
+            expected, expected_runtime,
+            "canonical golden must pin each JSON stream event identity and serialized content"
+        );
 
-fn run() {
-    path := "@DIR@/json_stream_out.json"
-    out :: files.create(path) ?? panic("create")
-    writer :: json.writer(^out, canonical: true) ?? panic("writer")
-    writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
-    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
-    writer.write(encoding.DataEvent.Int(2)) ?? panic("value b")
-    writer.write(encoding.DataEvent.Key("a")) ?? panic("key a")
-    writer.write(encoding.DataEvent.Int(1)) ?? panic("value a")
-    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
-    writer.finish() ?? panic("finish")
-    input :: files.open(path) ?? panic("open")
-    reader :: fmt.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
-    loop event, reader {
-        print("event")
-    }
-    print("eof")
-    print(files.read(path) ?? panic("read"))
-}
-"#;
-    assert_aot_dev_stream_parity("json-stream", &stream_fixture("json", body));
+        let python_scratch = Scratch::new("json-stream-python");
+        let python_output_path = python_scratch.path().join("python.json");
+        let python = Command::new("python3")
+            .arg(&python_path)
+            .arg(&python_output_path)
+            .output()
+            .expect("matched Python encoding fixture must execute");
+        assert!(
+            python.status.success(),
+            "matched Python encoding fixture failed:\n{}",
+            String::from_utf8_lossy(&python.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&python.stdout),
+            expected_json,
+            "matched Python fixture serialized content"
+        );
+        assert_eq!(
+            fs::read_to_string(&python_output_path).expect("Python fixture output"),
+            expected_json,
+            "matched Python fixture file content"
+        );
+
+        let scratch = Scratch::new("json-stream-canonical");
+        let aot = run_aot(&jet_path, scratch.path());
+        let (backend, dev) = run_default_dev(jet_path.to_str().unwrap());
+        assert_eq!(
+            backend,
+            DevBackend::ResidentJit,
+            "canonical encoding example must execute on default resident JIT"
+        );
+        let interpreter = run_forced_interpreter(jet_path.to_str().unwrap());
+
+        for (label, output) in [
+            ("AOT", &aot),
+            ("default resident JIT", &dev),
+            ("forced interpreter", &interpreter),
+        ] {
+            assert_eq!(output.exit, 0, "{label} canonical encoding run failed: {}", output.stderr);
+            assert!(output.stderr.is_empty(), "{label} emitted stderr: {}", output.stderr);
+            assert_eq!(
+                output.stdout, expected_runtime,
+                "{label} output drifted from the canonical serialized stream"
+            );
+            assert!(
+                output.stdout.contains(expected_json),
+                "{label} output is missing serialized JSON content"
+            );
+        }
+        assert_eq!(dev, aot, "default resident JIT drifted from canonical AOT");
+        assert_eq!(interpreter, aot, "forced interpreter drifted from canonical AOT");
+    });
 }
 
 #[test]

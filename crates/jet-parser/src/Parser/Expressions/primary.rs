@@ -1,6 +1,6 @@
 use super::super::{
-    AccessConvention, CallArg, Diagnostic, EnumLitArg, Expr, Parser, Span, StrPart, StrTokPart,
-    Syntax, TokKind, describe,
+    AccessConvention, CallArg, Diagnostic, EnumLitArg, Expr, Lambda, LambdaBody, LambdaMeta,
+    Parser, Span, StrPart, StrTokPart, Syntax, TokKind, describe,
 };
 
 impl<'a> Parser<'a> {
@@ -352,6 +352,11 @@ impl<'a> Parser<'a> {
                         value: None,
                     })
                 }
+                TokKind::Ident(name)
+                    if name == Syntax::KW_CONC_TASK && self.at_task_surface_expr() =>
+                {
+                    self.task_surface_expr()
+                }
                 TokKind::Ident(name) => {
                     let span = self.bump().span;
                     let type_name = name.clone();
@@ -558,6 +563,192 @@ impl<'a> Parser<'a> {
                     Some(self.peek().span),
                 )),
             }
+        }
+
+        /// D-CONC-SPAWN1=D: one `task` word owns single-task spawn and the
+        /// nested `all`/`race`/`any` combinators. Lower these forms into the
+        /// existing method-call seam; sema and TIR keep one task mechanism.
+        fn at_task_surface_expr(&self) -> bool {
+            match &self.peek2().kind {
+                // A local named `task` keeps ordinary member and call syntax.
+                // The combinator spelling is recognized only at its complete
+                // `task.<selector> {` shape.
+                TokKind::Dot => matches!(
+                    (&self.peek3().kind, &self.peek4().kind),
+                    (TokKind::Ident(selector), TokKind::LBrace)
+                        if matches!(selector.as_str(), "all" | "race" | "any")
+                ),
+                // `task { … }` is the block-bodied spawn form.
+                TokKind::LBrace => true,
+                // Parentheses, indexing, member access, and operators keep
+                // `task` an ordinary local. This gives a pre-existing local
+                // named `task` clean shadowing for `task(…)`, `task[…]`,
+                // `task.member`, and arithmetic. Bare spawns use an operand
+                // that cannot continue an ordinary identifier expression.
+                TokKind::Ident(_)
+                | TokKind::Int(_, _)
+                | TokKind::Float(_)
+                | TokKind::Str(_)
+                | TokKind::Char(_)
+                | TokKind::UnitNumber { .. }
+                | TokKind::KwTrue
+                | TokKind::KwFalse
+                | TokKind::KwNull
+                | TokKind::KwIt
+                | TokKind::KwSelf
+                | TokKind::KwIf
+                | TokKind::KwLoop
+                | TokKind::KwMove
+                | TokKind::KwCopy => true,
+                TokKind::Hash => matches!(self.peek3().kind, TokKind::Ident(_)),
+                _ => false,
+            }
+        }
+
+        fn task_surface_expr(&mut self) -> Result<Expr, Diagnostic> {
+            let task_span = self.bump().span;
+            if matches!(self.peek().kind, TokKind::Dot) {
+                self.bump();
+                let (selector, selector_span) = self.expect_ident("after `task.`")?;
+                if selector == "group" {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "`task.group` is a statement, not a value".to_string(),
+                        "a task group owns a block and its children until the closing brace"
+                            .to_string(),
+                        "write `task.group name { … }`".to_string(),
+                        Some(selector_span),
+                    ));
+                }
+                if !matches!(selector.as_str(), "all" | "race" | "any") {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("unknown task selector `{selector}`"),
+                        "task combinators use only `all`, `race`, or `any`".to_string(),
+                        "write `task.all { … }`, `task.race { … }`, or `task.any { … }`"
+                            .to_string(),
+                        Some(selector_span),
+                    ));
+                }
+                self.expect(TokKind::LBrace, "after the task selector")?;
+                let open = self.toks[self.pos - 1].span;
+                let mut branches = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RBrace) {
+                    loop {
+                        let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
+                            let open = self.bump().span;
+                            let body = self.block_stmts();
+                            let end = self.toks[self.pos - 1].span.end;
+                            (LambdaBody::Block(body), Span::new(open.start, end))
+                        } else {
+                            let body = self.expr()?;
+                            let body_span = body.span();
+                            (LambdaBody::Expr(Box::new(body)), body_span)
+                        };
+                        branches.push((body, body_span));
+                        if matches!(self.peek().kind, TokKind::RBrace) {
+                            break;
+                        }
+                        self.expect(TokKind::Comma, "between task branches")?;
+                    }
+                }
+                self.expect(TokKind::RBrace, "to close the task combinator")?;
+                let close = self.toks[self.pos - 1].span;
+                let list_span = Span::new(open.start, close.end);
+                let tasks = branches
+                    .into_iter()
+                    .map(|(body, body_span)| {
+                        let lambda = Lambda {
+                            take_names: Vec::new(),
+                            params: Vec::new(),
+                            body,
+                            span: body_span,
+                            meta: LambdaMeta::default(),
+                        };
+                        Expr::MethodCall {
+                            receiver: Box::new(Expr::Ident(
+                                Syntax::INTERNAL_TASK_RECEIVER.to_string(),
+                                task_span,
+                            )),
+                            method: "spawn".to_string(),
+                            method_span: task_span,
+                            owner_type_args: Vec::new(),
+                            type_args: Vec::new(),
+                            args: vec![CallArg {
+                                convention: AccessConvention::Read,
+                                expr: Expr::Lambda(lambda),
+                                span: body_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            }],
+                            recv_type: None,
+                            resolved_ret: None,
+                            checked_widen: false,
+                        }
+                    })
+                    .collect();
+                return Ok(Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(
+                        Syntax::INTERNAL_TASK_RECEIVER.to_string(),
+                        task_span,
+                    )),
+                    method: selector,
+                    method_span: selector_span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
+                    args: vec![CallArg {
+                        convention: AccessConvention::Read,
+                        expr: Expr::ListLit(tasks, list_span),
+                        span: list_span,
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    recv_type: None,
+                    resolved_ret: None,
+                    checked_widen: false,
+                });
+            }
+
+            let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
+                let open = self.bump().span;
+                let body = self.block_stmts();
+                let end = self.toks[self.pos - 1].span.end;
+                (LambdaBody::Block(body), Span::new(open.start, end))
+            } else {
+                let body = self.expr()?;
+                let body_span = body.span();
+                (LambdaBody::Expr(Box::new(body)), body_span)
+            };
+            let lambda = Lambda {
+                take_names: Vec::new(),
+                params: Vec::new(),
+                body,
+                span: body_span,
+                meta: LambdaMeta::default(),
+            };
+            Ok(Expr::MethodCall {
+                receiver: Box::new(Expr::Ident(
+                    Syntax::INTERNAL_TASK_RECEIVER.to_string(),
+                    task_span,
+                )),
+                method: "spawn".to_string(),
+                method_span: task_span,
+                owner_type_args: Vec::new(),
+                type_args: Vec::new(),
+                args: vec![CallArg {
+                    convention: AccessConvention::Read,
+                    expr: Expr::Lambda(lambda),
+                    span: body_span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                }],
+                recv_type: None,
+                resolved_ret: None,
+                checked_widen: false,
+            })
         }
     
         pub(super) fn str_expr_from_parts(

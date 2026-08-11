@@ -14,7 +14,7 @@
 //!
 //! `UPDATE_EXPECT=1` remains the explicit bless-all mode for a reviewed sweep.
 //!
-//! Never bless a snapshot you haven't read against docs/spec/diagnostics.md.
+//! Never bless a snapshot you haven't read against the typed diagnostic row.
 //! These files are the product: the error messages ARE the language's UX.
 
 use std::fs;
@@ -247,30 +247,39 @@ fn ui_snapshots() {
         let jetpack_hangar_digest_mismatch = src
             .lines()
             .any(|line| line.trim() == "// @jetpack_hangar_digest_mismatch");
-        // D-ENV-FACET1 / E1337: environment profile selection is an
+        // D-ENV-FACET1 / E1337: environment module selection is an
         // environment-model diagnostic, so this fixture drives that same
         // evaluator while retaining the ordinary UI snapshot contract.
         let env_facet_missing = src
             .lines()
             .any(|line| line.trim() == "// @env_facet_missing");
+        // D-ENVFLAG1 / E1342: the retired compound selector is a teaching
+        // diagnostic from the real Jetpack command surface.
+        let jetpack_retired_environment_flag = src
+            .lines()
+            .any(|line| line.trim() == "// @jetpack_retired_environment_flag");
         // D-WORKSPACELOCK1 / E1202: persisted workspace identity failures
         // use the same registered diagnostic in tooling and CLI paths.
         let workspace_lock_e1202 = src
             .lines()
             .any(|line| line.trim() == "// @workspace_lock_e1202");
         // Card #1421 c2 / D-LIB-REUSE1=B / E1338: a `.jetlib` artifact's
-        // compiler-identity stamp is checked before mapping. The build path
-        // that emits the stamp is a later slice (#1421 c4-6), so this drives
-        // the check directly against a fixture stamp.
+        // compiler-identity stamp is checked before mapping. This fixture
+        // drives the shared stamp check directly against a fixture stamp.
         let jetlib_version_mismatch = src
             .lines()
             .any(|line| line.trim() == "// @jetlib_version_mismatch");
         // Card #1421 c3 / D-LIB-DYNTRUST1=A / E1339: a `.jetlib` artifact's
         // declared effects are checked against the load site's grant before
-        // mapping. Same deferred-build-path note as above.
+        // mapping. This fixture drives the shared grant check directly.
         let jetlib_effect_refused = src
             .lines()
             .any(|line| line.trim() == "// @jetlib_effect_refused");
+        // Card #1421 / E1341: the Library resolver must reject an unknown
+        // binding instead of silently dropping it during code generation.
+        let library_invalid_binding = src
+            .lines()
+            .any(|line| line.trim() == "// @library_invalid_binding");
         // D-DX5-HOOK1 / Tower #549: `// @compiler_extension <repo-relative.wasm>`
         // sets JET_COMPILER_EXTENSION for this fixture only (no user syntax).
         let compiler_extension = src.lines().find_map(|line| {
@@ -281,13 +290,15 @@ fn ui_snapshots() {
         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
         let actual = if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
+        } else if jetpack_retired_environment_flag {
+            run_jetpack_retired_environment_flag_snapshot()
         } else if env_facet_missing {
-            let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment_profile(
+            let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment(
                 &src,
                 path.parent().expect("environment fixture parent"),
                 Some("missing"),
             )
-            .expect_err("missing environment profile fixture must fail");
+            .expect_err("missing environment module fixture must fail");
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if workspace_lock_e1202 {
             let lock_path = ".jet/lock";
@@ -312,6 +323,11 @@ fn ui_snapshots() {
             let diagnostics = jetpack::JetLib::check_effect_grant("skyhawk", &stamp, &grant)
                 .expect_err("an effect outside the grant must be refused before mapping");
             jet::render_diagnostics(&shown_path, &src, &diagnostics)
+        } else if library_invalid_binding {
+            match jet::compile_library(&file_arg, None) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
         } else if programmable_build {
             let result = if build_locked {
                 jet::compile_programmable_build_opts(
@@ -336,6 +352,11 @@ fn ui_snapshots() {
                 jet::Interpreter::RunOutcome::Problems(diags) => {
                     jet::render_diagnostics(&shown_path, &src, &diags)
                 }
+                jet::Interpreter::RunOutcome::Ran {
+                    stderr,
+                    exit_code,
+                    ..
+                } if exit_code != 0 => stderr,
                 jet::Interpreter::RunOutcome::Ran { .. } => "(no errors)\n".to_string(),
             }
         } else if repl_deny {
@@ -462,6 +483,33 @@ fn ui_snapshots() {
         "expected the ui suite to contain tests, found {}",
         checked
     );
+}
+
+fn run_jetpack_retired_environment_flag_snapshot() -> String {
+    let scratch = unique_tmp("jet_ui_retired_environment_flag");
+    let root = scratch.join("root");
+    let project = scratch.join("project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev { packages: [nixpkgs.ripgrep] }\nmodule env.full { packages: [nixpkgs.fd] }\n",
+    )
+    .unwrap();
+    let output = Command::new(jetpack_bin())
+        .args(["enter", "info", "--env-profile", "full", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run real jetpack retired environment flag diagnostic fixture");
+    let _ = fs::remove_dir_all(&scratch);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "retired environment selector must fail: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8")
 }
 
 fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {

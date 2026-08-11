@@ -1,5 +1,7 @@
 //! D-WEBBACKEND1 M2 (c123): `--target=web` WASM + JS artifact golden runs.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -974,8 +976,8 @@ fn run() {}
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tick()"));
     assert!(wasm.contains("jet_wasm_tick();"), "void body side effect was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_twice(user_n: i64) -> i64"));
-    assert!(wasm.contains("jet_wasm_twice(user_n)"), "export did not call internal helper:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_twice(__jet_n: i64) -> i64"));
+    assert!(wasm.contains("jet_wasm_twice(__jet_n)"), "export did not call internal helper:\n{wasm}");
 }
 
 #[test]
@@ -1029,7 +1031,7 @@ fn run() {}
         web.js_app
     );
     assert!(
-        web.wasm_rust.contains("_jet_switch_subject"),
+        web.wasm_rust.contains("__jet_switch_subject"),
         "Wasm MixedSwitch/RangeSwitch must bind the switch subject:\n{}",
         web.wasm_rust
     );
@@ -1134,7 +1136,7 @@ fn run() {}
     assert!(
         web.js_app.contains("while ((i < n))")
             && web.js_app.contains("continue;")
-            && web.js_app.contains("_jet_loop_first"),
+            && web.js_app.contains("__jet_loop_first"),
         "JS While/Continue/CountedLoop forms were not all emitted:\n{}",
         web.js_app
     );
@@ -1154,9 +1156,9 @@ fn run() {}
         web.wasm_rust
     );
     assert!(
-        web.wasm_rust.contains("while (user_i < user_n)")
+        web.wasm_rust.contains("while (__jet_i < __jet_n)")
             && web.wasm_rust.contains("continue;")
-            && web.wasm_rust.contains("_jet_loop_first"),
+            && web.wasm_rust.contains("__jet_loop_first"),
         "Wasm While/Continue/CountedLoop forms were not all emitted:\n{}",
         web.wasm_rust
     );
@@ -1277,8 +1279,8 @@ fn run() {}
         web.wasm_rust
     );
     assert!(
-        web.wasm_rust.contains("matches!(&(user_toggle), user_Toggle::user_On)")
-            && web.wasm_rust.contains("if user_flag"),
+        web.wasm_rust.contains("matches!(&(__jet_toggle), __jet_Toggle::__jet_On)")
+            && web.wasm_rust.contains("if __jet_flag"),
         "Wasm Matches + And must emit both short-circuit tests:\n{}",
         web.wasm_rust
     );
@@ -1540,9 +1542,9 @@ fn run() {
         "JS IfExpr must retain branch statements and await bridge calls:\n{js}"
     );
     assert!(
-        wasm.contains("if user_flag {")
-            && (wasm.contains("let user_n = 6;") || wasm.contains("let mut user_n = 6;"))
-            && wasm.contains("(user_n + 1)"),
+        wasm.contains("if __jet_flag {")
+            && (wasm.contains("let __jet_n = 6;") || wasm.contains("let mut __jet_n = 6;"))
+            && wasm.contains("(__jet_n + 1)"),
         "Wasm IfExpr must retain branch statements and values:\n{wasm}"
     );
     let check = Command::new("node")
@@ -1863,10 +1865,10 @@ fn run() { print(summarize(4)) }
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_canvas_tir.jet")
         .expect("ordinary Canvas control flow and print must compile through TIR");
     let wasm = &out.web.expect("web artifacts").wasm_rust;
-    assert!(wasm.contains("if (user_total > 10)"), "TIR if was not emitted:\n{wasm}");
+    assert!(wasm.contains("if (__jet_total > 10)"), "TIR if was not emitted:\n{wasm}");
     assert!(wasm.contains("println!(\"{}\""), "TIR print was not emitted:\n{wasm}");
     assert!(
-        wasm.contains("user_text: &String") || wasm.contains("user_text: String"),
+        wasm.contains("__jet_text: &String") || wasm.contains("__jet_text: String"),
         "internal String parameter was rejected:\n{wasm}"
     );
 }
@@ -2189,9 +2191,9 @@ fn codable_struct_wasm_bridge_reconstructs_typed_argument() {
     let src = include_str!("ui/web_abi_codable.jet");
     let dir = build_web_fixture("codable_struct", src, "tests/ui/web_abi_codable.jet");
     let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    let signature = "fn jet_export_sum_point(user_p_x: i64, user_p_y: i64) -> i64";
-    let reconstruction = "let user_p = user_Point { user_x: user_p_x, user_y: user_p_y };";
-    let field_read = "((user_p).user_x + (user_p).user_y)";
+    let signature = "fn jet_export_sum_point(__jet_p_x: i64, __jet_p_y: i64) -> i64";
+    let reconstruction = "let __jet_p = __jet_Point { __jet_x: __jet_p_x, __jet_y: __jet_p_y };";
+    let field_read = "((__jet_p).__jet_x + (__jet_p).__jet_y)";
     assert!(wasm_rust.contains(signature), "flattened ABI drifted:\n{wasm_rust}");
     assert!(
         wasm_rust.find(reconstruction) < wasm_rust.find(field_read),
@@ -2318,11 +2320,11 @@ fn web_wasm_range_loop_bridge_roundtrip() {
     let dir = build_web_fixture("wasm_range", src, "examples/features/web/web_wasm_range.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("for user_i in (0)..=(user_n)"),
+        wasm.contains("for __jet_i in (0)..=(__jet_n)"),
         "inclusive range loop was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("user_total = (user_total + user_i)"),
+        wasm.contains("__jet_total = (__jet_total + __jet_i)"),
         "loop body assign was dropped:\n{wasm}"
     );
     let stdout = run_web_app(&dir);
@@ -2346,11 +2348,11 @@ fn web_wasm_for_in_bridge_roundtrip() {
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
         wasm.contains(".iter().cloned()")
-            && (wasm.contains("for user_x in") || wasm.contains("for x in")),
+            && (wasm.contains("for __jet_x in") || wasm.contains("for x in")),
         "plain ForIn was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("user_total = (user_total + user_x)")
+        wasm.contains("__jet_total = (__jet_total + __jet_x)")
             || wasm.contains("total = (total + x)"),
         "ForIn body assign was dropped:\n{wasm}"
     );
@@ -2434,12 +2436,12 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
         "string arg helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("let user_s = jet_abi_string_arg(user_s)")
+        wasm.contains("let __jet_s = jet_abi_string_arg(__jet_s)")
             || wasm.contains("let s = jet_abi_string_arg(s)"),
         "export wrapper must unpack String param:\n{wasm}"
     );
     assert!(
-        wasm.contains("&user_s") || wasm.contains("&s"),
+        wasm.contains("&__jet_s") || wasm.contains("&s"),
         "wrapper must pass borrowed String into jet_wasm_*:\n{wasm}"
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
@@ -2495,7 +2497,7 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
         "list-int free export missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("let user_xs = jet_abi_list_i64_arg(user_xs)")
+        wasm.contains("let __jet_xs = jet_abi_list_i64_arg(__jet_xs)")
             || wasm.contains("let xs = jet_abi_list_i64_arg(xs)"),
         "export wrapper must unpack [Int] param:\n{wasm}"
     );
@@ -2505,7 +2507,7 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
         "export must pack [Int] return as u64:\n{wasm}"
     );
     assert!(
-        wasm.contains("&user_xs") || wasm.contains("&xs"),
+        wasm.contains("&__jet_xs") || wasm.contains("&xs"),
         "wrapper must pass borrowed Vec into jet_wasm_*:\n{wasm}"
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
@@ -2571,7 +2573,7 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         "list-string free export missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("let user_xs = jet_abi_list_string_arg(user_xs)")
+        wasm.contains("let __jet_xs = jet_abi_list_string_arg(__jet_xs)")
             || wasm.contains("let xs = jet_abi_list_string_arg(xs)"),
         "export wrapper must unpack [String] param:\n{wasm}"
     );

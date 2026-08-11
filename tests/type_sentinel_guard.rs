@@ -23,6 +23,8 @@
 //! Diagnostic/fixture files are not scanned — only the compiler's own
 //! foundation sources, where a sentinel constant is declared.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 

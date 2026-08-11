@@ -1,5 +1,7 @@
 //! Focused parity checks for the remaining CPU compute slices.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 

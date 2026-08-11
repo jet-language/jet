@@ -232,6 +232,28 @@ test('events are recorded with attribution', () => {
   assert.equal(e.by, 'agent-7');
 });
 
+test('openCountTrend reconstructs the window from live and archived card timestamps', () => {
+  const end = Date.parse('2026-08-10T12:00:00.000Z');
+  const old = '2026-07-20T12:00:00.000Z';
+  const recent = '2026-08-08T12:00:00.000Z';
+  const s = {
+    cards: [
+      { id: 'open-old', phase: 'building', created: old },
+      { id: 'open-new', phase: 'planning' },
+      { id: 'closed', phase: 'done', created: old, completedAt: recent },
+    ],
+    events: [{ at: recent, action: 'card.add', ref: 'open-new' }],
+  };
+  const history = { cards: [{ id: 'archived', phase: 'done', created: old, completedAt: recent }] };
+  assert.deepEqual(db.openCountTrend(s, history, 7, end), {
+    windowDays: 7,
+    since: '2026-08-03T12:00:00.000Z',
+    openAtStart: 3,
+    openNow: 2,
+    delta: -1,
+  });
+});
+
 test('backups rotate on writes', () => {
   const st = fresh();
   for (let i = 0; i < 3; i++) st.mutate((s, cfg) => db.addCard(s, { title: 'c' + i }, cfg));

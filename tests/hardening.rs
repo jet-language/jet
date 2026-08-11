@@ -3,6 +3,8 @@
 //! type-checked wrong programs before the fixes. Each test pins the new
 //! behavior: a clean front-end diagnostic, or generated Rust that compiles.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -60,7 +62,7 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("should compile");
     assert!(
-        out.rust.contains("user_greet(&("),
+        out.rust.contains("__jet_greet(&("),
         "read-convention method arg must be borrowed: {}",
         out.rust
     );
@@ -83,7 +85,7 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("should compile");
     assert!(
-        out.rust.contains("user_name).clone()"),
+        out.rust.contains("__jet_name).clone()"),
         "field reads in owning position must clone: {}",
         out.rust
     );
@@ -400,7 +402,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
     assert!(
-        rust.contains("mod user_my_utils"),
+        rust.contains("mod __jet_my_utils"),
         "module alias must be a valid Rust identifier: {rust}"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -421,12 +423,12 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
     assert!(
-        rust.contains("user_shapes::user_Point { user_x:")
-            || rust.contains("user_shapes::user_Point{user_x:"),
+        rust.contains("__jet_shapes::__jet_Point { __jet_x:")
+            || rust.contains("__jet_shapes::__jet_Point{__jet_x:"),
         "cross-module struct literal must match the declaration: {rust}"
     );
     assert!(
-        rust.contains("pub struct user_Point"),
+        rust.contains("pub struct __jet_Point"),
         "module items must be reachable from the entry: {rust}"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -454,7 +456,7 @@ fn duplicate_file_stems_get_unique_module_names() {
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
     assert!(
-        rust.contains("mod user_util") && rust.contains("mod user_util_2"),
+        rust.contains("mod __jet_util") && rust.contains("mod __jet_util_2"),
         "same-stem modules must get unique mod names: {rust}"
     );
     let _ = fs::remove_dir_all(&dir);

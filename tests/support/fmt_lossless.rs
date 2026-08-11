@@ -4,11 +4,14 @@ use std::path::PathBuf;
 use jet::Lexer::{StrTokPart, TokKind, Token};
 
 const UI_PARSE_INVALID: &[&str] = &[
+    "tests/ui/E0922_body_debug_derive.jet",
     "tests/ui/E0927_retired_pure_callable.jet",
     "tests/ui/E0927_retired_pure_trait_oneline.jet",
     "tests/ui/E0927_retired_pure_trait_twoline.jet",
     "tests/ui/E0927_unknown_marker_function.jet",
+    "tests/ui/E0929_body_capability_derive.jet",
     "tests/ui/E2714_derive_old_for.jet",
+    "tests/ui/arg_positional_after_label.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/auto_derive_invalid_sign.jet",
     "tests/ui/bad_escape.jet",
@@ -110,7 +113,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/param_zone_empty_positional.jet",
     "tests/ui/param_zone_misplaced.jet",
     "tests/ui/param_zone_repeated.jet",
-    "tests/ui/params_not_yet.jet",
     "tests/ui/parse_pattern_adjacent_holes.jet",
     "tests/ui/perf_budget_unknown_role_field.jet",
     "tests/ui/persist_not_module_level.jet",
@@ -1532,8 +1534,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "task-block rewrite preserves body",
-            "fn run() { g.task { work() } }\n",
-            "fn run() { g.task => { other() } }\n",
+            "fn run() { task.group g { x :: task { work() } } }\n",
+            "fn run() { task.group g { x :: task { other() } } }\n",
         ),
         (
             "enum-group comma rule preserves variant order",

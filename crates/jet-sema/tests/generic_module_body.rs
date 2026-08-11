@@ -31,6 +31,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             alias: "main".into(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
+            script_body: std::mem::take(&mut program.script_body),
             source: src.into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
@@ -46,7 +47,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
         ffi_callback_fns: HashSet::new(),
         cffi: CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: HashMap::new(),
+        name_ledger: jet_sema::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(),
@@ -72,18 +73,18 @@ fn only_instance_fingerprint(src: &str, root: &str) -> String {
 fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, Vec<Diagnostic>) {
     ensure_tir_bridge();
     let mut modules = Vec::new();
-    let mut import_targets = HashMap::new();
+    let mut name_ledger = jet_sema::AST::NameLedger::default();
     for (module_idx, (path, src, targets)) in sources.iter().enumerate() {
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
         let mut program = Parser::parse(&tokens).expect("source parses");
         for (alias, target) in *targets {
             let import = program.imports.iter().find(|import| import.import_alias() == *alias && !matches!(import.kind, jet_sema::AST::ImportKind::Unqualified { .. })).unwrap();
-            import_targets.insert((module_idx, import.span), *target);
+            name_ledger.record_import_target(module_idx, import.span, *target);
         }
         modules.push(LoadedModule {
             path: PathBuf::from(path), display: (*path).into(), alias: path.trim_end_matches(".jet").into(),
-            imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), source: (*src).into(),
+            imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), script_body: std::mem::take(&mut program.script_body), source: (*src).into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
             html_path: program.html_path, no_alloc_policy: program.no_alloc_policy,
@@ -94,7 +95,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
     let mut bundle = ProgramBundle {
         entry: sources.len() - 1, project_root: PathBuf::from("pkg-a"), modules,
         parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: CFfi::default(), comptime_inputs: Vec::new(),
-        import_targets, layer_ceiling: None, inferred_layer: Syntax::RuntimeLayer::Core,
+        name_ledger, layer_ceiling: None, inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(), web_partition_enforced: false, web_partition_report: None,
         dep_roots: HashMap::new(),
         active_os: Syntax::OSTarget::host(),
@@ -173,13 +174,13 @@ pub module other<T, size: Int> { pub struct Box { value: T } }
 "#;
     let first = r#"
 use "./templates" as templates
-use templates.{boxed}
+use templates.[boxed]
 pub module first = boxed<Int, 3>
 fn run() {}
 "#;
     let second = r#"
 use "./templates" as templates
-use templates.{boxed, other}
+use templates.[boxed, other]
 module second = boxed<Int, 3>
 module different_arg = boxed<Int, 4>
 module different_template = other<Int, 3>

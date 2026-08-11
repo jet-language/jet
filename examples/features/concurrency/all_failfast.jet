@@ -19,14 +19,8 @@ fn boom() => Int {
 }
 
 fn run() {
-    taskgroup g {
-        slow :: g.task => {
-            slow_one()
-        }
-        bad :: g.task => {
-            boom()
-        }
-        results :: g.all([slow, bad])
+    task.group g {
+        results :: task.all { slow_one(), boom() }
         print(results[0])
     }
 }

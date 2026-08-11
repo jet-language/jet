@@ -17,6 +17,9 @@ pub enum SymKind {
     Module,
     Function {
         params: Vec<(String, AST::Type)>,
+        /// Public call labels and zones, kept separately from local body names.
+        /// D-APILABEL1=A: LSP consumers must show the callable contract.
+        param_contract: Vec<(String, String, AST::ParamZone)>,
         ret: Option<AST::Type>,
         effects: Option<Vec<(String, Span)>>,
         effect_via: Option<(String, Span)>,
@@ -116,7 +119,7 @@ struct WalkCtx<'a> {
     db: &'a mut SymbolDB,
     caller: Option<CallerFrame>,
     scope_identity: String,
-    reference_anchors: &'a HashMap<(String, usize, usize), jet_sema::DefinitionAnchorFact>,
+    name_ledger: &'a jet_foundation::Names::NameLedger,
     structural_parents: Vec<usize>,
     structural_slot: String,
     structural_slot_kind: StructuralSlotKind,
@@ -182,9 +185,10 @@ impl SymbolDB {
             definition_facts,
         );
         self.index.set_bypasses(self.bypasses.clone());
-        self.index.set_instances(bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
+        self.index.set_instances(bundle.modules.iter().enumerate().flat_map(|(module_idx, module)| module.items.iter().filter_map(move |item| {
             let Item::CodeModule(cm) = item else { return None };
             let identity = cm.instance_identity.as_ref()?;
+            let member_name = |name: &str| jet_foundation::Names::member_name(&cm.name, name);
             Some(InstanceFact {
                 name: cm.name.clone(), module_path: module.display.clone(),
                 fingerprint: identity.fingerprint.clone(),
@@ -199,11 +203,11 @@ impl SymbolDB {
                     span: application.span.into(),
                 }).collect(),
                 exported_members: cm.body.as_deref().unwrap_or_default().iter().filter_map(|item| match item {
-                    Item::Func(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
-                    Item::Struct(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
-                    Item::Enum(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
-                    Item::Trait(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
-                    Item::Tag(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
+                    Item::Func(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Struct(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Enum(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Trait(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
+                    Item::Tag(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
                     _ => None,
                 }).collect(),
             })
@@ -213,6 +217,10 @@ impl SymbolDB {
                 let Item::Const(value) = item else { return None };
                 let output = value.resolved_output.as_ref()?;
                 let target = &bundle.modules[output.module];
+                let identity = facts
+                    .name_ledger
+                    .semantic_identity(output.module, &output.semantic_name)
+                    .unwrap_or_else(|| format!("{}::{}", target.alias, output.semantic_name));
                 Some(OutputFact {
                     binding: value.name.clone(),
                     kind: output.kind.as_str().to_string(),
@@ -220,7 +228,7 @@ impl SymbolDB {
                     module_path: module.display.clone(),
                     span: value.span.into(),
                     entry: OutputEntryFact {
-                        identity: format!("{}::{}", target.alias, output.semantic_name),
+                        identity,
                         name: output.source_name.clone(),
                         module_path: output.source_path.clone(),
                         definition_span: output.definition.into(),
@@ -337,6 +345,55 @@ fn method_params(f: &AST::Func) -> Vec<(String, AST::Type)> {
         .collect()
 }
 
+fn method_parameter_contract(f: &AST::Func) -> Vec<(String, String, AST::ParamZone)> {
+    parameter_contract(&f.params)
+}
+
+fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZone)> {
+    params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| (p.name.clone(), p.call_label().to_string(), p.zone))
+        .collect()
+}
+
+/// Render the public call surface for LSP completion/signature help. Separators
+/// are part of the displayed signature; callers only use the actual parameter
+/// entries when constructing LSP parameter objects.
+pub fn function_parameter_parts(
+    params: &[(String, AST::Type)],
+    contract: &[(String, String, AST::ParamZone)],
+) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut star_done = false;
+    for (index, (local, ty)) in params.iter().enumerate() {
+        let (contract_local, label, zone) = contract
+            .get(index)
+            .map(|(local, label, zone)| (local.as_str(), label.as_str(), *zone))
+            .unwrap_or((local.as_str(), local.as_str(), AST::ParamZone::Either));
+        if zone == AST::ParamZone::LabelOnly && !star_done {
+            star_done = true;
+            parts.push(Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+        }
+        let shown = if zone == AST::ParamZone::PositionalOnly {
+            contract_local.to_string()
+        } else if label == contract_local {
+            label.to_string()
+        } else {
+            format!("{label} {contract_local}")
+        };
+        parts.push(format!("{shown}: {}", ty.name()));
+        if zone == AST::ParamZone::PositionalOnly
+            && contract
+                .get(index + 1)
+                .is_none_or(|(_, _, next)| *next != AST::ParamZone::PositionalOnly)
+        {
+            parts.push(Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+        }
+    }
+    parts
+}
+
 fn method_fact(
     scope: &str,
     owner: &str,
@@ -378,8 +435,8 @@ fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
 }
 
 fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
-    let target = ctx.reference_anchors
-        .get(&(mp.to_string(), span.start, span.end))
+    let target = ctx.name_ledger
+        .reference(mp, span.start, span.end)
         .map(|fact| DefinitionAnchor {
             module_path: fact.module_path.clone(),
             kind: fact.kind.clone(),
@@ -515,6 +572,7 @@ fn item_span(item: &AST::Item) -> Span {
     match item {
         AST::Item::EffectDecl(x) => x.span,
         AST::Item::MarkerDecl(x) => x.span,
+        AST::Item::FactDecl(x) => x.span,
         AST::Item::Func(x) => x.span,
         AST::Item::Struct(x) => x.span,
         AST::Item::Enum(x) => x.span,
@@ -604,13 +662,17 @@ where
 /// Build the shared symbol index for a checked bundle (LSP + public API).
 pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SymbolDB {
     let mut db = SymbolDB::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         let mp = module.display.clone();
+        let module_alias = facts
+            .name_ledger
+            .module_alias(module_idx)
+            .unwrap_or(&module.alias);
         let mut ctx = WalkCtx {
             db: &mut db,
             caller: None,
-            scope_identity: root_identity(&mp),
-            reference_anchors: &facts.reference_anchors,
+            scope_identity: root_identity(module_alias),
+            name_ledger: &facts.name_ledger,
             structural_parents: Vec::new(),
             structural_slot: "root".to_string(),
             structural_slot_kind: StructuralSlotKind::List,
@@ -620,7 +682,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         for item in &module.items {
             collect_item(item, &mp, module, &mut ctx);
         }
-        apply_inferred_effect_rows(&mut db, module, facts);
+        apply_inferred_effect_rows(&mut db, module_idx, module, facts);
     }
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts, bundle);
@@ -630,6 +692,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
 
 fn apply_inferred_effect_rows(
     db: &mut SymbolDB,
+    module_idx: usize,
     module: &LoadedModule,
     facts: &SemIndexEffectFacts,
 ) {
@@ -641,12 +704,16 @@ fn apply_inferred_effect_rows(
             if let Item::Func(function) = item {
                 inline_keys.insert(
                     (function.name_span.start, function.name_span.end),
-                    format!("{}__{}", code_module.name, function.name),
+                    jet_foundation::Names::member_name(&code_module.name, &function.name),
                 );
             }
         }
     }
-    let module_prefix = format!("{}::", module.alias);
+    let module_alias = facts
+        .name_ledger
+        .module_alias(module_idx)
+        .unwrap_or(&module.alias);
+    let module_prefix = format!("{module_alias}::");
     for def in db
         .defs
         .iter_mut()
@@ -657,6 +724,7 @@ fn apply_inferred_effect_rows(
             ret,
             effects,
             effect_via,
+            ..
         } = &mut def.kind
         else {
             continue;
@@ -812,12 +880,12 @@ fn normalize_definition(source: &str) -> String {
 pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode> {
     let mp = module.display.clone();
     let mut db = SymbolDB::new();
-    let reference_anchors = HashMap::new();
+    let name_ledger = jet_foundation::Names::NameLedger::default();
     let mut ctx = WalkCtx {
         db: &mut db,
         caller: None,
         scope_identity: root_identity(&mp),
-        reference_anchors: &reference_anchors,
+        name_ledger: &name_ledger,
         structural_parents: Vec::new(),
         structural_slot: "root".to_string(),
         structural_slot_kind: StructuralSlotKind::List,
@@ -894,7 +962,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
     );
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match item {
-        Item::EffectDecl(_) | Item::MarkerDecl(_) => {}
+        Item::EffectDecl(_) | Item::MarkerDecl(_) | Item::FactDecl(_) => {}
         Item::Func(f) => {
             record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
@@ -911,6 +979,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 kind: SymKind::Function {
                     params: params.clone(),
+                    param_contract: method_parameter_contract(f),
                     ret: f.return_type.clone(),
                     effects: f.declared_effects.clone(),
                     effect_via: f.effect_via.clone(),
@@ -1077,6 +1146,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
+                        param_contract: method_parameter_contract(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1134,6 +1204,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         module_path: mp.to_string(),
                         kind: SymKind::Function {
                             params: method_params(meth),
+                            param_contract: method_parameter_contract(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
@@ -1232,6 +1303,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
+                        param_contract: method_parameter_contract(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1270,6 +1342,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         module_path: mp.to_string(),
                         kind: SymKind::Function {
                             params: method_params(meth),
+                            param_contract: method_parameter_contract(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
@@ -1316,6 +1389,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     module_path: mp.to_string(),
                     kind: SymKind::Function {
                         params: params.clone(),
+                        param_contract: parameter_contract(&sig.params),
                         ret: sig.return_type.clone(),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
@@ -1379,6 +1453,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
+                        param_contract: method_parameter_contract(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),

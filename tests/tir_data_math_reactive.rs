@@ -1,5 +1,7 @@
 //! TIR data math reactive integration tests.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
@@ -67,7 +69,7 @@ fn columnar_list_core_surface_runs() {
 fn columnar_lowers_to_struct_of_arrays_no_unsafe() {
     let rust = compile_rust("tir_columnar_gen", COLUMNAR_PROG);
     assert!(
-        rust.contains("struct user_P_columns"),
+        rust.contains("struct __jet_P_columns"),
         "expected a generated struct-of-arrays type"
     );
     assert!(

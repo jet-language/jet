@@ -105,8 +105,9 @@ use "core/files"           // quoted paths are for .jet files only
 If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
 `crypto`, or `archive`, the compiler rejects it — those names are reserved for
 first-party packages (**E1002**). An unknown core module is **E1001**;
-selective imports (`use core.files.{read}`) are rejected — keep qualified access
-through an alias. An unknown item in a known core module is **E1004**, with a
+a member list after a core module (`use core.files.[read]`) names core modules,
+not their items, so importing an item this way is **E1001** — keep qualified
+access through an alias. An unknown item in a known core module is **E1004**, with a
 did-you-mean suggestion when possible.
 
 Fallible core functions return `T ? E` and must be handled with `?`, `??`, or

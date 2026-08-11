@@ -3,6 +3,8 @@
 //! Unlike the broad `cffi` suite, this lane never skips. CI supplies explicit
 //! C/Rust toolchains and a runner where cross execution is required.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -185,7 +187,7 @@ fn run() {{
         )
     });
     assert!(!out.rust.contains("/* unsupported"));
-    assert!(out.rust.contains("extern \"C\" fn user_increment"));
+    assert!(out.rust.contains("extern \"C\" fn __jet_increment"));
     assert!(out.rust.contains("#[repr(C, u8)]"));
     assert!(out.rust.contains(&format!("extern \"{}\"", if abi == "default" { "C" } else { &abi })));
 

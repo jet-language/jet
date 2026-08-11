@@ -237,7 +237,7 @@ fn render_reactive_tir_closure(body: &[TStmt], cx: &Cx, indent: usize) -> String
     format!("move || {{ {} }}", inner)
 }
 
-/// c109 Phase 7: an inherent method, emitted INSIDE an `impl user_<T> { … }` block
+/// c109 Phase 7: an inherent method, emitted INSIDE an `impl __jet_<T> { … }` block
 /// (the caller `emit_type_impl` already opened it). Byte-identical to `emit_method`:
 /// `    pub fn user_<name>(<self>, <params>) -> <ret> {\n … \n    }\n`. The `self`
 /// receiver form comes from `self_conv` (`Read`→`&self`, `Mutate`→`&mut self`,
@@ -367,10 +367,10 @@ pub(crate) fn emit_tir_method(
     out.push_str(&format!("{pad}}}\n"));
 }
 
-/// c109 Phase 12: a trait-impl method, emitted INSIDE an `impl Trait for user_<T> { … }`
+/// c109 Phase 12: a trait-impl method, emitted INSIDE an `impl Trait for __jet_<T> { … }`
 /// block (the caller `emit_trait_impl`/`emit_external_trait_impl` opened it).
 /// Byte-identical to `emit_trait_method` (Source/Codegen/Items.rs): a BARE method name
-/// (no `user_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
+/// (no `__jet_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
 /// an `unsafe ` prefix iff the source was an `#Unsafe fn`.
 pub(crate) fn emit_tir_trait_method(
     tir: &TFunc,
@@ -381,7 +381,7 @@ pub(crate) fn emit_tir_trait_method(
     out: &mut String,
 ) {
     // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Encode`/`impl T.Decode` method is
-    // bridged to the Rust `user_Encode`/`user_Decode` trait's method name + signature.
+    // bridged to the Rust `__jet_Encode`/`__jet_Decode` trait's method name + signature.
     // The user wrote the verbs `encode`/`decode` with Jet-facing signatures; the trait
     // declares `jet_encode(&self) -> jet_std::DataTree` /
     // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>`.
@@ -469,7 +469,7 @@ pub(crate) fn emit_tir_trait_method(
 }
 
 /// D-SERDE2 (card #131 S1-bridge): emit a hand `impl T.Encode`/`impl T.Decode` method,
-/// bridged to the Rust `user_Encode`/`user_Decode` trait signature. Body is lowered
+/// bridged to the Rust `__jet_Encode`/`__jet_Decode` trait signature. Body is lowered
 /// through the same TIR as any trait method; only the header (name + receiver/params +
 /// return) is the trait's, not the user's Jet-facing spelling.
 ///
@@ -523,7 +523,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
 }
 
 /// c109 Phase 15: a DELEGATION trait method (`using field`), emitted INSIDE the
-/// `impl Trait for user_<T> { … }` block `emit_external_trait_impl` opened. Byte-for-byte
+/// `impl Trait for __jet_<T> { … }` block `emit_external_trait_impl` opened. Byte-for-byte
 /// `emit_delegation_method` (Source/Codegen/Items.rs): the pre-rendered signature line,
 /// then the single forwarding call (`(self).<field>.<method>(args)`) at 8-space indent —
 /// with a trailing `;` for a unit method, none for a returning one — then `    }`.

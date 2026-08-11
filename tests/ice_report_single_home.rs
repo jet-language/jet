@@ -13,6 +13,8 @@
 //!     proves the hook's actual output: no raw Rust panic text / no
 //!     `RUST_BACKTRACE` hint, the branded report instead, exit code 101.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

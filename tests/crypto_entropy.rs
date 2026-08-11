@@ -1,3 +1,5 @@
+mod common;
+
 mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -398,8 +400,10 @@ fn live_provider_remains_independent_across_process_exec() {
 
 #[test]
 fn crypto_runtime_sources_contain_no_predictable_fallback() {
-    let process = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs");
-    let crypto_random = process
+    let crypto_entropy = include_str!(
+        "../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs"
+    );
+    let crypto_random = crypto_entropy
         .split("fn jet_std_crypto_random_bytes")
         .nth(1)
         .expect("crypto random shim exists")
@@ -407,7 +411,7 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
         .next()
         .expect("crypto random shim closes");
     let sources = [
-        include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs"),
+        crypto_entropy,
         include_str!("../crates/jet-pkg-model/src/Prelude/Crypto.rs"),
         crypto_random,
     ]

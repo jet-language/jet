@@ -14,18 +14,11 @@ fn run() {
         .{position: 20, velocity: 3},
         .{position: 30, velocity: 4}
     }
-    taskgroup g {
+    task.group g {
         left :: &particles[0]
         right :: &particles[2]
-        moved_left :: g.task => {
-            left.position += left.velocity
-            left.position
-        }
-        moved_right :: g.task => {
-            right.position += right.velocity
-            right.position
-        }
-        print(g.all([moved_left, moved_right]))
+        moved :: task.all { { left.position += left.velocity; left.position }, { right.position += right.velocity; right.position } }
+        print(moved)
     }
     print(particles[0].position)
     print(particles[1].position)
@@ -33,9 +26,9 @@ fn run() {
 
     // One borrow on its own is the same law with one child. The write still
     // lands on the owner, because the group joins before the block ends.
-    taskgroup solo {
+    task.group solo {
         only :: &particles[1]
-        done :: solo.task => {
+        done :: task {
             only.position += only.velocity
             only.position
         }

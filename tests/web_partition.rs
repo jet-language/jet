@@ -1,5 +1,7 @@
 //! D-WASM1=A (c123 M1): web JS/WASM partition sema.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -190,6 +192,7 @@ fn dom_fn() {
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
+            script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
@@ -203,7 +206,7 @@ fn dom_fn() {
         used_core: Default::default(),
         cffi: Default::default(),
         comptime_inputs: vec![],
-        import_targets: Default::default(),
+        name_ledger: jet::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: jet::Syntax::RuntimeLayer::Core,
         web_partitions: Default::default(),

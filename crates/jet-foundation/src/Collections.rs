@@ -1412,7 +1412,17 @@ fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 
 fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("join", 0) | (Syntax::METHOD_TASK_WAIT, 0) => Some(args.first().cloned()),
+        ("join", 0) | (Syntax::METHOD_TASK_WAIT, 0) => Some(Some(Type::Result {
+            ok: Box::new(args.first().cloned().unwrap_or(Type::Named(
+                Syntax::TYPE_UNIT.to_string(),
+            ))),
+            err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
+        })),
+        (Syntax::METHOD_TASK_SCOPE_JOIN, 0) => {
+            Some(Some(args.first().cloned().unwrap_or(Type::Named(
+                Syntax::TYPE_UNIT.to_string(),
+            ))))
+        }
         // D-DETACH1: fire-and-forget — consumes the Task handle, returns unit.
         (Syntax::TASK_DETACH, 0) => Some(None),
         // D-COROUTINE1=A: task handle control-plane hooks over the internal coroutine substrate.
@@ -1420,9 +1430,6 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
         | (Syntax::METHOD_TASK_PAUSE, 1)
         | (Syntax::METHOD_TASK_RESUME, 0)
         | (Syntax::METHOD_TASK_CANCEL, 0) => Some(None),
-        (Syntax::METHOD_TASK_TRACE, 0) => Some(Some(Type::String)),
-        // Failure query: "cancelled" when cancel was requested; empty string otherwise.
-        ("exception", 0) => Some(Some(Type::String)),
         _ => None,
     }
 }

@@ -6,6 +6,8 @@
 //! DISTINCT from the Rust bridge build toolchain (D-JPK-BUILDTOOL1); this is
 //! the Jet compiler pin.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

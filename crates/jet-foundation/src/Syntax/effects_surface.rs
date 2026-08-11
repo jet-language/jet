@@ -102,14 +102,20 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 /// registry row the rest of the compiler consumes is #1457's and #1458's job.
 pub const KW_MARKER: &str = "marker"; // D-META-NAME1, D-META-FORM1
 
+/// D-FACTDECL1=A: the one non-code fact declaration word —
+/// `fact Name($holds: …, $safe: …, …)`. It reuses the marker declaration
+/// parameter-list shape; the registry reads its rows from `Prelude/Facts.jet`.
+pub const KW_FACT: &str = "fact"; // D-FACTDECL1
+
 /// D-STATE1: the entry-transition placeholder — `#Transition(_, Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";
 
-/// D-EFF1 / D-QUAL1 (ratified 2026-06-22): the effect-restriction region marker,
-/// written `#Caps(Net, DB) { … }`. Inside the block, the body (and everything it
-/// transitively calls) may use only the listed effects; an out-of-set effect is
-/// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
+/// D-AUTHORITY-SCOPE1=A (ratified 2026-08-06, card #1500; implementation
+/// #1573): one scope marker serves both narrowed blocks and named handles.
+/// Bare `#Caps(Net, DB) { … }` narrows the block; `#Caps(g: FS, Net) { … }`
+/// binds `g` for the block. The `#Grant` retirement and migration belong to
+/// #1573. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
 /// D-SCAP1, amended by D-ARROW-CONTROL1=A: the scoped-capability grant marker,
@@ -130,24 +136,32 @@ pub const GRANT_BIND_SEPARATOR: &str = ":";
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
 
-/// D-TASKSCOPE1=A / D-NURSERY1=A / D-TASKGROUP-PARAM1=A: the compiler-private
-/// handle type bound by `taskgroup g { … }` and accepted as a direct
-/// named-function parameter. It routes `g.task` / `g.all` and carries the
-/// lexical group's internal collector through lowering; it is not a public
-/// first-class value.
+/// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
+pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";
+/// Compiler-only dispatch type for a `task` combinator not attached to a group.
+pub const INTERNAL_TASK_SURFACE_TYPE: &str = "\0jet.task.surface";
+/// Compiler-only dispatch type for a canonical combinator inside `task.group`.
+pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
+
+/// D-CONC-SPAWN1=D / D-TASKGROUP-PARAM1=A: the compiler-private handle type
+/// bound by `task.group g { … }` and accepted as a direct named-function
+/// parameter. It carries the lexical group's internal collector through
+/// lowering; it is not a public first-class value.
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
-/// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: scoped spawn method on a taskgroup
-/// handle — `g.task => expression` or `g.task => { … }`.
-pub const TASKGROUP_SPAWN_METHOD: &str = "task";
+/// Compiler-private dispatch method for canonical `task` spawn syntax.
+pub const TASKGROUP_SPAWN_METHOD: &str = "spawn";
 
-/// D-NURSERY1=A: join every task handle in a list — `g.all([h1, h2])`.
+/// D-NURSERY1=A, respelled `task.all { … }` by D-CONC-SPAWN1=D: join every
+/// branch, results in order.
 pub const TASKGROUP_ALL_METHOD: &str = "all";
 
-/// D-CONCCOMB1=A: first completed task wins — `g.race([h1, h2])`.
+/// D-CONCCOMB1=A, respelled `task.race { … }` by D-CONC-SPAWN1=D: first
+/// successful branch wins.
 pub const TASKGROUP_RACE_METHOD: &str = "race";
 
-/// D-CONCCOMB1=A: first completed result — `g.any([h1, h2])` (v1: same join race).
+/// D-CONCCOMB1=A, respelled `task.any { … }` by D-CONC-SPAWN1=D: first
+/// completed branch wins (v1: same join race).
 pub const TASKGROUP_ANY_METHOD: &str = "any";
 
 /// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.
@@ -170,6 +184,10 @@ pub const SELECT_WAIT_METHOD: &str = "wait";
 
 /// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
 pub const METHOD_TASK_WAIT: &str = "wait";
+/// Compiler-private consuming join used by task-group scope cleanup. Unlike
+/// user `.join()`, it unwraps `TaskFailure` so a child panic cannot vanish when
+/// the generated cleanup expression's value is discarded.
+pub const METHOD_TASK_SCOPE_JOIN: &str = "\0jet.task.scope_join";
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 pub const METHOD_TASK_PAUSE: &str = "pause";
 /// D-COROUTINE1=A: clear the paused marker in the control plane.
@@ -182,8 +200,6 @@ pub const METHOD_TASK_TRACE: &str = "trace";
 // D-VERDICT-1323-1 (ratified 2026-07-30): the list twin of each single-task
 // method, so a group of handles is driven without writing a loop. Each name
 // means exactly what its single-handle counterpart means, applied in order.
-/// Spawn `n` tasks from one callable — `tasks.spawn_group(n, fn) => [Task<T>]`.
-pub const CORE_TASKS_SPAWN_GROUP: &str = "spawn_group";
 /// Wait for every task and return the results in list order (consumes).
 pub const METHOD_TASK_WAIT_ALL: &str = "wait_all";
 /// `join_all`'s method spelling — the same mechanism as `wait_all` (consumes).
@@ -614,7 +630,7 @@ pub const ENV_EXPORT_VERB: &str = "export";
 pub const ENV_TEST_VERB: &str = "test";
 /// D-ENV-FILES1=A: plan and apply the managed-file graph for the active env.
 pub const ENV_SYNC_VERB: &str = "sync";
-/// D-ENV-PROFILE1=C: disclose the selected profile and typed environment facts.
+/// D-ENV-PROFILE1=C: disclose the selected preset and typed environment facts.
 pub const ENV_INFO_VERB: &str = "info";
 /// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
 /// auto-activation (and drop any active env) in the current shell.
@@ -677,7 +693,7 @@ pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";
 
-/// D-JPK-PROFILE1=D: source-backed package profile inspection and generation
+/// D-JPK-PROFILE1=D: source-backed package generation inspection and generation
 /// commands. The first delivery slice exposes `plan`; switching and history
 /// are owned by the dependent profile cards.
 pub const PROFILE_SUBCOMMAND: &str = "profile";

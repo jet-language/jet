@@ -320,7 +320,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         }
     } else if stem == "game/raylib_window" {
         assert!(
-            !user_code.contains("unsafe fn user_"),
+            !user_code.contains("unsafe fn __jet_"),
             "raylib user functions must stay safe; bridge unsafe stays in vetted prelude"
         );
     } else {

@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use crate::AST::ProgramBundle;
+use crate::AST::{ParamZone, ProgramBundle};
 use jet_driver::QueryService::CompilerQueries;
 #[cfg(test)]
 use jet_queries::{FileKey, QueryKey};
@@ -1100,12 +1100,15 @@ fn signature_help_response(
         None => return Some(response(id, "null")),
     };
 
-    let (label, params_json, param_count) = match &def.kind {
-        SymKind::Function { params, ret, effects, effect_via } => {
-            let parts: Vec<String> = params
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, ty.name()))
-                .collect();
+    let (label, params_json, active) = match &def.kind {
+        SymKind::Function {
+            params,
+            param_contract,
+            ret,
+            effects,
+            effect_via,
+        } => {
+            let parts = jet_semindex::function_parameter_parts(params, param_contract);
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
             if let Some((param, _)) = effect_via {
                 label.push_str(" =[via ");
@@ -1121,19 +1124,19 @@ fn signature_help_response(
             if let Some(ret) = ret {
                 label.push_str(&format!(" {}", ret.name()));
             }
-            let params_json = parts
+            let parameter_parts: Vec<&String> = parts
                 .iter()
-                .map(|part| format!(r#"{{"label":"{}"}}"#, json_escape(part)))
+                .filter(|part| part.as_str() != "/" && part.as_str() != "*")
+                .collect();
+            let params_json = parameter_parts
+                .iter()
+                .map(|part| format!(r#"{{"label":"{}"}}"#, json_escape(part.as_str())))
                 .collect::<Vec<_>>()
                 .join(",");
-            (label, params_json, parts.len())
+            let active = signature_active_parameter(&call, param_contract, parameter_parts.len());
+            (label, params_json, active)
         }
         _ => return Some(response(id, "null")),
-    };
-    let active = if param_count == 0 {
-        0
-    } else {
-        call.active_param.min(param_count.saturating_sub(1))
     };
     let result = format!(
         r#"{{"signatures":[{{"label":"{}","parameters":[{}]}}],"activeSignature":0,"activeParameter":{}}}"#,
@@ -2021,6 +2024,7 @@ fn inlay_hint_response(
 struct ActiveCall {
     name: String,
     active_param: usize,
+    active_label: Option<String>,
 }
 
 fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
@@ -2028,20 +2032,75 @@ fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
     let mut i = offset.min(bytes.len());
     let mut nested = 0usize;
     let mut active_param = 0usize;
+    let mut active_start = i;
     while i > 0 {
         i -= 1;
         match bytes[i] {
             b')' | b']' | b'}' => nested += 1,
             b'(' if nested == 0 => {
                 let name = callee_name_before_paren(bytes, i)?;
-                return Some(ActiveCall { name, active_param });
+                if active_param == 0 {
+                    active_start = i + 1;
+                }
+                let active_label = call_argument_label(&src[active_start..offset.min(src.len())]);
+                return Some(ActiveCall {
+                    name,
+                    active_param,
+                    active_label,
+                });
             }
             b'(' | b'[' | b'{' => nested = nested.saturating_sub(1),
-            b',' if nested == 0 => active_param += 1,
+            b',' if nested == 0 => {
+                if active_param == 0 {
+                    active_start = i + 1;
+                }
+                active_param += 1;
+            }
             _ => {}
         }
     }
     None
+}
+
+fn call_argument_label(argument: &str) -> Option<String> {
+    let argument = argument.trim_start();
+    let label_len = argument
+        .as_bytes()
+        .iter()
+        .take_while(|byte| is_ident_byte(**byte))
+        .count();
+    if label_len == 0 {
+        return None;
+    }
+    let rest = argument[label_len..].trim_start();
+    if !rest.starts_with(':') || rest.starts_with("::") {
+        return None;
+    }
+    Some(argument[..label_len].to_string())
+}
+
+fn signature_active_parameter(
+    call: &ActiveCall,
+    contract: &[(String, String, ParamZone)],
+    param_count: usize,
+) -> usize {
+    if param_count == 0 {
+        return 0;
+    }
+    if let Some(label) = &call.active_label {
+        if let Some(index) = contract.iter().position(|(_, public, zone)| {
+            *zone != ParamZone::PositionalOnly && public == label
+        }) {
+            return index.min(param_count - 1);
+        }
+    }
+    contract
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, _, zone))| *zone != ParamZone::LabelOnly)
+        .nth(call.active_param)
+        .map(|(index, _)| index.min(param_count - 1))
+        .unwrap_or_else(|| call.active_param.min(param_count - 1))
 }
 
 fn callee_name_before_paren(bytes: &[u8], paren: usize) -> Option<String> {

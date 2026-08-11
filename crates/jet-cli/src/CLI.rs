@@ -790,7 +790,12 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--freestanding", help: "with build/run: target a system without an operating system" },
     // D-CTEFFECT1: comptime effect tier gate.
     FlagSpec { long: "--allow-impure", help: "with build/run: allow explicitly gated compile-time effects" },
-    FlagSpec { long: "--target", help: "with build: compile for a target platform" },
+    FlagSpec { long: "--target", help: "with build: select a target: a rustc triple or board.<name>" },
+    // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
+    // preset and has no retired-spelling alias.
+    FlagSpec { long: "--env", help: "with env/run/dev/test: select one declared env.<name> module" },
+    // D-CONF-WORD1=A: `--preset` selects a named environment composition.
+    FlagSpec { long: "--preset", help: "with env/run/dev/test: select one declared environment preset" },
     FlagSpec {
         long: "--explain-partition",
         help: "with build --target=web: show which code becomes JavaScript or WebAssembly",
@@ -802,9 +807,9 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },
     FlagSpec { long: "--emit-generated", help: "with build: copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "short form of --update-snapshots" },
-    // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
+    // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
     FlagSpec { long: "--release", help: "with build/run: optimize for release" },
-    FlagSpec { long: "--profile", help: "with build/run: use --profile=<name>" },
+    FlagSpec { long: "--profile", help: "with build/run: how hard to optimize: release, debug, ci, or a named optimization bundle" },
     FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },
@@ -1090,7 +1095,7 @@ pub fn completions_for_program(
         "bash" => {
             if schema.commands.is_empty() {
                 return Some(format!(
-                    "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F _jet_program_completion -- {}\n",
+                    "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- {}\n",
                     jet_foundation::CLISchema::RECORD_VERSION,
                     shell_single_quote(&root_words.join(" ")),
                     shell_single_quote(command_name),
@@ -1102,7 +1107,7 @@ pub fn completions_for_program(
                 shell_single_quote(&input_words(&command.inputs).join(" ")),
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
-                "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F _jet_program_completion -- {}\n",
+                "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {}\n",
                 jet_foundation::CLISchema::RECORD_VERSION,
                 shell_single_quote(&root_words.join(" ")),
                 shell_single_quote(&input_words(&schema.inputs).join(" ")),

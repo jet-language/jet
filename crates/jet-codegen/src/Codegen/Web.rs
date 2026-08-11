@@ -1514,10 +1514,16 @@ fn bundle_module_index_for_alias(bundle: &ProgramBundle, alias: &str) -> Option<
         .find_map(|import| {
             (import.import_alias() == alias)
                 .then(|| {
+                    if bundle
+                        .name_ledger
+                        .effective_alias(bundle.entry, alias)
+                        .is_none()
+                    {
+                        return None;
+                    }
                     bundle
-                        .import_targets
-                        .get(&(bundle.entry, import.span))
-                        .copied()
+                        .name_ledger
+                        .import_target(bundle.entry, import.span)
                 })
                 .flatten()
         })
@@ -1832,7 +1838,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         emit_wasm_uninit_storage(&mut out);
     }
     out.push_str(
-        "trait user_Display { fn display(&self) -> String; }\n\
+        "trait __jet_Display { fn display(&self) -> String; }\n\
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
@@ -2697,14 +2703,14 @@ fn emit_wasm_body(
                     Some(step) => {
                         let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
                         out.push_str(&format!("{pad}{{\n"));
-                        out.push_str(&format!("{pad}    let _jet_loop_start = {start};\n"));
-                        out.push_str(&format!("{pad}    let _jet_loop_end = {end};\n"));
-                        out.push_str(&format!("{pad}    let _jet_loop_stride = {step};\n"));
+                        out.push_str(&format!("{pad}    let __jet_loop_start = {start};\n"));
+                        out.push_str(&format!("{pad}    let __jet_loop_end = {end};\n"));
+                        out.push_str(&format!("{pad}    let __jet_loop_stride = {step};\n"));
                         out.push_str(&format!(
-                            "{pad}    assert!(_jet_loop_stride > 0, \"E0123: loop stride must be positive\");\n"
+                            "{pad}    assert!(__jet_loop_stride > 0, \"E0123: loop stride must be positive\");\n"
                         ));
                         out.push_str(&format!(
-                            "{pad}    for {loop_var} in (_jet_loop_start{range_op}_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n"
+                            "{pad}    for {loop_var} in (__jet_loop_start{range_op}__jet_loop_end).step_by(__jet_loop_stride as usize) {{\n"
                         ));
                         emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
                         out.push_str(&format!("{pad}    }}\n"));
@@ -2741,14 +2747,14 @@ fn emit_wasm_body(
                 match var2 {
                     Some(v2) => {
                         out.push_str(&format!(
-                            "{pad}for (_jet_i, _jet_item) in {iter}.enumerate() {{\n"
+                            "{pad}for (__jet_i, __jet_item) in {iter}.enumerate() {{\n"
                         ));
                         out.push_str(&format!(
-                            "{pad}    let {} = _jet_i as i64;\n",
+                            "{pad}    let {} = __jet_i as i64;\n",
                             mangle(var)
                         ));
                         out.push_str(&format!(
-                            "{pad}    let {} = _jet_item;\n",
+                            "{pad}    let {} = __jet_item;\n",
                             mangle(v2)
                         ));
                         emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
@@ -2794,7 +2800,7 @@ fn emit_wasm_body(
                 )?;
                 let inner = "    ".repeat(indent + 1);
                 if step.is_some() {
-                    out.push_str(&format!("{inner}let mut _jet_loop_first = true;\n"));
+                    out.push_str(&format!("{inner}let mut __jet_loop_first = true;\n"));
                 }
                 out.push_str(&format!(
                     "{inner}{}loop {{\n",
@@ -2803,7 +2809,7 @@ fn emit_wasm_body(
                 let body_pad = "    ".repeat(indent + 2);
                 if let Some(step) = step {
                     out.push_str(&format!(
-                        "{body_pad}if _jet_loop_first {{ _jet_loop_first = false; }} else {{\n"
+                        "{body_pad}if __jet_loop_first {{ __jet_loop_first = false; }} else {{\n"
                     ));
                     emit_wasm_body(
                         std::slice::from_ref(step.as_ref()),
@@ -2824,11 +2830,17 @@ fn emit_wasm_body(
                 out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::Break(label) => match label {
-                Some(name) => out.push_str(&format!("{pad}break 'jet_{name};\n")),
+                Some(name) => out.push_str(&format!(
+                    "{pad}break '{};\n",
+                    mangle(name)
+                )),
                 None => out.push_str(&format!("{pad}break;\n")),
             },
             TIR::TStmt::Continue(label) => match label {
-                Some(name) => out.push_str(&format!("{pad}continue 'jet_{name};\n")),
+                Some(name) => out.push_str(&format!(
+                    "{pad}continue '{};\n",
+                    mangle(name)
+                )),
                 None => out.push_str(&format!("{pad}continue;\n")),
             },
             TIR::TStmt::IndexAssign {
@@ -2916,7 +2928,7 @@ fn emit_wasm_body(
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "    ".repeat(indent + 1);
                 out.push_str(&format!(
-                    "{inner}let _jet_switch_subject = &({subject_str});\n"
+                    "{inner}let __jet_switch_subject = &({subject_str});\n"
                 ));
                 for (i, (cond, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
@@ -2973,7 +2985,7 @@ fn emit_wasm_body(
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "    ".repeat(indent + 1);
                 out.push_str(&format!(
-                    "{inner}let _jet_switch_subject = &({subject_str});\n"
+                    "{inner}let __jet_switch_subject = &({subject_str});\n"
                 ));
                 for (i, (lo, hi, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
@@ -3122,11 +3134,11 @@ fn wasm_emit_expr(
                     return Ok(format!("{}.to_string()", json_quote(text)));
                 }
             }
-            let mut value = String::from("{ let mut _jet_s = String::new(); ");
+            let mut value = String::from("{ let mut __jet_s = String::new(); ");
             for part in parts {
                 match part {
                     TIR::TStrPart::Lit(text) if !text.is_empty() => {
-                        value.push_str(&format!("_jet_s.push_str({}); ", json_quote(text)));
+                        value.push_str(&format!("__jet_s.push_str({}); ", json_quote(text)));
                     }
                     TIR::TStrPart::Lit(_) => {}
                     TIR::TStrPart::Interp(interp, format) => {
@@ -3141,14 +3153,14 @@ fn wasm_emit_expr(
                             }
                         };
                         value.push_str(&format!(
-                            "_jet_s.push_str(&format!({:?}, {})); ",
+                            "__jet_s.push_str(&format!({:?}, {})); ",
                             spec,
                             wasm_emit_expr(interp, funcs, file_prefix, reconstructions)?
                         ));
                     }
                 }
             }
-            value.push_str("_jet_s }");
+            value.push_str("__jet_s }");
             value
         }
         TIR::TExprKind::Local(local) if local.uninit_scalar => {
@@ -3744,7 +3756,7 @@ fn param_names(params: &[(String, Type)]) -> String {
 }
 
 fn web_name(name: &str) -> &str {
-    name.strip_prefix("user_").unwrap_or(name)
+    name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name)
 }
 
 fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
@@ -3757,7 +3769,7 @@ fn local_web_key(file_prefix: Option<&str>, rust_fn: &str) -> String {
 
 fn web_place(name: &str) -> String {
     let name = name.strip_prefix("(*").and_then(|s| s.strip_suffix(')')).unwrap_or(name);
-    if let Some(source) = name.strip_prefix("_jet_cap_user_") {
+    if let Some(source) = name.strip_prefix("__jet_cap_") {
         return source.to_string();
     }
     web_name(name).to_string()
@@ -3783,28 +3795,28 @@ fn wasm_tir_place(place: &TIR::TPlace) -> Result<String, ()> {
 
 fn js_label_prefix(label: &Option<String>) -> String {
     match label {
-        Some(name) => format!("jet_{name}: "),
+        Some(name) => format!("{}: ", mangle(name)),
         None => String::new(),
     }
 }
 
 fn js_break_stmt(label: &Option<String>) -> String {
     match label {
-        Some(name) => format!("break jet_{name};"),
+        Some(name) => format!("break {};", mangle(name)),
         None => "break;".to_string(),
     }
 }
 
 fn js_continue_stmt(label: &Option<String>) -> String {
     match label {
-        Some(name) => format!("continue jet_{name};"),
+        Some(name) => format!("continue {};", mangle(name)),
         None => "continue;".to_string(),
     }
 }
 
 fn wasm_label_prefix(label: &Option<String>) -> String {
     match label {
-        Some(name) => format!("'jet_{name}: "),
+        Some(name) => format!("'{}: ", mangle(name)),
         None => String::new(),
     }
 }
@@ -4217,7 +4229,7 @@ fn emit_tir_js_body(
                 )?;
                 let inner = "  ".repeat(indent + 1);
                 if step.is_some() {
-                    out.push_str(&format!("{inner}let _jet_loop_first = true;\n"));
+                    out.push_str(&format!("{inner}let __jet_loop_first = true;\n"));
                 }
                 out.push_str(&format!(
                     "{inner}{}while (true) {{\n",
@@ -4226,7 +4238,7 @@ fn emit_tir_js_body(
                 let body_pad = "  ".repeat(indent + 2);
                 if let Some(step) = step {
                     out.push_str(&format!(
-                        "{body_pad}if (_jet_loop_first) {{ _jet_loop_first = false; }} else {{\n"
+                        "{body_pad}if (__jet_loop_first) {{ __jet_loop_first = false; }} else {{\n"
                     ));
                     emit_tir_js_body(
                         std::slice::from_ref(step.as_ref()),

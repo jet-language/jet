@@ -6,6 +6,8 @@
 //!
 //! Test failures show the first diverging expected/actual line.
 
+mod common;
+
 use jet::REPL::{run_transcript, run_transcript_with_flags};
 
 fn run_repl_process(state: &std::path::Path, input: &[u8], limit: Option<&str>) -> std::process::Output {
@@ -1227,7 +1229,7 @@ fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
 #[test]
 fn repl_core_json_parse_inline() {
     let inputs = &[
-        "use core.encoding.json as json",
+        "use core.[encoding.json]",
         "json.to_string(json.parse(\"[42]\") ?? panic(\"bad\"))",
     ];
     let out = run_transcript(inputs, None);

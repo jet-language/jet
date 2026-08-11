@@ -1,3 +1,5 @@
+mod common;
+
 // Card #1658: DomRuntime.js is claimed to be a faithful line-by-line port of
 // the Rust `JetBackend` pipeline (Ui.rs), but nothing checked that. This
 // structural-diff guard extracts the measure/layout/paint/on_event stage

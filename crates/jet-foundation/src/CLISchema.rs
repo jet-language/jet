@@ -252,15 +252,10 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
         if wanted_alias.is_some_and(|alias| import.import_alias() != alias) {
             return None;
         }
-        let target = bundle.import_targets.get(&(source, import.span)).copied()?;
-        bundle.modules[target]
-            .items
-            .iter()
-            .any(|item| match item {
-                Item::Struct(structure) => structure.is_pub && structure.name == leaf,
-                Item::Enum(enumeration) => enumeration.is_pub && enumeration.name == leaf,
-                _ => false,
-            })
+        let target = bundle.name_ledger.import_target(source, import.span)?;
+        bundle
+            .name_ledger
+            .visible(source, target, leaf)
             .then_some(target)
     }).last()
 }

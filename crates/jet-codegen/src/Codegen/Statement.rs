@@ -31,6 +31,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_service_receipt = etype == Some("ServiceReceipt");
     let is_service_error = etype == Some("ServiceError");
     let is_hook_outcome = etype == Some("HookOutcome");
+    let is_data_event = etype == Some("DataEvent");
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
     let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
@@ -52,9 +53,11 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             if is_json_type_name(t) {
                 format!("{}jet_std::DataTree", cx.root_prefix)
             } else if t.starts_with("__JetUnion_") {
-                format!("user_{t}")
+                user_type_rust(t)
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
+            } else if t == "DataEvent" {
+                format!("{}jet_std::DataEvent", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_ERROR {
                 format!("{}jet_std::IOError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
@@ -75,9 +78,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
-                format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
+                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(t))
             } else {
-                format!("user_{}", t)
+                user_type_rust(t)
             }
         })
         .unwrap_or_else(|| {
@@ -87,12 +90,12 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                     return format!("{}JetKey", cx.root_prefix);
                 }
             }
-            "user_TYPE".to_string()
+            mangle("TYPE")
         });
     // Variant names are mangled for user enums, but JSON/Key/union tags keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
+        if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
             v.to_string()
         } else {
             mangle_variant(v)
@@ -142,7 +145,14 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
                 let real_names = variant_field_names(cx, variant).map(|names| {
                     if is_email || is_auth || is_service_receipt || is_service_error {
-                        names.into_iter().map(|name| name.strip_prefix("user_").unwrap_or(&name).to_string()).collect()
+                        names
+                            .into_iter()
+                            .map(|name| {
+                                name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    .unwrap_or(&name)
+                                    .to_string()
+                            })
+                            .collect()
                     } else {
                         names
                     }
@@ -261,6 +271,19 @@ pub(crate) fn variant_binding_types_for_enum(
             _ => Some(Vec::new()),
         };
     }
+    if enum_name == "DataEvent" {
+        return match variant {
+            "Bool" => Some(vec![Type::Bool]),
+            "Int" => Some(vec![Type::Int]),
+            "Float" => Some(vec![Type::Float]),
+            "Text" | "Key" => Some(vec![Type::String]),
+            "Bytes" => Some(vec![Type::List(Box::new(Type::Int))]),
+            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => {
+                Some(Vec::new())
+            }
+            _ => None,
+        };
+    }
     let resolved = cx
         .core_qualified_rust_type_name(enum_name)
         .unwrap_or(enum_name);
@@ -318,7 +341,12 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                         .iter()
                         .zip(&slot_pats)
                         .map(|(name, pattern)| {
-                            let name = if plain { name.strip_prefix("user_").unwrap_or(name) } else { name };
+                            let name = if plain {
+                                name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    .unwrap_or(name)
+                            } else {
+                                name
+                            };
                             format!("{name}: {pattern}")
                         })
                         .collect::<Vec<_>>();

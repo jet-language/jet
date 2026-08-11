@@ -4,6 +4,8 @@
 //! that cannot execute, removes definitely test-only items, and treats unknown
 //! cfg predicates conservatively as production.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

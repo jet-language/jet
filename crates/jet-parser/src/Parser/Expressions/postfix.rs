@@ -67,33 +67,7 @@ impl<'a> Parser<'a> {
                         } else {
                             Vec::new()
                         };
-                        // D-TASKSCOPE1=A / D-ARROW-CONTROL1: `g.task => body`
-                        // desugars to a zero-parameter lambda.
-                        if member == Syntax::TASKGROUP_SPAWN_METHOD
-                            && matches!(self.peek().kind, TokKind::LambdaArrow)
-                        {
-                            let lam = self.parse_task_body_lambda()?;
-                            let lam_span = lam.span;
-                            expr = Expr::MethodCall {
-                                receiver: Box::new(expr),
-                                method: member.clone(),
-                                method_span: member_span,
-                                owner_type_args: Vec::new(),
-                                type_args,
-                                args: vec![CallArg {
-                                    convention: AccessConvention::Read,
-                                    expr: Expr::Lambda(lam),
-                                    span: lam_span,
-                                    flags: crate::AST::CallArgFlags::default(),
-                                    label: None,
-                                    spread: false,
-                                }],
-                                recv_type: None,
-                                resolved_ret: None,
-                                checked_widen: false,
-                            };
-                            continue;
-                        } else if matches!(self.peek().kind, TokKind::LParen) {
+                        if matches!(self.peek().kind, TokKind::LParen) {
                             self.bump();
                             let mut args = Vec::new();
                             if member == Syntax::METHOD_TAKE_PATTERN {
@@ -225,33 +199,6 @@ impl<'a> Parser<'a> {
                         };
                     }
                     TokKind::LambdaArrow => {
-                        // D-TASKSCOPE1=A / D-ARROW-CONTROL1: `g.task => body`
-                        // after `.task` was parsed as a field.
-                        if let Expr::Field(base, member, member_span) = &expr {
-                            if member == Syntax::TASKGROUP_SPAWN_METHOD {
-                                let lam = self.parse_task_body_lambda()?;
-                                let lam_span = lam.span;
-                                expr = Expr::MethodCall {
-                                    receiver: base.clone(),
-                                    method: member.clone(),
-                                    method_span: *member_span,
-                                    owner_type_args: Vec::new(),
-                                    type_args: Vec::new(),
-                                    args: vec![CallArg {
-                                        convention: AccessConvention::Read,
-                                        expr: Expr::Lambda(lam),
-                                        span: lam_span,
-                                        flags: crate::AST::CallArgFlags::default(),
-                                        label: None,
-                                        spread: false,
-                                    }],
-                                    recv_type: None,
-                                    resolved_ret: None,
-                                    checked_widen: false,
-                                };
-                                continue;
-                            }
-                        }
                         break;
                     }
                     TokKind::LBrace => {

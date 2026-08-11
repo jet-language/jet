@@ -7,7 +7,7 @@
 //! B1 — `JSON.Text(x)` on a borrowed (`view`) parameter moved out of the
 //!      borrow; sema must insert a clone.
 //! B2 — field access on a core struct (`ProcessResult.code`) mangled the field
-//!      name to `user_code`; the core struct has unprefixed fields.
+//!      name to `__jet_code`; the core struct has unprefixed fields.
 //! B3 — `.get(k)` on a `Map` bound from an `Object(root)` pattern lowered to
 //!      list indexing; the binding must keep its `Map` type.
 //! B4 — `for k, v in recv.field { … }` parsed `recv.field { … }` as a struct
@@ -153,7 +153,7 @@ fn run() {
 
 /// D-EPPAYLOAD1: an OWNED LOCAL moved into an enum-payload construction, then
 /// read again afterward, used to move it for real in the generated Rust
-/// (`user_Wrapped::user_Value(user_s)`) with no jet-level diagnostic — the
+/// (`__jet_Wrapped::__jet_Value(__jet_s)`) with no jet-level diagnostic — the
 /// later `print("{s}")` reached rustc as a raw, unreported E0382. Sema now
 /// auto-clones an owning-position bare ident that is still live after the
 /// construction (the same rule `clone_borrowed_struct_field_value` already

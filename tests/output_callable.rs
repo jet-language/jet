@@ -100,7 +100,7 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
 
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("jet_runtime_boundary(|| user_start())"));
+    assert!(rust.contains("jet_runtime_boundary(|| __jet_start())"));
     assert!(matches!(
         jet::Interpreter::run_checked(&bundle, false),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -164,11 +164,11 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
         "effect row should be copied from sema"
     );
     assert_eq!(output.authority.as_str(), "safe-jet");
-    assert!(facts.reference_anchors.values().any(|anchor| {
+    assert!(facts.name_ledger.references().values().any(|anchor| {
         anchor.module_path == output.source_path && anchor.def_span == output.definition
     }));
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("user_helper::user_start()"), "{rust}");
+    assert!(rust.contains("__jet_helper::__jet_start()"), "{rust}");
     assert!(matches!(
         jet::Interpreter::run_checked(&bundle, false),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -309,8 +309,8 @@ fn checked_default_selects_one_of_multiple_executables() {
     }).expect("checked default selects one Output");
     assert_eq!(selected.address, "two");
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("jet_runtime_boundary(|| user_second())"), "{rust}");
-    assert!(!rust.contains("jet_runtime_boundary(|| user_first())"), "{rust}");
+    assert!(rust.contains("jet_runtime_boundary(|| __jet_second())"), "{rust}");
+    assert!(!rust.contains("jet_runtime_boundary(|| __jet_first())"), "{rust}");
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     assert_eq!(schema.entry_type, "Args");
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
     assert!(rust.contains("__jet_cli_spec_Args"), "{rust}");
-    assert!(rust.contains("user_launch(&__args)"), "{rust}");
+    assert!(rust.contains("__jet_launch(&__args)"), "{rust}");
 }
 
 #[test]

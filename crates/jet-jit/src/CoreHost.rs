@@ -8,6 +8,8 @@
 use super::Concurrency;
 use std::cell::{Cell, RefCell};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
@@ -73,6 +75,173 @@ extern "C" fn jet_jit_os_hostname() -> i64 {
         })
         .unwrap_or_else(|| "localhost".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(host))
+}
+
+// The resident JIT cannot hand a Rust `Rc` callback to the process signal
+// boundary. Its one callback ABI is `(function address, optional capture-list
+// handle)`, and this adapter owns the same signal-mark/dispatcher split as the
+// embedded Prelude. The dispatcher is the only place that invokes JIT code.
+mod jit_os_interrupt {
+    use super::{mpsc, AtomicUsize, Concurrency, OnceLock, Ordering};
+
+    static PENDING: AtomicUsize = AtomicUsize::new(0);
+    static DISPATCH: OnceLock<Result<mpsc::Sender<DispatchCommand>, String>> = OnceLock::new();
+
+    struct Command {
+        callback: usize,
+        env: i64,
+        ready: mpsc::SyncSender<()>,
+    }
+
+    enum DispatchCommand {
+        Register(Command),
+        Reset(mpsc::SyncSender<()>),
+    }
+
+    fn note_interrupt() {
+        PENDING.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(unix)]
+    extern "C" fn unix_mark(_: i32) {
+        note_interrupt();
+    }
+
+    #[cfg(unix)]
+    fn install_platform_handler() -> Result<(), String> {
+        extern "C" {
+            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+        }
+        const SIGINT: i32 = 2;
+        let previous = unsafe { signal(SIGINT, unix_mark) };
+        if previous == usize::MAX {
+            Err("could not install the SIGINT handler".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(windows)]
+    unsafe extern "system" fn windows_mark(kind: u32) -> i32 {
+        if kind == 0 {
+            note_interrupt();
+            1
+        } else {
+            0
+        }
+    }
+
+    #[cfg(windows)]
+    fn install_platform_handler() -> Result<(), String> {
+        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
+        extern "system" {
+            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
+        }
+        unsafe { SetConsoleCtrlHandler(None, 0) };
+        let installed = unsafe { SetConsoleCtrlHandler(Some(windows_mark), 1) };
+        if installed == 0 {
+            Err("could not install the Windows console Ctrl-C handler".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn install_platform_handler() -> Result<(), String> {
+        Err("interrupt handling is unavailable on this target".to_string())
+    }
+
+    fn dispatcher() -> Result<&'static mpsc::Sender<DispatchCommand>, String> {
+        match DISPATCH.get_or_init(|| {
+            install_platform_handler()?;
+            let (tx, rx) = mpsc::channel::<DispatchCommand>();
+            std::thread::Builder::new()
+                .name("jet-jit-interrupt".to_string())
+                .spawn(move || {
+                    let mut handlers: Vec<(usize, i64)> = Vec::new();
+                    loop {
+                        match rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                            Ok(DispatchCommand::Register(command)) => {
+                                handlers.push((command.callback, command.env));
+                                let _ = command.ready.send(());
+                            }
+                            Ok(DispatchCommand::Reset(ready)) => {
+                                handlers.clear();
+                                PENDING.store(0, Ordering::Release);
+                                let _ = ready.send(());
+                            }
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        }
+                        let count = PENDING.swap(0, Ordering::Acquire);
+                        for _ in 0..count {
+                            for &(callback, env) in &handlers {
+                                Concurrency::with_http_jet_runtime(|| {
+                                    // The callback ABI is selected by whether a
+                                    // capture-list handle was supplied. Both
+                                    // forms are emitted by the same TIR node.
+                                    unsafe {
+                                        if env == 0 {
+                                            let callback: extern "C" fn() =
+                                                std::mem::transmute(callback);
+                                            callback();
+                                        } else {
+                                            let callback: extern "C" fn(i64) =
+                                                std::mem::transmute(callback);
+                                            callback(env);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                })
+                .map_err(|e| format!("could not start interrupt dispatcher: {e}"))?;
+            Ok(tx)
+        }) {
+            Ok(tx) => Ok(tx),
+            Err(message) => Err(message.clone()),
+        }
+    }
+
+    pub(super) fn register(callback: i64, env: i64) {
+        let result = (|| {
+            let tx = dispatcher()?;
+            let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+            tx.send(DispatchCommand::Register(Command {
+                callback: callback as usize,
+                env,
+                ready: ready_tx,
+            }))
+            .map_err(|_| "interrupt dispatcher stopped".to_string())?;
+            ready_rx
+                .recv()
+                .map_err(|_| "interrupt dispatcher stopped".to_string())
+        })();
+        if let Err(message) = result {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap(&format!("core.os.on_interrupt: {message}"));
+            });
+        }
+    }
+
+    pub(super) fn reset() {
+        let Some(Ok(tx)) = DISPATCH.get() else {
+            return;
+        };
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        if tx.send(DispatchCommand::Reset(ready_tx)).is_ok() {
+            let _ = ready_rx.recv();
+        }
+    }
+}
+
+extern "C" fn jet_jit_os_on_interrupt(callback: i64, env: i64) {
+    jit_os_interrupt::register(callback, env);
+}
+
+pub(crate) fn reset_jit_interrupts() {
+    jit_os_interrupt::reset();
 }
 
 // ── core.os extras (#1465) — mirrors jet_std_os_* in OsExtra.rs / FSIoEnvOsTesting.rs
@@ -2170,6 +2339,34 @@ extern "C" fn jet_jit_process_exit(code: i64) {
     });
 }
 
+// D-LIB-CALLGRANT1=A: the host only converts heap handles into the exact
+// Prelude loader inputs. Identity/effect checks and native mapping stay in
+// `jet_jit::Mod`, which includes the shared Mod Prelude.
+extern "C" fn jet_jit_mod_load(path: i64, grant: i64) -> i64 {
+    let path = clone_string(path);
+    let read = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.record_get_int(grant, 0)?;
+        let len = rt.heap.list_len(list)?;
+        (0..len)
+            .map(|index| rt.heap.list_get_string(list, index))
+            .collect::<Option<Vec<_>>>()
+    });
+    let Some(read) = read else {
+        return result_err_msg("Mod.load expects a ModGrant.{ read: [String] }");
+    };
+    match crate::Mod::load(path, read) {
+        Ok(handle) => result_ok(handle as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+
+extern "C" fn jet_jit_mod_on_tick(module: i64, dt: i64) -> i64 {
+    match crate::Mod::on_tick(module, dt) {
+        Ok(value) => result_ok(value as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+
 host_fns! {
     struct CoreHostFns;
     register: register_core_host_symbols;
@@ -2287,6 +2484,7 @@ host_fns! {
     os_wait: "jet_jit_os_wait" => jet_jit_os_wait: sig_i64;
     os_waitpid: "jet_jit_os_waitpid" => jet_jit_os_waitpid: sig_i64_i64_i64;
     os_utime: "jet_jit_os_utime" => jet_jit_os_utime: sig_i64_i64_i64_i64;
+    os_on_interrupt: "jet_jit_os_on_interrupt" => jet_jit_os_on_interrupt: sig_void_i64_i64;
     os_atexit: "jet_jit_os_atexit" => jet_jit_os_atexit: sig_unary_i64;
     os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
     log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;
@@ -2333,6 +2531,8 @@ host_fns! {
     fs_temp_dir: "jet_jit_fs_temp_dir" => jet_jit_fs_temp_dir: sig_unary_i64;
     fs_temp_file: "jet_jit_fs_temp_file" => jet_jit_fs_temp_file: sig_unary_i64;
     fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
+    mod_load: "jet_jit_mod_load" => jet_jit_mod_load: sig_i64_i64_i64;
+    mod_on_tick: "jet_jit_mod_on_tick" => jet_jit_mod_on_tick: sig_i64_i64_i64;
     path_join: "jet_jit_path_join" => jet_jit_path_join: sig_i64_i64_i64;
     path_parent_str: "jet_jit_path_parent_str" => jet_jit_path_parent_str: sig_unary_i64;
     path_extension_str: "jet_jit_path_extension_str" => jet_jit_path_extension_str: sig_unary_i64;
@@ -2376,5 +2576,3 @@ host_fns! {
     io_input: "jet_jit_io_input" => jet_jit_io_input: sig_i8_i64_i64;
     process_exit: "jet_jit_process_exit" => jet_jit_process_exit: sig_void_i64;
 }
-
-

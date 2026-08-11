@@ -67,14 +67,14 @@ impl JetShow for JetRange {
         self.structural_text()
     }
 }
-impl user_Display for JetRange {
+impl __jet_Display for JetRange {
     fn display(&self) -> String {
         self.structural_text()
     }
 }
 impl JetDisplay for JetRange {
     fn jet_display(&self) -> String {
-        <Self as user_Display>::display(self)
+        <Self as __jet_Display>::display(self)
     }
 }
 impl JetDebug for JetRange {
@@ -82,7 +82,7 @@ impl JetDebug for JetRange {
         self.structural_text()
     }
 }
-impl user_Equatable for JetRange {
+impl __jet_Equatable for JetRange {
     fn equal(&self, rhs: &Self) -> bool {
         jet_range_equal(
             self.start,
@@ -375,9 +375,9 @@ impl<K: Ord + JetDebug, V: JetDebug> JetDebug for JetMap<K, V> {
         jet_debug_map(self.iter().map(|(key, value)| (key.jet_debug(), value.jet_debug())))
     }
 }
-// D-FAIL-CARRIER1=A: one carrier, so one printer. The report type says which
-// view is being read: the clean report prints the payload bare and `null` for
-// an absence; a failure report prints the verdict around them.
+// D-FAIL-CARRIER1=A: one carrier, so one printer. Show and Display keep clean
+// reports bare and render absence as `null`; Debug projects them as `Val(...)`
+// and `None`. A told report prints its verdict around the payload.
 impl JetShow for JetAbsent {
     fn jet_show(&self) -> String {
         "null".to_string()
@@ -400,6 +400,29 @@ impl JetDebug for JetAbsent {
     }
     fn jet_report_is_clean() -> bool {
         true
+    }
+}
+impl JetShow for JetTaskFailure {
+    fn jet_show(&self) -> String {
+        match self {
+            JetTaskFailure::Cancelled => "Cancelled".to_string(),
+            JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+            JetTaskFailure::Panicked(reason) => format!("Panicked({reason})"),
+        }
+    }
+}
+impl JetDisplay for JetTaskFailure {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+impl JetDebug for JetTaskFailure {
+    fn jet_debug(&self) -> String {
+        match self {
+            JetTaskFailure::Cancelled => "Cancelled".to_string(),
+            JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+            JetTaskFailure::Panicked(reason) => format!("Panicked({reason:?})"),
+        }
     }
 }
 impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {
@@ -428,9 +451,9 @@ impl<T: JetDebug, E: JetDebug> JetDebug for JetOutcome<T, E> {
     fn jet_debug(&self) -> String {
         let clean = <E as JetDebug>::jet_report_is_clean();
         match self {
-            Ok(v) if clean => v.jet_debug(),
+            Ok(v) if clean => jet_debug_optional(Some(v.jet_debug())),
             Ok(v) => format!("Ok({})", v.jet_debug()),
-            Err(e) if clean => e.jet_debug(),
+            Err(_) if clean => jet_debug_optional(None),
             Err(e) => format!("Err({})", e.jet_debug()),
         }
     }

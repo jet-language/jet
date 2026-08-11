@@ -103,7 +103,7 @@ pub(crate) struct Cx {
     pub(crate) const_values: HashMap<String, CtValue>,
     pub(crate) type_names: HashSet<String>,
     /// D-DIST1 (c109 Phase 23): distinct-type name -> (base type, is_numeric). A
-    /// distinct type renders to a `#[repr(transparent)]` newtype `user_<Name>(pub
+    /// distinct type renders to a `#[repr(transparent)]` newtype `__jet_<Name>(pub
     /// Base)`; the TIR reads the base type to give `.raw()` (`(recv).0`) its total
     /// result type, and `is_numeric` is informational (the arithmetic operator is
     /// chosen by `ast_operand_is_integer`, which returns `None` for a distinct).
@@ -132,7 +132,7 @@ pub(crate) struct Cx {
     /// the runtime step functions + `jet_decode_traced` chain-walker.
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1: struct names declared `#layout(columnar)`. A `[S]` of such a
-    /// struct lowers to the generated `user_<S>_columns` struct-of-arrays type;
+    /// struct lowers to the generated `__jet_<S>_columns` struct-of-arrays type;
     /// `rust_type` maps the list type and the list ops route to its inherent API.
     pub(crate) columnar: HashSet<String>,
     pub(crate) auto_printable: HashSet<String>,
@@ -163,10 +163,11 @@ pub(crate) struct Cx {
     /// + dump. Never set in normal builds, so codegen output is byte-identical
     /// (golden tests never touch this path).
     pub(crate) coverage: bool,
-    /// Import alias -> Rust module name (`user_scoring`).
+    /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
-    /// Cross-module pub type name -> Rust module path. Bare leaves remain for
-    /// unique imports; owner-qualified names (`note.Note`) preserve aliases.
+    /// Canonical cross-module nominal identity -> Rust module path. The key
+    /// includes package and source-module identity; import aliases are only
+    /// source lookup projections and never semantic type identities.
     pub(crate) foreign_types: HashMap<String, String>,
     /// D-MOD4: `(alias, item)` -> `(real Rust module, real fn)` for `pub use`
     /// re-exports, so `text.wrap` lowers to the module that actually defines it.
@@ -193,12 +194,27 @@ pub(crate) struct Cx {
     pub(crate) extern_funcs: HashMap<String, String>,
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     pub(crate) code_modules: HashSet<String>,
-    /// D-MOD3: unqualified inline-module items (name → "alias__method").
+    /// D-MOD3: unqualified inline-module items (name → canonical member name).
     pub(crate) unqualified_inline: HashMap<String, String>,
     /// D-MOD3: unqualified file-module items (name → (rust_mod_name, fn_name)).
     pub(crate) unqualified_file: HashMap<String, (String, String)>,
+    /// D-NAME-WALK1=A: per-inline-function unqualified import scopes. The key
+    /// is the emitted mangled function name (`module__function`).
+    pub(crate) inline_unqualified: HashMap<String, HashMap<String, String>>,
+    pub(crate) inline_unqualified_file:
+        HashMap<String, HashMap<String, (String, String)>>,
+    /// D-NAME-WALK1=A: per-inline-function Core import scopes. The key is the
+    /// emitted mangled function name (`module__function`).
+    pub(crate) inline_core_imports: HashMap<String, HashMap<String, String>>,
+    /// Names from inline scopes used by the conservative TIR coverage gate.
+    /// Lowering still reads the exact per-function map.
+    pub(crate) inline_import_names: HashSet<String>,
+    /// D-NAME-WALK1=A: inline-module pub re-exports of inline functions.
+    pub(crate) inline_reexport_inline: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: inline-module pub re-exports of Core items.
+    pub(crate) inline_reexport_core: HashMap<(String, String), (String, String)>,
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
-    /// are called without the `user_` prefix in Rust (the trait impl owns the name).
+    /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
     /// D-TXN-ROLLBACK layer 2: user types that implement the `Rollback` trait.
     /// Populated in `build_cx_items` from `Item::Impl` blocks with
@@ -565,6 +581,10 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "DBScope" => Some("JetDbScope"),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
         "Plugin" => Some("JetPlugin"),
+        // D-LIB-CALLGRANT1=A: loaded libraries are opaque handles; the grant
+        // is a small constructable prelude record.
+        "Mod" => Some("JetMod"),
+        "ModGrant" => Some("JetModGrant"),
         _ => None,
     }
 }
@@ -671,11 +691,34 @@ pub(crate) use crate::Syntax::args_handle_rust_type;
 pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
+/// Return the leaf of a canonical nominal name. Dotted names remain accepted
+/// only at source lookup boundaries for older Core spellings; foreign nominal
+/// maps themselves contain `::` identities exclusively.
+pub(crate) fn nominal_leaf(name: &str) -> &str {
+    name.rsplit_once("::")
+        .or_else(|| name.rsplit_once('.'))
+        .map_or(name, |(_, leaf)| leaf)
+}
+
 impl Cx {
+    pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
+        let rust_mod = if alias.is_empty() {
+            None
+        } else {
+            Some(self.import_mods.get(alias)?)
+        };
+        let mut matches = self
+            .foreign_types
+            .iter()
+            .filter(|(name, _)| nominal_leaf(name) == leaf)
+            .filter(|(_, module)| rust_mod.is_none_or(|expected| *module == expected))
+            .map(|(name, _)| name.clone());
+        let identity = matches.next()?;
+        matches.next().is_none().then_some(identity)
+    }
+
     fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
-        let (qualifier, leaf) = name.split_once('.')?;
-        let module = self.import_mods.get(qualifier)?.strip_prefix("user_")?;
-        Some(format!("{module}.{leaf}"))
+        name.contains("::").then(|| name.to_string())
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -766,9 +809,38 @@ impl Cx {
         }
     }
 
+    /// Resolve a Core alias in the exact function scope selected by
+    /// D-NAME-WALK1=A. Inline bindings overlay the enclosing file bindings.
+    pub(crate) fn core_import_module_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+    ) -> Option<&str> {
+        self.inline_core_imports
+            .get(fn_name)
+            .and_then(|scope| scope.get(alias))
+            .or_else(|| self.core_imports.get(alias))
+            .map(String::as_str)
+    }
+
+    /// Resolve a Core alias without a function-specific scope. TIR coverage
+    /// predicates have only structural AST facts, so they use the enclosing
+    /// map first and then any inline body map as a conservative reachability
+    /// check. Lowering always uses the exact helper above.
+    pub(crate) fn any_core_import_module(&self, alias: &str) -> Option<&str> {
+        self.core_imports
+            .get(alias)
+            .or_else(|| {
+                self.inline_core_imports
+                    .values()
+                    .find_map(|scope| scope.get(alias))
+            })
+            .map(String::as_str)
+    }
+
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
-        match (self.core_imports.get(alias).map(String::as_str), leaf) {
+        match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
@@ -1175,16 +1247,16 @@ impl Cx {
     }
 
     /// D-SOA1: if `inner` is a `#layout(columnar)` struct type, the Rust path of
-    /// its generated struct-of-arrays type (`user_<S>_columns`, module-prefixed
+    /// its generated struct-of-arrays type (`__jet_<S>_columns`, module-prefixed
     /// like the struct itself). `None` for any non-columnar element.
     pub(crate) fn columnar_list_type(&self, inner: &Type) -> Option<String> {
         if let Type::Named(name) = inner {
             if self.is_columnar_struct(name) {
-                return Some(if self.foreign_types.contains_key(name.as_str()) {
-                    let rust_mod = &self.foreign_types[name.as_str()];
-                    format!("{}{}::user_{name}_columns", self.root_prefix, rust_mod)
+                let columns = crate::Syntax::generated_path(&format!("{name}_columns"));
+                return Some(if let Some(rust_mod) = self.foreign_types.get(name.as_str()) {
+                    format!("{}{}::{columns}", self.root_prefix, rust_mod)
                 } else {
-                    format!("user_{name}_columns")
+                    columns
                 });
             }
         }
@@ -1274,7 +1346,7 @@ impl Cx {
             Type::String => "String".to_string(),
             Type::Char => "char".to_string(),
             // D-SOA1: a `[S]` of a `#layout(columnar)` struct lowers to the
-            // generated struct-of-arrays type `user_<S>_columns`, not `Vec<S>`.
+            // generated struct-of-arrays type `__jet_<S>_columns`, not `Vec<S>`.
             Type::List(inner) if self.columnar_list_type(inner).is_some() => {
                 self.columnar_list_type(inner).unwrap()
             }
@@ -1310,7 +1382,7 @@ impl Cx {
                     self.rust_type(err)
                 )
             }
-            // Items inside an imported file live in `mod user_<alias>`; the
+            // Items inside an imported file live in `mod __jet_<alias>`; the
             // module provides the namespace, so item names stay plain.
             // c148: also recognize multi-char type params from `current_type_params`.
             Type::Named(name)
@@ -1329,6 +1401,13 @@ impl Cx {
                 if name == Syntax::TYPE_REMOVE_BY && !self.type_names.contains(name) =>
             {
                 format!("{}JetRemoveBy", self.root_prefix)
+            }
+            // D-CONC-FAIL1=A: task joins carry the shared Prelude failure
+            // value. Keep this builtin mapping ahead of user named types.
+            Type::Named(name)
+                if name == Syntax::TYPE_TASK_FAILURE && !self.type_names.contains(name) =>
+            {
+                format!("{}JetTaskFailure", self.root_prefix)
             }
             // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
             // internal collector. The surface remains second-class.
@@ -1503,7 +1582,7 @@ impl Cx {
             // D-TERM1 (ratified 2026-06-22): `Key` is a top-level prelude enum.
             Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
             // D-RENDERTGT2=A (c133 M1): UI geometry/event/backend types. User structs
-            // named Point/Rect/Size (common in examples) keep `user_<Name>` lowering.
+            // named Point/Rect/Size (common in examples) keep `__jet_<Name>` lowering.
             Type::Named(name) if name == "Point" && !self.type_names.contains(name) => {
                 format!("{}JetPoint", self.root_prefix)
             }
@@ -1699,7 +1778,7 @@ impl Cx {
                 )
             }
             // A user struct/enum sharing a built-in Core type name (e.g. a user
-            // `Vec3`) wins — it keeps its own `user_<Name>` lowering. Only fall to the
+            // `Vec3`) wins — it keeps its own `__jet_<Name>` lowering. Only fall to the
             // built-in jet_std struct when the name is NOT a user type.
             Type::Named(name)
                 if core_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
@@ -1762,20 +1841,8 @@ impl Cx {
             }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
-                let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                let leaf = nominal_leaf(name);
                 format!("{}{}::{}", self.root_prefix, rust_mod, user_type_rust(leaf))
-            }
-            Type::Named(name) if name.contains('.') => {
-                let (alias, leaf) = name.split_once('.').unwrap();
-                match self.import_mods.get(alias) {
-                    Some(rust_mod) => format!(
-                        "{}{}::{}",
-                        self.root_prefix,
-                        rust_mod,
-                        user_type_rust(leaf)
-                    ),
-                    None => user_type_rust(name),
-                }
             }
             Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
             Type::Named(name) => user_type_rust(name),
@@ -2118,24 +2185,12 @@ impl Cx {
             }
             Type::Apply { name, args } => {
                 let head = if let Some(rust_mod) = self.foreign_types.get(name) {
-                    let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                    let leaf = nominal_leaf(name);
                     format!(
                         "{}{}::{}",
                         self.root_prefix,
                         rust_mod,
                         user_type_rust(leaf)
-                    )
-                } else if let Some((alias, leaf)) = name.split_once('.') {
-                    self.import_mods.get(alias).map_or_else(
-                        || user_type_rust(name),
-                        |rust_mod| {
-                            format!(
-                                "{}{}::{}",
-                                self.root_prefix,
-                                rust_mod,
-                                user_type_rust(leaf)
-                            )
-                        },
                     )
                 } else {
                     user_type_rust(name)
@@ -2183,7 +2238,7 @@ impl Cx {
             Type::Tagged { inner, .. } => self.rust_type(inner),
             // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
             Type::Union(members) => {
-                format!("user_{}", crate::AST::union_enum_name(members))
+                crate::Syntax::generated_name(&crate::AST::union_enum_name(members))
             }
             // Erased by the `quantity_parts()` guard above `rust_type` returns
             // through; a runtime quantity value IS its base numeric type.
@@ -2408,16 +2463,21 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
 
 pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         let module_funcs = extern_func_map(&module.items);
         for (name, wrapper) in module_funcs {
             map.insert(name.clone(), wrapper.clone());
-            map.insert(format!("user_{}::{name}", module.alias), wrapper);
+            map.insert(format!("{}::{name}", mangle(&module.alias)), wrapper);
         }
         if module.display.starts_with("cpp.") {
             for item in &module.items {
                 if let Item::Impl(def) = item {
-                    for method in def.methods.iter().filter(|method| method.is_pub) {
+                    for method in def.methods.iter().filter(|method| {
+                        bundle.name_ledger.exported(
+                            module_idx,
+                            &format!("{}.{}", def.type_name, method.name),
+                        )
+                    }) {
                         map.insert(
                             foreign_binding_method_key(&def.type_name, &method.name),
                             String::new(),
@@ -2431,7 +2491,7 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
 }
 
 pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
-    format!("__jet_foreign_method__{owner}__{method}")
+    crate::Syntax::generated_path(&format!("foreign_method__{owner}__{method}"))
 }
 
 /// Add local and imported unit-family facts under the names used by this module.
@@ -2440,38 +2500,95 @@ pub(crate) fn register_bundle_unit_metadata(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) {
-    let imported = bundle.modules[module_idx]
-        .imports
-        .iter()
-        .filter_map(|import| {
-            bundle
-                .import_targets
-                .get(&(module_idx, import.span))
-                .copied()
-                .map(|target| {
-                    let qualifier = bundle.modules[target].alias.clone();
-                    (target, Some(qualifier))
-                })
-        });
+    let mut imported = Vec::new();
+    for import in &bundle.modules[module_idx].imports {
+        if bundle
+            .name_ledger
+            .effective_alias(module_idx, &import.import_alias())
+            .is_none()
+        {
+            continue;
+        }
+        let Some(target) = bundle.name_ledger.import_target(module_idx, import.span) else {
+            continue;
+        };
+        let qualifier = bundle
+            .name_ledger
+            .module_identity(target)
+            .expect("name ledger must contain every loaded module");
+        imported.push((target, Some(qualifier)));
+    }
+    for (target, _) in crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx) {
+        if imported.iter().all(|(existing, _)| *existing != target) {
+            let qualifier = bundle
+                .name_ledger
+                .module_identity(target)
+                .expect("name ledger must contain every loaded module");
+            imported.push((target, Some(qualifier)));
+        }
+    }
     for (target, qualifier) in std::iter::once((module_idx, None)).chain(imported) {
         let module = &bundle.modules[target];
         for item in &module.items {
-            if let Item::UnitFamily(family) = item {
-                if qualifier.is_some() && !family.is_pub {
+            if let Item::Distinct(definition) = item {
+                if qualifier.is_some()
+                    && !bundle
+                        .name_ledger
+                        .visible(module_idx, target, &definition.name)
+                {
                     continue;
                 }
+                let name = qualifier.as_ref().map_or_else(
+                    || definition.name.clone(),
+                    |qualifier| format!("{qualifier}::{}", definition.name),
+                );
+                let base = qualifier.as_ref().map_or_else(
+                    || definition.base.clone(),
+                    |_| super::Imports::qualify_imported_call_type(
+                        bundle,
+                        target,
+                        "",
+                        &definition.base,
+                    ),
+                );
+                cx.type_names.insert(name.clone());
+                cx.distinct_types.insert(
+                    name,
+                    (
+                        base,
+                        definition.derives.iter().any(|(derive, _)| {
+                            derive == crate::Syntax::MARKER_NUMERIC
+                        }),
+                    ),
+                );
+                continue;
+            }
+            if let Item::UnitFamily(family) = item {
                 let dimension = family.resolved_dimension.clone();
                 for member in family.distinct_defs() {
+                    if qualifier.is_some()
+                        && !bundle.name_ledger.visible(module_idx, target, &member.name)
+                    {
+                        continue;
+                    }
                     let name = qualifier.as_ref().map_or_else(
                         || member.name.clone(),
-                        |qualifier| format!("{qualifier}.{}", member.name),
+                        |qualifier| format!("{qualifier}::{}", member.name),
                     );
                     cx.type_names.insert(name.clone());
                     cx.distinct_types
                         .insert(
                             name.clone(),
                             (
-                                member.base.clone(),
+                                qualifier.as_ref().map_or_else(
+                                    || member.base.clone(),
+                                    |_| super::Imports::qualify_imported_call_type(
+                                        bundle,
+                                        target,
+                                        "",
+                                        &member.base,
+                                    ),
+                                ),
                                 member.derives.iter().any(|(derive, _)| {
                                     derive == crate::Syntax::MARKER_NUMERIC
                                 }),
@@ -2500,7 +2617,7 @@ pub(crate) fn register_bundle_unit_metadata(
                 let Item::Impl(implementation) = item else {
                     continue;
                 };
-                let qualified = format!("{qualifier}.{}", implementation.type_name);
+                let qualified = format!("{qualifier}::{}", implementation.type_name);
                 if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
                     && cx.unit_labels.contains_key(&qualified)
                 {
@@ -2517,7 +2634,8 @@ pub(crate) fn register_bundle_unit_metadata(
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
-        reexport_call_map, unqualified_import_maps, update_cloneability_with_foreign_types,
+        inline_core_import_maps, inline_import_maps, reexport_call_map, unqualified_import_maps,
+        update_cloneability_with_foreign_types,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
@@ -2541,14 +2659,35 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, module_idx);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, module_idx);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     cx.package_edition = bundle.edition.clone();
 }
 
 fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-    let imported = bundle.modules[module_idx]
+    let mut imported: Vec<usize> = bundle.modules[module_idx]
         .imports
         .iter()
-        .filter_map(|import| bundle.import_targets.get(&(module_idx, import.span)).copied());
+        .filter_map(|import| {
+            bundle
+                .name_ledger
+                .effective_alias(module_idx, &import.import_alias())?;
+            bundle.name_ledger.import_target(module_idx, import.span)
+        })
+        .collect();
+    imported.extend(
+        crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx)
+            .into_iter()
+            .map(|(target, _)| target),
+    );
+    imported.sort_unstable();
+    imported.dedup();
     for target in imported {
         for item in &bundle.modules[target].items {
             let (owner, methods) = match item {
@@ -2557,20 +2696,48 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 Item::Impl(def) => (&def.type_name, &def.methods),
                 _ => continue,
             };
-            for method in methods.iter().filter(|method| method.is_pub) {
-                let key = (owner.clone(), method.name.clone());
+            let owner_identity = bundle
+                .name_ledger
+                .nominal_identity(target, owner)
+                .expect("name ledger must contain every loaded module");
+            for method in methods.iter().filter(|method| {
+                bundle.name_ledger.visible(
+                    module_idx,
+                    target,
+                    &format!("{}.{}", owner, method.name),
+                )
+            }) {
+                let key = (owner_identity.clone(), method.name.clone());
                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
                 {
                     cx.method_self_convs
                         .entry(key.clone())
                         .or_insert(self_param.convention);
                 }
-                cx.method_sigs
-                    .entry(key.clone())
-                    .or_insert_with(|| method_sig_params(method));
+                cx.method_sigs.entry(key.clone()).or_insert_with(|| {
+                    method_sig_params(method)
+                        .into_iter()
+                        .map(|(convention, ty)| {
+                            (
+                                convention,
+                                super::Imports::qualify_imported_call_type(
+                                    bundle,
+                                    target,
+                                    "",
+                                    &ty,
+                                ),
+                            )
+                        })
+                        .collect()
+                });
                 cx.method_rets
                     .entry(key)
-                    .or_insert_with(|| method.return_type.clone());
+                    .or_insert_with(|| {
+                        method
+                            .return_type
+                            .as_ref()
+                            .map(|ty| super::Imports::qualify_imported_call_type(bundle, target, "", ty))
+                    });
             }
         }
     }
@@ -2861,6 +3028,12 @@ pub(crate) fn build_cx_items(
         code_modules: HashSet::new(),
         unqualified_inline: HashMap::new(),
         unqualified_file: HashMap::new(),
+        inline_unqualified: HashMap::new(),
+        inline_unqualified_file: HashMap::new(),
+        inline_core_imports: HashMap::new(),
+        inline_import_names: HashSet::new(),
+        inline_reexport_inline: HashMap::new(),
+        inline_reexport_core: HashMap::new(),
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),
@@ -3354,6 +3527,7 @@ pub(crate) fn build_cx_items(
             }
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
@@ -3445,7 +3619,7 @@ pub(crate) fn build_cx_items(
                     cx.code_modules.insert(cm.name.clone());
                     for inner in body {
                         if let Item::Func(f) = inner {
-                            let mangled = format!("{}__{}", cm.name, f.name);
+                            let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
                             cx.fn_type_params.insert(
                                 mangled.clone(),
                                 f.type_params.iter().map(|param| param.name.clone()).collect(),
@@ -3511,16 +3685,12 @@ pub(crate) fn build_cx_items(
                     }
                 }
                 for m in &s.methods {
-                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
-                        cx.method_self_convs
-                            .insert((s.name.clone(), m.name.clone()), self_param.convention);
+                    register_method(&mut cx, &s.name, m, false);
+                }
+                for implementation in &s.trait_impls {
+                    for m in &implementation.methods {
+                        register_method(&mut cx, &s.name, m, true);
                     }
-                    cx.method_sigs
-                        .insert((s.name.clone(), m.name.clone()), method_sig_params(m));
-                    cx.method_type_params
-                        .insert((s.name.clone(), m.name.clone()), m.type_params.clone());
-                    cx.method_rets
-                        .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
                 if s.derives
                     .iter()
@@ -3584,37 +3754,17 @@ pub(crate) fn build_cx_items(
                     }
                 }
                 for m in &e.methods {
-                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
-                        cx.method_self_convs
-                            .insert((e.name.clone(), m.name.clone()), self_param.convention);
+                    register_method(&mut cx, &e.name, m, false);
+                }
+                for implementation in &e.trait_impls {
+                    for m in &implementation.methods {
+                        register_method(&mut cx, &e.name, m, true);
                     }
-                    cx.method_sigs
-                        .insert((e.name.clone(), m.name.clone()), method_sig_params(m));
-                    cx.method_type_params
-                        .insert((e.name.clone(), m.name.clone()), m.type_params.clone());
-                    cx.method_rets
-                        .insert((e.name.clone(), m.name.clone()), m.return_type.clone());
                 }
             }
             Item::Impl(i) => {
                 for m in &i.methods {
-                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
-                        cx.method_self_convs.insert(
-                            (i.type_name.clone(), m.name.clone()),
-                            self_param.convention,
-                        );
-                    }
-                    cx.method_sigs
-                        .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
-                    cx.method_type_params
-                        .insert((i.type_name.clone(), m.name.clone()), m.type_params.clone());
-                    cx.method_rets
-                        .insert((i.type_name.clone(), m.name.clone()), m.return_type.clone());
-                    // S62: track trait-impl methods so call sites know not to mangle.
-                    if i.trait_name.is_some() {
-                        cx.trait_methods
-                            .insert((i.type_name.clone(), m.name.clone()));
-                    }
+                    register_method(&mut cx, &i.type_name, m, i.trait_name.is_some());
                 }
             }
             _ => {}
@@ -3861,8 +4011,30 @@ fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
     }
 }
 
-/// Parameter conventions for a method, excluding `self` — call-site args
-/// align positionally with this list (the receiver is emitted separately).
+/// Register one method surface for sema/codegen call lookup. Nested and
+/// top-level trait impls use the same table so lowering cannot lose a method
+/// merely because derive generation chose a different AST container.
+fn register_method(cx: &mut Cx, owner: &str, method: &Func, is_trait: bool) {
+    let key = (owner.to_string(), method.name.clone());
+    if let Some(self_param) = method
+        .params
+        .iter()
+        .find(|param| param.name == Syntax::KW_SELF)
+    {
+        cx.method_self_convs.insert(key.clone(), self_param.convention);
+    }
+    cx.method_sigs
+        .insert(key.clone(), method_sig_params(method));
+    cx.method_type_params
+        .insert(key.clone(), method.type_params.clone());
+    cx.method_rets
+        .insert(key.clone(), method.return_type.clone());
+    // S62: track trait-impl methods so call sites know not to mangle.
+    if is_trait {
+        cx.trait_methods.insert(key);
+    }
+}
+
 fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
     f.params
         .iter()

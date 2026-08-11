@@ -5,6 +5,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::arm_fallible_pattern;
+use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
 use crate::Codegen::TIR::arm_bin_match_pattern;
@@ -31,6 +32,7 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TPatternPosition;
@@ -60,21 +62,42 @@ fn encoding_reader_method(ty: &Type) -> Option<TForInMethod> {
     }
 }
 
-pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
+pub(super) fn tracked_float_origin(
+    b: &crate::AST::Binding,
+    ty: &Type,
+) -> Option<TBindingOrigin> {
     if !b.track() || !matches!(ty, Type::Float) {
         return None;
     }
-    let (line, col) = crate::Diagnostics::span_line_col(&cx.src, b.name_span.start);
+    Some(TBindingOrigin {
+        name: b.name.clone(),
+        span: b.name_span,
+    })
+}
+
+pub(super) fn tracked_float_slot(
+    b: &crate::AST::Binding,
+    ty: &Type,
+    slot: TLocal,
+) -> TLocal {
+    match tracked_float_origin(b, ty) {
+        Some(origin) => slot.with_origin(origin),
+        None => slot,
+    }
+}
+
+pub(super) fn render_tracked_float_origin(origin: &TBindingOrigin, cx: &Cx) -> String {
+    let (line, col) = crate::Diagnostics::span_line_col(&cx.src, origin.span.start);
     let snippet = cx
         .src
         .lines()
         .nth(line.saturating_sub(1))
         .unwrap_or("")
         .trim();
-    Some(format!(
+    format!(
         "tracked `{}` at {}:{}:{}: {}",
-        b.name, cx.file, line, col, snippet
-    ))
+        origin.name, cx.file, line, col, snippet
+    )
 }
 
 pub(super) fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Option<String> {
@@ -409,6 +432,55 @@ fn lower_if_cond_atom(
     } = cond
     {
         let subj = lower_if_let_subject(subject, cx, env);
+        // DataEvent shares variant names (`Int`, `Float`, …) with the dynamic
+        // DataTree surface. Once sema has resolved the subject to DataEvent, use
+        // that enum's prelude pattern and payload facts instead of the DataTree
+        // heuristic below.
+        if matches!(&subj.ty, Type::Named(name) if name == "DataEvent") {
+            let enum_type = Some("DataEvent".to_string());
+            if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
+                if bindings.len() == 1 {
+                    let ty = variant_binding_types_for_enum(cx, "DataEvent", variant)
+                        .and_then(|ts| ts.into_iter().next());
+                    let cloned = lower_if_let_subject(subject, cx, env);
+                    let cloned_subj = TExpr {
+                        ty: cloned.ty.clone(),
+                        kind: TExprKind::Clone(Box::new(cloned)),
+                    };
+                    return (
+                        TIfCond::IfLet {
+                            pattern: TPattern::arm(pattern.clone(), enum_type),
+                            subj: cloned_subj,
+                        },
+                        Some((name.clone(), TLocal::user(name), ty)),
+                        Vec::new(),
+                    );
+                }
+            } else if bindings.len() == 1 && matches!(bindings.first(), Some(PatSlot::Wildcard)) {
+                let cloned = lower_if_let_subject(subject, cx, env);
+                let cloned_subj = TExpr {
+                    ty: cloned.ty.clone(),
+                    kind: TExprKind::Clone(Box::new(cloned)),
+                };
+                return (
+                    TIfCond::IfLet {
+                        pattern: TPattern::arm(pattern.clone(), enum_type),
+                        subj: cloned_subj,
+                    },
+                    None,
+                    Vec::new(),
+                );
+            } else if bindings.is_empty() {
+                return (
+                    TIfCond::Matches {
+                        pattern: TPattern::arm(pattern.clone(), enum_type),
+                        subj,
+                    },
+                    None,
+                    Vec::new(),
+                );
+            }
+        }
         if let Type::Union(members) = &subj.ty {
             let enum_name = crate::AST::union_enum_name(members);
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
@@ -677,6 +749,20 @@ pub(crate) fn lower_switch(
     {
         return lower_fallible_match(subject, arms, else_body, cx, env);
     }
+    // Shape A-GUARD: lower guarded variant arms through the same short-circuit
+    // TIfCond chain used by ordinary `if` conditions. This keeps payload bindings
+    // in scope for their guards and gives AOT, JIT, and interpreter one lowering.
+    if else_body.is_some()
+        && arms.iter().any(|a| {
+            arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
+        })
+        && arms.iter().all(|a| {
+            arm_variant_pattern(cx, &a.cond, subject).is_some()
+                || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
+        })
+    {
+        return lower_guard_switch(arms, else_body, cx, env);
+    }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
     // heads / D-DESTRUCT1 struct-pattern heads mixed in — → the general mixed
@@ -894,7 +980,7 @@ fn range_inclusive_cond(subject_ty: &Type, lo: i64, hi: i64) -> TExpr {
 
 /// c109 Phase 15: lower a MIXED comparison/Bool `when` switch (shape D) to a
 /// `TStmt::MixedSwitch`, reproducing `emit_mixed_switch` (Source/Codegen/Statement.rs).
-/// The subject is bound once to `_jet_switch_subject = &(subject)` (emitted for parity);
+/// The subject is bound once to `__jet_switch_subject = &(subject)` (emitted for parity);
 /// each arm's PLAIN condition is resolved to a Rust string at lowering (`emit_expr`); the
 /// arm bodies + `else` are lowered in separate lexical environments.
 pub(crate) fn lower_mixed_switch(
@@ -950,7 +1036,7 @@ pub(crate) fn lower_mixed_switch(
 }
 
 /// D-DESTRUCT1: value tests in `.{ field: value, ... }` become equality checks
-/// against the borrowed `_jet_switch_subject` that `MixedSwitch` emits.
+/// against the borrowed `__jet_switch_subject` that `MixedSwitch` emits.
 fn struct_pattern_cond_expr(
     pattern: &Pattern,
     subject_ty: &Type,
@@ -1038,14 +1124,14 @@ pub(super) fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     let Pattern::StrMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
-    str_match_scan_closure_ex(parts, cx, "_jet_switch_subject.as_str()", true)
+    str_match_scan_closure_ex(parts, cx, "__jet_switch_subject.as_str()", true)
 }
 
 /// D-PARSESTR1 (extended for D-SHIFT1's `Cursor.take_pattern` consume mode —
 /// I8, one matcher engine, not a second one): the same scan engine as above,
 /// generalized over WHERE the subject text comes from (`subject_src`, a raw
 /// Rust expression) and whether the WHOLE subject must be consumed
-/// (`require_full_match`). The `if == {}` shape uses `_jet_switch_subject`
+/// (`require_full_match`). The `if == {}` shape uses `__jet_switch_subject`
 /// and requires full consumption; `take_pattern` scans a local `__jet_tail`
 /// slice and only needs a PREFIX match — the caller advances a cursor by the
 /// consumed byte count, which (when `require_full_match` is false) is
@@ -1085,7 +1171,10 @@ pub(crate) fn str_match_scan_closure_ex(
                 i += 1;
             }
             crate::AST::StrMatchPart::Hole { name, ty, .. } => {
-                let var = format!("__jet_sm_{}", mangle(name));
+                let var = format!(
+                    "__jet_sm_{}",
+                    crate::Syntax::generated_suffix(&mangle(name))
+                );
                 // Find the boundary: the next literal anchor's text (non-greedy —
                 // the FIRST occurrence from the cursor), or end-of-string if this
                 // hole is the last part.
@@ -1152,7 +1241,12 @@ pub(crate) fn str_match_scan_closure_ex(
     }
     let mut tuple_vars: Vec<String> = holes
         .iter()
-        .map(|(n, _)| format!("__jet_sm_{}", mangle(n)))
+        .map(|(n, _)| {
+            crate::Syntax::generated_name(&format!(
+                "sm_{}",
+                crate::Syntax::generated_suffix(&mangle(n))
+            ))
+        })
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {
@@ -1181,7 +1275,7 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     let Pattern::BinMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
-    bin_match_scan_closure_ex(parts, cx, "(_jet_switch_subject).as_slice()", true)
+    bin_match_scan_closure_ex(parts, cx, "(__jet_switch_subject).as_slice()", true)
 }
 
 /// D-BINPAT1 (card #506 follow-up): the same bit-scan engine, generalized
@@ -1227,7 +1321,10 @@ pub(crate) fn bin_match_scan_closure_ex(
             }
             BinMatchPart::Hole { name, spec, .. } => match spec {
                 BinSpec::Rest => {
-                    let var = format!("__jet_bm_{}", mangle(name));
+                    let var = format!(
+                        "__jet_bm_{}",
+                        crate::Syntax::generated_suffix(&mangle(name))
+                    );
                     body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
                     body.push_str(&format!(
                         "let {var}: Vec<u8> = __jet_bm[__jet_pos / 8..].to_vec(); __jet_pos = __jet_total;\n"
@@ -1238,7 +1335,10 @@ pub(crate) fn bin_match_scan_closure_ex(
                     ));
                 }
                 BinSpec::Bits { width, endian } => {
-                    let var = format!("__jet_bm_{}", mangle(name));
+                    let var = format!(
+                        "__jet_bm_{}",
+                        crate::Syntax::generated_suffix(&mangle(name))
+                    );
                     let ty = cx.rust_type(&bin_bits_type(*width));
                     let w = *width as usize;
                     body.push_str(&format!("if __jet_pos + {w} > __jet_total {{ return None; }}\n"));
@@ -1272,7 +1372,12 @@ pub(crate) fn bin_match_scan_closure_ex(
     }
     let mut tuple_vars: Vec<String> = holes
         .iter()
-        .map(|(n, _)| format!("__jet_bm_{}", mangle(n)))
+        .map(|(n, _)| {
+            crate::Syntax::generated_name(&format!(
+                "bm_{}",
+                crate::Syntax::generated_suffix(&mangle(n))
+            ))
+        })
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {

@@ -230,7 +230,7 @@ mod jet_stm {
         }
     }
 }
-trait user_Serialize {
+trait __jet_Serialize {
     fn to_json(&self) -> String;
 }
 

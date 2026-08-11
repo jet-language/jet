@@ -6,7 +6,7 @@
 //!   - scalar params (Int/Float/Bool) pass by value, String by `&String`;
 //!     `mut` params are `&mut T`; `take` params are `T` by value
 //!   - a name bound to a `&T`/`&mut T` parameter is always emitted as the
-//!     place `(*user_x)`, so every name has its plain Jet type
+//!     place `(*__jet_x)`, so every name has its plain Jet type
 //!   - every printed/interpolated value goes through the `JetShow` trait
 //!     in the prelude (Float keeps its decimal part there, S21)
 //!   - every operator result is fully parenthesized
@@ -21,10 +21,13 @@ use crate::AST::{
 };
 use std::collections::HashSet;
 
+pub(crate) use jet_foundation::Names::{mangle, mangle_path as mangle_variant, user_type_rust};
+
 mod CModule;
 mod Context;
 mod Imports;
 mod Items;
+pub mod Library;
 pub mod Plugin;
 mod Statement;
 pub mod TIR;
@@ -47,6 +50,7 @@ pub use Plugin::{emit_plugin, plugin_export_shape, PluginArtifacts, PluginScalar
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
+pub use Library::{emit_library, library_export_shape, LibraryArtifacts, LibraryExport, LibraryScalar};
 pub use Web::{
     build_wasm_jet_source_map, emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupported,
 };
@@ -75,6 +79,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-FLOORDIV1=A: `/%`. Shared the same way, so every tier rounds down
     // identically.
     include_str!("../Prelude/Core/Division.rs"),
+    include_str!("../../../jet-foundation/src/TypedHeads.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/ByteBuffer.rs"),
@@ -125,16 +130,16 @@ fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
 /// Imported Jet modules keep their module-local traits; the root imports these
 /// from the cached runtime rlib after the native builder splits the source.
 fn push_cached_runtime_traits(out: &mut String) {
-    out.push_str("pub trait user_Display {\n");
+    out.push_str("pub trait __jet_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
     out.push_str("}\n\n");
-    out.push_str("pub trait user_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
+    out.push_str("pub trait __jet_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
     for ty in [
         "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
         "bool", "char", "String",
     ] {
         out.push_str(&format!(
-            "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+            "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
         ));
     }
     out.push('\n');
@@ -885,6 +890,17 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
+    let needs_mod = core_usage_matches(used_core, &["core.mod"]);
+    if needs_mod {
+        // The generated loader must compare against the compiler that emitted
+        // this program. Keep the value in the shared Prelude, not in a host.
+        out.push_str(&format!(
+            "\nconst __JET_COMPILER_VERSION: &str = {:?};\n",
+            env!("CARGO_PKG_VERSION")
+        ));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Mod.rs"));
+        out.push('\n');
+    }
 
     // Kernel closure: JetStd brace-chain files name these Top symbols
     // (FileReader, text fold, JSON frames, TCPStream, deadlines, TLS entropy).
@@ -939,6 +955,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_fs_runtime {
@@ -1248,8 +1265,8 @@ fn strip_unused_gc_prelude(out: String) -> String {
 /// Programs that never call `core.raylib` must not inherit that unsafe prelude.
 fn strip_unused_raylib_prelude(out: String) -> String {
     let prelude_end = [
-        out.find("fn user_"),
-        out.find("pub fn user_"),
+        out.find("fn __jet_"),
+        out.find("pub fn __jet_"),
         out.find("fn main()"),
     ]
     .into_iter()
@@ -1327,8 +1344,8 @@ fn strip_unused_term_prelude(out: String) -> String {
     // Fast path: if the term dispatchers are referenced in user code (after the
     // prelude), keep the whole term section.
     let prelude_end = [
-        out.find("fn user_"),
-        out.find("pub fn user_"),
+        out.find("fn __jet_"),
+        out.find("pub fn __jet_"),
         out.find("fn main()"),
     ]
     .into_iter()
@@ -1389,8 +1406,8 @@ fn strip_unused_term_prelude(out: String) -> String {
 /// unless generated user code actually calls it.
 fn strip_unused_os_signal_prelude(out: String) -> String {
     let prelude_end = [
-        out.find("fn user_"),
-        out.find("pub fn user_"),
+        out.find("fn __jet_"),
+        out.find("pub fn __jet_"),
         out.find("fn main()"),
     ]
     .into_iter()
@@ -1437,66 +1454,40 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
     s
 }
 
-/// Rust identifier for a Jet name.
-///
-/// D-META-STAGE1=B: the compile-time mark rides the name, so a Jet name may
-/// begin with `$`, which Rust cannot spell. A marked name gets its own prefix
-/// rather than losing the mark. That keeps the mapping injective, which the
-/// ratified text requires: a plain name and a marked name can never denote the
-/// same binding, so they can never mangle to the same Rust place either.
-pub(crate) fn mangle(name: &str) -> String {
-    match name.strip_prefix(crate::Syntax::COMPTIME_MARK) {
-        Some(rest) => format!("userct_{}", rest),
-        None => format!("user_{}", name),
-    }
-}
-
-/// D-TAG1: Rust identifier for an enum variant. A grouped leaf's Jet name is a
-/// dotted path (`Fire.Burn`); Rust variant names can't dot, so segments join
-/// with `__` (`user_Fire__Burn`). Flat variants mangle exactly as before.
-/// Sema rejects two paths that would flatten identically (E0105), so this is
-/// injective over a checked program.
-pub(crate) fn mangle_variant(name: &str) -> String {
-    format!("user_{}", name.replace('.', "__"))
-}
-
-/// Rust identifier for a Jet user type (`Payment.Client` → `user_Payment__Client`).
-pub(crate) fn user_type_rust(name: &str) -> String {
-    format!("user_{}", name.replace('.', "__"))
-}
-
 pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_owned: bool) {
     if include_runtime_owned {
-        out.push_str("pub trait user_Display {\n");
+        out.push_str("pub trait __jet_Display {\n");
         out.push_str("    fn display(&self) -> String;\n");
         out.push_str("}\n\n");
     }
-    out.push_str("pub trait user_Debug {\n");
+    out.push_str("pub trait __jet_Debug {\n");
     out.push_str("    fn debug(&self) -> String;\n");
     out.push_str("}\n\n");
 }
 
 pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_owned: bool) {
     out.push_str("#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n");
-    out.push_str("pub enum user_Ordering { user_Less, user_Equal, user_Greater }\n\n");
+    out.push_str("pub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n");
     for (name, method, ret) in [
         ("Add", "add", "Self"),
         ("Sub", "sub", "Self"),
         ("Mul", "mul", "Self"),
         ("Div", "div", "Self"),
         ("Equatable", "equal", "bool"),
-        ("Comparable", "compare", "user_Ordering"),
+        ("Comparable", "compare", "__jet_Ordering"),
     ] {
         if name == "Equatable" && !include_runtime_owned {
             continue;
         }
         if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
+            let trait_rust = mangle(name);
             out.push_str(&format!(
-                "pub trait user_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
+                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
             ));
         } else {
+            let trait_rust = mangle(name);
             out.push_str(&format!(
-                "pub trait user_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
+                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
             ));
         }
     }
@@ -1507,8 +1498,9 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Mul", "mul", "jet_mul"),
             ("Div", "div", "jet_div"),
         ] {
+            let trait_rust = mangle(trait_name);
             out.push_str(&format!(
-                "impl user_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
+                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
             ));
         }
     }
@@ -1519,8 +1511,9 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Mul", "mul", "*"),
             ("Div", "div", "/"),
         ] {
+            let trait_rust = mangle(trait_name);
             out.push_str(&format!(
-                "impl user_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
+                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
             ));
         }
     }
@@ -1530,7 +1523,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             "bool", "char", "String",
         ] {
             out.push_str(&format!(
-                "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+                "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
             ));
         }
     }
@@ -1539,7 +1532,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
         "String",
     ] {
         out.push_str(&format!(
-            "impl user_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n"
+            "impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n"
         ));
     }
     out.push('\n');
@@ -1547,14 +1540,14 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
 
 /// D-SHAPE-RESOURCE2=A: the one nominal consuming, infallible cleanup trait.
 pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
-    out.push_str("pub trait user_Close {\n");
+    out.push_str("pub trait __jet_Close {\n");
     out.push_str("    fn close(self);\n");
     out.push_str("}\n\n");
-    out.push_str("struct JetResource<T: user_Close>(Option<T>);\n");
-    out.push_str("impl<T: user_Close> JetResource<T> { fn new(value: T) -> Self { Self(Some(value)) } fn take(&mut self) -> T { self.0.take().expect(\"resource already consumed\") } fn close(&mut self) { if let Some(value) = self.0.take() { user_Close::close(value); } } }\n");
-    out.push_str("impl<T: user_Close> std::ops::Deref for JetResource<T> { type Target = T; fn deref(&self) -> &T { self.0.as_ref().expect(\"resource already consumed\") } }\n");
-    out.push_str("impl<T: user_Close> std::ops::DerefMut for JetResource<T> { fn deref_mut(&mut self) -> &mut T { self.0.as_mut().expect(\"resource already consumed\") } }\n");
-    out.push_str("impl<T: user_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
+    out.push_str("struct JetResource<T: __jet_Close>(Option<T>);\n");
+    out.push_str("impl<T: __jet_Close> JetResource<T> { fn new(value: T) -> Self { Self(Some(value)) } fn take(&mut self) -> T { self.0.take().expect(\"resource already consumed\") } fn close(&mut self) { if let Some(value) = self.0.take() { __jet_Close::close(value); } } }\n");
+    out.push_str("impl<T: __jet_Close> std::ops::Deref for JetResource<T> { type Target = T; fn deref(&self) -> &T { self.0.as_ref().expect(\"resource already consumed\") } }\n");
+    out.push_str("impl<T: __jet_Close> std::ops::DerefMut for JetResource<T> { fn deref_mut(&mut self) -> &mut T { self.0.as_mut().expect(\"resource already consumed\") } }\n");
+    out.push_str("impl<T: __jet_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
 }
 
 fn collect_allocator_constructors(
@@ -1732,18 +1725,18 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             format!("{root}jet_std::FileLock"),
         ] {
             out.push_str(&format!(
-                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }
     if uses("core.net") {
         for ty in [format!("{root}JetTCPStream"), format!("{root}JetUnixStream")] {
             out.push_str(&format!(
-                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
         out.push_str(&format!(
-            "impl user_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
+            "impl __jet_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
         ));
     }
     let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE)
@@ -1757,7 +1750,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
     ] {
         if uses_mem || constructed_allocators.contains(name) {
             out.push_str(&format!(
-                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }
@@ -1767,8 +1760,8 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         // concrete `DBScope` calls.
         out.push_str(&format!(
             "trait JetDBDriver {{\n\
-             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
-             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
+             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError>;\n\
+             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError>;\n\
              \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError>;\n\
              \tfn begin(&mut self) -> bool;\n\
              \tfn commit(&mut self) -> bool;\n\
@@ -1778,11 +1771,11 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         if let Some(ffi) = &cx.ffi_crate {
             out.push_str(&format!(
                 "impl JetDBDriver for {root}JetDbScope {{\n\
-                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
                  \t\tjet_db_scope_query(self, &sql, &params)\n\
                  \t}}\n\
-                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_query(self, &sql, &params).map(|__rows| __rows.into_iter().next())\n\
+                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError> {{\n\
+                 \t\tjet_db_scope_query(self, &sql, &params).map({root}jet_std::jet_db_first_row)\n\
                  \t}}\n\
                  \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
                  \t\tjet_db_scope_execute(self, &sql, &params)\n\
@@ -1797,7 +1790,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
 let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
-fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
 let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n"
@@ -1807,7 +1800,7 @@ let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.p
 let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
-fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
 let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n"
@@ -1822,7 +1815,7 @@ fn execute(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_
 let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }};\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
-fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
 let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }};\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
@@ -1839,14 +1832,14 @@ let mut backend = JetDbScopeBackend {{ scope }};\n\
 }}\n"
             ));
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
+                "impl __jet_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbScope {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
+                "impl __jet_Close for {root}JetDbScope {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));
         } else {
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\nimpl user_Close for {root}JetDbScope {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl __jet_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\nimpl __jet_Close for {root}JetDbScope {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }
@@ -1869,27 +1862,27 @@ pub(crate) fn emit_synthetic_iter_index_traits(
     has_index_mut: bool,
 ) {
     if has_iterable {
-        out.push_str("pub trait user_Iterable {\n");
+        out.push_str("pub trait __jet_Iterable {\n");
         out.push_str("    type Iter;\n");
         out.push_str("    fn iter(self) -> Self::Iter;\n");
         out.push_str("}\n\n");
     }
     if has_iterator {
-        out.push_str("pub trait user_Iterator {\n");
+        out.push_str("pub trait __jet_Iterator {\n");
         out.push_str("    type Item;\n");
         out.push_str("    fn next(&mut self) -> JetOutcome<Self::Item, JetAbsent>;\n");
         out.push_str("}\n\n");
     }
     if has_index {
-        out.push_str("pub trait user_Index {\n");
+        out.push_str("pub trait __jet_Index {\n");
         out.push_str("    type Key;\n");
         out.push_str("    type Value;\n");
         out.push_str("    fn get(&self, k: Self::Key) -> JetOutcome<Self::Value, JetAbsent>;\n");
         out.push_str("}\n\n");
     }
     if has_index_mut {
-        out.push_str("pub trait user_IndexMut: user_Index {\n");
-        out.push_str("    fn set(&mut self, k: <Self as user_Index>::Key, v: <Self as user_Index>::Value);\n");
+        out.push_str("pub trait __jet_IndexMut: __jet_Index {\n");
+        out.push_str("    fn set(&mut self, k: <Self as __jet_Index>::Key, v: <Self as __jet_Index>::Value);\n");
         out.push_str("}\n\n");
     }
 }
@@ -1936,11 +1929,11 @@ pub(crate) fn program_iter_index_usage(items: &[Item]) -> (bool, bool, bool, boo
     (has_iterable, has_iterator, has_index, has_index_mut)
 }
 
-/// D-TXN-ROLLBACK layer 2: emit the `trait user_Rollback { … }` Rust trait
+/// D-TXN-ROLLBACK layer 2: emit the `trait __jet_Rollback { … }` Rust trait
 /// declaration when any impl block in the program references `Rollback`. Programs
 /// with no `Rollback` impl produce zero output here (byte-identical to before).
 pub(crate) fn emit_synthetic_rollback_trait(out: &mut String) {
-    out.push_str("pub trait user_Rollback {\n");
+    out.push_str("pub trait __jet_Rollback {\n");
     out.push_str("    type Snapshot;\n");
     out.push_str("    fn snapshot(&self) -> Self::Snapshot;\n");
     out.push_str("    fn restore(&mut self, _snap: Self::Snapshot);\n");
@@ -2028,6 +2021,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
@@ -2243,6 +2237,8 @@ mod tests {
         let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
         let division =
             std::fs::read_to_string(root.join("src/Prelude/Core/Division.rs")).unwrap();
+        let typed_heads =
+            std::fs::read_to_string(root.join("../jet-foundation/src/TypedHeads.rs")).unwrap();
         let typed_text =
             std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
         let progress =
@@ -2283,6 +2279,7 @@ mod tests {
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
             ("src/Prelude/Core/Division.rs", division.as_str()),
+            ("../jet-foundation/src/TypedHeads.rs", typed_heads.as_str()),
             ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Progress.rs", progress.as_str()),
             ("src/Prelude/Core/ByteBuffer.rs", byte_buffer.as_str()),
@@ -2412,6 +2409,7 @@ mod tests {
                 core.as_str(),
                 power.as_str(),
                 division.as_str(),
+                typed_heads.as_str(),
                 typed_text.as_str(),
                 progress.as_str(),
                 byte_buffer.as_str(),
@@ -2444,6 +2442,7 @@ mod tests {
             core.as_str(),
             power.as_str(),
             division.as_str(),
+            typed_heads.as_str(),
             typed_text.as_str(),
             progress.as_str(),
             byte_buffer.as_str(),
@@ -2518,7 +2517,7 @@ mod tests {
             project_root: PathBuf::from(root),
             modules: vec![crate::AST::LoadedModule {
                 path: PathBuf::from(root).join("main.jet"), display: "main.jet".into(), source: src.into(), alias: "main".into(),
-                imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items),
+                imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
                 no_prelude: program.no_prelude, html_path: program.html_path,
@@ -2527,7 +2526,7 @@ mod tests {
                 rule_facts: std::mem::take(&mut program.rule_facts),
             }],
             parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: crate::AST::CFfi::default(),
-            comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
+            comptime_inputs: Vec::new(), name_ledger: crate::AST::NameLedger::default(), layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
             active_os: crate::Syntax::OSTarget::host(),
@@ -2591,6 +2590,7 @@ mod tests {
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut prog.imports),
                 items: std::mem::take(&mut prog.items),
+                script_body: std::mem::take(&mut prog.script_body),
                 block_spans: std::mem::take(&mut prog.block_spans),
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
@@ -2605,7 +2605,7 @@ mod tests {
             ffi_callback_fns: HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
-            import_targets: HashMap::new(),
+            name_ledger: crate::AST::NameLedger::default(),
             layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core,
             web_partitions: HashMap::new(),
@@ -2626,7 +2626,7 @@ mod tests {
         let rust = emit_bundle(&bundle, CompileMode::Run, None);
         assert!(rust.contains("fn main()"), "generated Rust has no main");
         assert!(rust.contains("jet_raylib_window_open"));
-        assert!(rust.contains("let user_window: RaylibWindow"));
+        assert!(rust.contains("let __jet_window: RaylibWindow"));
         assert!(
             !rust.contains("jet_std::Raylib"),
             "raylib bridge handles must lower to top-level prelude types"
@@ -2640,21 +2640,41 @@ mod tests {
         assert!(rust.contains("dlopen"));
         assert!(rust.contains("JET_RAYLIB_DISPLAY"));
         assert!(
-            !rust.contains("unsafe fn user_"),
+            !rust.contains("unsafe fn __jet_"),
             "raylib user functions must stay safe; unsafe is confined to the vetted bridge"
         );
     }
 }
 
+struct TestCase<'a> {
+    test: &'a TestDef,
+    /// Rust module path that owns the test. `None` means the generated root.
+    module: Option<String>,
+    index: usize,
+}
+
+fn test_fn_path(test: &TestCase<'_>) -> String {
+    let name = format!("jet_test_{}", test.index);
+    test.module
+        .as_deref()
+        .map_or(name.clone(), |module| format!("{module}::{name}"))
+}
+
 /// Emit a test harness binary: all definitions plus one `main` that runs
 /// every `#Test "…" { }` block (M6 phase 2).
 pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
-    let tests: Vec<&TestDef> = prog
+    let tests: Vec<TestCase<'_>> = prog
         .items
         .iter()
         .filter_map(|i| match i {
             Item::Test(t) => Some(t),
             _ => None,
+        })
+        .enumerate()
+        .map(|(index, test)| TestCase {
+            test,
+            module: None,
+            index,
         })
         .collect();
     assert!(!tests.is_empty(), "emit_tests called with no test blocks");
@@ -2714,6 +2734,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
@@ -2775,7 +2796,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         }
     }
 
-    emit_test_fns(&cx, &tests, &mut out);
+    emit_test_fns(&cx, &tests, None, &mut out);
     emit_test_main(&tests, &mut out);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
@@ -2785,7 +2806,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 /// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
 /// (unit or property) is invoked through its `jet_test_N()` entry; the loop is
 /// identical whichever kind it is.
-fn emit_test_main(tests: &[&TestDef], out: &mut String) {
+fn emit_test_main(tests: &[TestCase<'_>], out: &mut String) {
     emit_test_main_cov(tests, &[], out, false)
 }
 
@@ -2805,7 +2826,7 @@ fn emit_test_main(tests: &[&TestDef], out: &mut String) {
 /// Reporting always walks results in (possibly shuffled) `slots` order, so
 /// output is deterministic regardless of which thread finishes first.
 fn emit_test_main_cov(
-    tests: &[&TestDef],
+    tests: &[TestCase<'_>],
     checks: &[&ResolvedOutput],
     out: &mut String,
     coverage: bool,
@@ -2817,16 +2838,20 @@ fn emit_test_main_cov(
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
-    for (i, test) in tests.iter().enumerate() {
+    for test in tests {
+        let def = test.test;
         let name = escape_rust_str(
-            test.name
+            def.name
                 .as_deref()
                 .expect("sema resolves every test marker name before codegen"),
         );
-        let skip = whole_test_skip(test);
+        let skip = whole_test_skip(def);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: jet_test_{} }},\n",
-            name, skip, !test.params.is_empty(), i
+            "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: {} }},\n",
+            name,
+            skip,
+            !def.params.is_empty(),
+            test_fn_path(test),
         ));
     }
     for (i, check) in checks.iter().enumerate() {
@@ -2883,7 +2908,7 @@ fn emit_test_main_cov(
     out.push_str("        match (skip, res) {\n");
     out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); report.skipped += 1; }\n");
     out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } report.passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { let failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { let mut failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); if property { failure.message = msg; } println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
     out.push_str("            (false, None) => unreachable!(),\n");
     out.push_str("        }\n");
     out.push_str("    }\n");
@@ -2911,8 +2936,8 @@ fn emit_output_check_fns(checks: &[&ResolvedOutput], out: &mut String) {
 
 /// Does any test in the set declare property parameters (D-TEST1)? Drives whether
 /// the harness needs `PROP_PRELUDE`.
-fn any_property_test(tests: &[&TestDef]) -> bool {
-    tests.iter().any(|t| !t.params.is_empty())
+fn any_property_test(tests: &[TestCase<'_>]) -> bool {
+    tests.iter().any(|t| !t.test.params.is_empty())
 }
 
 /// D-DOTSCOPE1: is this test whole-test-skipped — i.e. does a `.skip` scope
@@ -2931,12 +2956,23 @@ fn whole_test_skip(test: &TestDef) -> bool {
 /// plus a driver `jet_test_N()` that generates inputs, runs cases, and shrinks
 /// the first failure to a minimal counterexample. Either way `jet_test_N()` is
 /// the single entry the main loop calls, so the reporting loop is shared.
-fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
+fn emit_test_fns(
+    cx: &Cx,
+    tests: &[TestCase<'_>],
+    module: Option<&str>,
+    out: &mut String,
+) {
     const CASES: usize = 200;
     const SHRINK_STEPS: usize = 2000;
-    for (i, test) in tests.iter().enumerate() {
+    let visibility = if module.is_some() { "pub " } else { "" };
+    for test_case in tests {
+        if test_case.module.as_deref() != module {
+            continue;
+        }
+        let test = test_case.test;
+        let i = test_case.index;
         if test.params.is_empty() {
-            out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
+            out.push_str(&format!("{visibility}fn jet_test_{}() -> Result<(), String> {{\n", i));
             emit_test_body(cx, &test.body, out);
             out.push_str("    Ok(())\n");
             out.push_str("}\n\n");
@@ -2951,7 +2987,7 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
             .map(|p| format!("{}: {}", mangle(&p.name), cx.rust_type(&p.ty)))
             .collect();
         out.push_str(&format!(
-            "fn jet_prop_{}({}) -> Result<(), String> {{\n",
+            "{visibility}fn jet_prop_{}({}) -> Result<(), String> {{\n",
             i,
             sig.join(", ")
         ));
@@ -2965,7 +3001,7 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
         let n = test.params.len();
         let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
         let tuple_ty = format!("({},)", types.join(", "));
-        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
+        out.push_str(&format!("{visibility}fn jet_test_{}() -> Result<(), String> {{\n", i));
         out.push_str("    let seed = jet_prop_seed();\n");
         out.push_str("    let mut rng = JetRng::new(seed);\n");
         // call helper that takes the tuple, returns Result
@@ -3098,7 +3134,8 @@ pub fn emit_bundle_dbg(
     // package edition. Keep codegen on the same edition sema checked.
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let mut out = String::new();
     out.push_str(&format!(
         "// Generated by {} — do not edit. Edit the .{} source instead.\n",
@@ -3137,7 +3174,7 @@ pub fn emit_bundle_dbg(
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3170,6 +3207,14 @@ pub fn emit_bundle_dbg(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, true, true);
         out.push_str("}\n\n");
     }
@@ -3200,10 +3245,14 @@ pub fn emit_bundle_dbg(
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(&mut cx, bundle, bundle.entry);
     for import in &entry.imports {
-        let Some(&target) = bundle
-            .import_targets
-            .get(&(bundle.entry, import.span))
-        else {
+        if bundle
+            .name_ledger
+            .effective_alias(bundle.entry, &import.import_alias())
+            .is_none()
+        {
+            continue;
+        }
+        let Some(target) = bundle.name_ledger.import_target(bundle.entry, import.span) else {
             continue;
         };
         let imported = &bundle.modules[target];
@@ -3226,13 +3275,21 @@ pub fn emit_bundle_dbg(
             continue;
         }
         out.push_str(&format!(
-            "use user_{}::user_Display as _;\n",
-            imported.alias
+            "use {}::__jet_Display as _;\n",
+            mangle(&imported.alias)
         ));
     }
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, true, false);
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
@@ -3261,13 +3318,24 @@ pub fn emit_bundle_tests_cov(
     coverage: bool,
 ) -> String {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
-    let tests: Vec<&TestDef> = entry
-        .items
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
+    let tests: Vec<TestCase<'_>> = bundle
+        .modules
         .iter()
-        .filter_map(|i| match i {
-            Item::Test(t) => Some(t),
-            _ => None,
+        .enumerate()
+        .flat_map(|(owner, module)| {
+            let module_path = (owner != bundle.entry).then(|| mangle(&module.alias));
+            module.items.iter().filter_map(move |item| match item {
+                Item::Test(test) => Some((module_path.clone(), test)),
+                _ => None,
+            })
+        })
+        .enumerate()
+        .map(|(index, (module, test))| TestCase {
+            test,
+            module,
+            index,
         })
         .collect();
     let checks = bundle.modules.iter().flat_map(|module| module.items.iter()).filter_map(|item| {
@@ -3322,9 +3390,15 @@ pub fn emit_bundle_tests_cov(
         if i == bundle.entry {
             continue;
         }
-        let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        let module_path = mangle(&module.alias);
+        out.push_str(&format!("mod {} {{\n", module_path));
         out.push_str(MOD_USE);
+        out.push_str("use super::{jet_proof_record, jet_test_failure, jet_test_print};\n");
+        if tests.iter().any(|test| {
+            test.module.as_deref() == Some(module_path.as_str()) && !test.test.params.is_empty()
+        }) {
+            out.push_str("use super::{jet_prop_seed, JetGen, JetRng};\n");
+        }
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -3336,7 +3410,7 @@ pub fn emit_bundle_tests_cov(
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
-        cx.coverage = coverage;
+        cx.coverage = coverage; // inline Core scope setup follows below
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
         TIR::register_imported_struct_shapes(&mut cx, bundle, i);
@@ -3353,7 +3427,16 @@ pub fn emit_bundle_tests_cov(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
+        emit_test_fns(&cx, &tests, Some(&module_path), &mut out);
         out.push_str("}\n\n");
     }
 
@@ -3384,9 +3467,17 @@ pub fn emit_bundle_tests_cov(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
-    emit_test_fns(&cx, &tests, &mut out);
+    emit_test_fns(&cx, &tests, None, &mut out);
     emit_output_check_fns(&checks, &mut out);
     emit_test_main_cov(&tests, &checks, &mut out, coverage);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
@@ -3402,16 +3493,16 @@ pub fn emit_bundle_tests_cov(
 ///     a compiler diagnostic, same tier as `run_bench`'s missing-file message).
 ///   - unnamed: exactly one property test in the file is picked automatically;
 ///     zero or more-than-one is an `Err` (the latter lists the candidates).
-fn select_fuzz_target<'a>(
-    tests: &[&'a TestDef],
+fn select_fuzz_target(
+    tests: &[TestCase<'_>],
     test_name: Option<&str>,
 ) -> Result<usize, String> {
     if let Some(name) = test_name {
         match tests
             .iter()
-            .position(|test| test.name.as_deref() == Some(name))
+            .position(|test| test.test.name.as_deref() == Some(name))
         {
-            Some(i) if !tests[i].params.is_empty() => Ok(i),
+            Some(i) if !tests[i].test.params.is_empty() => Ok(i),
             Some(_) => Err(format!(
                 "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
                 name
@@ -3422,7 +3513,7 @@ fn select_fuzz_target<'a>(
         let candidates: Vec<usize> = tests
             .iter()
             .enumerate()
-            .filter(|(_, t)| !t.params.is_empty())
+            .filter(|(_, t)| !t.test.params.is_empty())
             .map(|(i, _)| i)
             .collect();
         match candidates.len() {
@@ -3437,6 +3528,7 @@ fn select_fuzz_target<'a>(
                     .iter()
                     .map(|&index| {
                         tests[index]
+                            .test
                             .name
                             .as_deref()
                             .expect("sema resolves every test marker name before codegen")
@@ -3475,13 +3567,20 @@ pub fn emit_bundle_fuzz(
     test_name: Option<&str>,
 ) -> Result<String, String> {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
-    let tests: Vec<&TestDef> = entry
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
+    let tests: Vec<TestCase<'_>> = entry
         .items
         .iter()
         .filter_map(|i| match i {
             Item::Test(t) => Some(t),
             _ => None,
+        })
+        .enumerate()
+        .map(|(index, test)| TestCase {
+            test,
+            module: None,
+            index,
         })
         .collect();
     if tests.is_empty() {
@@ -3527,7 +3626,7 @@ pub fn emit_bundle_fuzz(
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3556,6 +3655,14 @@ pub fn emit_bundle_fuzz(
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3586,10 +3693,18 @@ pub fn emit_bundle_fuzz(
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
-    emit_test_fns(&cx, &tests, &mut out);
-    emit_fuzz_main(&cx, tests[target], target, file_label, &mut out);
+    emit_test_fns(&cx, &tests, None, &mut out);
+    emit_fuzz_main(&cx, &tests[target], target, file_label, &mut out);
     Ok(strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))))
@@ -3598,8 +3713,15 @@ pub fn emit_bundle_fuzz(
 /// See `emit_bundle_fuzz`'s doc comment for the overall shape. `test` is the
 /// chosen property test, `idx` its position (`jet_prop_{idx}` is its body fn,
 /// already emitted by `emit_test_fns`).
-fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &mut String) {
+fn emit_fuzz_main(
+    cx: &Cx,
+    test_case: &TestCase<'_>,
+    idx: usize,
+    file_label: &str,
+    out: &mut String,
+) {
     const SHRINK_STEPS: usize = 2000;
+    let test = test_case.test;
     let n = test.params.len();
     let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
     let tuple_ty = format!("({},)", types.join(", "));
@@ -3730,7 +3852,8 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 /// instead of printing false timings.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
+    let bundle_auto_derives =
+        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let benches: Vec<&BenchDef> = entry
         .items
         .iter()
@@ -3789,7 +3912,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             continue;
         }
         let ns = module.alias.clone();
-        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
         let mut cx = build_cx_items(
             &module.items,
@@ -3819,6 +3942,14 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
+        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
+        cx.inline_unqualified = inline;
+        cx.inline_unqualified_file = file;
+        cx.inline_import_names = names;
+        cx.inline_reexport_inline = reexports;
+        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
+        cx.inline_core_imports = inline_core;
+        cx.inline_reexport_core = reexport_core;
         emit_program_items(&cx, &module.items, &mut out, false, true);
         out.push_str("}\n\n");
     }
@@ -3850,6 +3981,14 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
+    cx.inline_unqualified = inline;
+    cx.inline_unqualified_file = file;
+    cx.inline_import_names = names;
+    cx.inline_reexport_inline = reexports;
+    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
+    cx.inline_core_imports = inline_core;
+    cx.inline_reexport_core = reexport_core;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
 
     out.push_str(

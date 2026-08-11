@@ -411,8 +411,8 @@ impl<'a> Checker<'a> {
                 registry
                     .struct_fields(leaf)?
                     .iter()
-                    .find(|(candidate, _, _, _)| candidate == field)
-                    .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+                    .find(|(candidate, _, _)| candidate == field)
+                    .map(|(_, _, ty)| substitute_type(ty, &subst))
             }
             _ => None,
         }

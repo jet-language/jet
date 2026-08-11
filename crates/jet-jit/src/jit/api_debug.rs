@@ -71,6 +71,8 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
                 let mut plan = plan;
                 if let Some(gap) = plan.gap.as_mut() {
                     gap.reason = reason;
+                } else {
+                    plan.gap = Some(JitGap::new(entry_run_name(bundle), reason));
                 }
                 Err(plan)
             }
@@ -85,7 +87,15 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
                 record_trace(plan.rows);
                 Ok(outcome)
             }
-            Err(_) => Err(plan),
+            Err(reason) => {
+                let mut plan = plan;
+                if let Some(gap) = plan.gap.as_mut() {
+                    gap.reason = reason;
+                } else {
+                    plan.gap = Some(JitGap::new(entry_run_name(bundle), reason));
+                }
+                Err(plan)
+            }
         }
     }
 }
@@ -219,6 +229,40 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
         ensure_resident_module(&program)
     })
+}
+
+/// Test hook: run only the resident Cranelift path.
+///
+/// The public backend intentionally deopts to the canonical interpreter when
+/// resident execution is unavailable. Proof harnesses must not accept that
+/// result as JIT evidence, so this seam returns the resident failure instead.
+#[doc(hidden)]
+pub fn run_resident_strict_for_test(bundle: &ProgramBundle) -> Result<RunOutcome, String> {
+    if !cranelift_host_supported() {
+        return Err("cranelift-jit host path unsupported on this architecture".to_string());
+    }
+    TIR::install_comptime_bridge();
+    crate::Ffi::bind_bundle_ffi(bundle)?;
+    let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
+        format!(
+            "lower_jit_program returned None ({})",
+            TIR::lower_jit_program_fail_reason(bundle)
+        )
+    })?;
+    let plan = plan_tiers(bundle, Some(&program));
+    if plan.whole_interp || !plan.deopt.is_empty() {
+        return Err(format!(
+            "resident tier plan is not strict: whole_interp={} deopt={:?}",
+            plan.whole_interp, plan.deopt
+        ));
+    }
+    match try_resident(bundle) {
+        Ok(outcome) => Ok(outcome),
+        Err(plan) => Err(plan
+            .gap
+            .map(|gap| format!("{}: {}", gap.function, gap.reason))
+            .unwrap_or_else(|| "resident Cranelift execution failed".to_string())),
+    }
 }
 
 /// Test hook: lowered function names in the JIT program.

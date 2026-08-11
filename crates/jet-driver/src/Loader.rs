@@ -685,7 +685,7 @@ fn load_entry_with_overlays_mode_with_sink(
 
     // Pre-resolve every file import to its loaded module index so Codegen doesn't
     // need to call back into Loader (breaks the Codegen→Loader dep cycle).
-    let mut import_targets = HashMap::new();
+    let mut name_ledger = crate::AST::NameLedger::default();
     for module_idx in 0..modules.len() {
         let (module_path, imports) = {
             let m = &modules[module_idx];
@@ -712,7 +712,7 @@ fn load_entry_with_overlays_mode_with_sink(
             ) {
                 let norm = normalize_path(&target_path);
                 if let Some(&target_idx) = path_to_idx.get(&norm) {
-                    import_targets.insert((module_idx, imp.span), target_idx);
+                    name_ledger.record_import_target(module_idx, imp.span, target_idx);
                 }
             }
         }
@@ -737,7 +737,7 @@ fn load_entry_with_overlays_mode_with_sink(
         ffi_callback_fns: HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets,
+        name_ledger,
         layer_ceiling,
         inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(),
@@ -798,6 +798,7 @@ fn load_entry_with_overlays_mode_with_sink(
             alias,
             imports: std::mem::take(&mut program.imports),
             items: program.items,
+            script_body: program.script_body,
             block_spans: program.block_spans,
             web_target_ceiling: program.web_target_ceiling,
             pub_file: program.pub_file,
@@ -1255,6 +1256,7 @@ fn load_file(
         alias,
         imports: imports.clone(),
         items: prog.items,
+        script_body: prog.script_body,
         block_spans: prog.block_spans,
         web_target_ceiling: prog.web_target_ceiling,
         pub_file: prog.pub_file,
@@ -1270,7 +1272,7 @@ fn load_file(
         if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
             continue;
         }
-        // D-MOD3: `use alias.Item` / `use alias.{A,B}` forms don't load new files;
+        // D-MOD3: `use alias.Item` / `use alias.[A,B]` forms don't load new files;
         // sema resolves them against already-loaded modules (E0609–E0611).
         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
             continue;
@@ -1334,6 +1336,8 @@ fn load_file(
         name: String,
         name_span: crate::Diagnostics::Span,
         span: crate::Diagnostics::Span,
+        is_pub: bool,
+        is_package_pub: bool,
     }
     let code_module_decls: Vec<CmMeta> = modules[module_idx]
         .items
@@ -1345,6 +1349,8 @@ fn load_file(
                         name: cm.name.clone(),
                         name_span: cm.name_span,
                         span: cm.span,
+                        is_pub: cm.is_pub,
+                        is_package_pub: cm.is_package_pub,
                     });
                 }
             }
@@ -1397,8 +1403,8 @@ fn load_file(
             alias: cm.name.clone(),
             alias_span: cm.name_span,
             span: cm.span,
-            is_pub: false,
-            is_package_pub: false,
+            is_pub: cm.is_pub,
+            is_package_pub: cm.is_package_pub,
             inline_version: None,
         };
         modules[module_idx].imports.push(synthetic);

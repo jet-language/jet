@@ -139,7 +139,7 @@ fn evaluate_module<'a>(
     let mut secrets = Vec::new();
     let mut adapters = Vec::new();
     let mut lifecycle = EnvironmentLifecycle::default();
-    let mut profiles = Vec::new();
+    let mut presets = Vec::new();
     let mut languages = Vec::new();
     let mut files = Vec::new();
     let mut package_profiles = Vec::new();
@@ -159,12 +159,12 @@ fn evaluate_module<'a>(
                     secrets: names,
                     adapters: found_adapters,
                     lifecycle: captured_lifecycle,
-                    profiles: captured_profiles,
+                    presets: captured_presets,
                     languages: captured_languages,
                     files: captured_files,
                 } = capture;
                 lifecycle_merge(&mut lifecycle, captured_lifecycle, &m.name)?;
-                profiles.extend(captured_profiles);
+                presets.extend(captured_presets);
                 languages.extend(captured_languages);
                 files.extend(captured_files);
                 entries.push(((c.namespace, c.path.clone()), entry));
@@ -179,12 +179,12 @@ fn evaluate_module<'a>(
                     secrets: names,
                     adapters: found_adapters,
                     lifecycle: captured_lifecycle,
-                    profiles: captured_profiles,
+                    presets: captured_presets,
                     languages: captured_languages,
                     files: captured_files,
                 } = capture;
                 lifecycle_merge(&mut lifecycle, captured_lifecycle, &m.name)?;
-                profiles.extend(captured_profiles);
+                presets.extend(captured_presets);
                 languages.extend(captured_languages);
                 files.extend(captured_files);
                 entries.push(((c.namespace, c.path.clone()), entry));
@@ -251,7 +251,7 @@ fn evaluate_module<'a>(
         secrets,
         adapters,
         lifecycle,
-        profiles,
+        presets,
         languages,
         files,
         integrations,
@@ -594,7 +594,7 @@ struct EnvCapture {
     secrets: Vec<String>,
     adapters: Vec<AdapterPlan>,
     lifecycle: EnvironmentLifecycle,
-    profiles: Vec<PresetSpec>,
+    presets: Vec<PresetSpec>,
     languages: Vec<LanguageSpec>,
     files: Vec<super::Environment::ManagedFile>,
 }
@@ -659,18 +659,18 @@ fn evaluate_package_profile_fields(
         if !allowed.iter().any(|allowed| *allowed == field) {
             return Err(Diagnostic::error(
                 "E1333",
-                format!("package profile `{name}` has unknown field `{field}`"),
-                "a source-backed package profile has only `extends`, `packages`, and `collisions` facts".to_string(),
-                "remove the field or move user/environment settings into a declared `user.<name>` profile".to_string(),
+                format!("package generation `{name}` has unknown field `{field}`"),
+                "a source-backed package generation has only `extends`, `packages`, and `collisions` facts".to_string(),
+                "remove the field or move user/environment settings into a declared `user.<name>` generation".to_string(),
                 Some(*span),
             ));
         }
         if !seen.insert(field) {
             return Err(Diagnostic::error(
                 "E1332",
-                format!("package profile `{name}` repeats field `{field}`"),
-                "one package profile must have one value for each typed fact".to_string(),
-                "keep one declaration for the field, or split the profiles and compose them with `extends`".to_string(),
+                format!("package generation `{name}` repeats field `{field}`"),
+                "one package generation must have one value for each typed fact".to_string(),
+                "keep one declaration for the field, or split the generations and compose them with `extends`".to_string(),
                 Some(*span),
             ));
         }
@@ -687,8 +687,8 @@ fn evaluate_package_profile_fields(
         &HashSet::new(),
         base_dir,
         Some(src),
-        "package profile fields are pure computed values; a cycle has no deterministic evaluation order",
-        "break the cycle by making one profile field a literal or by moving the shared computation into a pure function",
+        "package generation fields are pure computed values; a cycle has no deterministic evaluation order",
+        "break the cycle by making one generation field a literal or by moving the shared computation into a pure function",
     )?;
     let resolved = computed.values;
     let mut packages = Vec::new();
@@ -706,8 +706,8 @@ fn evaluate_package_profile_fields(
         if !extracted.adapters.is_empty() {
             return Err(Diagnostic::error(
                 "E1335",
-                format!("package profile `{name}` contains an adapter package"),
-                "profile packages must retain provider identity and cannot hide a build recipe inside the profile declaration".to_string(),
+                format!("package generation `{name}` contains an adapter package"),
+                "generation packages must retain provider identity and cannot hide a build recipe inside the generation declaration".to_string(),
                 "realize the adapter as a named package, then reference its exact package identity".to_string(),
                 Some(value.span()),
             ));
@@ -718,8 +718,8 @@ fn evaluate_package_profile_fields(
         Some(value) => names_from(value).ok_or_else(|| {
             Diagnostic::error(
                 "E1333",
-                format!("package profile `{name}` has invalid `extends`"),
-                "profile inheritance is a deterministic list of profile names".to_string(),
+                format!("package generation `{name}` has invalid `extends`"),
+                "generation inheritance is a deterministic list of generation names".to_string(),
                 "write `extends: [\"base\"]`".to_string(),
                 Some(value_span(fields, Syntax::PROFILE_FIELD_EXTENDS)),
             )
@@ -761,7 +761,7 @@ fn package_profile_collisions(
                 let crate::AST::CtKey::Str(key) = key else {
                     return Err(Diagnostic::error(
                         "E1333",
-                        format!("package profile `{name}` has a non-string collision path"),
+                        format!("package generation `{name}` has a non-string collision path"),
                         "collision policy is an exact string path-to-provider map".to_string(),
                         "use a quoted path as the map key".to_string(),
                         Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
@@ -778,7 +778,7 @@ fn package_profile_collisions(
         _ => {
             return Err(Diagnostic::error(
                 "E1333",
-                format!("package profile `{name}` has invalid `collisions`"),
+                format!("package generation `{name}` has invalid `collisions`"),
                 "collision policy is an exact path-to-provider map".to_string(),
                 "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
                 Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
@@ -790,7 +790,7 @@ fn package_profile_collisions(
         let Some(provider) = string_value(provider) else {
             return Err(Diagnostic::error(
                 "E1333",
-                format!("package profile `{name}` has a non-string collision provider"),
+                format!("package generation `{name}` has a non-string collision provider"),
                 "each exact path needs one explicit provider identity".to_string(),
                 "use a quoted package ref as the map value".to_string(),
                 Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
@@ -799,7 +799,7 @@ fn package_profile_collisions(
         if path.trim().is_empty() || provider.trim().is_empty() || path.contains('\0') {
             return Err(Diagnostic::error(
                 "E1333",
-                format!("package profile `{name}` has an invalid collision entry"),
+                format!("package generation `{name}` has an invalid collision entry"),
                 "exact collision paths and provider identities cannot be empty or contain NUL".to_string(),
                 "name the path and the exact package provider".to_string(),
                 Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
@@ -808,8 +808,8 @@ fn package_profile_collisions(
         if out.insert(path.clone(), provider).is_some() {
             return Err(Diagnostic::error(
                 "E1332",
-                format!("package profile `{name}` repeats collision path `{path}`"),
-                "one profile cannot choose two providers for one exact path".to_string(),
+                format!("package generation `{name}` repeats collision path `{path}`"),
+                "one generation cannot choose two providers for one exact path".to_string(),
                 "keep one collision selection for the path".to_string(),
                 Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
             ));
@@ -893,7 +893,7 @@ fn evaluate_env_fields(
     let mut secrets = Vec::new();
     let mut adapters = Vec::new();
     let mut lifecycle = EnvironmentLifecycle::default();
-    let mut profiles = Vec::new();
+    let mut presets = Vec::new();
     let mut languages = Vec::new();
     let mut files = Vec::new();
     let extern_names = HashSet::new();
@@ -961,7 +961,7 @@ fn evaluate_env_fields(
             }
         } else if name == Syntax::ENV_FIELD_PRESETS {
             if let Some(value) = resolved.get(name) {
-                profiles.extend(presets_from_value(value).map_err(|error| {
+                presets.extend(presets_from_value(value).map_err(|error| {
                     Diagnostic::error(
                         "E1332",
                         format!("environment preset declaration is invalid: {error}"),
@@ -1023,7 +1023,7 @@ fn evaluate_env_fields(
         secrets,
         adapters,
         lifecycle,
-        profiles,
+        presets,
         languages,
         files,
     })

@@ -60,7 +60,7 @@ impl CellSchema {
                 .map(|(field, ty)| {
                     let ty = jet_foundation::Generics::substitute_type(ty, &subst);
                     Ok((
-                        field.strip_prefix("user_").unwrap_or(field).to_string(),
+                        field.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(field).to_string(),
                         Self::from_type(&ty, meta)?,
                     ))
                 })

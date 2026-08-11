@@ -10,7 +10,8 @@ import { openStore, empty } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
-  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleBallotDocGaps } from '../app/lint.mjs';
+  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleBallotDocGaps,
+  ruleCriteriaEvidenceConflicts, ruleCriteriaPhaseDrift, ruleDuplicateSuspects } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 
@@ -230,7 +231,71 @@ test('ruleBallotDocGaps: no docs/ballots dir is clean, never throws', () => {
   assert.deepEqual(ruleBallotDocGaps(empty('T'), { decisions: [] }, { docsRoot }), []);
 });
 
-// ---- 8. lint() aggregator ------------------------------------------------------------
+// ---- 8. criteria integrity ---------------------------------------------------
+
+test('criteria-evidence-conflict: flags met and verified rows with disputed evidence', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Criteria evidence' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
+  st.mutate((s) => db.addCriterion(s, '#1', 'second', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'NOT SATISFIED: missing case', by: 'builder' }));
+  st.mutate((s) => db.meetCriterion(s, '#1', 2, { evidence: 'built', by: 'builder' }));
+  st.mutate((s) => db.verifyCriterion(s, '#1', 2, { evidence: 'could not run the check', by: 'verifier' }));
+  const findings = ruleCriteriaEvidenceConflicts(st.load());
+  assert.equal(findings.length, 2);
+  assert.ok(findings.every(f => f.rule === 'criteria-evidence-conflict' && f.ref === '#1'));
+  assert.match(findings[0].msg + findings[1].msg, /criterion #1|criterion #2/);
+});
+
+test('criteria-evidence-conflict: stays clean for open rows and positive evidence', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Clean criteria evidence' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'ran the check; all cases pass', by: 'builder' }));
+  assert.deepEqual(ruleCriteriaEvidenceConflicts(st.load()), []);
+});
+
+test('criteria-phase-drift: flags complete rows or verified rows behind verify', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'All met while building', phase: 'building' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'builder' }));
+
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Verified while building', phase: 'building' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#2', 'second', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#2', 1, { evidence: 'built', by: 'builder' }));
+  st.mutate((s) => db.verifyCriterion(s, '#2', 1, { evidence: 'checked', by: 'verifier' }));
+
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Open while building', phase: 'building' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#3', 'third', 'planner'));
+
+  const findings = ruleCriteriaPhaseDrift(st.load());
+  assert.equal(findings.length, 2);
+  assert.deepEqual(findings.map(f => f.ref), ['#1', '#2']);
+  assert.ok(findings.every(f => f.rule === 'criteria-phase-drift'));
+});
+
+// ---- 9. duplicate-suspect ---------------------------------------------------
+
+test('duplicate-suspect: flags shared test references only among open cards', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Parser symptom A', body: 'fails in tests/parser.rs at some_test_name',
+  }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Parser symptom B', body: 'fails in tests/parser.rs at some_test_name',
+  }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Closed parser symptom', phase: 'done', body: 'fails in tests/parser.rs at some_test_name',
+  }, cfg));
+  const findings = ruleDuplicateSuspects(st.load());
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule, 'duplicate-suspect');
+  assert.equal(findings[0].ref, '#1,#2');
+  assert.match(findings[0].msg, /tests\/parser\.rs/);
+});
+
+// ---- 9. lint() aggregator ------------------------------------------------------------
 
 test('lint(): combines core rules; --docs adds the doc-gap rule only when asked', () => {
   const st = fresh();
@@ -253,7 +318,7 @@ test('lint(): combines core rules; --docs adds the doc-gap rule only when asked'
   assert.ok(withDocs.some(f => f.rule === 'ratified-in-open-ballot-doc'));
 });
 
-// ---- 9. burndown scope --------------------------------------------------------------
+// ---- 10. burndown scope --------------------------------------------------------------
 
 test('nextCards burndown scope: current-epoch epoch-track + sidequests, other epochs excluded', () => {
   const st = fresh();
@@ -273,7 +338,7 @@ test('nextCards burndown scope: current-epoch epoch-track + sidequests, other ep
   assert.deepEqual(unscoped, ['In current epoch', 'Other epoch', 'Sidequest'], 'no scope → all agent-lane cards');
 });
 
-// ---- 10. CLI wiring: tower lint + tower next --burndown ------------------------------
+// ---- 11. CLI wiring: tower lint + tower next --burndown ------------------------------
 
 const run = (cwd, args, ok = true) => {
   try {
@@ -300,6 +365,17 @@ test('cli: tower lint exits 1 and reports a finding once one exists', () => {
   const r = run(cwd, ['lint'], false);
   assert.equal(r.code, 1);
   assert.match(r.out, /done-without-evidence\s+#1/);
+});
+
+test('cli: tower lint --json exits 1 for shared open test references', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-lint-duplicate-cli-'));
+  run(cwd, ['init', '--name', 'Lint Duplicate Test']);
+  run(cwd, ['card', 'add', '--title', 'A', '--body', 'fails in tests/shared.rs at shared_test_name']);
+  run(cwd, ['card', 'add', '--title', 'B', '--body', 'fails in tests/shared.rs at shared_test_name', '--force']);
+  const r = run(cwd, ['lint', '--json'], false);
+  assert.equal(r.code, 1);
+  const findings = JSON.parse(r.out);
+  assert.ok(findings.some(f => f.rule === 'duplicate-suspect' && f.ref === '#1,#2'));
 });
 
 test('cli: tower lint --docs finds a ratified id in a doc rooted at --docs-root', () => {

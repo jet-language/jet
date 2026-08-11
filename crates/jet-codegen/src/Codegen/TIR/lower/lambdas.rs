@@ -13,6 +13,9 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower::lambda_block_tail;
+use crate::Codegen::TIR::lower::{
+    prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
+};
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -24,10 +27,14 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::unit_type;
 use std::collections::HashSet;
 
+fn lambda_jit_name(start: usize, end: usize) -> String {
+    crate::Syntax::generated_name(&format!("lambda_{start}_{end}"))
+}
+
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
 /// Every capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
 /// analysis here. The body is lowered on a CLONED env extended with: the cloned
-/// captures (rebound to `_jet_cap_<n>`, place = that name, type `None` — matching the
+/// captures (rebound to `__jet_cap_<n>`, place = that name, type `None` — matching the
 /// AST slot) and the params (place = mangled name, type from the annotation). The
 /// rendered closure body string is produced now so emit is a pure wrapper.
 pub(crate) fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
@@ -122,9 +129,9 @@ fn lower_lambda_expecting_with_host_borrow(
     // Computed before the clone-capture prelude so a moving escape can also clone
     // borrowed/Fn captures rustc would otherwise reject (E0521).
     let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
-    // The clone-capture prelude: `let _jet_cap_<n> = (<outer place>).clone();`. The
+    // The clone-capture prelude: `let __jet_cap_<n> = (<outer place>).clone();`. The
     // outer place comes from the *outer* env (the capture is an outer local). The cap
-    // rebinds the name with place `_jet_cap_<n>`, no deref, type `None` (matching the
+    // rebinds the name with place `__jet_cap_<n>`, no deref, type `None` (matching the
     // AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
     let mut prep = String::new();
     let mut extra_cloned: Vec<String> = Vec::new();
@@ -164,7 +171,10 @@ fn lower_lambda_expecting_with_host_borrow(
         .iter()
         .chain(extra_cloned.iter())
     {
-        let cap = format!("_jet_cap_{}", mangle(name));
+        let cap = format!(
+            "__jet_cap_{}",
+            crate::Syntax::generated_suffix(&mangle(name))
+        );
         // Clone temps must be `mut` when the closure body assigns through them
         // (FnMut / captured `:=` locals). Always emit `let mut` for cloned
         // captures — over-mutability is safe; missing mut is rustc E0594 (I2).
@@ -177,7 +187,11 @@ fn lower_lambda_expecting_with_host_borrow(
             .ty_of(name)
             .unwrap_or_else(|| Type::Named("Unit".to_string()));
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
-        lam_env.bind(name, TLocal::generated(&cap), Some(cap_ty));
+        let slot = match env.origin_of(name) {
+            Some(origin) => TLocal::generated(&cap).with_origin(origin),
+            None => TLocal::generated(&cap),
+        };
+        lam_env.bind(name, slot, Some(cap_ty));
     }
     // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
@@ -202,7 +216,7 @@ fn lower_lambda_expecting_with_host_borrow(
             let cap_ty = env
                 .ty_of(&name)
                 .unwrap_or_else(|| Type::Named("Unit".to_string()));
-            // Body still reads the outer place (no `_jet_cap_` rebind).
+            // Body still reads the outer place (no `__jet_cap_` rebind).
             captures.push((name.clone(), crate::Codegen::TIR::local_place(&name), cap_ty));
         }
     }
@@ -266,12 +280,14 @@ fn lower_lambda_expecting_with_host_borrow(
     let prev_in_stm = cx.in_stm_transact.replace(false);
     let (body, executable) = match &lam.body {
         LambdaBody::Expr(e) => {
+            prepare_interrupt_callback_local_expr(e, cx, &mut lam_env);
             // An expression-bodied lambda returns an owned value, just like an
             // explicit `return`; clone a borrowed non-scalar parameter here.
             let lowered = lower_owned_expr(e, cx, &mut lam_env);
             (emit_tir_expr(&lowered, cx), TLambdaBody::Expr(Box::new(lowered)))
         }
         LambdaBody::Block(stmts) => {
+            prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
             let lowered = lower_stmts(stmts, cx, &mut lam_env);
             let mut inner = String::new();
             emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
@@ -285,7 +301,7 @@ fn lower_lambda_expecting_with_host_borrow(
         body,
         executable,
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
-        jit_name: format!("__jit_lambda_{}_{}", lam.span.start, lam.span.end),
+        jit_name: lambda_jit_name(lam.span.start, lam.span.end),
         param_types,
         ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit"))
             .then_some(body_ty),
@@ -348,7 +364,11 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
 
     let mut lam_env = fork_panic(env);
     for cap in &captures {
-        lam_env.bind(&cap.name, TLocal::user(&cap.name), Some(cap.ty.clone()));
+        let slot = match env.origin_of(&cap.name) {
+            Some(origin) => TLocal::user(&cap.name).with_origin(origin),
+            None => TLocal::user(&cap.name),
+        };
+        lam_env.bind(&cap.name, slot, Some(cap.ty.clone()));
     }
     for (i, p) in lam.params.iter().enumerate() {
         let ty = p
@@ -360,6 +380,10 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
     }
 
     let ret = lambda_body_ty(lam, cx, env);
+    match &lam.body {
+        LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
+        LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
+    }
     let body = match &lam.body {
         LambdaBody::Expr(e) => TJitSpawnBody::Expr(Box::new(lower_expr(e, cx, &mut lam_env))),
         LambdaBody::Block(stmts) => {
@@ -415,16 +439,27 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     let mut lam_env = fork_panic(env);
     let mut prep = String::new();
     for name in &lam.meta.cloned_captures {
-        let cap = format!("_jet_cap_{}", mangle(name));
+        let cap = format!(
+            "__jet_cap_{}",
+            crate::Syntax::generated_suffix(&mangle(name))
+        );
         prep.push_str(&format!(
             "let {} = ({}).clone();\n    ",
             cap,
             env.place_of(name)
         ));
-        lam_env.bind(name, TLocal::generated(&cap), None);
+        let slot = match env.origin_of(name) {
+            Some(origin) => TLocal::generated(&cap).with_origin(origin),
+            None => TLocal::generated(&cap),
+        };
+        lam_env.bind(name, slot, None);
     }
     for p in &lam.params {
         lam_env.bind(&p.name, TLocal::user(&p.name), p.ty.clone());
+    }
+    match &lam.body {
+        LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
+        LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
     }
     let params: Vec<String> = lam
         .params
@@ -451,7 +486,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
 
 /// Render a `#Reactive { … }` block as a `move || { … }` closure for
 /// `jet_reactive_effect`. Outer locals read inside the block are cloned into
-/// `_jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
+/// `__jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
 pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> String {
     let reads = crate::Sema::block_free_var_reads(stmts);
     let mut caps: Vec<String> = reads
@@ -462,7 +497,10 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
     let mut lam_env = fork_panic(outer_env);
     let mut prep = String::new();
     for name in &caps {
-        let cap = format!("_jet_cap_{}", mangle(name));
+        let cap = format!(
+            "__jet_cap_{}",
+            crate::Syntax::generated_suffix(&mangle(name))
+        );
         // Reactive bodies may update their private clone on every rerun. The
         // runtime serializes the resulting FnMut closure behind a Mutex.
         prep.push_str(&format!(
@@ -470,9 +508,14 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
             cap,
             outer_env.place_of(name)
         ));
-        lam_env.bind(name, TLocal::generated(&cap), outer_env.ty_of(name));
+        let slot = match outer_env.origin_of(name) {
+            Some(origin) => TLocal::generated(&cap).with_origin(origin),
+            None => TLocal::generated(&cap),
+        };
+        lam_env.bind(name, slot, outer_env.ty_of(name));
     }
     let mut inner = String::new();
+    prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
     let lowered = lower_stmts(stmts, cx, &mut lam_env);
     emit_tir_stmts(&lowered, cx, &mut inner, 1);
     let closure = format!("move || {{ {} }}", inner);
@@ -610,5 +653,13 @@ pub(crate) fn render_router_handler(
         }
         // The gate (`router_register_in_subset`) proved arg 1 is one of the two above.
         _ => unreachable!("router handler gate proved a named-fn or lambda handler"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn lambda_native_names_use_reserved_prefix() {
+        assert_eq!(super::lambda_jit_name(12, 34), "__jet_lambda_12_34");
     }
 }

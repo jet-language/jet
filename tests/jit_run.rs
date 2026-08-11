@@ -76,6 +76,85 @@ fn run() {
 }
 
 #[test]
+fn named_args_example_runs_on_resident_jit_and_forced_interpreter() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(named_args_example_runs_on_resident_jit_and_forced_interpreter_inner)
+        .expect("named_args tier proof thread")
+        .join()
+        .expect("named_args tier proof thread panicked");
+}
+
+fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
+    assert!(
+        jet_jit::cranelift_host_supported(),
+        "named_args runtime proof requires a supported resident Cranelift host"
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let file = root.join("examples/features/basics/named_args.jet");
+    let expected_path = root.join("examples/features/expected/basics/named_args.out");
+    let expected = fs::read_to_string(&expected_path).expect("named_args golden output");
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("named_args example should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "named_args example must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "named_args example must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("named_args example must compile in resident JIT: {error}"));
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected named_args: {diags:?}"),
+    };
+    assert!(
+        !jet_jit::jit_executed_for_test(),
+        "forced named_args proof must not execute resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "forced named_args proof must enter the interpreter directly, not through deopt or fallback"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default resident JIT rejected named_args: {diags:?}"),
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "named_args default run must execute resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "named_args default run must not deopt or fall back"
+    );
+
+    let expected = (expected, String::new(), 0);
+    assert_eq!(interpreted, expected, "forced interpreter named_args drifted");
+    assert_eq!(resident, expected, "resident JIT named_args drifted");
+    assert_eq!(resident, interpreted, "named_args tiers diverged");
+}
+
+#[test]
 fn bounded_workers_example_has_total_tir() {
     // Sema and TIR lowering recurse per source-nesting level with large debug
     // frames (#1319). Direct calls to jet_jit's lowering helpers bypass the
@@ -266,6 +345,72 @@ fn run() {
     assert!(
         !jet_jit::fallback_invoked_for_test(),
         "the expert terminal model must not deopt to tier 0"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-PROCESS-SESSION2=D / #1842: the capability report is one real program
+/// observed through the AOT, resident Cranelift, and explicitly forced
+/// interpreter lenses. This must exercise `ProcessSpec.capabilities().has`,
+/// not a direct generated-Rust helper.
+#[cfg(unix)]
+#[test]
+fn terminal_capabilities_match_aot_resident_jit_and_interpreter() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_process_terminal_capabilities_tiers");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("terminal_capabilities.jet");
+    fs::write(
+        &file,
+        r#"use core.process as process
+
+fn run() {
+    plan :: process.cmd(["echo", "terminal"]).terminal()
+    facts :: plan.capabilities()
+    print(facts.has(TerminalFact.terminal))
+    print(facts.has("preview_x"))
+}
+"#,
+    )
+    .unwrap();
+
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "AOT stderr: {}", String::from_utf8_lossy(&aot.stderr));
+    assert_eq!(aot.stdout, b"true\nfalse\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(file.to_str().unwrap(), false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("resident capability query failed: {diags:#?}"),
+    };
+    assert_eq!(resident, "true\nfalse\n");
+    assert!(jet_jit::jit_executed_for_test(), "capability query must execute in resident JIT");
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "capability query must not deopt"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "capability query must not fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(file.to_str().unwrap(), true, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("forced interpreter capability query failed: {diags:#?}"),
+    };
+    assert_eq!(interpreted, "true\nfalse\n");
+    assert!(!jet_jit::jit_executed_for_test(), "forced proof must execute in tier-0 interpreter");
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "forced proof must not deopt"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "forced proof must not fall back"
     );
 
     let _ = fs::remove_dir_all(&dir);

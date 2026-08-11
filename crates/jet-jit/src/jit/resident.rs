@@ -77,6 +77,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         pools: Vec::new(),
         shareds: Vec::new(),
         conditions: Vec::new(),
+        shared_guard_permits: HashMap::new(),
         expirings: Vec::new(),
         secrets: Vec::new(),
         crypto_values: Vec::new(),
@@ -166,6 +167,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.byte_buffers.clear();
     rt.allocators.clear();
     rt.pools.clear();
+    rt.shared_guard_permits.clear();
     rt.shareds.clear();
     rt.conditions.clear();
     rt.expirings.clear();
@@ -173,6 +175,10 @@ fn reset_run_heap(rt: &mut JitRuntime) {
 }
 
 pub(crate) fn resident_teardown() {
+    // The interrupt adapter stores raw resident-code addresses. Drain and clear
+    // that registry before dropping the module so a dispatcher wake cannot call
+    // code from the previous resident image.
+    crate::CoreHost::reset_jit_interrupts();
     clear_deopt_state();
     crate::Collections::clear_packed_enum_show();
     crate::Watcher::clear_watcher_state();
@@ -417,7 +423,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
             continue;
         }
         let sym = if f.name == program.entry {
-            "jet_jit_main".to_string()
+            "__jet_jit_main".to_string()
         } else {
             super::types_meta::jit_fn_name(&f.name)
         };
@@ -443,8 +449,9 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
 
 pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
-    // Rebuild the module (Cranelift rejects redefining `jet_jit_main`) but keep
+    // Rebuild the module (Cranelift rejects redefining `__jet_jit_main`) but keep
     // the live runtime heap — the M2 contract.
+    crate::CoreHost::reset_jit_interrupts();
     let mut runtime =
         RESIDENT_RUNTIME.with(|slot| slot.borrow_mut().take().unwrap_or_else(fresh_runtime));
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);

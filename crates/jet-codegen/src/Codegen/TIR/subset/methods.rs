@@ -179,8 +179,26 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
     }
-    // D-TASKSCOPE1=A: `g.task => …` on a taskgroup handle (scoped spawn).
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    // D-CONC-SPAWN1=D: canonical task nodes lower through the same scoped
+    // spawn/select TIR shapes as the pre-existing task implementation.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
+        && method == "spawn"
+    {
+        return args.len() == 1
+            && args[0].label.is_none()
+            && matches!(&args[0].expr, Expr::Lambda(_))
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
+        && matches!(method, "all" | "race" | "any")
+    {
+        return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    let task_group_receiver = matches!(
+        recv_type.as_deref(),
+        Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    );
+    if task_group_receiver
         && method == Syntax::TASKGROUP_SPAWN_METHOD
     {
         return args.len() == 1
@@ -188,14 +206,15 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
     }
-    // D-NURSERY1=A: `g.all([…])` — join a list of task handles.
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    // D-CONC-SPAWN1=D: canonical `task.group` combinators use the same TIR
+    // nodes as top-level `task.all`/`task.race`/`task.any`.
+    if task_group_receiver
         && method == Syntax::TASKGROUP_ALL_METHOD
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
-    // D-CONCCOMB1=A: `g.race([…])` / `g.any([…])` — first completed task wins.
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+    // D-CONC-SPAWN1=D: `task.race { … }` / `task.any { … }` — nested child combinators.
+    if task_group_receiver
         && (method == Syntax::TASKGROUP_RACE_METHOD || method == Syntax::TASKGROUP_ANY_METHOD)
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
@@ -387,7 +406,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         if matches!(receiver, Expr::Field(..)) {
             if let Some(submodule) =
-                core_module_path_from_receiver(receiver, &cx.core_imports, locals)
+                core_module_path_from_receiver(receiver, cx, locals)
             {
                 return core_call_covered(&submodule, method)
                     && core_call_args_in_subset(&submodule, method, args, cx, locals);
@@ -395,15 +414,22 @@ pub(crate) fn method_call_in_subset(
         }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
-                if let Some(module) = cx.core_imports.get(alias) {
-                    // c109 Phase 13: the three closure-taking core calls (`tasks.spawn`/
-                    // `http.serve`/`scope.guard`) — NOT in `core_fixed_sig`, each a
+                if let Some(module) = cx.any_core_import_module(alias) {
+                    // c109 Phase 13: the two closure-taking core calls (`http.serve`/
+                    // `scope.guard`) — NOT in `core_fixed_sig`, each a
                     // bespoke emit shape with a literal-lambda closure arg.
                     if core_closure_call_in_subset(module, method, args, cx, locals) {
                         return true;
                     }
                     return core_call_covered(module, method)
                         && core_call_args_in_subset(module, method, args, cx, locals);
+                }
+                if let Some((module, real_method)) = cx
+                    .inline_reexport_core
+                    .get(&(alias.clone(), method.to_string()))
+                {
+                    return core_call_covered(module, real_method)
+                        && core_call_args_in_subset(module, real_method, args, cx, locals);
                 }
                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
@@ -647,9 +673,12 @@ pub(crate) fn method_call_in_subset(
     // `join(sep)` is claimed by shape d above); `detach`/`receive` (0 args) and
     // `send` (1 arg) are used by no other builtin. The receiver is a `Task`/
     // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
-    // `tasks.spawn(…)`-produced. Tried after the collection builtins so a
+    // `task`-produced. Tried after the collection builtins so a
     // list/map/string method can't be misclaimed.
-    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+    if recv_type.is_none()
+        && (is_concurrency_method_name(method, args.len())
+            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
+    {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
@@ -967,35 +996,35 @@ pub(crate) fn method_call_in_subset(
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
+                    if cx.any_core_import_module(alias) == Some("core.encoding") {
                         return true;
                     }
                 }
             }
             if leaf == "DataLimits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.data") {
+                    if cx.any_core_import_module(alias) == Some("core.data") {
                         return true;
                     }
                 }
             }
             if leaf == "CBOROptions" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor") {
+                    if cx.any_core_import_module(alias) == Some("core.encoding.cbor") {
                         return true;
                     }
                 }
             }
             if matches!(leaf.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions") {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml") {
+                    if cx.any_core_import_module(alias) == Some("core.encoding.xml") {
                         return true;
                     }
                 }
             }
             if leaf == "Limits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.email") {
+                    if cx.any_core_import_module(alias) == Some("core.email") {
                         return true;
                     }
                 }
@@ -1143,13 +1172,15 @@ pub(crate) fn method_call_in_subset(
 
 pub(super) fn core_module_path_from_receiver(
     receiver: &Expr,
-    imports: &std::collections::HashMap<String, String>,
+    cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> Option<String> {
     match receiver {
-        Expr::Ident(alias, _) if !locals.contains(alias) => imports.get(alias).cloned(),
+        Expr::Ident(alias, _) if !locals.contains(alias) => {
+            cx.any_core_import_module(alias).map(str::to_owned)
+        }
         Expr::Field(base, leaf, _) => {
-            let module = core_module_path_from_receiver(base, imports, locals)?;
+            let module = core_module_path_from_receiver(base, cx, locals)?;
             let submodule = format!("{module}.{leaf}");
             crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
         }

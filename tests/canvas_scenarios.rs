@@ -1,5 +1,7 @@
 //! D-CANVASTEST1=A: stdlib-only browser scenarios for Canvas.
 
+mod common;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};

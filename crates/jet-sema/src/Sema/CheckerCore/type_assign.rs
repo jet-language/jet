@@ -46,6 +46,55 @@ fn is_core_view_generic(ty: &Type) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    /// One nominal identity rule for local and imported user types. An imported
+    /// expression carries `alias.Type`, while a declared signature carries the
+    /// bare `Type`; they are equal only when both names resolve to the same
+    /// owning module. The same rule is used by return checking below so a raw
+    /// `Type` inequality cannot reintroduce E0113 after this check succeeds.
+    pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
+        match (want, got) {
+            (Type::Named(want), Type::Named(got)) => {
+                let (want_ns, want_name) = self.struct_type_name_parts(want);
+                let (got_ns, got_name) = self.struct_type_name_parts(got);
+                want_name == got_name
+                    && matches!(
+                        (
+                            self.struct_owner_module(want_name, want_ns),
+                            self.struct_owner_module(got_name, got_ns),
+                        ),
+                        (Some(want_mod), Some(got_mod)) if want_mod == got_mod
+                    )
+            }
+            (
+                Type::Apply {
+                    name: want_name,
+                    args: want_args,
+                },
+                Type::Apply {
+                    name: got_name,
+                    args: got_args,
+                },
+            ) => {
+                let (want_ns, want_name) = self.struct_type_name_parts(want_name);
+                let (got_ns, got_name) = self.struct_type_name_parts(got_name);
+                want_name == got_name
+                    && want_args.len() == got_args.len()
+                    && matches!(
+                        (
+                            self.struct_owner_module(want_name, want_ns),
+                            self.struct_owner_module(got_name, got_ns),
+                        ),
+                        (Some(want_mod), Some(got_mod)) if want_mod == got_mod
+                    )
+                    && want_args
+                        .iter()
+                        .zip(got_args)
+                        .all(|(want, got)| want == got || self.nominal_type_identity(want, got))
+            }
+            _ => false,
+        }
+    }
+
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             self.warn_soft_public_declared_type(ty, span);
             self.check_declared_type_rules(ty, span);
@@ -115,11 +164,11 @@ impl<'a> Checker<'a> {
             let (owner, public_name) = if let Some((alias, leaf)) = name.rsplit_once('.') {
                 (self.imports.get(alias).copied(), leaf)
             } else {
-                let locally_owned = self.registry.contains(name)
-                    || self.modules.is_some_and(|modules| {
-                        modules[self.module_idx].type_pub.contains_key(name)
-                            && modules[self.module_idx].trait_reg.is_trait_name(name)
-                    });
+                let locally_owned = self.registry.contains(name) || {
+                    let declared = self.name_ledger.declaration(self.module_idx, name).is_some();
+                    self.modules
+                        .is_some_and(|modules| declared && modules[self.module_idx].trait_reg.is_trait_name(name))
+                };
                 let owner = if locally_owned {
                     Some(self.module_idx)
                 } else {
@@ -299,6 +348,7 @@ impl<'a> Checker<'a> {
                             | "Signal" | "Derived" | "Computed"
                             // D-EVENT1=D: first-party typed event/hook handles.
                             | "Event" | "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome"
+                            | "DispatchReport"
                             // D-STREAMYIELD1: generator return type.
                             | "Stream"
                             // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
@@ -600,6 +650,9 @@ impl<'a> Checker<'a> {
         /// qualified constructor). Compare those spellings by their owning
         /// module before the structural mismatch paths run.
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
+            if want != got && self.nominal_type_identity(want, got) {
+                return false;
+            }
             if want == got {
                 if !Type::obligations_satisfy(want, got) {
                     self.diags.push(Diagnostic::error(

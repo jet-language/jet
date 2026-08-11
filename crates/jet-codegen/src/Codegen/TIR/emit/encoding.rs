@@ -1,6 +1,7 @@
 use crate::AST::{Type};
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
+use crate::Codegen::mangle;
 use crate::Codegen::TIR::emit::emit_panic_locals;
 use crate::Codegen::TIR::emit::emit_panic_message_expr;
 use crate::Codegen::TIR::emit_tir_expr;
@@ -40,8 +41,10 @@ pub(crate) fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String
         }
         TOrFallback::Break => "break".to_string(),
         TOrFallback::Continue => "continue".to_string(),
-        TOrFallback::BreakLabel(name) => format!("break 'jet_{name}"),
-        TOrFallback::ContinueLabel(name) => format!("continue 'jet_{name}"),
+        TOrFallback::BreakLabel(name) => format!("break '{}", mangle(name)),
+        TOrFallback::ContinueLabel(name) => {
+            format!("continue '{}", mangle(name))
+        }
     }
 }
 

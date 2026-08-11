@@ -454,6 +454,9 @@ fn to_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
         PackageParseError::ConfigMembers => {
             e1206(&file, "a Config file cannot declare `members`")
         }
+        PackageParseError::Composition(detail) if detail.contains("is a diagnostic code") => {
+            e1206_lint_policy(&file, detail)
+        }
         PackageParseError::Composition(detail) => e1206(&file, detail),
         PackageParseError::BadTarget { name, value, reserved: true } => e1210(
             &file,
@@ -533,6 +536,28 @@ fn e1206(_file: &str, detail: &str) -> Diagnostic {
             "check `{}` against docs/spec/syntax-decisions.md (U1)",
             Syntax::PACKAGE_FILE
         ),
+        None,
+    )
+}
+
+fn e1206_lint_policy(_file: &str, detail: &str) -> Diagnostic {
+    let fix = detail
+        .split_once("use `")
+        .and_then(|(_, rest)| rest.split_once('`'))
+        .map(|(name, _)| {
+            format!(
+                "use `{name}` in `policy.lints.deny` instead of the diagnostic code"
+            )
+        })
+        .unwrap_or_else(|| {
+            "use a registered lint name in `policy.lints.deny` instead of a diagnostic code"
+                .to_string()
+        });
+    Diagnostic::error(
+        "E1206",
+        format!("`{}` has a shape error", Syntax::PACKAGE_FILE),
+        detail.to_string(),
+        fix,
         None,
     )
 }

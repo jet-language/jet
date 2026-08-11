@@ -19,7 +19,7 @@ use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::timeout_nanos;
-use crate::Codegen::TIR::lower::tracked_float_origin;
+use crate::Codegen::TIR::lower::tracked_float_slot;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
@@ -29,12 +29,13 @@ use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Preserve contextual union typing when a sema-resolved comptime value stays
 /// as a `CtLit`. The literal must remain a single fact for JIT/interpreter, but
@@ -93,6 +94,423 @@ fn bake_comptime_value_with_type(
     }
 }
 
+fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name, _) => Some(name),
+        Expr::Paren(inner, _) => interrupt_callback_ident(inner),
+        _ => None,
+    }
+}
+
+fn is_core_os_receiver(expr: &Expr, cx: &Cx) -> bool {
+    match expr {
+        Expr::Ident(alias, _) => cx
+            .any_core_import_module(alias)
+            .is_some_and(|module| module == "core.os"),
+        Expr::Field(base, leaf, _) => leaf == "os" && is_core_os_receiver(base, cx),
+        _ => false,
+    }
+}
+
+fn collect_interrupt_callback_names_expr(
+    expr: &Expr,
+    cx: &Cx,
+    names: &mut HashSet<String>,
+) {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            if method == "on_interrupt" && is_core_os_receiver(receiver, cx) {
+                if let Some(name) = args.first().and_then(|arg| interrupt_callback_ident(&arg.expr)) {
+                    names.insert(name.to_string());
+                }
+            }
+            collect_interrupt_callback_names_expr(receiver, cx, names);
+            for arg in args {
+                collect_interrupt_callback_names_expr(&arg.expr, cx, names);
+            }
+        }
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_interrupt_callback_names_expr(&arg.expr, cx, names);
+            }
+        }
+        Expr::CallValue { callee, args, .. } => {
+            collect_interrupt_callback_names_expr(callee, cx, names);
+            for arg in args {
+                collect_interrupt_callback_names_expr(&arg.expr, cx, names);
+            }
+        }
+        // A normal lambda is its own function boundary. Its body gets one scan
+        // when that lambda is lowered; descending here would make the
+        // enclosing function scan the nested function and reintroduce the old
+        // per-statement-list walk. Collecting/result loops are the exception:
+        // sema lowers those immediately-called lambdas as inline blocks in the
+        // current function, so their callback uses belong to this scan.
+        Expr::Lambda(lam) => {
+            if lam.meta.collecting_loop || lam.meta.result_loop {
+                match &lam.body {
+                    crate::AST::LambdaBody::Expr(body) => {
+                        collect_interrupt_callback_names_expr(body, cx, names)
+                    }
+                    crate::AST::LambdaBody::Block(body) => {
+                        collect_interrupt_callback_names(body, cx, names)
+                    }
+                }
+            }
+        }
+        Expr::Paren(inner, _)
+        | Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _)
+        | Expr::Spread(inner, _)
+        | Expr::IncDec { operand: inner, .. } => {
+            collect_interrupt_callback_names_expr(inner, cx, names)
+        }
+        Expr::Binary(_, left, right, _) => {
+            collect_interrupt_callback_names_expr(left, cx, names);
+            collect_interrupt_callback_names_expr(right, cx, names);
+        }
+        Expr::CompareChain { operands, .. } => {
+            for operand in operands {
+                collect_interrupt_callback_names_expr(operand, cx, names);
+            }
+        }
+        Expr::ListLit(items, _) => {
+            for item in items {
+                collect_interrupt_callback_names_expr(item, cx, names);
+            }
+        }
+        Expr::MemberSpread { base, .. } => {
+            collect_interrupt_callback_names_expr(base, cx, names)
+        }
+        Expr::MapLit(entries, _) => {
+            for (key, value) in entries {
+                collect_interrupt_callback_names_expr(key, cx, names);
+                collect_interrupt_callback_names_expr(value, cx, names);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_interrupt_callback_names_expr(base, cx, names);
+            collect_interrupt_callback_names_expr(index, cx, names);
+        }
+        Expr::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            collect_interrupt_callback_names_expr(base, cx, names);
+            collect_interrupt_callback_names_expr(start, cx, names);
+            collect_interrupt_callback_names_expr(end, cx, names);
+            if let Some(range) = range {
+                collect_interrupt_callback_names_expr(range, cx, names);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            collect_interrupt_callback_names_expr(start, cx, names);
+            collect_interrupt_callback_names_expr(end, cx, names);
+        }
+        Expr::Field(base, _, _) => collect_interrupt_callback_names_expr(base, cx, names),
+        Expr::OptField { base, .. } => collect_interrupt_callback_names_expr(base, cx, names),
+        Expr::StructLit { fields, .. } => {
+            for (_, _, value) in fields {
+                collect_interrupt_callback_names_expr(value, cx, names);
+            }
+        }
+        Expr::TypedLit { body, .. } => body.for_each_expr(|value| {
+            collect_interrupt_callback_names_expr(value, cx, names)
+        }),
+        Expr::EnumLit { args, .. } => {
+            for arg in args {
+                match arg {
+                    crate::AST::EnumLitArg::Positional(value)
+                    | crate::AST::EnumLitArg::Named { expr: value, .. } => {
+                        collect_interrupt_callback_names_expr(value, cx, names)
+                    }
+                }
+            }
+        }
+        Expr::Str(parts, _) => {
+            for part in parts {
+                if let crate::AST::StrPart::Interp(value, _) = part {
+                    collect_interrupt_callback_names_expr(value, cx, names);
+                }
+            }
+        }
+        Expr::PatternTest { subject, .. } => {
+            collect_interrupt_callback_names_expr(subject, cx, names)
+        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_interrupt_callback_names_expr(cond, cx, names);
+            collect_interrupt_callback_names(then_body, cx, names);
+            collect_interrupt_callback_names_expr(then_value, cx, names);
+            collect_interrupt_callback_names(else_body, cx, names);
+            collect_interrupt_callback_names_expr(else_value, cx, names);
+        }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, value) in fields {
+                collect_interrupt_callback_names_expr(value, cx, names);
+            }
+        }
+        Expr::PtrFromAddr { addr, .. } => collect_interrupt_callback_names_expr(addr, cx, names),
+        Expr::OrFallback { value, .. } => collect_interrupt_callback_names_expr(value, cx, names),
+        _ => {}
+    }
+}
+
+fn collect_interrupt_callback_names(stmts: &[Stmt], cx: &Cx, names: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(expr) => collect_interrupt_callback_names_expr(expr, cx, names),
+            Stmt::Val(binding) => {
+                collect_interrupt_callback_names_expr(&binding.init, cx, names)
+            }
+            Stmt::Assign { value, .. } => collect_interrupt_callback_names_expr(value, cx, names),
+            Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
+                collect_interrupt_callback_names_expr(value, cx, names)
+            }
+            Stmt::While { cond, body, .. } => {
+                collect_interrupt_callback_names_expr(cond, cx, names);
+                collect_interrupt_callback_names(body, cx, names);
+            }
+            Stmt::For { kind, body, .. } => {
+                if let ForKind::In { collection, step } = kind {
+                    collect_interrupt_callback_names_expr(collection, cx, names);
+                    if let Some(step) = step {
+                        collect_interrupt_callback_names_expr(step, cx, names);
+                    }
+                }
+                collect_interrupt_callback_names(body, cx, names);
+            }
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                collect_interrupt_callback_names_expr(subject, cx, names);
+                for arm in arms {
+                    collect_interrupt_callback_names_expr(&arm.cond, cx, names);
+                    collect_interrupt_callback_names(&arm.body, cx, names);
+                }
+                if let Some(body) = else_body {
+                    collect_interrupt_callback_names(body, cx, names);
+                }
+            }
+            Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Switched { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::ComptimeBlock { body, .. } => collect_interrupt_callback_names(body, cx, names),
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
+                collect_interrupt_callback_names_expr(&init.init, cx, names);
+                collect_interrupt_callback_names_expr(cond, cx, names);
+                if let Some(step) = step {
+                    collect_interrupt_callback_names(
+                        std::slice::from_ref(step.as_ref()),
+                        cx,
+                        names,
+                    );
+                }
+                collect_interrupt_callback_names(body, cx, names);
+            }
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_interrupt_callback_names_expr(cond, cx, names);
+                collect_interrupt_callback_names(then_body, cx, names);
+                if let Some(body) = else_body {
+                    collect_interrupt_callback_names(body, cx, names);
+                }
+            }
+            Stmt::ScopeMember { args, body, .. } => {
+                for arg in args {
+                    collect_interrupt_callback_names_expr(arg, cx, names);
+                }
+                collect_interrupt_callback_names(body, cx, names);
+            }
+            Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                collect_interrupt_callback_names_expr(subject, cx, names);
+                for arm in arms {
+                    collect_interrupt_callback_names(&arm.body, cx, names);
+                }
+                if let Some(body) = else_body {
+                    collect_interrupt_callback_names(body, cx, names);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Val(binding) => {
+                if let Some(source) = interrupt_callback_ident(&binding.init) {
+                    aliases.push((binding.name.clone(), source.to_string()));
+                }
+            }
+            Stmt::CountedLoop { init, body, .. } => {
+                if let Some(source) = interrupt_callback_ident(&init.init) {
+                    aliases.push((init.name.clone(), source.to_string()));
+                }
+                collect_interrupt_aliases(body, aliases);
+            }
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Switched { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::ComptimeBlock { body, .. } => collect_interrupt_aliases(body, aliases),
+            Stmt::Switch { arms, else_body, .. } => {
+                for arm in arms {
+                    collect_interrupt_aliases(&arm.body, aliases);
+                }
+                if let Some(body) = else_body {
+                    collect_interrupt_aliases(body, aliases);
+                }
+            }
+            Stmt::ComptimeIf {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_interrupt_aliases(then_body, aliases);
+                if let Some(body) = else_body {
+                    collect_interrupt_aliases(body, aliases);
+                }
+            }
+            Stmt::ScopeMember { body, .. } => collect_interrupt_aliases(body, aliases),
+            Stmt::ComptimeSwitch { arms, else_body, .. } => {
+                for arm in arms {
+                    collect_interrupt_aliases(&arm.body, aliases);
+                }
+                if let Some(body) = else_body {
+                    collect_interrupt_aliases(body, aliases);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) {
+    let mut names = HashSet::new();
+    collect_interrupt_callback_names(stmts, cx, &mut names);
+    let mut send = names;
+    let mut aliases = Vec::new();
+    collect_interrupt_aliases(stmts, &mut aliases);
+    loop {
+        let before = send.len();
+        for (target, source) in &aliases {
+            if send.contains(target) {
+                send.insert(source.clone());
+            }
+            if send.contains(source) {
+                send.insert(target.clone());
+            }
+        }
+        if send.len() == before {
+            break;
+        }
+    }
+    for name in send {
+        env.mark_send_fn(&name);
+    }
+}
+
+pub(super) fn prepare_interrupt_callback_local_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) {
+    let mut names = HashSet::new();
+    collect_interrupt_callback_names_expr(expr, cx, &mut names);
+    for name in names {
+        env.mark_send_fn(&name);
+    }
+}
+
+fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
+    match &mut init.kind {
+        TExprKind::Lambda(lam) => {
+            lam.arc = true;
+            lam.rc = false;
+        }
+        TExprKind::FnValue {
+            kind:
+                TFnValueKind::NamedFn {
+                    name: Some(name), ..
+                },
+        } => {
+            init.kind = TExprKind::FnValue {
+                kind: TFnValueKind::NamedFn {
+                    wrapper: crate::Codegen::emit_named_fn_value_sync(cx, name, &init.ty),
+                    name: Some(name.clone()),
+                },
+            };
+        }
+        _ => {}
+    }
+    init
+}
+
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 });
     let mut split_views = split_view_plan(stmts, cx, env);
@@ -103,7 +521,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             if cx.debug_linemap {
                 out.push(TStmt::LineMarker(view.candidate.line));
             }
-            let candidate = view.candidate;
+            let mut candidate = view.candidate;
             let elem_ty = match tir_recv_jet_ty(&candidate.owner, env) {
                 Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(*elem),
                 _ => None,
@@ -112,6 +530,10 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 TLocal::user(&candidate.name).through_ref()
             } else {
                 TLocal::user(&candidate.name)
+            };
+            let slot = match candidate.origin.take() {
+                Some(origin) => slot.with_origin(origin),
+                None => slot,
             };
             env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
@@ -177,6 +599,7 @@ struct SplitViewCandidate {
     owner_key: String,
     name: String,
     ty: Option<Type>,
+    origin: Option<TBindingOrigin>,
     start: i64,
     end: i64,
     single: bool,
@@ -257,7 +680,9 @@ pub(crate) fn place_window_init<'a>(
             ..
         } if method == crate::Syntax::MEM_PIN
             && matches!(receiver.as_ref(), Expr::Ident(alias, _)
-                if cx.core_imports.get(alias).is_some_and(|m| m == crate::Syntax::CORE_MEM_MODULE)) =>
+                if cx
+                    .any_core_import_module(alias)
+                    .is_some_and(|m| m == crate::Syntax::CORE_MEM_MODULE)) =>
         {
             let inner = &args.first()?.expr;
             Some((
@@ -314,6 +739,10 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
         owner_key,
         name: binding.name.clone(),
         ty: binding.ty.clone(),
+        origin: binding
+            .ty
+            .as_ref()
+            .and_then(|ty| crate::Codegen::TIR::lower::tracked_float_origin(binding, ty)),
         start,
         end,
         single,
@@ -790,6 +1219,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 } else {
                     TLocal::user(&b.name).as_uninit_scalar()
                 };
+                let slot = tracked_float_slot(b, ty, slot);
                 env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
@@ -810,7 +1240,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
             if b.arena_view {
                 let init = lower_expr(&b.init, cx, env);
-                env.bind(&b.name, TLocal::user(&b.name).through_ref(), b.ty.clone());
+                let slot = tracked_float_slot(
+                    b,
+                    b.ty.as_ref().unwrap_or(&init.ty),
+                    TLocal::user(&b.name).through_ref(),
+                );
+                env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -838,6 +1273,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     } else {
                         TLocal::user(&b.name).through_ref()
                     };
+                    let slot = tracked_float_slot(
+                        b,
+                        b.ty.as_ref().unwrap_or(&init.ty),
+                        slot,
+                    );
                     env.bind(&b.name, slot, b.ty.clone());
                     return TStmt::Let {
                         name: b.name.clone(),
@@ -919,7 +1359,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             .unwrap_or(TExprKind::DefaultLit)
                     }),
                 };
-                env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
+                let slot = tracked_float_slot(
+                    b,
+                    b.ty.as_ref().unwrap_or(&init.ty),
+                    TLocal::user(&b.name),
+                );
+                env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1005,6 +1450,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // Totality: if the source omitted the type, infer it ONCE here from
             // the init's already-resolved type. Codegen never infers.
             let ty = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            let send_fn = env.is_send_fn(&b.name)
+                && matches!(&ty, Type::Fn { .. })
+                && !mut_fn;
+            if send_fn {
+                init = force_interrupt_callback_value(init, cx);
+            }
             let is_resource = match &ty {
                 Type::Named(name) | Type::Apply { name, .. } => cx.close_types.contains(name),
                 _ => false,
@@ -1018,6 +1469,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
             // when bound immutably (its methods take `&mut self`). Mirror
             // `emit_let`'s `is_file_handle` set exactly.
+            // card #1859: `Mailer` (`jet_email::Mailer::send`, Prelude/CoreLib/Email.rs)
+            // takes `&mut self` too and was missing from this set, so a `mailer ::
+            // email.smtp(…)` local kept `let` and rustc rejected `.send()` (E0596, I2).
             let is_file_handle = matches!(
                 &ty,
                 Type::Named(n) if n == "FileReader" || n == "FileWriter"
@@ -1029,6 +1483,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     || n == "Stdout" || n == "Stderr"
                     || n == "TcpStream" || n == "UnixStream" || n == "HTTPRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
+                    || n == "Mailer"
             )
             // D-DATAFLOW1=A: DataStream.next / stream reducers take &mut.
             || matches!(
@@ -1067,16 +1522,19 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
             // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
             // inferred binding.
-            let let_ty = crate::Codegen::TIR::let_ty_for_opt(
-                b.ty.as_ref(),
-                cx,
-                mut_fn,
-                is_resource,
-                b.gc_promotion.is_some() || b.gc_transferred,
-            );
-            let track_origin = tracked_float_origin(b, &ty, cx);
+            let let_ty = if send_fn && b.ty.is_some() {
+                TLetTy::SendFn(ty.clone())
+            } else {
+                crate::Codegen::TIR::let_ty_for_opt(
+                    b.ty.as_ref(),
+                    cx,
+                    mut_fn,
+                    is_resource,
+                    b.gc_promotion.is_some() || b.gc_transferred,
+                )
+            };
             let binding_name = if is_resource {
-                format!("__jet_resource_{}_{}", b.name, b.name_span.start)
+                crate::Syntax::generated_name(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
                 b.name.clone()
             };
@@ -1085,10 +1543,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             } else {
                 TLocal::user(&binding_name)
             };
+            let slot = tracked_float_slot(b, &ty, slot);
             env.bind(&b.name, slot, Some(ty));
-            if let Some(origin) = &track_origin {
-                env.mark_tracked_float(&b.name, origin.clone());
-            }
             if b.gc_promotion.is_some() || b.gc_transferred {
                 env.mark_gc(&b.name);
             }
@@ -1753,13 +2209,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         }
         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
         // internal collector. Helpers borrow this same value.
-        Stmt::TaskGroup { name, body, .. } => {
+        Stmt::TaskGroup { name, limit, body, .. } => {
             let mut scoped = clone_env(env);
             let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
             let group = TLocal::user(name);
             scoped.bind(name, group.clone(), Some(group_ty));
             TStmt::TaskGroup {
                 group,
+                limit: limit.as_ref().map(|value| lower_expr(value, cx, env)),
                 body: lower_stmts(body, cx, &mut scoped),
             }
         }

@@ -42,6 +42,353 @@ mod disjoint_semantics {
     }
 }
 
+// The resident collection ABI owns only handle conversion.  The operation
+// itself must stay in the same Prelude source embedded by AOT and evaluated by
+// tier 0 (I9).  This small module supplies the Prelude's sibling types that
+// are normally present in the flat emitted program, then exposes Vec-shaped
+// adapters for JIT handles.
+#[allow(dead_code, non_camel_case_types, unused_imports)]
+mod collection_semantics {
+    pub use jet_foundation::Outcome::*;
+
+    use jet_foundation::StructuralDebug::jet_debug_map;
+    use jet_foundation::StructuralDebug::jet_debug_optional;
+    use jet_foundation::StructuralDebug::jet_debug_range;
+
+    // These are emitted beside the Prelude in an AOT program.  Keep the same
+    // bridge here so Values.rs remains the only scalar/string/list formatter.
+    trait __jet_Display {
+        fn display(&self) -> String;
+    }
+    trait __jet_Equatable: Sized {
+        fn equal(&self, rhs: &Self) -> bool;
+    }
+
+    #[derive(Clone)]
+    struct JetByteBuffer {
+        bytes: Vec<u8>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
+
+    impl<K, V> JetMap<K, V> {
+        fn new() -> Self {
+            Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
+        }
+    }
+
+    impl<K: Ord, V> std::iter::FromIterator<(K, V)> for JetMap<K, V> {
+        fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
+            Self(std::sync::Arc::new(pairs.into_iter().collect()))
+        }
+    }
+
+    impl<K, V> std::ops::Deref for JetMap<K, V> {
+        type Target = std::collections::BTreeMap<K, V>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            std::sync::Arc::make_mut(&mut self.0)
+        }
+    }
+
+    fn jet_panic(_file: &str, _line: u32, msg: &str) -> ! {
+        super::Concurrency::with_runtime_mut(|rt| rt.set_trap(msg));
+        std::process::exit(70)
+    }
+
+    include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Values.rs");
+    include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
+
+    fn show<T: JetShow>(value: &T) -> String {
+        value.jet_show()
+    }
+
+    fn debug<T: JetDebug>(value: &T) -> String {
+        value.jet_debug()
+    }
+
+    pub(super) fn debug_i64(value: i64) -> String { debug(&value) }
+    pub(super) fn debug_f64(value: f64) -> String { debug(&value) }
+    pub(super) fn debug_f32(value: f32) -> String { debug(&value) }
+    pub(super) fn debug_bool(value: bool) -> String { debug(&value) }
+    pub(super) fn debug_char(value: char) -> String { debug(&value) }
+    pub(super) fn debug_string(value: String) -> String { debug(&value) }
+
+    pub(super) fn show_i64_list(value: Vec<i64>) -> String { show(&value) }
+    pub(super) fn debug_i64_list(value: Vec<i64>) -> String { debug(&value) }
+    pub(super) fn show_u64_list(value: Vec<u64>) -> String { show(&value) }
+    pub(super) fn debug_u64_list(value: Vec<u64>) -> String { debug(&value) }
+    pub(super) fn show_f64_list(value: Vec<f64>) -> String { show(&value) }
+    pub(super) fn debug_f64_list(value: Vec<f64>) -> String { debug(&value) }
+    pub(super) fn show_f32_list(value: Vec<f32>) -> String { show(&value) }
+    pub(super) fn debug_f32_list(value: Vec<f32>) -> String { debug(&value) }
+    pub(super) fn show_bool_list(value: Vec<bool>) -> String { show(&value) }
+    pub(super) fn debug_bool_list(value: Vec<bool>) -> String { debug(&value) }
+    pub(super) fn show_char_list(value: Vec<char>) -> String { show(&value) }
+    pub(super) fn debug_char_list(value: Vec<char>) -> String { debug(&value) }
+    pub(super) fn show_string_list(value: Vec<String>) -> String { show(&value) }
+    pub(super) fn debug_string_list(value: Vec<String>) -> String { debug(&value) }
+
+    pub(super) fn iter_take<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_take(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_skip<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_skip(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_step_by<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_step_by(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_dedup<T: 'static + Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
+        jet_iter_dedup(jet_iter_from_vec(xs)).to_list()
+    }
+
+    pub(super) fn iter_chunks<T: 'static>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+        jet_iter_chunks(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_windows<T: 'static + Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+        jet_iter_windows(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn list_sum_i64(xs: Vec<i64>) -> i64 {
+        jet_list_sum(xs)
+    }
+
+    pub(super) fn list_product_i64(xs: Vec<i64>) -> i64 {
+        jet_list_product(xs)
+    }
+
+    pub(super) fn list_copy_i64(xs: &[i64]) -> Vec<i64> {
+        jet_list_copy(xs)
+    }
+
+    pub(super) fn list_min_i64(xs: Vec<i64>) -> JetOutcome<i64, JetAbsent> {
+        jet_list_min(xs)
+    }
+
+    pub(super) fn list_max_i64(xs: Vec<i64>) -> JetOutcome<i64, JetAbsent> {
+        jet_list_max(xs)
+    }
+
+    pub(super) fn list_flatten_i64(xs: Vec<Vec<i64>>) -> Vec<i64> {
+        jet_list_flatten(xs)
+    }
+
+    pub(super) fn list_intersperse_i64(xs: Vec<i64>, separator: i64) -> Vec<i64> {
+        jet_list_intersperse(xs, separator)
+    }
+
+    pub(super) fn iter_repeat<T: 'static + Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_repeat(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_cycle<T: 'static + Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_cycle(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_drop_last<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_drop_last(jet_iter_from_vec(xs), n).to_list()
+    }
+
+    pub(super) fn iter_shuffle<T: 'static>(xs: Vec<T>) -> Vec<T> {
+        jet_iter_shuffle(jet_iter_from_vec(xs)).to_list()
+    }
+
+    pub(super) fn iter_is_sorted<T: 'static + Ord>(xs: Vec<T>) -> bool {
+        jet_iter_is_sorted(jet_iter_from_vec(xs))
+    }
+
+    pub(super) fn iter_last_index_of<T: 'static + PartialEq>(
+        xs: Vec<T>,
+        needle: T,
+    ) -> JetOutcome<i64, JetAbsent> {
+        jet_iter_last_index_of(jet_iter_from_vec(xs), needle)
+    }
+
+    pub(super) fn iter_average_int(xs: Vec<i64>) -> f64 {
+        jet_iter_average_int(jet_iter_from_vec(xs))
+    }
+
+    pub(super) fn iter_average_float(xs: Vec<f64>) -> f64 {
+        jet_iter_average_float(jet_iter_from_vec(xs))
+    }
+
+    pub(super) fn iter_compare<T: 'static + Ord>(xs: Vec<T>, other: Vec<T>) -> i64 {
+        jet_iter_compare(jet_iter_from_vec(xs), other)
+    }
+
+    pub(super) fn iter_split_i64(xs: Vec<i64>, n: i64) -> (Vec<i64>, Vec<i64>) {
+        jet_iter_split_at(jet_iter_from_vec(xs), n, |left, right| (left, right))
+    }
+
+    pub(super) fn iter_zip_i64(left: Vec<i64>, right: Vec<i64>) -> Vec<(i64, i64)> {
+        jet_iter_zip(jet_iter_from_vec(left), jet_iter_from_vec(right), |a, b| (a, b)).to_list()
+    }
+
+    fn map_from_pairs(entries: Vec<(String, i64)>) -> JetMap<String, i64> {
+        entries.into_iter().collect()
+    }
+
+    fn map_pairs(map: &JetMap<String, i64>) -> Vec<(String, i64)> {
+        jet_map_entries_kernel(map)
+    }
+
+    pub(super) fn map_copy_i64(entries: Vec<(String, i64)>) -> Vec<(String, i64)> {
+        map_pairs(&jet_map_copy_kernel(&map_from_pairs(entries)))
+    }
+
+    pub(super) fn map_equal_i64(
+        left: Vec<(String, i64)>,
+        right: Vec<(String, i64)>,
+    ) -> bool {
+        jet_map_equal_kernel(&map_from_pairs(left), &map_from_pairs(right))
+    }
+
+    pub(super) fn map_first_key_i64(entries: Vec<(String, i64)>) -> Option<String> {
+        jet_map_first_key_kernel(&map_from_pairs(entries)).ok()
+    }
+
+    pub(super) fn map_entries_i64(entries: Vec<(String, i64)>) -> Vec<(String, i64)> {
+        map_pairs(&map_from_pairs(entries))
+    }
+
+    pub(super) fn map_min_i64(entries: Vec<(String, i64)>) -> Option<i64> {
+        jet_map_min_value_kernel(&map_from_pairs(entries)).ok()
+    }
+
+    pub(super) fn map_max_i64(entries: Vec<(String, i64)>) -> Option<i64> {
+        jet_map_max_value_kernel(&map_from_pairs(entries)).ok()
+    }
+
+    pub(super) fn map_intersection_i64(
+        left: Vec<(String, i64)>,
+        right: Vec<(String, i64)>,
+    ) -> Vec<(String, i64)> {
+        map_pairs(&jet_map_intersection_kernel(
+            &map_from_pairs(left),
+            &map_from_pairs(right),
+        ))
+    }
+
+    pub(super) fn map_slice_i64(
+        entries: Vec<(String, i64)>,
+        keys: Vec<String>,
+    ) -> Vec<(String, i64)> {
+        map_pairs(&jet_map_slice_keys_kernel(&map_from_pairs(entries), keys))
+    }
+
+    pub(super) fn map_from_keys_i64(keys: Vec<String>, default: i64) -> Vec<(String, i64)> {
+        map_pairs(&jet_map_from_keys_kernel(keys, default))
+    }
+
+    pub(super) fn map_contains_i64(entries: Vec<(String, i64)>, needle: i64) -> bool {
+        jet_map_contains_value_kernel(&map_from_pairs(entries), &needle)
+    }
+
+    pub(super) fn map_remove_i64(
+        entries: Vec<(String, i64)>,
+        key: String,
+    ) -> Option<i64> {
+        let mut map = map_from_pairs(entries);
+        jet_map_remove_kernel(&mut map, &key).ok()
+    }
+
+    pub(super) fn map_pop_first_i64(
+        entries: Vec<(String, i64)>,
+    ) -> (Option<String>, Option<i64>, Vec<(String, i64)>) {
+        let mut map = map_from_pairs(entries);
+        let key = map.keys().next().cloned();
+        let value = jet_map_pop_first_kernel(&mut map).ok();
+        (key, value, map_pairs(&map))
+    }
+
+    pub(super) fn iter_zip_many_i64(
+        columns: Vec<Vec<i64>>,
+        mode: u8,
+        fills: Vec<i64>,
+    ) -> Option<Vec<Vec<i64>>> {
+        jet_iter_zip_many(columns, mode, |column| {
+            fills.get(column).copied().unwrap_or_default()
+        })
+    }
+
+    pub(super) fn list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
+        jet_list_slice(xs, start, end)
+    }
+
+    pub(super) fn list_equal<T: PartialEq>(left: &[T], right: &[T]) -> bool {
+        jet_list_equal(left, right)
+    }
+
+    pub(super) fn list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+        jet_list_binary_search(xs, needle)
+    }
+
+    pub(super) fn list_union<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+        jet_list_union(left, right)
+    }
+
+    pub(super) fn list_intersection<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+        jet_list_intersection(left, right)
+    }
+
+    pub(super) fn list_difference<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+        jet_list_difference(left, right)
+    }
+
+    pub(super) fn list_random<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
+        jet_list_random(xs)
+    }
+
+    pub(super) fn list_min_max_i64(xs: &[i64]) -> JetOutcome<(i64, i64), JetAbsent> {
+        jet_list_min_max(xs, |min, max| (min, max))
+    }
+
+    pub(super) fn list_replace<T: Clone + PartialEq>(xs: &[T], old: &T, new: T) -> Vec<T> {
+        jet_list_replace(xs, old, new)
+    }
+
+    pub(super) fn list_starts_with<T: PartialEq>(xs: &[T], prefix: &[T]) -> bool {
+        jet_list_starts_with(xs, prefix)
+    }
+
+    pub(super) fn list_ends_with<T: PartialEq>(xs: &[T], suffix: &[T]) -> bool {
+        jet_list_ends_with(xs, suffix)
+    }
+
+    pub(super) fn list_unzip_i64(xs: Vec<(i64, i64)>) -> (Vec<i64>, Vec<i64>) {
+        jet_list_unzip(xs)
+    }
+
+    pub(super) fn priority_queue_remove_value(
+        pq: &mut std::collections::BinaryHeap<i64>,
+        value: i64,
+    ) -> JetOutcome<i64, JetAbsent> {
+        jet_priority_queue_remove_value_kernel(pq, value)
+    }
+
+    pub(super) fn priority_queue_remove_slot(
+        pq: &mut std::collections::BinaryHeap<i64>,
+        index: i64,
+        file: &str,
+        line: u32,
+    ) -> Result<JetOutcome<i64, JetAbsent>, String> {
+        jet_priority_queue_remove_slot_kernel(pq, index, file, line)
+    }
+}
+
 fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
     crate::runtime_host::alloc_jit_result(
         rt,
@@ -312,19 +659,15 @@ extern "C" fn jet_jit_list_clone(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_list(list).expect("jit list clone: bad handle"))
 }
 
+extern "C" fn jet_jit_list_copy(list: i64) -> i64 {
+    let values = clone_list_ints(list);
+    alloc_from_ints(&collection_semantics::list_copy_i64(&values))
+}
+
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        if rt.heap.list_len(list).is_none() {
-            jet_foundation::ice!(None, "jit list slice: bad handle");
-        }
-        match rt.heap.list_slice(list, start, end) {
-            Some(id) => id,
-            None => {
-                rt.set_trap("slice out of bounds: the range is outside the list");
-                0
-            }
-        }
-    })
+    let xs = clone_list_ints(list);
+    let out = collection_semantics::list_slice(&xs, start, end);
+    alloc_from_ints(&out)
 }
 
 extern "C" fn jet_jit_list_range_end(
@@ -498,27 +841,97 @@ extern "C" fn jet_jit_map_new() -> i64 {
 }
 
 extern "C" fn jet_jit_map_clone(map: i64) -> i64 {
+    alloc_map_pairs(&collection_semantics::map_copy_i64(clone_map_pairs(map)))
+}
+
+extern "C" fn jet_jit_map_equal(left: i64, right: i64) -> i8 {
+    i8::from(collection_semantics::map_equal_i64(
+        clone_map_pairs(left),
+        clone_map_pairs(right),
+    ))
+}
+
+extern "C" fn jet_jit_map_first(map: i64) -> i64 {
+    let value = collection_semantics::map_first_key_i64(clone_map_pairs(map));
     Concurrency::with_runtime_mut(|rt| {
-        let len = rt
-            .heap
-            .map_len(map)
-            .expect("jit map clone: bad handle");
-        let out = rt.heap.alloc_empty_map();
-        for i in 0..len {
-            let key = rt
-                .heap
-                .map_key_at(map, i)
-                .expect("jit map clone: key");
-            let value = rt
-                .heap
-                .map_value_at(map, i)
-                .expect("jit map clone: value");
-            rt.heap
-                .map_insert(out, key, value)
-                .expect("jit map clone: insert");
+        let value = value.map(|key| rt.heap.alloc_string(key));
+        option_i64(rt, value)
+    })
+}
+
+extern "C" fn jet_jit_map_to_list(map: i64) -> i64 {
+    let entries = collection_semantics::map_entries_i64(clone_map_pairs(map));
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        for (key, value) in entries {
+            let row = rt.heap.alloc_record(2);
+            let key_id = rt.heap.alloc_string(key);
+            let _ = rt.heap.record_set_string(row, 0, key_id);
+            let _ = rt.heap.record_set_int(row, 1, value);
+            let _ = rt.heap.list_push_int(out, row);
         }
         out
     })
+}
+
+extern "C" fn jet_jit_map_min(map: i64) -> i64 {
+    let value = collection_semantics::map_min_i64(clone_map_pairs(map));
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+extern "C" fn jet_jit_map_max(map: i64) -> i64 {
+    let value = collection_semantics::map_max_i64(clone_map_pairs(map));
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+extern "C" fn jet_jit_map_intersection(left: i64, right: i64) -> i64 {
+    let pairs = collection_semantics::map_intersection_i64(
+        clone_map_pairs(left),
+        clone_map_pairs(right),
+    );
+    alloc_map_pairs(&pairs)
+}
+
+extern "C" fn jet_jit_map_slice(map: i64, keys: i64) -> i64 {
+    let key_ids = clone_list_ints(keys);
+    let keys = Concurrency::with_runtime_mut(|rt| {
+        key_ids
+            .into_iter()
+            .map(|key| rt.heap.clone_string(key).expect("jit map slice: string key"))
+            .collect::<Vec<_>>()
+    });
+    let pairs = collection_semantics::map_slice_i64(clone_map_pairs(map), keys);
+    alloc_map_pairs(&pairs)
+}
+
+extern "C" fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
+    let key_ids = clone_list_ints(keys);
+    let keys = Concurrency::with_runtime_mut(|rt| {
+        key_ids
+            .into_iter()
+            .map(|key| rt.heap.clone_string(key).expect("jit map from_keys: string key"))
+            .collect::<Vec<_>>()
+    });
+    let pairs = collection_semantics::map_from_keys_i64(keys, default);
+    alloc_map_pairs(&pairs)
+}
+
+extern "C" fn jet_jit_map_contains_value(map: i64, needle: i64) -> i8 {
+    i8::from(collection_semantics::map_contains_i64(
+        clone_map_pairs(map),
+        needle,
+    ))
+}
+
+extern "C" fn jet_jit_map_pop_first(map: i64) -> i64 {
+    let (key, value, _) = collection_semantics::map_pop_first_i64(clone_map_pairs(map));
+    if let Some(key) = key {
+        Concurrency::with_runtime_mut(|rt| {
+            let key_id = rt.heap.alloc_string(key);
+            let _ = rt.heap.map_remove(map, key_id);
+        });
+    }
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
 }
 
 /// D-MAP-MERGE1=E: clone `left`, then overwrite/insert every entry from `right`
@@ -618,6 +1031,21 @@ extern "C" fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_map_remove(map: i64, key: i64) -> i64 {
+    let key_text = Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_string(key)
+            .expect("jit map remove: string key")
+    });
+    let value = collection_semantics::map_remove_i64(clone_map_pairs(map), key_text);
+    if value.is_some() {
+        Concurrency::with_runtime_mut(|rt| {
+            let _ = rt.heap.map_remove(map, key);
+        });
+    }
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
 extern "C" fn jet_jit_map_len(map: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.map_len(map).expect("jit map len: bad handle"))
 }
@@ -682,6 +1110,44 @@ fn clone_list_ints(list: i64) -> Vec<i64> {
     })
 }
 
+fn clone_list_strings(list: i64) -> Vec<String> {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_int_list(list)
+            .expect("jit string-list adapter: bad list handle")
+            .into_iter()
+            .map(|id| {
+                rt.heap
+                    .clone_string(id)
+                    .expect("jit string-list adapter: bad string handle")
+            })
+            .collect()
+    })
+}
+
+fn clone_map_pairs(map: i64) -> Vec<(String, i64)> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.map_len(map).expect("jit map adapter: bad handle");
+        (0..len)
+            .map(|index| {
+                let key_id = rt
+                    .heap
+                    .map_key_at(map, index)
+                    .expect("jit map adapter: key");
+                let key = rt
+                    .heap
+                    .clone_string(key_id)
+                    .expect("jit map adapter: string key");
+                let value = rt
+                    .heap
+                    .map_value_at(map, index)
+                    .expect("jit map adapter: value");
+                (key, value)
+            })
+            .collect()
+    })
+}
+
 fn alloc_from_ints(xs: &[i64]) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
@@ -694,15 +1160,47 @@ fn alloc_from_ints(xs: &[i64]) -> i64 {
     })
 }
 
-fn string_elems_eq(a: i64, b: i64) -> bool {
-    if a == b {
-        return true;
-    }
+fn alloc_from_strings(xs: &[String]) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match (rt.heap.get_string(a), rt.heap.get_string(b)) {
-            (Some(sa), Some(sb)) => sa == sb,
-            _ => false,
+        let out = rt.heap.alloc_empty_list();
+        for value in xs {
+            let id = rt.heap.alloc_string(value.clone());
+            rt.heap
+                .list_push_int(out, id)
+                .expect("jit string-list adapter: push");
         }
+        out
+    })
+}
+
+fn alloc_map_pairs(pairs: &[(String, i64)]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let map = rt.heap.alloc_empty_map();
+        for (key, value) in pairs {
+            let key_id = rt.heap.alloc_string(key.clone());
+            rt.heap
+                .map_insert(map, key_id, *value)
+                .expect("jit map adapter: insert");
+        }
+        map
+    })
+}
+
+fn alloc_nested_from_ints(xs: &[Vec<i64>]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        for inner in xs {
+            let child = rt.heap.alloc_empty_list();
+            for &value in inner {
+                rt.heap
+                    .list_push_int(child, value)
+                    .expect("jit nested-list adapter: push");
+            }
+            rt.heap
+                .list_push_int(out, child)
+                .expect("jit nested-list adapter: outer push");
+        }
+        out
     })
 }
 
@@ -728,182 +1226,102 @@ fn transfer_progress_step(source: i64, target: i64, n: i64) -> i64 {
 
 extern "C" fn jet_jit_iter_take(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
-    let n = n.max(0) as usize;
-    transfer_progress_take(list, alloc_from_ints(&xs[..n.min(xs.len())]), n as i64)
+    let out = collection_semantics::iter_take(xs, n);
+    transfer_progress_take(list, alloc_from_ints(&out), n)
 }
 
 extern "C" fn jet_jit_iter_skip(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
-    let n = n.max(0) as usize;
-    if n >= xs.len() {
-        transfer_progress_skip(list, alloc_from_ints(&[]), n as i64)
-    } else {
-        transfer_progress_skip(list, alloc_from_ints(&xs[n..]), n as i64)
-    }
+    let out = collection_semantics::iter_skip(xs, n);
+    transfer_progress_skip(list, alloc_from_ints(&out), n)
 }
 
 extern "C" fn jet_jit_iter_step_by(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
-    if n <= 0 {
-        return transfer_progress_step(list, alloc_from_ints(&[]), n);
-    }
-    let stepped: Vec<i64> = xs.into_iter().step_by(n as usize).collect();
-    transfer_progress_step(list, alloc_from_ints(&stepped), n)
+    let out = collection_semantics::iter_step_by(xs, n);
+    transfer_progress_step(list, alloc_from_ints(&out), n)
 }
 
 /// `string_elems != 0` → compare string contents (handles may differ); else i64 eq.
 extern "C" fn jet_jit_iter_dedup(list: i64, string_elems: i64) -> i64 {
-    let xs = clone_list_ints(list);
     let string_elems = string_elems != 0;
-    let mut out = Vec::new();
-    let mut prev: Option<i64> = None;
-    for x in xs {
-        let dup = match prev {
-            Some(p) if !string_elems => p == x,
-            Some(p) => string_elems_eq(p, x),
-            None => false,
-        };
-        if dup {
-            continue;
-        }
-        prev = Some(x);
-        out.push(x);
-    }
-    let out = alloc_from_ints(&out);
+    let out = if string_elems {
+        let xs = clone_list_strings(list);
+        alloc_from_strings(&collection_semantics::iter_dedup(xs))
+    } else {
+        let xs = clone_list_ints(list);
+        alloc_from_ints(&collection_semantics::iter_dedup(xs))
+    };
     crate::IO::progress_transfer_dedup_state(list, out, string_elems);
     out
 }
 
 extern "C" fn jet_jit_iter_chunks(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
-    let size = n.max(1) as usize;
-    let out = Concurrency::with_runtime_mut(|rt| {
-        let out = rt.heap.alloc_empty_list();
-        let mut i = 0usize;
-        while i < xs.len() {
-            let end = (i + size).min(xs.len());
-            let chunk = rt.heap.alloc_empty_list();
-            for &v in &xs[i..end] {
-                rt.heap
-                    .list_push_int(chunk, v)
-                    .expect("jit iter chunks: push");
-            }
-            rt.heap
-                .list_push_int(out, chunk)
-                .expect("jit iter chunks: outer push");
-            i = end;
-        }
-        out
-    });
+    let out = alloc_nested_from_ints(&collection_semantics::iter_chunks(xs, n));
     crate::IO::progress_transfer_chunks_state(list, out, n);
     out
 }
 
 extern "C" fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
-    let size = n.max(1) as usize;
-    if xs.len() < size {
-        let out = alloc_from_ints(&[]);
-        crate::IO::progress_transfer_windows_state(list, out, n);
-        return out;
-    }
-    let out = Concurrency::with_runtime_mut(|rt| {
-        let out = rt.heap.alloc_empty_list();
-        for start in 0..=(xs.len() - size) {
-            let win = rt.heap.alloc_empty_list();
-            for &v in &xs[start..start + size] {
-                rt.heap
-                    .list_push_int(win, v)
-                    .expect("jit iter windows: push");
-            }
-            rt.heap
-                .list_push_int(out, win)
-                .expect("jit iter windows: outer push");
-        }
-        out
-    });
+    let out = alloc_nested_from_ints(&collection_semantics::iter_windows(xs, n));
     crate::IO::progress_transfer_windows_state(list, out, n);
     out
 }
 
 extern "C" fn jet_jit_list_sum_i64(list: i64) -> i64 {
     let values = clone_list_ints(list);
-    Concurrency::with_runtime_mut(|rt| {
-        values
-            .into_iter()
-            .try_fold(0i64, i64::checked_add)
-            .unwrap_or_else(|| {
-                rt.set_trap("integer overflow");
-                0
-            })
-    })
+    collection_semantics::list_sum_i64(values)
 }
 
 extern "C" fn jet_jit_list_product_i64(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .clone_int_list(list)
-            .unwrap_or_default()
-            .into_iter()
-            .try_fold(1i64, i64::checked_mul)
-            .unwrap_or_else(|| {
-                rt.set_trap("integer overflow");
-                0
-            })
-    })
+    collection_semantics::list_product_i64(clone_list_ints(list))
 }
 
 extern "C" fn jet_jit_list_min_i64(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let value = rt.heap.clone_int_list(list).unwrap_or_default().into_iter().min();
-        option_i64(rt, value)
-    })
+    let value = collection_semantics::list_min_i64(clone_list_ints(list)).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
 }
 
 extern "C" fn jet_jit_list_max_i64(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let value = rt.heap.clone_int_list(list).unwrap_or_default().into_iter().max();
-        option_i64(rt, value)
-    })
+    let value = collection_semantics::list_max_i64(clone_list_ints(list)).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
 }
 
 extern "C" fn jet_jit_list_flatten(list: i64) -> i64 {
-    let out = Concurrency::with_runtime_mut(|rt| {
-        let outer = rt.heap.clone_int_list(list).unwrap_or_default();
-        let out = rt.heap.alloc_empty_list();
-        for inner in outer {
-            for value in rt.heap.clone_int_list(inner).unwrap_or_default() {
-                let _ = rt.heap.list_push_int(out, value);
-            }
-        }
-        out
+    let outer = clone_list_ints(list);
+    let nested = Concurrency::with_runtime_mut(|rt| {
+        outer
+            .iter()
+            .map(|inner| rt.heap.clone_int_list(*inner).unwrap_or_default())
+            .collect::<Vec<_>>()
     });
+    let out = alloc_from_ints(&collection_semantics::list_flatten_i64(nested));
     crate::IO::progress_transfer_flatten_state(list, out);
     out
 }
 
 extern "C" fn jet_jit_list_intersperse(list: i64, separator: i64) -> i64 {
-    let out = Concurrency::with_runtime_mut(|rt| {
-        let values = rt.heap.clone_int_list(list).unwrap_or_default();
-        let out = rt.heap.alloc_empty_list();
-        for (index, value) in values.into_iter().enumerate() {
-            if index != 0 {
-                let _ = rt.heap.list_push_int(out, separator);
-            }
-            let _ = rt.heap.list_push_int(out, value);
-        }
-        out
-    });
+    let out = alloc_from_ints(&collection_semantics::list_intersperse_i64(
+        clone_list_ints(list),
+        separator,
+    ));
     crate::IO::progress_transfer_intersperse_state(list, out);
     out
 }
 
 extern "C" fn jet_jit_list_zip(left: i64, right: i64) -> i64 {
+    let (left_values, right_values) = Concurrency::with_runtime_mut(|rt| {
+        (
+            rt.heap.clone_int_list(left).unwrap_or_default(),
+            rt.heap.clone_int_list(right).unwrap_or_default(),
+        )
+    });
+    let pairs = collection_semantics::iter_zip_i64(left_values, right_values);
     let out = Concurrency::with_runtime_mut(|rt| {
-        let left = rt.heap.clone_int_list(left).unwrap_or_default();
-        let right = rt.heap.clone_int_list(right).unwrap_or_default();
         let out = rt.heap.alloc_empty_list();
-        for (a, b) in left.into_iter().zip(right) {
+        for (a, b) in pairs {
             let pair = rt.heap.alloc_record(2);
             let _ = rt.heap.record_set_int(pair, 0, a);
             let _ = rt.heap.record_set_int(pair, 1, b);
@@ -918,22 +1336,160 @@ extern "C" fn jet_jit_list_zip(left: i64, right: i64) -> i64 {
 extern "C" fn jet_jit_list_unzip(pairs: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let pairs = rt.heap.clone_int_list(pairs).unwrap_or_default();
+        let pairs = pairs
+            .into_iter()
+            .filter_map(|pair| {
+                Some((
+                    rt.heap.record_get_int(pair, 0)?,
+                    rt.heap.record_get_int(pair, 1)?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        let (left_values, right_values) = collection_semantics::list_unzip_i64(pairs);
         let left = rt.heap.alloc_empty_list();
+        for value in left_values {
+            let _ = rt.heap.list_push_int(left, value);
+        }
         let right = rt.heap.alloc_empty_list();
-        for pair in pairs {
-            if let (Some(a), Some(b)) = (
-                rt.heap.record_get_int(pair, 0),
-                rt.heap.record_get_int(pair, 1),
-            ) {
-                let _ = rt.heap.list_push_int(left, a);
-                let _ = rt.heap.list_push_int(right, b);
-            }
+        for value in right_values {
+            let _ = rt.heap.list_push_int(right, value);
         }
         let result = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(result, 0, left);
         let _ = rt.heap.record_set_int(result, 1, right);
         result
     })
+}
+
+extern "C" fn jet_jit_list_starts_with(list: i64, prefix: i64) -> i8 {
+    collection_semantics::list_starts_with(&clone_list_ints(list), &clone_list_ints(prefix)) as i8
+}
+
+extern "C" fn jet_jit_list_ends_with(list: i64, suffix: i64) -> i8 {
+    collection_semantics::list_ends_with(&clone_list_ints(list), &clone_list_ints(suffix)) as i8
+}
+
+extern "C" fn jet_jit_iter_repeat(list: i64, n: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::iter_repeat(clone_list_ints(list), n))
+}
+
+extern "C" fn jet_jit_iter_cycle(list: i64, n: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::iter_cycle(clone_list_ints(list), n))
+}
+
+extern "C" fn jet_jit_iter_drop_last(list: i64, n: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::iter_drop_last(clone_list_ints(list), n))
+}
+
+extern "C" fn jet_jit_iter_shuffle(list: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::iter_shuffle(clone_list_ints(list)))
+}
+
+extern "C" fn jet_jit_iter_is_sorted(list: i64) -> i8 {
+    collection_semantics::iter_is_sorted(clone_list_ints(list)) as i8
+}
+
+extern "C" fn jet_jit_iter_last_index_of(list: i64, needle: i64) -> i64 {
+    let value = collection_semantics::iter_last_index_of(clone_list_ints(list), needle).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+extern "C" fn jet_jit_iter_average_int(list: i64) -> f64 {
+    collection_semantics::iter_average_int(clone_list_ints(list))
+}
+
+extern "C" fn jet_jit_iter_average_float(list: i64) -> f64 {
+    let values = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        (0..len)
+            .map(|index| rt.heap.list_get_float(list, index).unwrap_or_default())
+            .collect::<Vec<_>>()
+    });
+    collection_semantics::iter_average_float(values)
+}
+
+extern "C" fn jet_jit_iter_compare(list: i64, other: i64) -> i64 {
+    collection_semantics::iter_compare(clone_list_ints(list), clone_list_ints(other))
+}
+
+extern "C" fn jet_jit_iter_split(list: i64, n: i64) -> i64 {
+    let (left, right) = collection_semantics::iter_split_i64(clone_list_ints(list), n);
+    Concurrency::with_runtime_mut(|rt| {
+        let pair = rt.heap.alloc_record(2);
+        let left = {
+            let handle = rt.heap.alloc_empty_list();
+            for value in left {
+                let _ = rt.heap.list_push_int(handle, value);
+            }
+            handle
+        };
+        let right = {
+            let handle = rt.heap.alloc_empty_list();
+            for value in right {
+                let _ = rt.heap.list_push_int(handle, value);
+            }
+            handle
+        };
+        let _ = rt.heap.record_set_int(pair, 0, left);
+        let _ = rt.heap.record_set_int(pair, 1, right);
+        pair
+    })
+}
+
+extern "C" fn jet_jit_list_equal(left: i64, right: i64) -> i8 {
+    collection_semantics::list_equal(&clone_list_ints(left), &clone_list_ints(right)) as i8
+}
+
+extern "C" fn jet_jit_list_binary_search(list: i64, needle: i64) -> i64 {
+    let value = collection_semantics::list_binary_search(&clone_list_ints(list), &needle).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+extern "C" fn jet_jit_list_union(left: i64, right: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::list_union(
+        &clone_list_ints(left),
+        &clone_list_ints(right),
+    ))
+}
+
+extern "C" fn jet_jit_list_intersection(left: i64, right: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::list_intersection(
+        &clone_list_ints(left),
+        &clone_list_ints(right),
+    ))
+}
+
+extern "C" fn jet_jit_list_difference(left: i64, right: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::list_difference(
+        &clone_list_ints(left),
+        &clone_list_ints(right),
+    ))
+}
+
+extern "C" fn jet_jit_list_random(list: i64) -> i64 {
+    let value = collection_semantics::list_random(&clone_list_ints(list)).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+extern "C" fn jet_jit_list_min_max(list: i64) -> i64 {
+    let values = clone_list_ints(list);
+    let Some((min, max)) = collection_semantics::list_min_max_i64(&values).ok() else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let pair = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(pair, 0, min);
+        let _ = rt.heap.record_set_int(pair, 1, max);
+        pair + 1
+    })
+}
+
+extern "C" fn jet_jit_list_replace(list: i64, old: i64, new: i64) -> i64 {
+    alloc_from_ints(&collection_semantics::list_replace(
+        &clone_list_ints(list),
+        &old,
+        new,
+    ))
 }
 
 /// Stable sort `list` in place by parallel i64 `keys` (same length).
@@ -985,7 +1541,8 @@ extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
 }
 
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
-/// `kind`: 0 = raw i64, 1 = string, 2 = signed IntN, 3 = unsigned IntN.
+/// `kind`: 0 = Int, 1 = String, 2 = signed IntN, 3 = unsigned IntN,
+/// 4 = Float, 5 = Bool, 6 = Char, 7 = F32.
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_show_text(rt, list, kind);
@@ -994,34 +1551,111 @@ extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     });
 }
 
+fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
+    match kind {
+        1 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| rt.heap.clone_string(id).unwrap_or_default())
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_string_list(values)
+            } else {
+                collection_semantics::show_string_list(values)
+            }
+        }
+        2 => {
+            let values = rt.heap.clone_int_list(list).unwrap_or_default();
+            if debug {
+                collection_semantics::debug_i64_list(values)
+            } else {
+                collection_semantics::show_i64_list(values)
+            }
+        }
+        3 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| value as u64)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_u64_list(values)
+            } else {
+                collection_semantics::show_u64_list(values)
+            }
+        }
+        4 => {
+            let len = rt.heap.list_len(list).unwrap_or(0);
+            let values = (0..len)
+                .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0))
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_f64_list(values)
+            } else {
+                collection_semantics::show_f64_list(values)
+            }
+        }
+        7 => {
+            let len = rt.heap.list_len(list).unwrap_or(0);
+            let values = (0..len)
+                .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0) as f32)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_f32_list(values)
+            } else {
+                collection_semantics::show_f32_list(values)
+            }
+        }
+        5 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| value != 0)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_bool_list(values)
+            } else {
+                collection_semantics::show_bool_list(values)
+            }
+        }
+        6 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| char::from_u32(value as u32).unwrap_or('?'))
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_char_list(values)
+            } else {
+                collection_semantics::show_char_list(values)
+            }
+        }
+        _ => {
+            let values = rt.heap.clone_int_list(list).unwrap_or_default();
+            if debug {
+                collection_semantics::debug_i64_list(values)
+            } else {
+                collection_semantics::show_i64_list(values)
+            }
+        }
+    }
+}
+
 fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
-    if kind == 4 {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut parts = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            let v = rt.heap.list_get_float(list, i).unwrap_or(0.0);
-            parts.push(jet_rt::display_f64(v));
-        }
-        return format!("[{}]", parts.join(", "));
-    }
-    let xs = rt
-        .heap
-        .clone_int_list(list)
-        .unwrap_or_default();
-    let mut parts = Vec::with_capacity(xs.len());
-    if kind == 1 {
-        for id in xs {
-            parts.push(rt.heap.clone_string(id).unwrap_or_default());
-        }
-    } else {
-        for v in xs {
-            parts.push(match kind {
-                2 | 3 => jet_codegen::Comptime::MathLayout::integer_show(v, kind == 2),
-                _ => v.to_string(),
-            });
-        }
-    }
-    format!("[{}]", parts.join(", "))
+    list_text(rt, list, kind, false)
+}
+
+fn list_debug_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+    list_text(rt, list, kind, true)
 }
 
 /// JetShow `[T]` as a string handle for `{list}` interpolation.
@@ -1030,6 +1664,116 @@ extern "C" fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
         let text = list_show_text(rt, list, kind);
         rt.heap.alloc_string(text)
     })
+}
+
+/// Jet Debug list text as a string handle for structural-value marshalling.
+extern "C" fn jet_jit_list_debug(list: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = list_debug_text(rt, list, kind);
+        rt.heap.alloc_string(text)
+    })
+}
+
+/// String Debug text as a handle for structural-value marshalling.
+extern "C" fn jet_jit_string_debug(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(value).unwrap_or_default();
+        rt.heap.alloc_string(collection_semantics::debug_string(text))
+    })
+}
+
+/// Marshal a resident scalar into the shared Prelude Debug implementation.
+/// `kind`: 0 = Int, 1 = Float, 2 = Bool, 3 = Char, 4 = F32. Floats arrive as bits.
+extern "C" fn jet_jit_scalar_debug(value: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = match kind {
+            0 => collection_semantics::debug_i64(value),
+            1 => collection_semantics::debug_f64(f64::from_bits(value as u64)),
+            2 => collection_semantics::debug_bool(value != 0),
+            3 => collection_semantics::debug_char(char::from_u32(value as u32).unwrap_or('?')),
+            4 => collection_semantics::debug_f32(f32::from_bits(value as u32)),
+            _ => String::new(),
+        };
+        rt.heap.alloc_string(text)
+    })
+}
+
+/// Append `T?` Debug text through the shared StructuralDebug formatter.
+extern "C" fn jet_jit_str_push_debug_optional(
+    buf_id: i64,
+    payload_id: i64,
+    present: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        let payload = (present != 0)
+            .then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+        let text = jet_foundation::StructuralDebug::jet_debug_optional(payload);
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
+}
+
+/// Append a record after the JIT has marshalled rendered values and metadata.
+extern "C" fn jet_jit_str_push_debug_record(
+    buf_id: i64,
+    type_name_id: i64,
+    fields_id: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(type_name) = rt.heap.clone_string(type_name_id) else {
+            return;
+        };
+        let fields = rt.heap.clone_int_list(fields_id).unwrap_or_default();
+        if fields.len() % 4 != 0 {
+            return;
+        }
+        let mut marshalled = Vec::with_capacity(fields.len() / 4);
+        for field in fields.chunks_exact(4) {
+            let Some(name) = rt.heap.clone_string(field[0]) else {
+                return;
+            };
+            let Some(value) = rt.heap.clone_string(field[1]) else {
+                return;
+            };
+            if field[2] < 0 {
+                return;
+            }
+            marshalled.push(jet_foundation::StructuralDebug::JetDebugField {
+                name,
+                value,
+                storage_index: field[2] as usize,
+                redacted: field[3] != 0,
+            });
+        }
+        let text = jet_foundation::StructuralDebug::jet_debug_record_fields(
+            &type_name,
+            marshalled,
+        );
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
+}
+
+/// Append a positional variant through the shared StructuralDebug formatter.
+extern "C" fn jet_jit_str_push_debug_variant(
+    buf_id: i64,
+    variant_id: i64,
+    payload_id: i64,
+    has_payload: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(variant) = rt.heap.clone_string(variant_id) else {
+            return;
+        };
+        let payload = (has_payload != 0)
+            .then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+        let text = jet_foundation::StructuralDebug::jet_debug_variant(&variant, payload);
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
 }
 
 /// Print `T?` using its JIT Option carrier.
@@ -1049,7 +1793,7 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
         let payload = if result_abi || kind >= 3 {
             crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
         } else {
-            packed - 1
+            packed.wrapping_sub(1)
         };
         match kind {
             1 => {
@@ -2126,6 +2870,40 @@ extern "C" fn jet_jit_priority_queue_to_sorted_list(handle: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_priority_queue_remove_value(handle: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let removed = match rt
+            .priority_queues
+            .get_mut((handle as usize).wrapping_sub(1))
+        {
+            Some(heap) => collection_semantics::priority_queue_remove_value(heap, value).ok(),
+            None => None,
+        };
+        option_i64(rt, removed)
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_remove_slot(handle: i64, index: i64, line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let removed = match rt
+            .priority_queues
+            .get_mut((handle as usize).wrapping_sub(1))
+        {
+            Some(heap) => match collection_semantics::priority_queue_remove_slot(
+                heap, index, "<jit>", line,
+            ) {
+                Ok(value) => value.ok(),
+                Err(message) => {
+                    rt.set_trap(&message);
+                    None
+                }
+            },
+            None => None,
+        };
+        option_i64(rt, removed)
+    })
+}
+
 extern "C" fn jet_jit_lru_new(capacity: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.lrus.push(LruState {
@@ -2656,7 +3434,7 @@ extern "C" fn jet_jit_byte_buffer_method(
 /// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8), 3 = String handle (>>8).
 #[derive(Clone)]
 struct PackedEnumShow {
-    variants: Vec<(String, u8, String)>, // (user_Variant, kind, nested_enum_name)
+    variants: Vec<(String, u8, String)>, // (__jet_Variant, kind, nested_enum_name)
 }
 
 thread_local! {
@@ -2681,48 +3459,73 @@ pub(crate) fn register_packed_enum_show(
 }
 
 fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
-    PACKED_ENUM_SHOW.with(|t| {
-        let table = t.borrow();
-        let Some(def) = table.get(enum_name) else {
-            return format!("<enum {enum_name}>");
-        };
-        let disc = (packed & 0xff) as usize;
-        let Some((vname, kind, nested)) = def.variants.get(disc) else {
-            return format!("<bad disc {disc}>");
-        };
-        match kind {
-            0 => vname.clone(),
-            1 => format!("{vname}({})", packed >> 8),
-            2 => {
-                let inner = show_packed_enum(packed >> 8, nested, heap);
-                format!("{vname}({inner})")
-            }
-            // String handle in high bits — AOT JetShow uses Debug quotes.
-            3 => {
-                let text = heap.clone_string(packed >> 8).unwrap_or_default();
-                format!("{vname}({text:?})")
-            }
-            _ => format!("<{vname}?>"),
+    if enum_name == "IOError" {
+        let context = packed >> 8;
+        let resource = heap
+            .record_get_int(context, 1)
+            .and_then(|encoded| encoded.checked_sub(1))
+            .and_then(|handle| heap.clone_string(handle));
+        let cause = heap
+            .record_get_int(context, 3)
+            .and_then(|encoded| encoded.checked_sub(1))
+            .and_then(|handle| heap.clone_string(handle));
+        return jet_foundation::StructuralDebug::jet_show_io_error(
+            packed & 0xff,
+            heap.record_get_int(context, 0).unwrap_or(0),
+            resource.as_deref(),
+            cause.as_deref(),
+        );
+    }
+    let def = PACKED_ENUM_SHOW.with(|t| t.borrow().get(enum_name).cloned());
+    let Some(def) = def else {
+        return format!("<enum {enum_name}>");
+    };
+    let disc = (packed & 0xff) as usize;
+    let Some((vname, kind, nested)) = def.variants.get(disc).cloned() else {
+        return format!("<bad disc {disc}>");
+    };
+    let payload = match kind {
+        0 => None,
+        1 => Some((packed >> 8).to_string()),
+        2 => Some(show_packed_enum(packed >> 8, &nested, heap)),
+        // String handle in high bits — AOT JetShow uses Debug quotes.
+        3 => {
+            let text = heap.clone_string(packed >> 8).unwrap_or_default();
+            Some(format!("{text:?}"))
         }
-    })
+        _ => return format!("<{vname}?>"),
+    };
+    jet_foundation::StructuralDebug::jet_debug_variant(&vname, payload)
+}
+
+fn packed_enum_name(name_ptr: i64, name_len: i64) -> String {
+    if name_ptr == 0 || name_len <= 0 {
+        return String::new();
+    }
+    let slice = unsafe {
+        std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize)
+    };
+    String::from_utf8_lossy(slice).into_owned()
 }
 
 /// Print a packed i64 enum. `name_ptr`/`name_len` are a UTF-8 view of the Jet
 /// enum name (stable for the process — not a heap string handle).
 extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let name = if name_ptr == 0 || name_len <= 0 {
-            String::new()
-        } else {
-            let slice = unsafe {
-                std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize)
-            };
-            String::from_utf8_lossy(slice).into_owned()
-        };
+        let name = packed_enum_name(name_ptr, name_len);
         let text = show_packed_enum(packed, &name, &rt.heap);
         rt.stdout.push_str(&text);
         rt.stdout.push('\n');
     });
+}
+
+/// Return a packed enum's JetShow text as a string handle for interpolation.
+extern "C" fn jet_jit_enum_show(packed: i64, name_ptr: i64, name_len: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let name = packed_enum_name(name_ptr, name_len);
+        let text = show_packed_enum(packed, &name, &rt.heap);
+        rt.heap.alloc_string(text)
+    })
 }
 
 host_fns! {
@@ -2767,6 +3570,20 @@ host_fns! {
             .push(AbiParam::new(types::I8));
         let mut sig_get_opt = sig_len.clone();
         sig_get_opt.params.push(AbiParam::new(types::I64));
+        let mut sig_debug_optional = Signature::new(cc);
+        sig_debug_optional
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        let sig_debug_record = sig_debug_optional.clone();
+        let mut sig_debug_variant = Signature::new(cc);
+        sig_debug_variant
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        let mut sig_scalar_debug = Signature::new(cc);
+        sig_scalar_debug
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_scalar_debug.returns.push(AbiParam::new(types::I64));
         let mut sig_set_from = sig_len.clone();
         sig_set_from.params.push(AbiParam::new(types::I64));
         let mut sig_list_eq = Signature::new(cc);
@@ -2838,8 +3655,21 @@ host_fns! {
         sig_print_enum.params.push(AbiParam::new(types::I64));
         sig_print_enum.params.push(AbiParam::new(types::I64));
         sig_print_enum.params.push(AbiParam::new(types::I64));
+        let mut sig_enum_show = sig_print_enum.clone();
+        sig_enum_show.returns.push(AbiParam::new(types::I64));
         let mut sig_sort_by_keys = sig_get_opt.clone();
         sig_sort_by_keys.returns.clear();
+        let mut sig_bool = Signature::new(cc);
+        sig_bool.params.push(AbiParam::new(types::I64));
+        sig_bool.returns.push(AbiParam::new(types::I8));
+        let mut sig_f64 = Signature::new(cc);
+        sig_f64.params.push(AbiParam::new(types::I64));
+        sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_priority_queue_slot = Signature::new(cc);
+        sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
+        sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
+        sig_priority_queue_slot.params.push(AbiParam::new(types::I32));
+        sig_priority_queue_slot.returns.push(AbiParam::new(types::I64));
 
 
     }
@@ -2864,7 +3694,18 @@ host_fns! {
     list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
+    list_copy: "jet_jit_list_copy" => jet_jit_list_copy: sig_len;
     list_slice: "jet_jit_list_slice" => jet_jit_list_slice: sig_slice;
+    list_starts_with: "jet_jit_list_starts_with" => jet_jit_list_starts_with: sig_list_eq;
+    list_ends_with: "jet_jit_list_ends_with" => jet_jit_list_ends_with: sig_list_eq;
+    list_equal: "jet_jit_list_equal" => jet_jit_list_equal: sig_list_eq;
+    list_binary_search: "jet_jit_list_binary_search" => jet_jit_list_binary_search: sig_get_opt;
+    list_union: "jet_jit_list_union" => jet_jit_list_union: sig_get_opt;
+    list_intersection: "jet_jit_list_intersection" => jet_jit_list_intersection: sig_get_opt;
+    list_difference: "jet_jit_list_difference" => jet_jit_list_difference: sig_get_opt;
+    list_random: "jet_jit_list_random" => jet_jit_list_random: sig_len;
+    list_min_max: "jet_jit_list_min_max" => jet_jit_list_min_max: sig_len;
+    list_replace: "jet_jit_list_replace" => jet_jit_list_replace: sig_three_ret;
     list_range_end: "jet_jit_list_range_end" => jet_jit_list_range_end: sig_range_end;
     split_write: "jet_jit_split_write" => jet_jit_split_write: sig_disjoint;
     get_disjoint_write: "jet_jit_get_disjoint_write" => jet_jit_get_disjoint_write: sig_disjoint;
@@ -2881,17 +3722,38 @@ host_fns! {
     map_get: "jet_jit_map_get" => jet_jit_map_get: sig_map_get;
     map_validate: "jet_jit_map_validate" => jet_jit_map_validate: sig_len;
     map_get_opt: "jet_jit_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
+    map_remove: "jet_jit_map_remove" => jet_jit_map_remove: sig_map_get_opt;
     map_len: "jet_jit_map_len" => jet_jit_map_len: sig_len;
     map_key_at: "jet_jit_map_key_at" => jet_jit_map_key_at: sig_map_at;
     map_value_at: "jet_jit_map_value_at" => jet_jit_map_value_at: sig_map_at;
     map_keys: "jet_jit_map_keys" => jet_jit_map_keys: sig_len;
     map_values: "jet_jit_map_values" => jet_jit_map_values: sig_len;
+    map_equal: "jet_jit_map_equal" => jet_jit_map_equal: sig_list_eq;
+    map_first: "jet_jit_map_first" => jet_jit_map_first: sig_len;
+    map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
+    map_min: "jet_jit_map_min" => jet_jit_map_min: sig_len;
+    map_max: "jet_jit_map_max" => jet_jit_map_max: sig_len;
+    map_intersection: "jet_jit_map_intersection" => jet_jit_map_intersection: sig_get_opt;
+    map_slice: "jet_jit_map_slice" => jet_jit_map_slice: sig_get_opt;
+    map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
+    map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
+    map_pop_first: "jet_jit_map_pop_first" => jet_jit_map_pop_first: sig_len;
     iter_take: "jet_jit_iter_take" => jet_jit_iter_take: sig_get_opt;
     iter_skip: "jet_jit_iter_skip" => jet_jit_iter_skip: sig_get_opt;
     iter_step_by: "jet_jit_iter_step_by" => jet_jit_iter_step_by: sig_get_opt;
     iter_dedup: "jet_jit_iter_dedup" => jet_jit_iter_dedup: sig_get_opt;
     iter_chunks: "jet_jit_iter_chunks" => jet_jit_iter_chunks: sig_get_opt;
     iter_windows: "jet_jit_iter_windows" => jet_jit_iter_windows: sig_get_opt;
+    iter_repeat: "jet_jit_iter_repeat" => jet_jit_iter_repeat: sig_get_opt;
+    iter_cycle: "jet_jit_iter_cycle" => jet_jit_iter_cycle: sig_get_opt;
+    iter_drop_last: "jet_jit_iter_drop_last" => jet_jit_iter_drop_last: sig_get_opt;
+    iter_shuffle: "jet_jit_iter_shuffle" => jet_jit_iter_shuffle: sig_len;
+    iter_is_sorted: "jet_jit_iter_is_sorted" => jet_jit_iter_is_sorted: sig_bool;
+    iter_last_index_of: "jet_jit_iter_last_index_of" => jet_jit_iter_last_index_of: sig_get_opt;
+    iter_average_int: "jet_jit_iter_average_int" => jet_jit_iter_average_int: sig_f64;
+    iter_average_float: "jet_jit_iter_average_float" => jet_jit_iter_average_float: sig_f64;
+    iter_compare: "jet_jit_iter_compare" => jet_jit_iter_compare: sig_get_opt;
+    iter_split: "jet_jit_iter_split" => jet_jit_iter_split: sig_get_opt;
     list_sum_i64: "jet_jit_list_sum_i64" => jet_jit_list_sum_i64: sig_len;
     list_product_i64: "jet_jit_list_product_i64" => jet_jit_list_product_i64: sig_len;
     list_min_i64: "jet_jit_list_min_i64" => jet_jit_list_min_i64: sig_len;
@@ -2906,6 +3768,13 @@ host_fns! {
     print_opt: "jet_jit_print_opt" => jet_jit_print_opt: sig_print_list;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
     list_show: "jet_jit_list_show" => jet_jit_list_show: sig_get_opt;
+    list_debug: "jet_jit_list_debug" => jet_jit_list_debug: sig_get_opt;
+    string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;
+    scalar_debug: "jet_jit_scalar_debug" => jet_jit_scalar_debug: sig_scalar_debug;
+    enum_show: "jet_jit_enum_show" => jet_jit_enum_show: sig_enum_show;
+    str_push_debug_optional: "jet_jit_str_push_debug_optional" => jet_jit_str_push_debug_optional: sig_debug_optional;
+    str_push_debug_record: "jet_jit_str_push_debug_record" => jet_jit_str_push_debug_record: sig_debug_record;
+    str_push_debug_variant: "jet_jit_str_push_debug_variant" => jet_jit_str_push_debug_variant: sig_debug_variant;
     list_remove: "jet_jit_list_remove" => jet_jit_list_remove: sig_get_opt;
     list_pop: "jet_jit_list_pop" => jet_jit_list_pop: sig_len;
     list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;
@@ -2975,6 +3844,8 @@ host_fns! {
     priority_queue_peek: "jet_jit_priority_queue_peek" => jet_jit_priority_queue_peek: sig_len;
     priority_queue_pop: "jet_jit_priority_queue_pop" => jet_jit_priority_queue_pop: sig_len;
     priority_queue_to_sorted_list: "jet_jit_priority_queue_to_sorted_list" => jet_jit_priority_queue_to_sorted_list: sig_len;
+    priority_queue_remove_value: "jet_jit_priority_queue_remove_value" => jet_jit_priority_queue_remove_value: sig_get_opt;
+    priority_queue_remove_slot: "jet_jit_priority_queue_remove_slot" => jet_jit_priority_queue_remove_slot: sig_priority_queue_slot;
     lru_new: "jet_jit_lru_new" => jet_jit_lru_new: sig_len;
     lru_put: "jet_jit_lru_put" => jet_jit_lru_put: sig_three_ret;
     lru_get: "jet_jit_lru_get" => jet_jit_lru_get: sig_get_opt;
@@ -2993,8 +3864,3 @@ host_fns! {
     byte_buffer_to_bytes: "jet_jit_byte_buffer_to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
     byte_buffer_method: "jet_jit_byte_buffer_method" => jet_jit_byte_buffer_method: sig_four_ret;
 }
-
-
-
-
-

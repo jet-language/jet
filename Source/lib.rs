@@ -58,6 +58,9 @@ pub use jet_driver::{
     Lexer,
     LintPolicy,
     Loader,
+    LibraryExport,
+    JetLibArtifact,
+    JetLibStamp,
     Lock,
     Manifest,
     Package,
@@ -998,6 +1001,18 @@ pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     })
 }
 
+/// Compile a package's selected `Library` output. Library-shaped sources do
+/// not need an executable `fn run`; the native build adapter consumes the
+/// checked projections on `CompileOutput`.
+pub fn compile_library(
+    file: &str,
+    output: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_library(file, Sema::CompileMode::Check, output)
+    })
+}
+
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
 /// `// jet:line N` table `crates/jet-debug/src/LineMap.rs` reads back.
@@ -1133,9 +1148,10 @@ pub fn compile_benches_with_path(
 /// compile error on its normal path.
 pub fn has_bench_blocks(file: &str) -> bool {
     with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle.modules[bundle.entry]
-            .items
+        Ok(bundle) => bundle
+            .modules
             .iter()
+            .flat_map(|module| module.items.iter())
             .any(|i| matches!(i, AST::Item::Bench(_))),
         Err(_) => false,
     })
@@ -1147,9 +1163,10 @@ pub fn has_bench_blocks(file: &str) -> bool {
 /// the caller surfaces the real compile error on the normal harness path.
 pub fn has_test_blocks(file: &str) -> bool {
     with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle.modules[bundle.entry]
-            .items
+        Ok(bundle) => bundle
+            .modules
             .iter()
+            .flat_map(|module| module.items.iter())
             .any(|i| matches!(i, AST::Item::Test(_))),
         Err(_) => true,
     })

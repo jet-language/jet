@@ -14,6 +14,8 @@
 //! shared cache, then verifies each source's cache entry still returns *its own*
 //! binary (a poisoned entry would print another program's output on the hit).
 
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 

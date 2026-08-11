@@ -402,8 +402,12 @@ fn emit_plain_core_call(
     arg: &dyn Fn(usize) -> String,
     helper: &dyn Fn(&str) -> String,
 ) -> Option<String> {
-    let row = crate::Syntax::aot_core_call(module, method)?;
+    let row = crate::Syntax::core_call(module, method)?;
+    if !row.aot_direct {
+        return None;
+    }
     let rendered: Vec<String> = row
+        .signature
         .borrow_mask
         .iter()
         .enumerate()
@@ -413,8 +417,8 @@ fn emit_plain_core_call(
         })
         .collect();
     let sym = match row.symbol {
-        crate::Syntax::AotCoreCallSymbol::Prelude(symbol) => helper(symbol),
-        crate::Syntax::AotCoreCallSymbol::Rust(symbol) => symbol.to_string(),
+        crate::Syntax::CoreCallSymbol::Prelude(symbol) => helper(symbol),
+        crate::Syntax::CoreCallSymbol::Rust(symbol) => symbol.to_string(),
     };
     Some(emit_symbol_call(&sym, &rendered.join(", ")))
 }
@@ -1945,7 +1949,7 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        // The 1-arg default stays here, not in `Syntax::AOT_CORE_CALLS`: the row is
+        // The 1-arg default stays here, not in `Syntax::CORE_CALLS`: the row is
         // read before this match, so a table row would answer the 2-arg call
         // above and drop the policy argument.
         ("core.text", "display_width") => {

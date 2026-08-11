@@ -4,11 +4,11 @@
 // user never types (they write the verbs `encode`/`decode` only in a hand-impl,
 // D-SERDE2 — a later increment). Pure safe std Rust, no proc-macros (I1/I6).
 #[allow(non_camel_case_types)]
-pub trait user_Encode {
+pub trait __jet_Encode {
     fn jet_encode(&self) -> jet_std::DataTree;
 }
 #[allow(non_camel_case_types)]
-pub trait user_Decode: Sized {
+pub trait __jet_Decode: Sized {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
     /// D-MIGRATE4: decode this value, reporting whether it arrived as an older
     /// `#PublishedSchema` shape and was walked forward through the migration
@@ -25,37 +25,37 @@ pub trait user_Decode: Sized {
     }
 }
 
-impl user_Encode for i64 {
+impl __jet_Encode for i64 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Int(*self)
     }
 }
-impl user_Encode for f64 {
+impl __jet_Encode for f64 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Float(*self)
     }
 }
-impl user_Encode for bool {
+impl __jet_Encode for bool {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Bool(*self)
     }
 }
-impl user_Encode for String {
+impl __jet_Encode for String {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Text(self.clone())
     }
 }
-impl user_Encode for char {
+impl __jet_Encode for char {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Text(self.to_string())
     }
 }
-impl user_Encode for u8 {
+impl __jet_Encode for u8 {
     fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
 }
 macro_rules! jet_impl_sized_int_encode {
     ($($ty:ty),* $(,)?) => {$(
-        impl user_Encode for $ty {
+        impl __jet_Encode for $ty {
             fn jet_encode(&self) -> jet_std::DataTree {
                 jet_std::DataTree::Int(*self as i64)
             }
@@ -63,18 +63,18 @@ macro_rules! jet_impl_sized_int_encode {
     )*};
 }
 jet_impl_sized_int_encode!(i8, i16, i32, u16, u32);
-impl user_Encode for f32 {
+impl __jet_Encode for f32 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Float(*self as f64)
     }
 }
-impl user_Encode for jet_std::JetDecimal {
+impl __jet_Encode for jet_std::JetDecimal {
     fn jet_encode(&self) -> jet_std::DataTree {
         // Decimal stays exact through the shared tree; text preserves scale.
         jet_std::DataTree::Text(self.to_string_rep())
     }
 }
-impl<T: user_Encode> user_Encode for Vec<T> {
+impl<T: __jet_Encode> __jet_Encode for Vec<T> {
     fn jet_encode(&self) -> jet_std::DataTree {
         // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
         // Codable tree. Text codecs already render Bytes as a number list, while
@@ -90,7 +90,7 @@ impl<T: user_Encode> user_Encode for Vec<T> {
         jet_std::DataTree::Array(self.iter().map(|x| x.jet_encode()).collect())
     }
 }
-impl<T: user_Encode, const N: usize> user_Encode for [T; N] {
+impl<T: __jet_Encode, const N: usize> __jet_Encode for [T; N] {
     fn jet_encode(&self) -> jet_std::DataTree {
         if std::any::type_name::<T>() == "u8" {
             let mut bytes = Vec::with_capacity(N);
@@ -104,7 +104,7 @@ impl<T: user_Encode, const N: usize> user_Encode for [T; N] {
     }
 }
 // D-FAIL-CARRIER1=A: `T?` is the carrier, so the carrier is what codes.
-impl<T: user_Encode> user_Encode for JetOutcome<T, JetAbsent> {
+impl<T: __jet_Encode> __jet_Encode for JetOutcome<T, JetAbsent> {
     fn jet_encode(&self) -> jet_std::DataTree {
         match self {
             Ok(x) => x.jet_encode(),
@@ -112,7 +112,7 @@ impl<T: user_Encode> user_Encode for JetOutcome<T, JetAbsent> {
         }
     }
 }
-impl<V: user_Encode> user_Encode for std::collections::BTreeMap<String, V> {
+impl<V: __jet_Encode> __jet_Encode for std::collections::BTreeMap<String, V> {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(
             self.iter()
@@ -121,41 +121,41 @@ impl<V: user_Encode> user_Encode for std::collections::BTreeMap<String, V> {
         )
     }
 }
-impl<V: user_Encode> user_Encode for JetMap<String, V> {
+impl<V: __jet_Encode> __jet_Encode for JetMap<String, V> {
     fn jet_encode(&self) -> jet_std::DataTree {
         // Keep the JetMap surface as a transparent BTreeMap codec. Calling
         // `self.jet_encode()` (or relying on method lookup through Deref)
         // re-enters this impl for JetMap and recurses forever.
-        <std::collections::BTreeMap<String, V> as user_Encode>::jet_encode(&**self)
+        <std::collections::BTreeMap<String, V> as __jet_Encode>::jet_encode(&**self)
     }
 }
 // D-ENC-CBOR-SURFACE1: DataTree itself is Codable. Whole-value codec
 // composition must not fall through to rustc after front-end acceptance.
-impl user_Encode for jet_std::DataTree {
+impl __jet_Encode for jet_std::DataTree {
     fn jet_encode(&self) -> jet_std::DataTree { self.clone() }
 }
 
-impl user_Decode for i64 {
+impl __jet_Decode for i64 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_int(t)
     }
 }
-impl user_Decode for f64 {
+impl __jet_Decode for f64 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_float(t)
     }
 }
-impl user_Decode for bool {
+impl __jet_Decode for bool {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_bool(t)
     }
 }
-impl user_Decode for String {
+impl __jet_Decode for String {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_string(t)
     }
 }
-impl user_Decode for char {
+impl __jet_Decode for char {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let s = String::jet_decode(t)?;
         let mut it = s.chars();
@@ -168,7 +168,7 @@ impl user_Decode for char {
         }
     }
 }
-impl user_Decode for u8 {
+impl __jet_Decode for u8 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::DataTree::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
@@ -178,7 +178,7 @@ impl user_Decode for u8 {
 }
 macro_rules! jet_impl_sized_int_decode {
     ($($ty:ty => $name:literal),* $(,)?) => {$(
-        impl user_Decode for $ty {
+        impl __jet_Decode for $ty {
             fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
                 match t {
                     jet_std::DataTree::Int(n) => <$ty>::try_from(*n).map_err(|_| {
@@ -204,12 +204,12 @@ jet_impl_sized_int_decode!(
     u16 => "U16",
     u32 => "U32",
 );
-impl user_Decode for f32 {
+impl __jet_Decode for f32 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_f32(t)
     }
 }
-impl user_Decode for jet_std::JetDecimal {
+impl __jet_Decode for jet_std::JetDecimal {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::DataTree::Text(s) => jet_std::JetDecimal::from_str(s)
@@ -222,7 +222,7 @@ impl user_Decode for jet_std::JetDecimal {
         }
     }
 }
-impl<T: user_Decode> user_Decode for Vec<T> {
+impl<T: __jet_Decode> __jet_Decode for Vec<T> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::DataTree::Bytes(bytes) if std::any::type_name::<T>() == "u8" => {
@@ -266,7 +266,7 @@ impl<T: user_Decode> user_Decode for Vec<T> {
         }
     }
 }
-impl<T: user_Decode, const N: usize> user_Decode for [T; N] {
+impl<T: __jet_Decode, const N: usize> __jet_Decode for [T; N] {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let values = Vec::<T>::jet_decode(t)?;
         let found = values.len();
@@ -278,10 +278,10 @@ impl<T: user_Decode, const N: usize> user_Decode for [T; N] {
         })
     }
 }
-impl user_Decode for jet_std::DataTree {
+impl __jet_Decode for jet_std::DataTree {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> { Ok(t.clone()) }
 }
-impl<T: user_Decode> user_Decode for JetOutcome<T, JetAbsent> {
+impl<T: __jet_Decode> __jet_Decode for JetOutcome<T, JetAbsent> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::DataTree::Null => Ok(Err(JetAbsent)),
@@ -289,7 +289,7 @@ impl<T: user_Decode> user_Decode for JetOutcome<T, JetAbsent> {
         }
     }
 }
-impl<V: user_Decode> user_Decode for std::collections::BTreeMap<String, V> {
+impl<V: __jet_Decode> __jet_Decode for std::collections::BTreeMap<String, V> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::DataTree::Object(entries) => {
@@ -317,9 +317,9 @@ impl<V: user_Decode> user_Decode for std::collections::BTreeMap<String, V> {
         }
     }
 }
-impl<V: user_Decode> user_Decode for JetMap<String, V> {
+impl<V: __jet_Decode> __jet_Decode for JetMap<String, V> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        <std::collections::BTreeMap<String, V> as user_Decode>::jet_decode(t)
+        <std::collections::BTreeMap<String, V> as __jet_Decode>::jet_decode(t)
             .map(|map| map.into_iter().collect())
     }
 }
@@ -327,13 +327,13 @@ impl<V: user_Decode> user_Decode for JetMap<String, V> {
 // ── core.encoding: typed format verbs over Encode/Decode (D-ENC1, D-SERDE6) ────
 // `to_string`/`to_string_pretty` (D-JSONVERB1) and the typed `decode<T>` route
 // every format through the one DataTree model.
-fn jet_enc_json_to_string<T: user_Encode>(v: &T) -> String {
+fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
     jet_std::render_datatree_json(&v.jet_encode(), false, 0)
 }
-fn jet_enc_json_to_string_pretty<T: user_Encode>(v: &T) -> String {
+fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> String {
     jet_std::render_datatree_json(&v.jet_encode(), true, 0)
 }
-fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let j = jet_std::parse_json(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
     })?;
@@ -345,7 +345,7 @@ fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::
 
 // D-MIGRATE3=A: `decode_traced<T>` — same decode, wrapped in `DecodeResult` so the
 // caller can ask whether/how it migrated, without `decode` itself paying for it.
-fn jet_enc_json_decode_traced<T: user_Decode>(
+fn jet_enc_json_decode_traced<T: __jet_Decode>(
     text: &String,
 ) -> Result<jet_std::DecodeResult<T>, Vec<jet_std::FieldError>> {
     let j = jet_std::parse_json(text).map_err(|e| {
@@ -358,7 +358,7 @@ fn jet_enc_json_decode_traced<T: user_Decode>(
 // CSV typed decode: header row maps columns to fields by name; each data row
 // becomes a DataTree::Object of Text cells, then decodes to `T`. A short row or a
 // per-row decode failures are typed `[FieldError]` values naming the 1-based row.
-fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
     let rows = jet_ring_csv_parse(text).map_err(jet_std::FieldError::one)?;
     let mut it = rows.into_iter();
     let Some(header) = it.next() else {

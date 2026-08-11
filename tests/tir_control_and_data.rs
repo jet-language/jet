@@ -1,5 +1,7 @@
 //! TIR control and data integration tests.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
@@ -82,11 +84,11 @@ fn run() {
 "#;
     let rust = compile("tir_range_value_windows", src);
     assert!(
-        rust.contains("let user_window = jet_view_range_new"),
+        rust.contains("let __jet_window = jet_view_range_new"),
         "bare Range projection must borrow without copying: {rust}"
     );
     assert!(
-        rust.contains("let user_edit = jet_view_mut_range_new"),
+        rust.contains("let __jet_edit = jet_view_mut_range_new"),
         "write Range projection must borrow the owner: {rust}"
     );
     let (code, stdout) = build_and_run("tir_range_value_windows", src);
@@ -468,11 +470,11 @@ fn run() {
 ";
     let generated = compile("tir_ranges_codegen", src);
     assert!(
-        generated.contains("for user_n in (1i64)..=(5i64) {"),
+        generated.contains("for __jet_n in (1i64)..=(5i64) {"),
         "literal range loop must remain a direct Rust range jump:\n{generated}"
     );
     assert!(
-        !generated.contains("let _jet_range = JetRange"),
+        !generated.contains("let __jet_range = JetRange"),
         "literal range loop must not allocate or construct a Range value:\n{generated}"
     );
     let (code, stdout) = build_and_run("tir_ranges", src);
@@ -563,7 +565,7 @@ false
 }
 
 /// Named loops: `next(outer)` and `break(outer)` driving a nested
-/// range loop. The `'jet_<name>:` labels are resolved at lowering.
+/// range loop. The `'__jet_<name>:` labels are resolved at lowering.
 #[test]
 fn labeled_break_and_continue() {
     if !have_rustc() {
@@ -585,6 +587,9 @@ fn run() {
     print(\"done\")
 }
 ";
+    let rust = compile("tir_labeled", src);
+    assert!(rust.contains("continue '__jet_outer;"), "{rust}");
+    assert!(rust.contains("break '__jet_outer;"), "{rust}");
     let (code, stdout) = build_and_run("tir_labeled", src);
     assert_eq!(code, 0);
     // i=1: j=1 prints 1-1, i!=2 so j=2 -> next(outer).
@@ -987,6 +992,35 @@ fn run() {
     assert_eq!(stdout, "live:42\nlive:7\nidle\nclosed\n");
 }
 
+/// S83 / D-CHOOSE-HEADS1=A: multi-head declarations lower to the same TIR
+/// enum table used by ordinary `if subject == { … }` dispatch.
+#[test]
+fn multi_head_functions_use_table_dispatch() {
+    assert!(
+        have_rustc(),
+        "multi-head AOT parity requires rustc; project harness must provision it"
+    );
+    let src = "\
+enum Shape {
+    Circle(Float)
+    Rect(w: Float, h: Float)
+}
+fn area(Circle(r: Float)) => Float {
+    return r * r
+}
+fn area(Rect(w: Float, h: Float)) => Float {
+    return w * h
+}
+fn run() {
+    print(area(Shape.Circle(3.0)))
+    print(area(.Rect.{ w: 2.0, h: 4.0 }))
+}
+";
+    let (code, stdout) = build_and_run("tir_multi_head_functions", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "9.0\n8.0\n");
+}
+
 /// A range pattern in a *payload* slot (`Good(200..299)`, lowered to a match-arm
 /// guard) alongside wildcard slots, all over an exhaustive enum match.
 #[test]
@@ -1021,7 +1055,7 @@ fn run() {
 }
 
 /// An arm-head range dispatch over a scalar subject with an `else` (the mixed-dispatch
-/// `if/else if … else` lowering, with the parity `_jet_switch_subject` binding).
+/// `if/else if … else` lowering, with the parity `__jet_switch_subject` binding).
 /// Mirrors examples/features/basics/pattern_matching.jet's `score_grade`.
 #[test]
 fn arm_head_range_dispatch() {
@@ -1088,15 +1122,15 @@ fn run() {
     assert!(table.contains("// jet:branch sparse-search"), "{table}");
     assert!(table.contains("// jet:branch bool-two-way"), "{table}");
     assert!(
-        table.contains("else if *_jet_switch_subject < 100"),
+        table.contains("else if *__jet_switch_subject < 100"),
         "sparse integers should emit a balanced search tree: {table}"
     );
     assert!(
-        table.contains("if *_jet_switch_subject {"),
+        table.contains("if *__jet_switch_subject {"),
         "two-way Bool dispatch should branch on the subject directly: {table}"
     );
     assert_eq!(
-        table.matches("match *_jet_switch_subject").count(),
+        table.matches("match *__jet_switch_subject").count(),
         1,
         "only dense integer arms should use table lowering: {table}"
     );
@@ -1116,20 +1150,20 @@ fn run() {
 "#,
     );
     assert!(
-        ordered.contains("let _jet_switch_subject = &(user_subject())"),
+        ordered.contains("let __jet_switch_subject = &(__jet_subject())"),
         "{ordered}"
     );
     assert!(
-        ordered.contains("(*_jet_switch_subject)"),
+        ordered.contains("(*__jet_switch_subject)"),
         "conditions must reuse the evaluated subject: {ordered}"
     );
     assert_eq!(
-        ordered.matches("&(user_subject())").count(),
+        ordered.matches("&(__jet_subject())").count(),
         1,
         "branch subject was evaluated more than once: {ordered}"
     );
     assert!(
-        !ordered.contains("_jet_switch_subject.clone()"),
+        !ordered.contains("__jet_switch_subject.clone()"),
         "branch dispatch must not clone its subject: {ordered}"
     );
 }

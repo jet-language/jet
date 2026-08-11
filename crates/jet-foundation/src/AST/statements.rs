@@ -227,18 +227,19 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — a lexical scope that
-    /// owns child tasks. `g.task => …` spawns; scope exit joins/cancels children.
+    /// D-CONC-SPAWN1=D: `task.group g(limit: n) { … }` — a lexical scope that
+    /// owns child tasks. The optional limit bounds concurrently active children.
     /// Emitted as a plain block at codegen; lifetime is enforced in sema (I3).
     TaskGroup {
         name: String,
         name_span: Span,
+        limit: Option<Expr>,
         body: Vec<Stmt>,
         span: Span,
     },
     /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29) + D-LAYOUT-CTOR1
     /// (D-VERDICT-1306-1): `name :: Layout.{ … }` — a Cassowary-style
-    /// constraint typed-literal. Unlike `region`/`taskgroup`, `name` is declared
+    /// constraint typed-literal. Unlike `region`/`task.group`, `name` is declared
     /// in the ENCLOSING scope and outlives the literal (solved values are read
     /// after the layout is defined). The parser desugars each `box.anchor` /
     /// `self.anchor` read inside `body` into a `name.h(box, anchor)` /

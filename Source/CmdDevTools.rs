@@ -1589,7 +1589,7 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
     print!("{}", jet::Explain::render(&explanation, color));
 }
 
-/// `jet inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
+/// `jet bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
 ///
 /// Generates a `#Bindgen module c.<lib>.__bindgen__` cache from a C header,
 /// using the same native std-only backend the compiler invokes on a cache miss
@@ -1598,6 +1598,14 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if matches!(
+        args.first().map(|arg| arg.as_str()),
+        Some("json" | "csv" | "sql" | "xml" | "proto")
+    ) {
+        let format = args[0].as_str();
+        run_data_bind(format, &args[1..]);
+        return;
+    }
     if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT) {
         run_cpp_bind(&args[1..]);
         return;
@@ -1641,6 +1649,10 @@ pub(crate) fn run_bind(args: &[&String]) {
             "usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]",
             jet::Syntax::BINARY_NAME
         );
+        eprintln!(
+            "       {} bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]",
+            jet::Syntax::BINARY_NAME
+        );
         eprintln!();
         eprintln!("Generate a C binding cache from a header (S59). The output is");
         eprintln!("a `#Bindgen module c.<lib>.__bindgen__` file, by default written");
@@ -1657,11 +1669,19 @@ pub(crate) fn run_bind(args: &[&String]) {
     while i < args.len() {
         match args[i].as_str() {
             "--pkg" => {
-                pkg = args.get(i + 1).map(|s| s.to_string());
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`bind` requires a value after `--pkg`");
+                    exit(ExitCodes::USAGE);
+                };
+                pkg = Some(value.to_string());
                 i += 2;
             }
             "-o" | "--out" => {
-                out = args.get(i + 1).map(|s| s.to_string());
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`bind` requires a value after `{}`", args[i]);
+                    exit(ExitCodes::USAGE);
+                };
+                out = Some(value.to_string());
                 i += 2;
             }
             // #1659 c3: --quiet suppresses the `bound …` status line; the
@@ -1682,39 +1702,33 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
 
     // Link key: --pkg if given, else the header basename (header→lib rule).
-    let lib = pkg.unwrap_or_else(|| {
+    let raw_lib = pkg.unwrap_or_else(|| {
         let base = header.rsplit('/').next().unwrap_or(header);
         base.strip_suffix(".h").unwrap_or(base).to_string()
     });
+    let lib = jet::Syntax::sanitize_generated_name(
+        &raw_lib,
+        jet::Syntax::NameCase::Snake,
+        "library",
+    );
 
     let header_src = match std::fs::read_to_string(header) {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "Error [E3208]: Could not generate bindings from `{}`.",
-                header
-            );
-            eprintln!(" Why: the header file could not be read ({}).", e);
-            eprintln!(" Fix: check the path, or install the library's dev headers.");
-            exit(ExitCodes::USER_ERROR);
-        }
+        Err(e) => bind_e3208(
+            format!("Could not generate bindings from `{header}`."),
+            format!("the header file could not be read ({e})."),
+            "check the path, or install the library's dev headers.".to_string(),
+        ),
     };
 
     // E2-M14 (owner 2026-06-18, supersedes D-CBIND3=B): native std-only backend.
     let result = match jet::CBind::generate(&header_src, &lib) {
         Ok(r) => r,
-        Err(why) => {
-            eprintln!(
-                "Error [E3208]: Could not generate bindings from `{}`.",
-                header
-            );
-            eprintln!(" Why: {}.", why);
-            eprintln!(
-                " Fix: hand-write `#Extern module c.{} {{ … }}` for the symbols you need.",
-                lib
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
+        Err(why) => bind_e3208(
+            format!("Could not generate bindings from `{header}`."),
+            format!("{why}."),
+            format!("hand-write `#Extern module c.{lib} {{ … }}` for the symbols you need."),
+        ),
     };
 
     // Default cache path follows D-CBIND7: .jet/bindings/c/<lib>.jet.
@@ -1733,7 +1747,7 @@ pub(crate) fn run_bind(args: &[&String]) {
 
     // Phase 3 (D-CBIND2): write a hash sidecar alongside the cache so the
     // compiler can detect stale caches on the next build (hash invalidation).
-    // cflags are not yet threaded through `jet inspect bind`; pass "" for now.
+    // cflags are not yet threaded through `jet bind`; pass "" for now.
     let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
 
     if !quiet {
@@ -1757,8 +1771,162 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
 }
 
+fn bind_e3208(what: String, why: String, fix: String) -> ! {
+    crate::emit_cli_report("E3208", what, why, fix, false);
+    exit(ExitCodes::USER_ERROR);
+}
+
+fn run_data_bind(format: &str, args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} bind {} <input> [--type <Type>] [-o <output>]",
+            jet::Syntax::BINARY_NAME,
+            format
+        );
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
+    }
+    let input_path = args[0].as_str();
+    let mut root_type = None;
+    let mut output = None;
+    let mut index = 1usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--type" => {
+                let Some(value) = args.get(index + 1) else {
+                    crate::cli_error!("E2102", "bind {format} requires a value after --type");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                if value.is_empty() {
+                    crate::cli_error!("E2102", "bind {format} type name cannot be empty");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                root_type = Some(value.to_string());
+                index += 2;
+            }
+            "-o" | "--out" => {
+                let Some(value) = args.get(index + 1) else {
+                    crate::cli_error!("E2102", "bind {format} requires a value after -o");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                if value.is_empty() {
+                    crate::cli_error!("E2102", "bind {format} output path cannot be empty");
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                output = Some(value.to_string());
+                index += 2;
+            }
+            other => {
+                crate::cli_error!("E2102", "unknown bind {format} argument {other}");
+                usage();
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+    let input = match fs::read_to_string(input_path) {
+        Ok(input) => input,
+        Err(error) => data_bind_error(
+            format,
+            input_path,
+            &format!("the input could not be read ({error})"),
+        ),
+    };
+    let output_path = output.clone().unwrap_or_else(|| {
+        let base = input_path
+            .rsplit(|ch| ch == '/' || ch == '\\')
+            .next()
+            .unwrap_or(input_path);
+        let stem = base
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(base);
+        let mut safe = String::new();
+        for ch in stem.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                safe.push(ch.to_ascii_lowercase());
+            } else if !safe.ends_with('_') {
+                safe.push('_');
+            }
+        }
+        while safe.ends_with('_') {
+            safe.pop();
+        }
+        if safe.is_empty() {
+            safe.push_str("schema");
+        }
+        format!("bindings/{safe}.{}", jet::Syntax::FILE_EXT)
+    });
+    let mut command = vec![
+        jet::Syntax::BINARY_NAME.to_string(),
+        "bind".to_string(),
+        format.to_string(),
+        input_path.to_string(),
+    ];
+    if let Some(root_type) = &root_type {
+        command.push("--type".to_string());
+        command.push(root_type.clone());
+    }
+    if let Some(output) = &output {
+        command.push("-o".to_string());
+        command.push(output.clone());
+    }
+    let command = command.join(" ");
+    let result = match jet::CBind::generate_data(
+        format,
+        input_path,
+        &input,
+        root_type.as_deref(),
+        &command,
+    ) {
+        Ok(result) => result,
+        Err(error) => data_bind_error(format, input_path, &error),
+    };
+    if let Some(parent) = Path::new(&output_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                data_bind_error(
+                    format,
+                    input_path,
+                    &format!("could not create output directory {} ({error})", parent.display()),
+                );
+            }
+        }
+    }
+    if let Err(error) = fs::write(&output_path, result.source) {
+        data_bind_error(
+            format,
+            input_path,
+            &format!("could not write {output_path} ({error})"),
+        );
+    }
+    println!(
+        "bound {} {} record{} from {input_path} → {output_path}",
+        result.record_count,
+        format,
+        if result.record_count == 1 { "" } else { "s" }
+    );
+}
+
+fn data_bind_error(format: &str, path: &str, why: &str) -> ! {
+    bind_e3208(
+        format!("Could not generate {format} bindings from {path}."),
+        format!("{why}."),
+        format!("provide a well-formed {format} schema and rerun `jet bind {format}`."),
+    )
+}
+
 fn run_cpp_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || eprintln!("usage: {} bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         usage();
         exit(if args.is_empty() { ExitCodes::USAGE } else { ExitCodes::OK });
@@ -1823,17 +1991,18 @@ fn run_cpp_bind(args: &[&String]) {
 }
 
 fn cpp_bind_error(path: &str, why: &str) -> ! {
-    eprintln!("Error [E3208]: Could not generate C++ bindings from `{path}`.");
-    eprintln!(" Why: {why}.");
-    eprintln!(" Fix: select an explicit target/toolchain, expose public scalar declarations, and request templates with `--instantiate`, then rerun `jet inspect bind cpp`.");
-    exit(ExitCodes::USER_ERROR)
+    bind_e3208(
+        format!("Could not generate C++ bindings from `{path}`."),
+        format!("{why}."),
+        "select an explicit target/toolchain, expose public scalar declarations, and request templates with `--instantiate`, then rerun `jet bind cpp`.".to_string(),
+    )
 }
 
-fn run_tcl_bind(args:&[&String]){let usage=||eprintln!("usage: {} inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind tcl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}let lib=pkg.unwrap_or_else(||{let b=path.rsplit('/').next().unwrap_or(path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_string()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|tcl_bind_error(path,&format!("the script could not be read ({e})")));let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::TCL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::TclBind::bind(&source,&lib,cache).unwrap_or_else(|e|tcl_bind_error(path,&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){tcl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.tcl-path")),format!("{}\n",result.lib_dir.display())){tcl_bind_error(path,&format!("the Tcl runtime identity could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){tcl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}println!("bound in-process Tcl session from `{path}` → {out_path}")}
-fn tcl_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn run_tcl_bind(args:&[&String]){let usage=||eprintln!("usage: {} bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind tcl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}let lib=pkg.unwrap_or_else(||{let b=path.rsplit('/').next().unwrap_or(path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_string()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|tcl_bind_error(path,&format!("the script could not be read ({e})")));let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::TCL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::TclBind::bind(&source,&lib,cache).unwrap_or_else(|e|tcl_bind_error(path,&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){tcl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.tcl-path")),format!("{}\n",result.lib_dir.display())){tcl_bind_error(path,&format!("the Tcl runtime identity could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){tcl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}println!("bound in-process Tcl session from `{path}` → {out_path}")}
+fn tcl_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use a valid Tcl initialization script and rerun `jet bind tcl` inside the provisioned Jet environment.".to_string())}
 
 fn run_lua_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind lua <script.lua> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind lua <script.lua> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;
     while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind lua` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
@@ -1847,12 +2016,12 @@ fn run_lua_bind(args:&[&String]){
     if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){lua_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} in-process Lua function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn lua_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define top-level `function name(input)` routines and rerun `jet inspect bind lua` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn lua_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level `function name(input)` routines and rerun `jet bind lua` inside the provisioned Jet environment.".to_string())}
 
 /// D-FFI-ADA1=A: compile exported GNAT functions and preserve scalar subtype
 /// ranges as checked Jet wrapper boundaries.
 fn run_ada_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;
     while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind ada` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
@@ -1865,12 +2034,12 @@ fn run_ada_bind(args:&[&String]){
     if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){ada_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} GNAT export{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn ada_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet inspect bind ada`.");exit(ExitCodes::USER_ERROR)}
+fn ada_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet bind ada`.".to_string())}
 
 /// D-FFI-PASCAL1=A: compile FreePascal cdecl exports and generate bounded,
 /// consuming opaque-handle wrappers for one Object Pascal class estate.
 fn run_pascal_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind pascal <library.pas> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind pascal <library.pas> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind pascal` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|pascal_bind_error(path,&format!("the Pascal source could not be read ({e})")));
@@ -1878,12 +2047,12 @@ fn run_pascal_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){pascal_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){pascal_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} FreePascal export{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn pascal_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: export scalar cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first method wrappers, then rerun `jet inspect bind pascal`.");exit(ExitCodes::USER_ERROR)}
+fn pascal_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export scalar cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first method wrappers, then rerun `jet bind pascal`.".to_string())}
 
 /// D-FFI-DART1=A: Dart/Flutter owns the isolate. Generate and compile the
 /// dart_api_dl callback bridge plus a native Jet plugin loaded by `dart:ffi`.
 fn run_dart_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut compute=None;let mut i=1;
     while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--jet"=>{compute=args.get(i+1).map(|v|v.to_string());if compute.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind dart` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
@@ -1900,12 +2069,12 @@ fn run_dart_bind(args:&[&String]){
     if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){dart_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} Dart callback{} and native Jet compute `{}` from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},native.display(),path,out_path);
 }
-fn dart_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn dart_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.".to_string())}
 
 /// D-FFI-PWSH1=A: validate named script functions, then generate a persistent
 /// PowerShell worker whose object pipeline crosses as canonical DataTree.
 fn run_powershell_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind pwsh <script.ps1> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind pwsh <script.ps1> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind pwsh` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|powershell_bind_error(path,&format!("the PowerShell script could not be read ({e})")));
@@ -1913,11 +2082,11 @@ fn run_powershell_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){powershell_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){powershell_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} persistent PowerShell function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn powershell_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn powershell_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named PowerShell functions with Jet-compatible identifiers and rerun `jet bind pwsh` inside the provisioned Jet environment.".to_string())}
 
 /// D-FFI-PERL1=A: compile named Perl subs into a supervised persistent worker.
 fn run_perl_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind perl <script.pl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind perl <script.pl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind perl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|perl_bind_error(path,&format!("the Perl script could not be read ({e})")));
@@ -1925,12 +2094,12 @@ fn run_perl_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){perl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){perl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} persistent Perl function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn perl_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define named main-package Perl functions with Jet-compatible identifiers and rerun `jet inspect bind perl` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn perl_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named main-package Perl functions with Jet-compatible identifiers and rerun `jet bind perl` inside the provisioned Jet environment.".to_string())}
 
 /// D-FFI-RUBY1=A: statically discover top-level methods and generate a
 /// persistent supervised Ruby worker. Ruby source never runs during discovery.
 fn run_ruby_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind ruby <script.rb> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind ruby <script.rb> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind ruby` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|ruby_bind_error(path,&format!("the Ruby script could not be read ({e})")));
@@ -1938,12 +2107,12 @@ fn run_ruby_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){ruby_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){ruby_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} persistent Ruby method{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn ruby_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet inspect bind ruby` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn ruby_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet bind ruby`.".to_string())}
 
 /// D-FFI-PHP1=A: statically discover top-level functions and generate a
 /// persistent supervised PHP worker pool. PHP source never runs during discovery.
 fn run_php_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind php <script.php> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind php <script.php> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind php` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|php_bind_error(path,&format!("the PHP script could not be read ({e})")));
@@ -1951,12 +2120,12 @@ fn run_php_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){php_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){php_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} PHP function{} into a four-worker pool from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn php_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn php_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet bind php` inside the provisioned Jet environment.".to_string())}
 
 /// D-FFI-R1=A: parse top-level function metadata without evaluating source,
 /// then generate a persistent supervised R worker.
 fn run_r_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind r <script.R> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind r <script.R> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind r` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|r_bind_error(path,&format!("the R script could not be read ({e})")));
@@ -1964,24 +2133,24 @@ fn run_r_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){r_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){r_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} R function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn r_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+fn r_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet bind r`.".to_string())}
 
 /// D-FFI-COM1=A: inspect a Windows type library and generate typed IDispatch
 /// automation stubs. Non-Windows hosts reject before touching the input.
 fn run_com_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind com <library.tlb> --pkg <lib>\n       {} inspect bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>",jet::Syntax::BINARY_NAME,jet::Syntax::BINARY_NAME);
-    if !cfg!(target_os="windows"){eprintln!("Error [E3260]: `com.*` needs a Windows host.");eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");exit(ExitCodes::USER_ERROR)}
+    let usage=||eprintln!("usage: {} bind com <library.tlb> --pkg <lib>\n       {} bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>",jet::Syntax::BINARY_NAME,jet::Syntax::BINARY_NAME);
+    if !cfg!(target_os="windows"){eprintln!("Error [E3260]: `com.*` needs a Windows host.");eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");eprintln!(" Fix: run `jet bind com` and build the COM module on a Windows host.");exit(ExitCodes::USER_ERROR)}
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let mut file=None;let mut guid=None;let mut major=None;let mut minor=None;let mut lcid=0u32;let mut pkg=None;let mut out=None;let mut i=0;while i<args.len(){match args[i].as_str(){"--registered"=>{guid=args.get(i+1).map(|v|v.to_string());i+=2},"--major"=>{major=args.get(i+1).and_then(|v|v.parse::<u16>().ok());i+=2},"--minor"=>{minor=args.get(i+1).and_then(|v|v.parse::<u16>().ok());i+=2},"--lcid"=>{lcid=args.get(i+1).and_then(|v|v.parse::<u32>().ok()).unwrap_or(u32::MAX);i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());i+=2},value if !value.starts_with('-')&&file.is_none()=>{file=Some(value.to_string());i+=1},_=>{usage();exit(ExitCodes::USAGE)}}}
     let Some(lib)=pkg else{usage();exit(ExitCodes::USAGE)};let input=if let Some(path)=file{if guid.is_some(){usage();exit(ExitCodes::USAGE)}jet::ComBind::TypeLibraryInput::File(path.into())}else{let(Some(guid),Some(major),Some(minor))=(guid,major,minor)else{usage();exit(ExitCodes::USAGE)};if lcid==u32::MAX{usage();exit(ExitCodes::USAGE)}jet::ComBind::TypeLibraryInput::Registered{guid,major,minor,lcid}};
     let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::COM_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::ComBind::bind(&input,&lib,cache).unwrap_or_else(|e|com_bind_error(&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){com_bind_error(&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){com_bind_error(&format!("the provenance could not be written ({e})"))}println!("bound {} typed COM member{} → {out_path}",result.methods.len(),if result.methods.len()==1{""}else{"s"});
 }
-fn com_bind_error(why:&str)->!{eprintln!("Error [E3208]: Could not generate COM bindings.");eprintln!(" Why: {why}.");eprintln!(" Fix: select a registered or file-backed type library with IDispatch metadata and rerun on Windows.");exit(ExitCodes::USER_ERROR)}
+fn com_bind_error(why:&str)->!{bind_e3208("Could not generate COM bindings.".to_string(),format!("{why}."),"select a registered or file-backed type library with IDispatch metadata and rerun on Windows.".to_string())}
 
 /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
 /// then build an in-process JNI invocation bridge.
 fn run_java_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || eprintln!("usage: {} bind java <source.java> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) { usage(); exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK}); }
     let source_path=args[0].as_str(); let mut pkg=None; let mut out=None; let mut i=1;
     while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind java` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
@@ -1996,24 +2165,24 @@ fn run_java_bind(args: &[&String]) {
     println!("bound {} JVM member{} from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},source_path,out_path);
 }
 
-fn java_bind_error(source:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.");exit(ExitCodes::USER_ERROR)}
+fn java_bind_error(source:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{source}`."),format!("{why}."),"use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet bind java`.".to_string())}
 
 /// D-FFI-DOTNET1=A: reflect a C# assembly surface, then generate an in-process
 /// hostfxr bridge. Managed state remains behind consuming GCHandle ownership.
 fn run_dotnet_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    let usage=||eprintln!("usage: {} bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind cs` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|dotnet_bind_error(path,&format!("the C# source could not be read ({e})")));
     let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::CS_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::DotNetBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|dotnet_bind_error(path,&e.to_string()));
     if let Err(e)=std::fs::write(&out_path,&result.source){dotnet_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){dotnet_bind_error(path,&format!("the provenance could not be written ({e})"))}println!("bound {} .NET member{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn dotnet_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`.");exit(ExitCodes::USER_ERROR)}
+fn dotnet_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet bind cs`.".to_string())}
 
 /// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
 /// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.
 fn run_go_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || eprintln!("usage: {} bind go <source.go> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         usage();
         eprintln!();
@@ -2045,10 +2214,11 @@ fn run_go_bind(args: &[&String]) {
 }
 
 fn go_bind_error(source: &str, why: &str) -> ! {
-    eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");
-    eprintln!(" Why: {why}.");
-    eprintln!(" Fix: export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.");
-    exit(ExitCodes::USER_ERROR);
+    bind_e3208(
+        format!("Could not generate bindings from `{source}`."),
+        format!("{why}."),
+        "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet bind go`.".to_string(),
+    )
 }
 
 /// D-FFI-FORTRAN1=A: discover scalar and fixed-shape ISO_C_BINDING functions, compile them
@@ -2057,7 +2227,7 @@ fn go_bind_error(source: &str, why: &str) -> ! {
 fn run_fortran_bind(args: &[&String]) {
     let usage = || {
         eprintln!(
-            "usage: {} inspect bind fortran <source.f90> [--pkg <lib>] [-o <out.jet>]",
+            "usage: {} bind fortran <source.f90> [--pkg <lib>] [-o <out.jet>]",
             jet::Syntax::BINARY_NAME
         );
     };
@@ -2159,14 +2329,15 @@ fn run_fortran_bind(args: &[&String]) {
 }
 
 fn fortran_bind_error(source: &str, why: &str) -> ! {
-    eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");
-    eprintln!(" Why: {why}.");
-    eprintln!(" Fix: use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.");
-    exit(ExitCodes::USER_ERROR);
+    bind_e3208(
+        format!("Could not generate bindings from `{source}`."),
+        format!("{why}."),
+        "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet bind fortran`.".to_string(),
+    )
 }
 
 fn run_cobol_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || eprintln!("usage: {} bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) { usage(); exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK}) }
     let source_path=args[0].as_str(); let mut copybook=None; let mut pkg=None; let mut out=None; let mut i=1;
     while i<args.len(){match args[i].as_str(){"--copybook"=>{copybook=args.get(i+1).map(|v|v.to_string());if copybook.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `bind cobol` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
@@ -2184,10 +2355,11 @@ fn run_cobol_bind(args: &[&String]) {
 }
 
 fn cobol_bind_error(path:&str,why:&str)->!{
-    eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");
-    eprintln!(" Why: {why}.");
-    eprintln!(" Fix: use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.");
-    exit(ExitCodes::USER_ERROR)
+    bind_e3208(
+        format!("Could not generate bindings from `{path}`."),
+        format!("{why}."),
+        "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet bind cobol`.".to_string(),
+    )
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a `pure fn run()` program.

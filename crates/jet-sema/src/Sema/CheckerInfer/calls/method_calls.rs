@@ -54,7 +54,7 @@ impl<'a> Checker<'a> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         let fields = self.struct_fields_of(owner, leaf)?;
-        if let Some((_, _, ty, _)) = fields.iter().find(|(known, ..)| known == field) {
+        if let Some((_, _, ty)) = fields.iter().find(|(known, ..)| known == field) {
             return Some(ty.clone());
         }
         self.diags.push(Diagnostic::error(
@@ -146,9 +146,7 @@ impl<'a> Checker<'a> {
             let Some(sig) = target.funcs.get(method) else {
                 continue;
             };
-            let visible = target.func_pub.get(method).copied().unwrap_or(false)
-                || (self.same_package_scope(module_idx)
-                    && target.func_pkg_pub.get(method).copied().unwrap_or(false));
+            let visible = self.name_ledger.visible(self.module_idx, module_idx, method);
             if !visible || !sig.root_param {
                 continue;
             }
@@ -368,16 +366,27 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_method_call(
-            &mut self,
-            receiver: &mut Box<Expr>,
-            method: &str,
-            span: Span,
-            owner_type_args: &mut Vec<Type>,
-            type_args: &mut Vec<Type>,
-            args: &mut Vec<crate::AST::CallArg>,
-            recv_type_out: &mut Option<String>,
+        &mut self,
+        receiver: &mut Box<Expr>,
+        method: &str,
+        span: Span,
+        owner_type_args: &mut Vec<Type>,
+        type_args: &mut Vec<Type>,
+        args: &mut Vec<crate::AST::CallArg>,
+        recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
+        {
+            return self.infer_task_surface_method(
+                receiver,
+                method,
+                span,
+                args,
+                recv_type_out,
+                resolved_ret_out,
+            );
+        }
         // D-ALLOC2: allocator methods operate through the runtime's audited
         // interior-mutable storage. `alloc` may coexist with existing views;
         // `reset` invalidates them. Do not run the ordinary owner-read check
@@ -388,10 +397,10 @@ impl<'a> Checker<'a> {
                 .lookup(name)
                 .is_some_and(|info| is_allocator_type(&info.ty)));
         self.check_call_receiver_evaluation(receiver, span);
-            // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
-            // range-shaped recovery long enough to point at the old spelling,
-            // but never admit it to the type system.
-            if method == Syntax::METHOD_VIEW {
+        // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
+        // range-shaped recovery long enough to point at the old spelling,
+        // but never admit it to the type system.
+        if method == Syntax::METHOD_VIEW {
                 self.infer(receiver);
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
@@ -985,7 +994,7 @@ impl<'a> Checker<'a> {
                 // D-MOD2: inline code module call — `math.double(x)` where `math` is an
                 // inline `module math { … }` in this file. Resolve via mangled name.
                 if let Some(canonical) = self.code_modules.get(alias.as_str()) {
-                    let mangled = format!("{}__{}", canonical, method);
+                    let mangled = jet_foundation::Names::member_name(canonical, method);
                     return self.infer_code_module_call(
                         alias,
                         &mangled,
@@ -2326,6 +2335,17 @@ impl<'a> Checker<'a> {
             if let Type::Named(handle_ty) = &recv_ty {
                 if handle_ty == "Plugin" {
                     if let Some(ret) = self.check_plugin_method(method, args, span) {
+                        *recv_type_out = Some(handle_ty.clone());
+                        return ret;
+                    }
+                }
+            }
+            // D-LIB-CALLGRANT1=A: a loaded `Mod` has one typed scalar entry
+            // point. Its grant and identity were checked at load; this method
+            // only records the executable effect and return carrier.
+            if let Type::Named(handle_ty) = &recv_ty {
+                if handle_ty == "Mod" {
+                    if let Some(ret) = self.check_mod_method(method, args, span) {
                         *recv_type_out = Some(handle_ty.clone());
                         return ret;
                     }
@@ -4253,8 +4273,8 @@ impl<'a> Checker<'a> {
             };
             let (_, dispatch_type_name) = Self::split_type_name(&type_name);
             if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
-                if let Some((_, _, field_ty, _)) =
-                    fields.iter().find(|(fname, _, _, _)| fname == method)
+                if let Some((_, _, field_ty)) =
+                    fields.iter().find(|(fname, _, _)| fname == method)
                 {
                     if matches!(field_ty, Type::Fn { .. }) {
                         *recv_type_out = Some(dispatch_type_name.to_string());
@@ -4289,7 +4309,12 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
-            if owner_mod != self.module_idx && !msig.is_pub {
+            let method_name = format!("{type_name}.{method}");
+            if owner_mod != self.module_idx
+                && !self
+                    .name_ledger
+                    .visible(self.module_idx, owner_mod, &method_name)
+            {
                 self.diags.push(crate::Sema::Diagnostics::private_item(method, span));
             } else if owner_mod != self.module_idx
                 && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic {

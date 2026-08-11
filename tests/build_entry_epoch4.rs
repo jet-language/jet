@@ -1,5 +1,7 @@
 //! Focused production legacy-bridge contract coverage for Epoch 4.
 
+mod common;
+
 use jet::Comptime::Build::{BuildCapability, BuildPolicy};
 use jet::Driver::{compile_bundle_path_build, BuildRunOptions};
 use std::collections::BTreeSet;

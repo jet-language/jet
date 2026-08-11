@@ -166,7 +166,7 @@ fn legacy_parallel_adapter_spellings_are_removed() {
 #[test]
 fn bare_lambda_to_fn_typed_param_emits_param_type() {
     // c142: a bare lambda (no param annotation) passed to a user fn-typed param
-    // used to ICE — codegen emitted `move |user_x| …` with no Rust type, so
+    // used to ICE — codegen emitted `move |__jet_x| …` with no Rust type, so
     // rustc couldn't infer it. Sema now elaborates the param type from the
     // expected fn-type back onto the AST so codegen emits it.
     let src = r#"
@@ -185,7 +185,7 @@ fn run() {
     let out = jet::compile(src).expect("bare lambda to fn-typed param should compile");
     assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
     assert!(
-        out.rust.contains("user_x: i64"),
+        out.rust.contains("__jet_x: i64"),
         "bare lambda param must get its type from the fn-typed slot, got:\n{}",
         out.rust
     );
@@ -221,7 +221,7 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("multiline callable tail should return");
     assert!(
-        out.rust.contains("return (user_adjusted).jet_mul"),
+        out.rust.contains("return (__jet_adjusted).jet_mul"),
         "the final expression must lower as the function result:\n{}",
         out.rust
     );

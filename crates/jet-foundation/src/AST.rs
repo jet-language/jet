@@ -16,7 +16,11 @@ mod program_imports;
 pub use program_imports::{
     AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
     ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
-    MigrationOp, Program, ProgramBundle, TryConvert,
+    MigrationOp, Program, ProgramBundle, TryConvert, CoreListPath, core_list_path,
+    core_list_prefix, import_item_alias,
+};
+pub use crate::Names::{
+    mangle, mangle_path, mangle_variant, member_name, user_trait_rust, user_type_rust, NameLedger,
 };
 
 #[path = "AST/items.rs"]
@@ -27,7 +31,7 @@ pub use items::{
     SystemFieldValue, ServiceEntry, OptionEntry, ImageLit, ImageField, ImageFromRef,
     ImageFieldValue, FleetLit, FleetField, FleetFieldValue, HostEntry, VmTestLit, VmTestField,
     VmTestFieldValue, PerfLit, ProfileLit, BudgetDecl, BudgetField, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
-    ProtocolDecl, StateDecl, EffectDecl, MarkerDecl, MarkerDeclParam, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
+    ProtocolDecl, StateDecl, EffectDecl, MarkerDecl, MarkerDeclParam, FactDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, TaskMetadata, TaskSkip, TaskCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, ParamZone, StructLayout, CEnumTag,
     Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,

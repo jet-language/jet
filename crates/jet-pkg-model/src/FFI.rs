@@ -3472,10 +3472,11 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         ),
         Type::Fn { .. } => "Box<dyn std::any::Any>".to_string(),
         Type::Named(name) if name == "Error" => "String".to_string(),
-        Type::Named(name) if user_types.contains(name) => format!("user_{name}"),
+        Type::Named(name) if user_types.contains(name) => crate::AST::user_type_rust(name),
         Type::Named(name) => name.clone(),
         Type::Apply { name, args } if user_types.contains(name) => format!(
-            "user_{name}<{}>",
+            "{}<{}>",
+            crate::AST::user_type_rust(name),
             args.iter()
                 .map(|a| rust_type(a, user_types))
                 .collect::<Vec<_>>()

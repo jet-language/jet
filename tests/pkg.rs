@@ -1475,7 +1475,7 @@ fn cli_build_lint_never_blocks_by_default() {
 
 #[test]
 fn cli_build_enforces_lint_policy_e1293() {
-    // D-LINTPOLICY1=A: a team's own `policy: { lints: { deny: [L0504] } }`
+    // D-LINTPOLICY1=A: a team's own `policy: { lints: { deny: [float_money] } }`
     // in `package.jet` turns that same warning into a build failure (E1293),
     // naming the denied lint. No other `package.jet` gets this behavior — the
     // wall is opt-in, per team (the override law's third clause).
@@ -1490,7 +1490,7 @@ fn cli_build_enforces_lint_policy_e1293() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [L0504] },\n}\n"),
+        &(min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [float_money] },\n}\n"),
     );
     write(
         &tmp,
@@ -1511,6 +1511,49 @@ fn cli_build_enforces_lint_policy_e1293() {
     assert!(
         !stderr.contains("Warning [L0504]"),
         "a denied lint must not also be printed as a plain warning:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
+    if !jet_bin().is_file() {
+        eprintln!(
+            "note: skipping cli_build_rejects_lint_code_policy_value_with_complete_diagnostic (run `cargo build` first)"
+        );
+        return;
+    }
+    let tmp = tmp_dir("lintpolicy_code_value");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(
+        &tmp,
+        "package.jet",
+        &(min_manifest("app", "0.1.0")
+            + "\npolicy: { lints: { deny: [L0302] } }\n"),
+    );
+    write(&tmp, "main.jet", "fn run() { print(\"hi\"); }\n");
+
+    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "a lint code is not a policy value:\n{stderr}");
+    assert!(
+        stderr.contains("Error [E1206]: `package.jet` has a shape error"),
+        "missing diagnostic what:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "Why: `L0302` is a diagnostic code; use `same_enum_guard_table` in `policy.lints.deny`"
+        ),
+        "missing diagnostic why:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "Fix: use `same_enum_guard_table` in `policy.lints.deny` instead of the diagnostic code"
+        ),
+        "missing diagnostic fix:\n{stderr}"
     );
 
     let _ = fs::remove_dir_all(&tmp);

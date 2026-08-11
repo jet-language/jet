@@ -434,6 +434,14 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek3().kind, TokKind::LParen)
         }
 
+        /// D-FACTDECL1=A: `fact Name(params…)` uses the same named-parameter
+        /// declaration shape as `marker Name(params…)`.
+        pub(super) fn at_fact_decl(&self) -> bool {
+            matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_FACT)
+                && matches!(&self.peek2().kind, TokKind::Ident(_))
+                && matches!(&self.peek3().kind, TokKind::LParen)
+        }
+
         /// D-META-FORM1=A: parse `marker Name(params…)`. The rule's own
         /// arguments and facts about the rule ($sites, $repeatable, …) share
         /// one named-parameter list, told apart by the `$` mark the lexer
@@ -456,6 +464,27 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
             Ok(crate::AST::MarkerDecl {
+                name,
+                name_span,
+                params,
+                span: Span::new(start.start, end),
+            })
+        }
+
+        /// D-FACTDECL1=A: parse one non-code registry row. Fact columns are
+        /// ordinary `$`-marked named parameters in the one shared list.
+        pub(super) fn fact_decl(&mut self) -> Result<crate::AST::FactDecl, Diagnostic> {
+            let start = self.peek().span;
+            self.bump(); // consume `fact`
+            let (name, name_span) =
+                self.expect_ident("the fact name in `fact Name(params…)`")?;
+            self.expect(TokKind::LParen, "to open the fact's parameter list")?;
+            let params = self.marker_decl_param_list()?;
+            let end = self.toks[self.pos - 1].span.end;
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            Ok(crate::AST::FactDecl {
                 name,
                 name_span,
                 params,
@@ -624,6 +653,39 @@ mod marker_decl_tests {
         assert_eq!(decl.params.len(), 2);
         assert_eq!(decl.params[0].name, "mode");
         assert_eq!(decl.params[1].name, "$sites");
+    }
+
+    /// D-FACTDECL1=A: fact declarations reuse the marker parameter AST shape.
+    #[test]
+    fn fact_declaration_parses_its_law_columns() {
+        let source = concat!(
+            "fact Exactness($holds: .Value, $safe: .Gain, ",
+            "$gates: [approx, raw], $decision: \"D-TEST\")\n",
+            "fn run() {}\n"
+        );
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("fact declaration must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::FactDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a FactDecl item");
+        assert_eq!(decl.name, "Exactness");
+        assert_eq!(
+            decl.params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            ["$holds", "$safe", "$gates", "$decision"]
+        );
+        assert!(decl
+            .params
+            .iter()
+            .all(|param| param.ty.is_none() && param.value.is_some()));
     }
 
     /// D-META-FORM1=A: `$repeatable` is a named parameter like every other

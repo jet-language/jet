@@ -95,12 +95,12 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("usage-sensitive generic bounds should compile");
     assert!(
-        out.rust.contains("fn user_inspect<T>"),
+        out.rust.contains("fn __jet_inspect<T>"),
         "read-only generic must not require Clone: {}",
         out.rust
     );
     assert!(
-        out.rust.contains("fn user_duplicate<T: Clone>"),
+        out.rust.contains("fn __jet_duplicate<T: Clone>"),
         "explicit copy must require Clone: {}",
         out.rust
     );
@@ -119,7 +119,7 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("nested read should compile");
     assert!(
-        !out.rust.contains("user_branch.user_leaf.user_text).clone()"),
+        !out.rust.contains("__jet_branch.__jet_leaf.__jet_text).clone()"),
         "nested read must stay borrowed: {}",
         out.rust
     );
@@ -136,14 +136,14 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("Shared callbacks must lower without double borrowing");
-    assert!(out.rust.contains("|user_c: &user_Config|"), "{}", out.rust);
+    assert!(out.rust.contains("|__jet_c: &__jet_Config|"), "{}", out.rust);
     assert!(
-        out.rust.contains("|user_c: &mut user_Config|"),
+        out.rust.contains("|__jet_c: &mut __jet_Config|"),
         "{}",
         out.rust
     );
-    assert!(!out.rust.contains("&&user_Config"), "{}", out.rust);
-    assert!(!out.rust.contains("&mut &user_Config"), "{}", out.rust);
+    assert!(!out.rust.contains("&&__jet_Config"), "{}", out.rust);
+    assert!(!out.rust.contains("&mut &__jet_Config"), "{}", out.rust);
 }
 
 #[test]
@@ -410,13 +410,13 @@ fn run() {
 "#;
     let output = jet::compile(source).expect("local Cell surface must compile");
     assert!(
-        output.rust.contains("jet_std::JetCell<user_Pair>"),
+        output.rust.contains("jet_std::JetCell<__jet_Pair>"),
         "{}",
         output.rust
     );
-    assert!(output.rust.contains("|user_pair: &user_Pair|"), "{}", output.rust);
+    assert!(output.rust.contains("|__jet_pair: &__jet_Pair|"), "{}", output.rust);
     assert!(
-        output.rust.contains("|user_pair: &mut user_Pair|"),
+        output.rust.contains("|__jet_pair: &mut __jet_Pair|"),
         "{}",
         output.rust
     );
@@ -1355,7 +1355,7 @@ fn run() {
     assert!(
         compiled
             .rust
-            .contains("let mut _jet_cap_user_pair = (user_pair).clone();"),
+            .contains("let mut __jet_cap_pair = (__jet_pair).clone();"),
         "{}",
         compiled.rust
     );
@@ -2499,7 +2499,7 @@ fn run() {
     let out = jet::compile(src).expect("bare range window must compile");
     assert!(
         out.rust
-            .contains("let user_window = jet_view_range_new"),
+            .contains("let __jet_window = jet_view_range_new"),
         "range acquisition must lower to a view: {}",
         out.rust
     );
@@ -2515,7 +2515,7 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("whole place window must compile");
-    assert!(out.rust.contains("let user_all = &(user_xs)"), "{}", out.rust);
+    assert!(out.rust.contains("let __jet_all = &(__jet_xs)"), "{}", out.rust);
 }
 
 #[test]
@@ -2570,9 +2570,9 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("write windows must write through to each owner place");
-    assert!(out.rust.contains("(*user_whole_edit) = 2i64"), "{}", out.rust);
-    assert!(out.rust.contains("(*user_field_edit) = 4i64"), "{}", out.rust);
-    assert!(out.rust.contains("(*user_index_edit) = 7i64"), "{}", out.rust);
+    assert!(out.rust.contains("(*__jet_whole_edit) = 2i64"), "{}", out.rust);
+    assert!(out.rust.contains("(*__jet_field_edit) = 4i64"), "{}", out.rust);
+    assert!(out.rust.contains("(*__jet_index_edit) = 7i64"), "{}", out.rust);
 }
 
 #[test]
@@ -2682,8 +2682,8 @@ fn run() {
         out.rust
     );
     assert!(
-        out.rust.contains("let user_left = &mut __jet_place_plan_")
-            && out.rust.contains("let user_right = &mut __jet_place_plan_"),
+        out.rust.contains("let __jet_left = &mut __jet_place_plan_")
+            && out.rust.contains("let __jet_right = &mut __jet_place_plan_"),
         "{}",
         out.rust
     );
@@ -2853,20 +2853,20 @@ fn run() {
     let out = jet::compile(src).expect("owner-backed collection views must compile");
     assert!(
         out.rust.contains(
-            "fn user_book_at<'__jet_view>(user_lib: &'__jet_view user_Library, user_i: i64) -> &'__jet_view [user_Book]"
+            "fn __jet_book_at<'__jet_view>(__jet_lib: &'__jet_view __jet_Library, __jet_i: i64) -> &'__jet_view [__jet_Book]"
         ),
         "read view must tie to parameter 0: {}",
         out.rust
     );
     assert!(
         out.rust.contains(
-            "fn user_edit_at<'__jet_view>(user_lib: &'__jet_view mut user_Library, user_i: i64) -> &'__jet_view mut [user_Book]"
+            "fn __jet_edit_at<'__jet_view>(__jet_lib: &'__jet_view mut __jet_Library, __jet_i: i64) -> &'__jet_view mut [__jet_Book]"
         ),
         "write view must tie to parameter 0: {}",
         out.rust
     );
     assert!(
-        out.rust.contains("].user_pages +="),
+        out.rust.contains("].__jet_pages +="),
         "field write must assign through the ViewMut element, not a cloned temporary: {}",
         out.rust
     );
@@ -3048,13 +3048,13 @@ fn run() {
     let out = jet::compile(src).expect("disjoint place plans must compile deterministically");
     assert!(
         out.rust
-            .contains("let __jet_place_plan_0_root = &mut (user_first_owner)"),
+            .contains("let __jet_place_plan_0_root = &mut (__jet_first_owner)"),
         "{}",
         out.rust
     );
     assert!(
         out.rust
-            .contains("let __jet_place_plan_1_root = &mut (user_second_owner)"),
+            .contains("let __jet_place_plan_1_root = &mut (__jet_second_owner)"),
         "{}",
         out.rust
     );
@@ -3074,8 +3074,8 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("different fields are structurally disjoint");
-    assert!(out.rust.contains("&mut ((user_pair).user_left)"), "{}", out.rust);
-    assert!(out.rust.contains("&mut ((user_pair).user_right)"), "{}", out.rust);
+    assert!(out.rust.contains("&mut ((__jet_pair).__jet_left)"), "{}", out.rust);
+    assert!(out.rust.contains("&mut ((__jet_pair).__jet_right)"), "{}", out.rust);
 }
 
 #[test]
@@ -3170,7 +3170,7 @@ fn run() { print(0) }
     let out = jet::compile(src).expect("parameter-rooted write view return must compile");
     assert!(
         out.rust.contains(
-            "fn user_edit_first<'__jet_view>(user_xs: &'__jet_view mut Vec<i64>) -> &'__jet_view mut [i64]"
+            "fn __jet_edit_first<'__jet_view>(__jet_xs: &'__jet_view mut Vec<i64>) -> &'__jet_view mut [i64]"
         ),
         "generated lifetime must tie the mutable view to parameter 0: {}",
         out.rust
@@ -3492,10 +3492,10 @@ fn run() {
     let out = jet::compile(src)
         .expect("a parser token and remainder may borrow one caller-owned source");
     assert!(
-        out.rust.contains("pub struct user_Token<'__jet_view>")
-            && out.rust.contains("pub user_text: &'__jet_view str")
-            && out.rust.contains("pub user_rest: &'__jet_view str")
-            && out.rust.contains("-> user_Token<'__jet_view>"),
+        out.rust.contains("pub struct __jet_Token<'__jet_view>")
+            && out.rust.contains("pub __jet_text: &'__jet_view str")
+            && out.rust.contains("pub __jet_rest: &'__jet_view str")
+            && out.rust.contains("-> __jet_Token<'__jet_view>"),
         "both parser views must share the hidden source lifetime: {}",
         out.rust
     );
@@ -3608,7 +3608,7 @@ fn run() { print(domain("user@example.com")) }
     let out = jet::compile(src).expect("parameter-rooted string view return must compile");
     assert!(
         out.rust.contains(
-            "fn user_domain<'__jet_view>(user_email: &'__jet_view String) -> &'__jet_view str"
+            "fn __jet_domain<'__jet_view>(__jet_email: &'__jet_view String) -> &'__jet_view str"
         ),
         "generated lifetime must tie the string view to parameter 0: {}",
         out.rust
@@ -3641,8 +3641,8 @@ fn domain(email: String) => Domain {
 fn run() { print(domain("user@example.com").value) }
 "#;
     let out = jet::compile(src).expect("parameter-rooted string view field must compile");
-    assert!(out.rust.contains("pub struct user_Domain<'__jet_view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub user_value: &'__jet_view str"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct __jet_Domain<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub __jet_value: &'__jet_view str"), "{}", out.rust);
 }
 
 #[test]
@@ -3910,9 +3910,9 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("returned aggregate must keep its view tied to parameter 0");
     assert!(
-        out.rust.contains("pub struct user_Window<'__jet_view>")
-            && out.rust.contains("pub user_values: &'__jet_view [i64]")
-            && out.rust.contains("-> user_Window<'__jet_view>"),
+        out.rust.contains("pub struct __jet_Window<'__jet_view>")
+            && out.rust.contains("pub __jet_values: &'__jet_view [i64]")
+            && out.rust.contains("-> __jet_Window<'__jet_view>"),
         "aggregate and return must share the hidden owner lifetime: {}",
         out.rust
     );
@@ -3936,10 +3936,10 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("nested returned aggregate must carry transitive view provenance");
-    assert!(out.rust.contains("pub struct user_Inner<'__jet_view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub struct user_Outer<'__jet_view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub user_inner: user_Inner<'__jet_view>"), "{}", out.rust);
-    assert!(out.rust.contains("-> user_Outer<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct __jet_Inner<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct __jet_Outer<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub __jet_inner: __jet_Inner<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("-> __jet_Outer<'__jet_view>"), "{}", out.rust);
 }
 
 #[test]
@@ -3967,11 +3967,11 @@ fn tuple(values: [Int]) => (window: Window, count: Int) {
 fn run() { print(0) }
 "#;
     let out = jet::compile(src).expect("wrapper returns must preserve view provenance");
-    assert!(out.rust.contains("Option<user_Window<'__jet_view>>"), "{}", out.rust);
-    assert!(out.rust.contains("Result<user_Window<'__jet_view>, String>"), "{}", out.rust);
-    assert!(out.rust.contains("pub user_window: user_Window<'__jet_view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub struct user_GenericHolder<'__jet_view, T"), "{}", out.rust);
-    assert!(out.rust.contains("pub user_maybe: Option<user_Window<'__jet_view>>"), "{}", out.rust);
+    assert!(out.rust.contains("Option<__jet_Window<'__jet_view>>"), "{}", out.rust);
+    assert!(out.rust.contains("Result<__jet_Window<'__jet_view>, String>"), "{}", out.rust);
+    assert!(out.rust.contains("pub __jet_window: __jet_Window<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct __jet_GenericHolder<'__jet_view, T"), "{}", out.rust);
+    assert!(out.rust.contains("pub __jet_maybe: Option<__jet_Window<'__jet_view>>"), "{}", out.rust);
     assert!(!out.rust.contains("Option<'__jet_view"), "{}", out.rust);
     assert!(!out.rust.contains("Result<'__jet_view"), "{}", out.rust);
 }
@@ -4022,25 +4022,25 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("enum and mutable aggregate views must reach codegen");
     assert!(
-        out.rust.contains("pub enum user_Selection<'__jet_view>")
-            && out.rust.contains("user_One(&'__jet_view [i64])")
+        out.rust.contains("pub enum __jet_Selection<'__jet_view>")
+            && out.rust.contains("__jet_One(&'__jet_view [i64])")
             && out
                 .rust
-                .contains("user_Pair(user_PairViews<'__jet_view>)")
+                .contains("__jet_Pair(__jet_PairViews<'__jet_view>)")
             && out
                 .rust
-                .contains("pub user_left: &'__jet_view [i64],")
+                .contains("pub __jet_left: &'__jet_view [i64],")
             && out
                 .rust
-                .contains("pub user_right: &'__jet_view [i64],"),
+                .contains("pub __jet_right: &'__jet_view [i64],"),
         "{}",
         out.rust
     );
     assert!(
-        out.rust.contains("pub struct user_Edit<'__jet_view>")
+        out.rust.contains("pub struct __jet_Edit<'__jet_view>")
             && out
                 .rust
-                .contains("pub user_values: &'__jet_view mut [i64]"),
+                .contains("pub __jet_values: &'__jet_view mut [i64]"),
         "{}",
         out.rust
     );
@@ -4755,8 +4755,8 @@ fn node(values: [Int]) => Node {
 fn run() { print(0) }
 "#;
     let out = jet::compile(src).expect("recursive view graph must terminate in sema and codegen");
-    assert!(out.rust.contains("pub struct user_Node<'__jet_view>"), "{}", out.rust);
-    assert!(out.rust.contains("user_Node<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct __jet_Node<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_Node<'__jet_view>"), "{}", out.rust);
 }
 
 #[test]
@@ -4897,8 +4897,8 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("both compatible parameter owners form one source union");
     assert!(
-        out.rust.contains("user_left: &'__jet_view Vec<i64>")
-            && out.rust.contains("user_right: &'__jet_view Vec<i64>")
+        out.rust.contains("__jet_left: &'__jet_view Vec<i64>")
+            && out.rust.contains("__jet_right: &'__jet_view Vec<i64>")
             && out.rust.contains("-> &'__jet_view [i64]"),
         "{}",
         out.rust
@@ -4991,12 +4991,12 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("all plain parameters are read borrows");
-    assert!(out.rust.contains("user_text: &String"), "{}", out.rust);
-    assert!(out.rust.contains("user_values: &Vec<i64>"), "{}", out.rust);
-    assert!(out.rust.contains("user_parcel: &user_Parcel"), "{}", out.rust);
-    assert!(out.rust.contains("user_value: &T"), "{}", out.rust);
-    assert!(out.rust.contains("user_f: &Box<dyn Fn"), "{}", out.rust);
-    assert!(!out.rust.contains("((*user_text)).clone()"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_text: &String"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_values: &Vec<i64>"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_parcel: &__jet_Parcel"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_value: &T"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_f: &Box<dyn Fn"), "{}", out.rust);
+    assert!(!out.rust.contains("((*__jet_text)).clone()"), "{}", out.rust);
 }
 
 #[test]
@@ -5013,10 +5013,10 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("function-value call must preserve read access");
-    assert!(out.rust.contains("user_f: &Box<dyn Fn(&String)"), "{}", out.rust);
-    assert!(out.rust.contains("user_value: &String"), "{}", out.rust);
-    assert!(out.rust.contains("((*user_f))(&((*user_value)))"), "{}", out.rust);
-    assert!(!out.rust.contains("((*user_value)).clone()"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_f: &Box<dyn Fn(&String)"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_value: &String"), "{}", out.rust);
+    assert!(out.rust.contains("((*__jet_f))(&((*__jet_value)))"), "{}", out.rust);
+    assert!(!out.rust.contains("((*__jet_value)).clone()"), "{}", out.rust);
 }
 
 #[test]
@@ -5354,7 +5354,7 @@ fn apply_to(parcel: Parcel, callback: fn(String, Int)) {
 fn run() { apply_to(Parcel.{ label: "hello" }, inspect) }
 "#;
     let out = jet::compile(src).expect("bare parameter subplace is a read window");
-    assert!(out.rust.contains("let user_alias = &"), "{}", out.rust);
+    assert!(out.rust.contains("let __jet_alias = &"), "{}", out.rust);
 }
 
 #[test]

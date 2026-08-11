@@ -109,10 +109,14 @@ export function openStore(dataDir) {
   // write from another agent can never be silently reverted. Undo touches
   // ONLY tower.json — history.json is append-only and never rolled back
   // (see test/history.test.mjs for the duplicate-tolerance this buys).
+  // #1738: expectRev is mandatory — a whole-board replace with no rev proof
+  // is exactly the overwrite class that once deleted 112 cards.
   const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
     recoverPendingRepairLocked(dataDir);
     const cur = loadRaw();
-    if (expectRev != null && Number(expectRev) !== cur.meta.rev)
+    if (expectRev == null)
+      fail('E_USAGE', `restore requires expectRev — read the board first and pass its meta.rev (currently ${cur.meta.rev})`);
+    if (Number(expectRev) !== cur.meta.rev)
       fail('E_CONFLICT', `undo refused: board changed since (rev ${cur.meta.rev} ≠ ${expectRev})`);
     const s = normalize(prevState);
     s.meta.rev = cur.meta.rev + 1;
@@ -539,6 +543,59 @@ export function project(s, config = null, history = null) {
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
 }
 
+const timestamp = (value) => {
+  if (!value) return null;
+  const raw = String(value);
+  const parsed = Date.parse(raw.length <= 10 ? `${raw}T00:00:00Z` : raw);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+function cardEventTime(events, card, predicate, after = -Infinity) {
+  const refs = new Set([card.id, `#${card.num}`, String(card.num)]);
+  return events
+    .filter(event => refs.has(String(event.ref)) && predicate(event))
+    .map(event => timestamp(event.at))
+    .filter(at => at != null && at > after)
+    .reduce((latest, at) => Math.max(latest, at), null);
+}
+
+function wasOpenAt(card, cutoff, events) {
+  const created = timestamp(card.created)
+    ?? cardEventTime(events, card, event => event.action === 'card.add');
+  if (created != null && created > cutoff) return false;
+  if (card.phase !== 'done' && card.phase !== 'frozen') return true;
+  const completed = card.phase === 'done'
+    ? timestamp(card.completedAt)
+      ?? cardEventTime(events, card, event => event.action === 'card.update' && /(?:^|,)phase(?:,|$)/.test(event.note || ''), cutoff)
+      ?? timestamp(completionTime(card))
+    : null;
+  return completed != null && completed > cutoff;
+}
+
+// The store already keeps card creation/completion timestamps and archived
+// card snapshots. Reconstruct the window's opening count from those records;
+// no separate counter can drift from the board.
+export function openCountTrend(s, history, days = 7, at = Date.now()) {
+  const windowDays = Math.max(1, Math.floor(Number(days) || 7));
+  const end = Number.isFinite(at) ? at : Date.now();
+  const cutoff = end - windowDays * DAY_MS;
+  const events = [...(history?.events || []), ...(s?.events || [])];
+  const known = new Map();
+  for (const card of [...(s?.cards || []), ...(history?.cards || [])]) {
+    const key = card.id ?? `#${card.num}`;
+    if (!known.has(key)) known.set(key, card);
+  }
+  const openNow = (s?.cards || []).filter(card => card.phase !== 'done' && card.phase !== 'frozen').length;
+  const openAtStart = [...known.values()].filter(card => wasOpenAt(card, cutoff, events)).length;
+  return {
+    windowDays,
+    since: new Date(cutoff).toISOString(),
+    openAtStart,
+    openNow,
+    delta: openNow - openAtStart,
+  };
+}
+
 // ---- resolution helpers ----------------------------------------------------
 
 // Accept a card by id or by tracking number ("#12" or "12").
@@ -895,6 +952,22 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   touchCard(c, by);
   maybeMintAcceptance(s, c);
   logEvent(s, { by, action: 'card.criteria-verify', ref: c.id, note: `#${item.n}` });
+  return { ...item, cardId: c.id, cardNum: c.num };
+}
+
+export function reopenCriterion(s, ref, n, { reason, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'reopen needs --by <agent>');
+  if (!reason || !String(reason).trim()) fail('E_INVALID', 'reopen needs --reason <text>');
+  if (item.status === 'open') fail('E_INVALID', 'criterion #' + n + ' is already open');
+  item.status = 'open';
+  item.metBy = null;
+  item.verifiedBy = null;
+  item.evidence = '';
+  item.at = now();
+  touchCard(c, by);
+  logEvent(s, { by, action: 'card.criteria-reopen', ref: c.id, note: '#' + item.n + ': ' + String(reason).trim() });
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 

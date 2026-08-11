@@ -4,6 +4,7 @@
 //! under the card #510 boundary.
 
 use super::*;
+use crate::AST::Type;
 
 pub(crate) const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
 pub(crate) const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
@@ -88,29 +89,90 @@ pub(crate) fn collect_used_core(
         if module_annotations_mention_encoding_surface(module) {
             used.insert("core.encoding::types".to_string());
         }
+        let mut module_imports = imports.clone();
+        for ((scope, name), (core_module, core_item)) in &states[idx].inline_reexport_core {
+            module_imports.insert(
+                format!("{scope}.{name}"),
+                format!("{core_module}::{core_item}"),
+            );
+        }
         for item in &module.items {
             match item {
-                Item::Func(f) => collect_core_stmts(&f.body, imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Func(f) => collect_core_stmts(&f.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Struct(s) => {
                     for m in &s.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
+                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Enum(e) => {
                     for m in &e.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
+                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Impl(i) => {
                     for m in &i.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
+                        collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
-                Item::Test(t) => collect_core_stmts(&t.body, imports, &mut used, &mut spans, &mut ffi_cb),
-                Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used, &mut spans, &mut ffi_cb),
-                Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Test(t) => collect_core_stmts(&t.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Bench(b) => collect_core_stmts(&b.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Const(c) => collect_core_expr(&c.value, &module_imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::CodeModule(cm) => {
+                    let Some(body) = &cm.body else { continue };
+                    let mut scoped_imports = module_imports.clone();
+                    for ((scope, name), core_module) in &states[idx].inline_core_imports {
+                        if scope == &cm.name {
+                            scoped_imports.insert(name.clone(), core_module.clone());
+                        }
+                    }
+                    for ((scope, name), (core_module, core_item)) in
+                        &states[idx].inline_reexport_core
+                    {
+                        if scope == &cm.name {
+                            scoped_imports.insert(
+                                format!("{scope}.{name}"),
+                                format!("{core_module}::{core_item}"),
+                            );
+                        }
+                    }
+                    for inner in body {
+                        match inner {
+                            Item::Func(f) => collect_core_stmts(
+                                &f.body,
+                                &scoped_imports,
+                                &mut used,
+                                &mut spans,
+                                &mut ffi_cb,
+                            ),
+                            Item::Struct(s) => {
+                                for method in &s.methods {
+                                    collect_core_stmts(
+                                        &method.body,
+                                        &scoped_imports,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                            }
+                            Item::Impl(i) => {
+                                for method in &i.methods {
+                                    collect_core_stmts(
+                                        &method.body,
+                                        &scoped_imports,
+                                        &mut used,
+                                        &mut spans,
+                                        &mut ffi_cb,
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Item::EffectDecl(_)
                 | Item::MarkerDecl(_)
+                | Item::FactDecl(_)
                 | Item::Trait(_)
                 | Item::Tag(_) // D-QUAL2: tags use no core imports
                 | Item::ExternRust(_)
@@ -118,14 +180,14 @@ pub(crate) fn collect_used_core(
                 | Item::Distinct(_)
                 | Item::TypeAlias(_) // D-TYPEALIAS1: erases
                 | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
-                | Item::CModule(_) | Item::CodeModule(_)
+                | Item::CModule(_)
                 | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
                 | Item::StateDecl(_) // D-STATE-DECL: uses no core imports
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
-            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+                | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
+                | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+                | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
             }
         }
     }
@@ -144,6 +206,19 @@ fn note_core_usage(
     if let Some(s) = span {
         spans.entry(key).or_insert(s);
     }
+}
+
+fn is_http_nominal_type(name: &str) -> bool {
+    matches!(
+        name,
+        "HTTPMethod"
+            | "HTTPStatus"
+            | "HTTPVersion"
+            | "HTTPHeaderName"
+            | "HTTPHeaderValue"
+            | "HTTPHeaders"
+            | "HTTPBody"
+    )
 }
 
 /// D-RINGLAYER1=A M2: bump inferred layer from emitted helper usage and enforce ceiling.
@@ -281,12 +356,20 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
-            | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
+            // D-CONC-SPAWN1=D: `task.group name { … }` needs no `use core.X`
+            // import to reach the embedded `jet_std` task runtime (AOT embeds
+            // it, JIT/interpreter compile the same Prelude source) — parsed
+            // syntax, not raw source text, owns the requirement, exactly like
+            // `#Shield` below.
+            Stmt::TaskGroup { body, span, .. } => {
+                note_core_usage(used, spans, "core.concurrency::task", Some(*span));
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
+            }
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
@@ -407,6 +490,16 @@ pub(crate) fn collect_core_expr(
             recv_type,
             ..
         } => {
+            // D-CONC-SPAWN1=D: bare `task expr`/`task.all|race|any { … }` parse
+            // into a method call on the parser-private `INTERNAL_TASK_RECEIVER`
+            // ident (set before sema ever runs), so this is available even
+            // though `recv_type` isn't filled in until inference. Needs the
+            // same embedded `jet_std` runtime as `task.group` above, with no
+            // `use core.X` import required.
+            if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::INTERNAL_TASK_RECEIVER)
+            {
+                note_core_usage(used, spans, "core.concurrency::task", Some(*method_span));
+            }
             // Epoch 3 String surface delegates Unicode classification, title
             // casing, trimming, and display-width padding to the pinned
             // `core.text` implementation. Mark that shared prelude reachable
@@ -437,16 +530,6 @@ pub(crate) fn collect_core_expr(
                     used,
                     spans,
                     "core.text::__string_surface__",
-                    Some(*method_span),
-                );
-            }
-            if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
-                && method == Syntax::TASKGROUP_SPAWN_METHOD
-            {
-                note_core_usage(
-                    used,
-                    spans,
-                    "core.tasks::spawn",
                     Some(*method_span),
                 );
             }
@@ -487,6 +570,15 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
+            // D-NETDEP1=A: sema normalizes `http.Body.bytes(...)` and the other
+            // static HTTP nominal calls to a bare `HTTP*` receiver before this
+            // whole-program walk. Preserve the module reachability marker so
+            // AOT embeds the same HTTPMessage Prelude source used by JIT.
+            if recv_type.as_deref().is_some_and(is_http_nominal_type)
+                || matches!(receiver.as_ref(), Expr::Ident(name, _) if is_http_nominal_type(name))
+            {
+                note_core_usage(used, spans, "core.http::__nominal__", Some(*method_span));
+            }
             if recv_type.as_deref() == Some(crate::Syntax::DURATION_TYPE)
                 || matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::DURATION_TYPE)
             {
@@ -515,7 +607,16 @@ pub(crate) fn collect_core_expr(
                 note_core_usage(used, spans, format!("core::{method}"), Some(*method_span));
             }
             if let Expr::Ident(alias, _) = receiver.as_ref() {
-                if let Some(module) = imports.get(alias) {
+                if let Some(module) = imports.get(&format!("{alias}.{method}")) {
+                    if let Some((module, item)) = module.split_once("::") {
+                        note_core_usage(
+                            used,
+                            spans,
+                            format!("{module}::{item}"),
+                            Some(*method_span),
+                        );
+                    }
+                } else if let Some(module) = imports.get(alias) {
                     note_core_usage(
                         used,
                         spans,
@@ -572,6 +673,22 @@ pub(crate) fn collect_core_expr(
             // CORELIB_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
             if c.name == Syntax::BUILTIN_INPUT {
                 note_core_usage(used, spans, "core.io::input", Some(c.name_span));
+            }
+            // D-BOUND-HEAD1=A: sema rewrites URL/Path/DateTime heads to their
+            // ordinary alternating literal/hole call before this reachability
+            // walk. Keep the owning optional prelude fragment reachable from
+            // that canonical call instead of inspecting source text.
+            match c.name.as_str() {
+                Syntax::TYPE_URL => {
+                    note_core_usage(used, spans, "core.url::typed_head", Some(c.name_span))
+                }
+                Syntax::TYPE_PATH => {
+                    note_core_usage(used, spans, "core.path::typed_head", Some(c.name_span))
+                }
+                Syntax::TYPE_DATETIME => {
+                    note_core_usage(used, spans, "core.time::typed_head", Some(c.name_span))
+                }
+                _ => {}
             }
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
@@ -669,7 +786,21 @@ pub(crate) fn collect_core_expr(
                 collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
-        Expr::TypedLit { body, .. } => {
+        Expr::TypedLit { head, body, span } => {
+            if let Some(Type::Named(name)) = head {
+                match name.as_str() {
+                    Syntax::TYPE_URL => {
+                        note_core_usage(used, spans, "core.url::typed_head", Some(*span))
+                    }
+                    Syntax::TYPE_PATH => {
+                        note_core_usage(used, spans, "core.path::typed_head", Some(*span))
+                    }
+                    Syntax::TYPE_DATETIME => {
+                        note_core_usage(used, spans, "core.time::typed_head", Some(*span))
+                    }
+                    _ => {}
+                }
+            }
             body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
         }
         Expr::EnumLit { args, .. } => {

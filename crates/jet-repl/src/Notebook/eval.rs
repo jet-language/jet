@@ -2,7 +2,7 @@
 
 use crate::{
     classify, collect_moved_names, e1802, normalize_repl_input, rebuild_funcs, type_check_item,
-    type_check_stmts, update_core_imports, InputKind, Session, ReplTurnStatus,
+    type_check_stmts, update_core_imports_from_ledger, InputKind, Session, ReplTurnStatus,
 };
 use crate::Comptime::{self, CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::AST::{Func, StructDef};
@@ -148,29 +148,32 @@ pub fn evaluate_step(
         }
 
         InputKind::Item(src) => {
-            let errors = type_check_item(session, &src);
-            if !errors.is_empty() {
-                for d in &errors {
-                    out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+            let bundle = match type_check_item(session, &src) {
+                Ok(bundle) => bundle,
+                Err(errors) => {
+                    for d in &errors {
+                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                    }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
+                    return EvalResult {
+                        text: out,
+                        status: ReplTurnStatus::Error,
+                        had_effect: false,
+                        quit: false,
+                    };
                 }
-                session.record_turn(
-                    trimmed,
-                    ReplTurnStatus::Error,
-                    errors
-                        .iter()
-                        .map(|d| format!("{}: {}", d.code, d.what))
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                );
-                return EvalResult {
-                    text: out,
-                    status: ReplTurnStatus::Error,
-                    had_effect: false,
-                    quit: false,
-                };
-            }
+            };
             session.item_srcs.push(src);
             rebuild_funcs(session);
+            update_core_imports_from_ledger(&bundle, &mut session.core_imports);
             out.push_str("ok\n");
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             session.remember_success(trimmed);
@@ -184,30 +187,32 @@ pub fn evaluate_step(
 
         InputKind::Import(src) => {
             session.import_srcs.push(src.clone());
-            let errors = type_check_item(session, "");
-            if !errors.is_empty() {
-                session.import_srcs.pop();
-                for d in &errors {
-                    out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+            let bundle = match type_check_item(session, "") {
+                Ok(bundle) => bundle,
+                Err(errors) => {
+                    session.import_srcs.pop();
+                    for d in &errors {
+                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                    }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
+                    return EvalResult {
+                        text: out,
+                        status: ReplTurnStatus::Error,
+                        had_effect: false,
+                        quit: false,
+                    };
                 }
-                session.record_turn(
-                    trimmed,
-                    ReplTurnStatus::Error,
-                    errors
-                        .iter()
-                        .map(|d| format!("{}: {}", d.code, d.what))
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                );
-                return EvalResult {
-                    text: out,
-                    status: ReplTurnStatus::Error,
-                    had_effect: false,
-                    quit: false,
-                };
-            }
+            };
             rebuild_funcs(session);
-            update_core_imports(&src, &mut session.core_imports);
+            update_core_imports_from_ledger(&bundle, &mut session.core_imports);
             out.push_str("ok\n");
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             session.remember_success(trimmed);

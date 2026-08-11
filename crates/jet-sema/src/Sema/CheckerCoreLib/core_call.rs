@@ -9,11 +9,21 @@ use crate::Sema::SendCrossing;
 use crate::Syntax;
 use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
 use super::core_types::{game_run_label_error, decode_error_ty, u8_ty, unit_ty};
-use super::fixed_sigs::core_fixed_sig;
+use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
     freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
+
+/// The Core row owns the lookup key for plain calls. Keep the fallback for
+/// polymorphic/closure forms until their projection rows land, but do not let
+/// a plain row silently acquire a second effect lookup here.
+fn core_effect_for_call(module: &str, name: &str) -> Option<crate::Sema::Effects::Effect> {
+    match Syntax::core_call(module, name) {
+        Some(row) => row.effect(),
+        None => core_effect(module, name),
+    }
+}
 
 fn vault_key_arg(ty: &Type) -> Option<Type> {
     match ty {
@@ -469,7 +479,10 @@ fn resolved_core_fixed_sig(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
-    let (params, ret) = core_fixed_sig(module, name)?;
+    let (params, ret) = match Syntax::core_call(module, name) {
+        Some(row) => core_fixed_sig_for_row(row)?,
+        None => core_fixed_sig(module, name)?,
+    };
     if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert") {
         Some((
             params
@@ -805,7 +818,22 @@ impl<'a> Checker<'a> {
                         span,
                     });
             }
-            if let Some(e) = core_effect(module, name) {
+            // Plain calls carry their erased arity in the foundation record.
+            // Keep the richer Jet type construction below in sema, but make
+            // every consumer reject a row-shaped call from the same fact.
+            if let Some(row) = Syntax::core_call(module, name) {
+                if matches!(row.fallibility, Syntax::CoreCallFallibility::Sema)
+                    && !row.accepts_arity(args.len())
+                {
+                    self.diags
+                        .push(wrong_core_arity(name, row.arity(), args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+            }
+            if let Some(e) = core_effect_for_call(module, name) {
                 // D-EFFTREE1: Core calls (this module-call path) stay tagged with
                 // a bare root — real stdlib call sites are unchanged (no migration
                 // break: existing diagnostics naming `FS`/`DB`/… keep their exact
@@ -916,7 +944,10 @@ impl<'a> Checker<'a> {
             // `FS`/`Net`/`Env`/`Exec`/`DB`/`Log`/`IO` — is impure inside a `#Pure fn`.
             // (Time/Rand return early above via E3403; stdin via the E3401 check
             // above, so this catches the remaining effect-carrying Core modules.)
-            if self.in_pure && self.det_suppress == 0 && core_effect(module, name).is_some() {
+            if self.in_pure
+                && self.det_suppress == 0
+                && core_effect_for_call(module, name).is_some()
+            {
                 let api = format!("{}.{}", module_short_name(module), name);
                 self.diags
                     .push(e3401(&self.fn_name.clone(), &api, &[], span));
@@ -2078,7 +2109,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 ("core.mem", "volatile_read") => {
-                    if !self.in_unsafe {
+                    if Syntax::core_mem_requires_audit(Syntax::MEM_VOLATILE_READ)
+                        && !self.in_unsafe
+                    {
                         self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
                     }
                     if args.len() != 1 {
@@ -2106,7 +2139,9 @@ impl<'a> Checker<'a> {
                     };
                 }
                 ("core.mem", "volatile_write") => {
-                    if !self.in_unsafe {
+                    if Syntax::core_mem_requires_audit(Syntax::MEM_VOLATILE_WRITE)
+                        && !self.in_unsafe
+                    {
                         self.diags.push(e3101(Syntax::MEM_VOLATILE_WRITE, span));
                     }
                     if args.len() != 2 {
@@ -3057,164 +3092,6 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     return None;
-                }
-                ("core.tasks", "spawn") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("spawn", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let saved_esc = self.lambda_escapes;
-                    let saved_task = self.is_task_spawn;
-                    self.lambda_escapes = true;
-                    self.is_task_spawn = true;
-                    let lam_ty = self.infer(&mut args[0].expr);
-                    self.lambda_escapes = saved_esc;
-                    self.is_task_spawn = saved_task;
-                    // Extract the return type from the closure's function type.
-                    let t = match lam_ty {
-                        Some(Type::Fn { params, ret, .. }) => {
-                            if !params.is_empty() {
-                                self.diags.push(Diagnostic::error(
-                                    "E0104",
-                                    format!(
-                                        "`spawn` needs a zero-parameter lambda, got {} parameter{}",
-                                        params.len(),
-                                        if params.len() == 1 { "" } else { "s" }
-                                    ),
-                                    "a task starts by calling the lambda with no arguments"
-                                        .to_string(),
-                                    "move data into the task with `take(name)` instead of lambda parameters"
-                                        .to_string(),
-                                    Some(args[0].expr.span()),
-                                ));
-                            }
-                            ret.map(|r| *r)
-                                .unwrap_or_else(|| Type::Named("Unit".to_string()))
-                        }
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`spawn` needs a lambda, not {}", other.show()),
-                                "a task starts by running a zero-parameter lambda".to_string(),
-                                "write `tasks.spawn(() => work())`".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
-                            Type::Named("Unit".to_string())
-                        }
-                        None => Type::Named("Unit".to_string()),
-                    };
-                    if let Some(problem) = self.sendability_problem(&t, false) {
-                        self.report_unsendable(
-                            "task result",
-                            &t,
-                            problem,
-                            SendCrossing::TaskResult,
-                            args[0].expr.span(),
-                        );
-                    }
-                    return Some(Type::Apply {
-                        name: "Task".to_string(),
-                        args: vec![t],
-                    });
-                }
-                // D-VERDICT-1323-1: spawn n tasks from one callable. Same
-                // capture rules as `spawn`; the result is the group list the
-                // *_all twins drive.
-                ("core.tasks", Syntax::CORE_TASKS_SPAWN_GROUP) => {
-                    if args.len() != 2 {
-                        self.diags.push(wrong_core_arity(
-                            Syntax::CORE_TASKS_SPAWN_GROUP,
-                            2,
-                            args.len(),
-                            span,
-                        ));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let count_ty = self.infer(&mut args[0].expr);
-                    if !matches!(count_ty, Some(Type::Int) | None) {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!(
-                                "`{}` needs a whole number of tasks, not {}",
-                                Syntax::CORE_TASKS_SPAWN_GROUP,
-                                count_ty.as_ref().map(|t| t.show()).unwrap_or_default()
-                            ),
-                            "the first argument says how many tasks to start".to_string(),
-                            format!(
-                                "write `tasks.{}(4, () => work())`",
-                                Syntax::CORE_TASKS_SPAWN_GROUP
-                            ),
-                            Some(args[0].expr.span()),
-                        ));
-                    }
-                    let saved_esc = self.lambda_escapes;
-                    let saved_task = self.is_task_spawn;
-                    self.lambda_escapes = true;
-                    self.is_task_spawn = true;
-                    let lam_ty = self.infer(&mut args[1].expr);
-                    self.lambda_escapes = saved_esc;
-                    self.is_task_spawn = saved_task;
-                    let t = match lam_ty {
-                        Some(Type::Fn { params, ret, .. }) => {
-                            if !params.is_empty() {
-                                self.diags.push(Diagnostic::error(
-                                    "E0104",
-                                    format!(
-                                        "`{}` needs a zero-parameter lambda, got {} parameter{}",
-                                        Syntax::CORE_TASKS_SPAWN_GROUP,
-                                        params.len(),
-                                        if params.len() == 1 { "" } else { "s" }
-                                    ),
-                                    "every task in the group starts by calling the lambda with no arguments"
-                                        .to_string(),
-                                    "move data into the task instead of taking lambda parameters"
-                                        .to_string(),
-                                    Some(args[1].expr.span()),
-                                ));
-                            }
-                            ret.map(|r| *r)
-                                .unwrap_or_else(|| Type::Named("Unit".to_string()))
-                        }
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`{}` needs a lambda, not {}",
-                                    Syntax::CORE_TASKS_SPAWN_GROUP,
-                                    other.show()
-                                ),
-                                "each task in the group runs the same zero-parameter lambda"
-                                    .to_string(),
-                                format!(
-                                    "write `tasks.{}(4, () => work())`",
-                                    Syntax::CORE_TASKS_SPAWN_GROUP
-                                ),
-                                Some(args[1].expr.span()),
-                            ));
-                            Type::Named("Unit".to_string())
-                        }
-                        None => Type::Named("Unit".to_string()),
-                    };
-                    if let Some(problem) = self.sendability_problem(&t, false) {
-                        self.report_unsendable(
-                            "task result",
-                            &t,
-                            problem,
-                            SendCrossing::TaskResult,
-                            args[1].expr.span(),
-                        );
-                    }
-                    return Some(Type::List(Box::new(Type::Apply {
-                        name: "Task".to_string(),
-                        args: vec![t],
-                    })));
                 }
                 // D-FANOUT3=C: consume a list of task handles and join them in
                 // list order. Runtime meaning reuses TaskGroupAll/jet_task_all.
@@ -5180,6 +5057,28 @@ impl<'a> Checker<'a> {
                 let _ = alias_span;
                 return None;
             };
+            if module == "core.os" && name == "on_interrupt" {
+                if args.len() != params.len() {
+                    self.diags
+                        .push(wrong_core_arity(name, params.len(), args.len(), span));
+                }
+                if let (Some((conv, param_ty)), Some(arg)) =
+                    (params.first(), args.get_mut(0))
+                {
+                    debug_assert_eq!(*conv, AccessConvention::Read);
+                    let saved_lambda_escapes = self.lambda_escapes;
+                    let saved_callback_depth = self.interrupt_callback_depth;
+                    self.lambda_escapes = true;
+                    self.interrupt_callback_depth += 1;
+                    self.expect_core_arg(name, 0, param_ty, arg);
+                    self.interrupt_callback_depth = saved_callback_depth;
+                    self.lambda_escapes = saved_lambda_escapes;
+                }
+                for arg in args.iter_mut().skip(params.len()) {
+                    self.infer(&mut arg.expr);
+                }
+                return ret;
+            }
             // D-COMPUTE-RAW1/I1: a raw kernel contract is an expert escape
             // hatch, not a safe compute constructor. Keep the fixed signature
             // and normal type checking, but require the same lexical audit

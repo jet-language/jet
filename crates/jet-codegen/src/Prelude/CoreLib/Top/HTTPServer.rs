@@ -4891,7 +4891,7 @@ fn jet_http_srv_json_text(status: i64, body: &String) -> JetHTTPResponse {
 }
 
 /// D-HTTP-JSON1=A: one JSON response. The content type is set for the caller.
-fn jet_http_srv_json<T: user_Encode>(status: i64, value: &T) -> JetHTTPResponse {
+fn jet_http_srv_json<T: __jet_Encode>(status: i64, value: &T) -> JetHTTPResponse {
     jet_http_srv_json_text(status, &jet_enc_json_to_string(value))
 }
 

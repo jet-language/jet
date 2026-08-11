@@ -16,6 +16,10 @@ use super::types_meta::{
 use super::JitRuntime;
 use crate::{Cell, Collections};
 
+fn spawn_body_name(index: usize) -> String {
+    jet_foundation::Syntax::generated_name(&format!("jit_spawn_body_{index}"))
+}
+
 fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
     Collections::clear_packed_enum_show();
     for enum_name in meta.enum_names() {
@@ -27,7 +31,7 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
         };
         let mut rows = Vec::new();
         for variant in variants {
-            let vname = variant.strip_prefix("user_").unwrap_or(variant.as_str());
+            let vname = variant.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant.as_str());
             let payloads = meta.enum_variant_payload_types(enum_name, vname).unwrap_or(&[]);
             let (kind, nested) = match payloads {
                 [] => (0u8, String::new()),
@@ -36,7 +40,7 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
                 [Type::String] => (3u8, String::new()),
                 _ => continue,
             };
-            // I2: print the Jet-source variant name, not the mangled `user_` form.
+            // I2: print the Jet-source variant name, not the mangled `__jet_` form.
             rows.push((vname.to_string(), kind, nested));
         }
         Collections::register_packed_enum_show(enum_name, rows);
@@ -195,16 +199,16 @@ fn lower_spawn_function(
     module
         .define_function(func_id, &mut ctx)
         .map_err(|e| format!("define spawn body: {e:?}"))?;
-    // Spawn bodies are named jet_jit_spawn_body_N at declare time; recover via FuncId scan.
+    // Spawn bodies use the same reserved machine-name lane as every generated symbol.
     let export = (0..64)
         .find_map(|i| {
-            let name = format!("jet_jit_spawn_body_{i}");
+            let name = spawn_body_name(i);
             match module.get_name(&name) {
                 Some(cranelift_module::FuncOrDataId::Func(id)) if id == func_id => Some(name),
                 _ => None,
             }
         })
-        .unwrap_or_else(|| "jet_jit_spawn_body".to_string());
+        .unwrap_or_else(|| jet_foundation::Syntax::generated_name("jit_spawn_body"));
     super::tier_cache::note_defined(&export, &ctx);
     module.clear_context(&mut ctx);
     Ok(())
@@ -605,10 +609,10 @@ fn lower_function(
         .define_function(func_id, &mut ctx)
         .map_err(|e| format!("define {}: {e:?}", tir.name))?;
     let export_name = if matches!(
-        module.get_name("jet_jit_main"),
+        module.get_name("__jet_jit_main"),
         Some(cranelift_module::FuncOrDataId::Func(id)) if id == func_id
     ) {
-        "jet_jit_main".to_string()
+        "__jet_jit_main".to_string()
     } else {
         super::types_meta::jit_fn_name(&tir.name)
     };
@@ -812,7 +816,7 @@ pub(crate) fn compile_program_tiered(
     let spawn_lambdas = &program.spawn_lambdas;
     let mut spawn_func_ids: Vec<FuncId> = Vec::new();
     for (i, lam) in spawn_lambdas.iter().enumerate() {
-        let name = format!("jet_jit_spawn_body_{i}");
+        let name = spawn_body_name(i);
         let sig = spawn_lambda_signature(module, lam);
         let id = module
             .declare_function(&name, Linkage::Export, &sig)
@@ -831,7 +835,7 @@ pub(crate) fn compile_program_tiered(
                 let cc = module.target_config().default_call_conv;
                 let sig = Signature::new(cc);
                 module
-                    .declare_function("jet_jit_main", Linkage::Export, &sig)
+                    .declare_function("__jet_jit_main", Linkage::Export, &sig)
                     .map_err(|e| e.to_string())?
             }
         };
@@ -846,7 +850,7 @@ pub(crate) fn compile_program_tiered(
             match existing_main {
                 Some(id) => id,
                 None => module
-                    .declare_function("jet_jit_main", Linkage::Export, &sig)
+                    .declare_function("__jet_jit_main", Linkage::Export, &sig)
                     .map_err(|e| e.to_string())?,
             }
         } else {
@@ -926,7 +930,7 @@ pub(crate) fn compile_program_tiered(
     }
 
     if cli_entry {
-        // Export `jet_jit_main` as a thin wrapper around the host trampoline.
+        // Export `__jet_jit_main` as a thin wrapper around the host trampoline.
         // Cranelift cannot `get_finalized_function` an Import for direct invoke.
         let main_id = func_ids[&program.entry];
         let import_id = cli_import_id.expect("cli import");
@@ -969,4 +973,12 @@ pub(crate) fn compile_program_tiered(
         .get(&program.entry)
         .copied()
         .ok_or_else(|| format!("jit program missing selected entry `{}`", program.entry))?)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn spawn_body_names_use_reserved_prefix() {
+        assert_eq!(super::spawn_body_name(3), "__jet_jit_spawn_body_3");
+    }
 }

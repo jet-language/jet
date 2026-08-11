@@ -223,6 +223,7 @@ impl<'a> Checker<'a> {
                             param_conv: Some(p.convention),
                             decl_loop_depth: 0,
                             sendable: true,
+                            interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
                             task_lint_span: None,
@@ -278,6 +279,7 @@ impl<'a> Checker<'a> {
                         param_conv: Some(p.convention),
                         decl_loop_depth: 0,
                         sendable: true,
+                        interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
                         task_lint_span: None,
@@ -388,6 +390,7 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
+                    interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
                     task_lint_span: None,
@@ -912,7 +915,7 @@ pub(crate) fn check_effect_boundaries(
                 if let Some(body) = &module.body {
                     for item in body {
                         if let Item::Func(f) = item {
-                            let identity = format!("{}__{}", module.name, f.name);
+                            let identity = jet_foundation::Names::member_name(&module.name, &f.name);
                             check_one(
                                 f,
                                 None,
@@ -1032,7 +1035,7 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
 pub fn error_conv_fn_name(from: &str, to: &str) -> String {
     let f = from.replace('.', "_");
     let t = to.replace('.', "_");
-    format!("__jet_errconv_{}_to_{}", f, t)
+    Syntax::generated_name(&format!("errconv_{f}_to_{t}"))
 }
 
 pub(crate) fn already_defined(name: &str, span: Span) -> Diagnostic {
@@ -1313,6 +1316,7 @@ pub(crate) fn synthesize_delegation_method(
         name_span: sig.name_span,
         meta: None,
                     type_params: vec![],
+        head_pattern: None,
         params,
         return_type: sig.return_type.clone(),
         return_type_span: None,
@@ -1392,6 +1396,7 @@ pub(crate) fn synthesize_default_method(
         name_span: sig.name_span,
         meta: None,
                     type_params: vec![],
+        head_pattern: None,
         params,
         return_type: sig.return_type.clone(),
         return_type_span: None,

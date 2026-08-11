@@ -1,6 +1,6 @@
 # Names, modules, and visibility: one tree
 
-Proposal, 2026-08-07. A first-principles rethink of how anything in Jet gets a name, is found, and is seen. Owner choices are the nine D-NAME ballots on card #1625, summarized in DECISIONS at the end. Everything else implements existing ratified law.
+Working proposal, 2026-08-07. A first-principles rethink of how anything in Jet gets a name, is found, and is seen. D-NAME-SIGIL1=A is ratified; the remaining owner choices are the other D-NAME ballots on card #1625, summarized in DECISIONS at the end.
 
 ## Executive summary
 
@@ -16,12 +16,12 @@ The concrete payoffs:
 
 - **Zero-import projects with a full audit trail.** Your own files are already in the tree. A beginner writes a second file and calls `scoring.letter(91)` with no `use` line. An expert runs `jet imports main.jet` and reads exactly what resolved to what, spells any import explicitly (`use project.grades.curve`, or `use "../shared/tools.jet" as tools` for a file by path), and can require explicit imports project-wide with one switch.
 - **One visibility story.** `pub` opens an edge, `pub(package)` fences at the package, `_name` means internal — one meaning everywhere. The file marker and its helpers become one spelling.
-- **The lexical space claimed on purpose.** One underscore talks to humans, two underscores belong to the machine (already ratified), and the dunder/sunder shapes are settled by ballot instead of left as accidents waiting for meaning.
+- **The lexical space claimed on purpose.** One underscore talks to humans, two underscores belong to the machine, and the dunder/sunder shapes mean nothing by ratified D-NAME-SIGIL1=A.
 - **A prelude you can read.** The ambient names become a visible alias list in Core source, not a Rust table. Growth stays ballot-gated.
 - **Names round-trip.** `T.reflect()` and every diagnostic print a path you can type back in. Today two same-named types reflect identically.
 - **One resolver.** Six binding stores, two import-map builders, two call ladders kept in sync by comment, six mangling sites, and two source-text scrapers collapse into one sema-owned name ledger that every engine and tool reads. This fixes a live divergence: `pub(package)` is enforced by sema and invisible to codegen's filters.
 
-What the nine ballots ask: adopt the model; make project files visible without imports; pick the audit switch for explicit imports; move the prelude into Core source; pick the visibility set; ratify the underscore ladder; unpark `use` inside module bodies; finish the ratified retirement of role modules; make reflection print paths.
+What the nine ballots ask: adopt the model; make project files visible without imports; pick the audit switch for explicit imports; move the prelude into Core source; pick the visibility set; record the ratified underscore ladder; unpark `use` inside module bodies; finish the ratified retirement of role modules; make reflection print paths.
 
 What does not change: private by default, no wildcards, no `namespace` keyword, the ratified Core tree and grouped `use` list, `$` law, casing law, generic modules, and the one-definition rule.
 
@@ -249,7 +249,7 @@ _name                             // one meaning anywhere: internal —
 
 One thing `_` never does in Jet: change access. Dart fused privacy into the underscore, so renaming `_x` to `x` there is an API change. In Jet the fence (`pub`) and the promise (`_`) stay separate marks, and `use project._name` still reaches an internal on purpose, with the warning.
 
-### 4. The underscore ladder: claim the lexical space on purpose — (ratifies the ladder; ballot D-NAME-SIGIL1)
+### 4. The underscore ladder: claim the lexical space on purpose — (ratified D-NAME-SIGIL1=A)
 
 Greenfield means the unclaimed shapes are part of the design, not leftovers. Here is the whole underscore space, what each shape means, and its status:
 
@@ -279,7 +279,7 @@ What the peers did with this space, and what it teaches:
 
 Python's regret is the sharpest: dunders gave the language a protocol namespace but put the machine's names in the user's mouth — everyone types `__init__` daily and typos fail silently. Jet already has both halves of the answer, ratified: protocol members ride traits with ordinary names, and compiler-held facts are read through `$` (`T.$range`, `f.$effects` — D-FACT-READ1), so there is nothing left for a dunder to do. The machine's namespace exists (`__`), but no human ever types into it.
 
-What SIGIL1 adds on top of the ratified pieces: it writes the ladder into the spec as one law, settles the dunder/sunder shapes (no meaning, stated on purpose — an explicit wall, so nobody "discovers" a use for `_name_` in year three), and gives the reserved `__` space one visible product — every compiler-generated symbol a tool can show you (stack traces, dumps, generated-code review) starts with `__jet`, so a machine name is recognizable on sight (proposed):
+The ratified SIGIL1 ruling writes the ladder into the spec as one law, settles the dunder/sunder shapes (no meaning, stated on purpose — an explicit wall, so nobody "discovers" a use for `_name_` in year three), and gives the reserved `__` space one visible product — every compiler-generated symbol a tool can show you (stack traces, dumps, generated-code review) starts with `__jet`, so a machine name is recognizable on sight:
 
 ```text
 $ jet run app.jet --trace
@@ -288,7 +288,8 @@ $ jet run app.jet --trace
   at project.main.run (main.jet:8)
 ```
 
-This also names the cleanup target for B5: the ~30 inline `format!("user_…")` mangling bypasses standardize on one ledger-derived scheme under the `__jet` prefix.
+The cleanup target is now one ledger-derived scheme under the `__jet` prefix;
+inline `format!("user_…")` mangling bypasses are retired.
 
 ### 5. The prelude in the open — (amends the D-PRELUDE-LAW1 mechanism, not its list; ballot D-NAME-ALIAS1)
 
@@ -595,7 +596,7 @@ Each ballot stands alone; any subset can be adopted. Full worked examples per op
 | D-NAME-AUDIT1 | ~~The explicit-imports switch~~ | Withdrawn — moot under FILES1=C; with no magic there is nothing to refuse |
 | D-NAME-ALIAS1 | Where does the prelude live? | A a readable Core module of `pub use` aliases / B today's compiler table / C mode-gated: bigger list for single files, small in packages |
 | D-NAME-FENCE1 | Which visibility set? | A `pub`, `pub(package)`, `pub module` (+ `priv` inside it), one `_` story / B keep today's six spellings / C minimal: `pub` and `_` only |
-| D-NAME-SIGIL1 | Ratify the underscore ladder and settle the dunder/sunder shapes? | A one law: `_` human, `__` machine (visible `__jet` scheme), dunders/sunders mean nothing on purpose / B carve `__name__` back as visible protocol members / C repeal the `__` reservation |
+| D-NAME-SIGIL1 | **Ratified A, 2026-08-07:** one underscore ladder and settled dunder/sunder shapes | `_` human, `__` machine (visible `__jet` scheme), dunders/sunders mean nothing on purpose |
 | D-NAME-WALK1 | Admit `use`/`pub use` inside module bodies, and write the one `.[ ]` sentence into the spec? | A both / B only inline `use` / C neither |
 | D-NAME-ROLEMOD1 | Finish the ratified retirement of role modules (`module env.dev`) into typed values? | A yes, edit U3/U8, delete `ENV_FILE`/`pkg.jet` readers / B keep role modules and amend D-ECO-DECL1 back / C defer |
 | D-NAME-REFLECT1 | Do reflection and diagnostics print canonical typeable paths? | A yes, add `.path`, keep `.name` as leaf / B no, keep bare names / C paths in tools only |
@@ -604,7 +605,7 @@ Ratified rulings each ballot amends are named inside the ballot text: FILES1 ame
 
 ## Implementation shape
 
-**Phase A — internal re-founding, no surface change, all tests green.** One resolver in sema produces the name ledger (generalize the existing `reference_anchors` + `import_targets`); codegen, JIT, interpreter, LSP, REPL, and devserver consume it. One `mangle` function under the `__jet` scheme; delete the ~30 inline `format!("user_…")` bypasses and the JIT's private drift (the JIT keeps its symbol prefix, derived from the ledger). Delete the import-map rebuild, the second call ladder, the `{alias}__{method}` byte slicing, the AST string rewrite for sibling calls, and the devserver's source scrapers. Codegen visibility filters read the ledger, closing the `pub(package)` divergence. I3 holds: resolution is checking, so it lives in sema; engines stay dumb readers. I6 holds: the ledger is plain data in an existing seam crate.
+**Phase A — internal re-founding, no surface change, all tests green.** One resolver in sema produces the name ledger (generalize the existing reference and import fact stores); codegen, JIT, interpreter, LSP, REPL, and devserver consume it. One `mangle` function under the `__jet` scheme; delete the ~30 inline `format!("user_…")` bypasses and the JIT's private drift (the JIT derives the same `__jet` prefix from the ledger). Delete the import-map rebuild, the second call ladder, the `{alias}__{method}` byte slicing, the AST string rewrite for sibling calls, and the devserver's source scrapers. Codegen visibility filters read the ledger, closing the `pub(package)` divergence. I3 holds: resolution is checking, so it lives in sema; engines stay dumb readers. I6 holds: the ledger is plain data in an existing seam crate.
 
 **Phase B — land ratified-but-unbuilt work on the new substrate**: the Core tree (#1574), grouped use lists (#1575), prelude policy (#1576), generic module respelling (#1523), `$build` facts (#1518). Built once, on one resolver.
 

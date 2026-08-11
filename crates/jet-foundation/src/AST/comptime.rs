@@ -1,6 +1,7 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
 use std::any::Any;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Names::{mangle, mangle_path, user_type_rust};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -610,6 +611,23 @@ impl CtValue {
         Some(jet_err(message.clone(), code, cause))
     }
 
+    /// Interpreter/deopt adapter for the core crypto error shape. The native
+    /// bridge carries the same stable Display text in `JetCryptoError`; keep
+    /// the tier-0 carrier as a message-only view rather than exposing its
+    /// Rust-shaped struct rendering at an entry boundary.
+    pub fn crypto_error_message(&self) -> Option<String> {
+        let CtValue::Struct { type_name, fields } = self else {
+            return None;
+        };
+        if type_name != "CryptoError" {
+            return None;
+        }
+        match fields.iter().find(|(field, _)| field == "message") {
+            Some((_, CtValue::Str(message))) => Some(message.clone()),
+            _ => None,
+        }
+    }
+
     /// Interpreter/deopt adapter from the Prelude-owned error shape. This is
     /// the inverse of `to_jet_err`; it does not recreate error semantics.
     pub fn from_jet_err(error: &crate::Outcome::JetErr) -> CtValue {
@@ -815,7 +833,7 @@ impl CtValue {
                     }
                 }
                 // AOT `JetShow` for user structs is `format!("{:?}", self)`
-                // (`Codegen::Items`) → `user_Name { user_field: … }`. Match that
+                // (`Codegen::Items`) → `__jet_Name { __jet_field: … }`. Match that
                 // here (I2 / #777 corpus differential). Table/Series/LazyFrame
                 // hide the internal `elem_type` schema tag AOT never prints.
                 let filtered: Vec<(String, CtValue)> = fields
@@ -844,12 +862,12 @@ impl CtValue {
                 _ => variant.clone(),
             },
             // The compiled program's Rust `#[derive(Debug)]` output for a user
-            // enum: the variant's Rust identifier is `user_<Variant>` (S34,
+            // enum: the variant's Rust identifier is `__jet_<Variant>` (S34,
             // `Codegen::mangle_variant`), and a payload prints tuple-style with
             // each arg in Rust `{:?}` form — matching that exactly here keeps
             // `jet dev` byte-identical to the compiled binary (I2).
             CtValue::Enum { variant, args, .. } => {
-                let mangled = format!("user_{}", variant.replace('.', "__"));
+                let mangled = mangle_path(variant);
                 if args.is_empty() {
                     mangled
                 } else if args.iter().all(|(label, _)| label.is_some()) {
@@ -902,15 +920,15 @@ impl CtValue {
             CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
             CtValue::Failed(CtReport::Told(v)) => format!("Err({})", v.debug_rust()),
             CtValue::Struct { type_name, fields } => {
-                let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
-                let mangled = format!("user_{}", ty.replace('.', "__"));
+                let ty = crate::Syntax::generated_suffix(type_name);
+                let mangled = crate::Syntax::generated_path(ty);
                 if fields.is_empty() {
                     mangled
                 } else {
                     let parts: Vec<String> = fields
                         .iter()
                         .map(|(n, v)| {
-                            let field = n.strip_prefix("user_").unwrap_or(n);
+                            let field = crate::Syntax::generated_suffix(n);
                             format!("{}: {}", ct_mangle(field), v.debug_rust())
                         })
                         .collect();
@@ -929,7 +947,7 @@ impl CtValue {
                 _ => variant.clone(),
             },
             CtValue::Enum { variant, args, .. } => {
-                let mangled = format!("user_{}", variant.replace('.', "__"));
+                let mangled = mangle_path(variant);
                 if args.is_empty() {
                     mangled
                 } else if args.iter().all(|(label, _)| label.is_some()) {
@@ -1203,7 +1221,7 @@ impl CtValue {
                     .iter()
                     .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
                     .collect();
-                format!("user_{} {{ {} }}", type_name, parts.join(", "))
+                format!("{} {{ {} }}", user_type_rust(type_name), parts.join(", "))
             }
             CtValue::Enum {
                 type_name,
@@ -1211,7 +1229,7 @@ impl CtValue {
                 args,
             } if type_name == "RemoveBy" => {
                 debug_assert!(args.is_empty(), "RemoveBy variants are unit values");
-                format!("JetRemoveBy::{}", variant.strip_prefix("user_").unwrap_or(variant))
+                format!("JetRemoveBy::{}", crate::Syntax::generated_suffix(variant))
             }
             CtValue::Enum {
                 type_name,
@@ -1234,13 +1252,13 @@ impl CtValue {
                 args,
             } => {
                 // Anonymous unions use compiler-owned bare Rust variants;
-                // ordinary user enums keep the `user_` namespace prefix.
+                // ordinary user enums keep the `__jet_` namespace prefix.
                 let variant = if type_name.starts_with("__JetUnion_") {
                     variant.clone()
                 } else {
                     ct_mangle(variant)
                 };
-                let prefix = format!("user_{}::{}", type_name, variant);
+                let prefix = format!("{}::{}", user_type_rust(type_name), variant);
                 if args.is_empty() {
                     prefix
                 } else if args.iter().all(|(label, _)| label.is_none()) {
@@ -1272,7 +1290,7 @@ impl CtValue {
 }
 
 fn ct_mangle(name: &str) -> String {
-    format!("user_{}", name)
+    mangle(name)
 }
 
 #[cfg(test)]
@@ -1323,7 +1341,7 @@ mod tests {
             args: vec![(None, loaded)],
         };
 
-        assert_eq!(wrapped.jet_show(), "user_Ready(Loaded(7))");
+        assert_eq!(wrapped.jet_show(), "__jet_Ready(Loaded(7))");
     }
 
     #[test]
@@ -1336,7 +1354,7 @@ mod tests {
 
         assert_eq!(
             value.serialize(),
-            "user___JetUnion_Int_String::Int(3i64)"
+            "__jet___JetUnion_Int_String::Int(3i64)"
         );
     }
 

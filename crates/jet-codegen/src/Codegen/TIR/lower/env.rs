@@ -1,14 +1,15 @@
 use crate::AST::{Expr, LValue, Stmt, Type};
-use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::{TBindingOrigin, TLocal};
 use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Per-function lowering environment: a local name -> (Rust place string, type).
-/// Built from params, extended by `let` bindings. The "place" already accounts
-/// for parameter deref, so `Local` emission needs no further resolution.
+/// Per-function lowering environment: a local name -> (structured slot, type).
+/// Built from params, extended by `let` bindings. The slot already accounts for
+/// parameter deref and binding provenance, so every TIR consumer sees the same
+/// local facts.
 ///
 /// The type is `Option<Type>`: a binding can carry a *resolved* type, or `None`
 /// when the AST path's slot had `jet_ty: None` and we must reproduce that
@@ -23,9 +24,6 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub(crate) struct LowerEnv {
     pub(super) locals: HashMap<String, (TLocal, Option<Type>)>,
-    /// D-PROVENANCE1=B: source note for each exact `#Track` Float binding.
-    /// Copies and other bindings have no entry.
-    pub(super) tracked_float_origins: HashMap<String, String>,
     /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
@@ -63,6 +61,8 @@ pub(crate) struct LowerEnv {
     /// Operand types that lowering materializes with Rust `.clone()`. Generic
     /// function emission uses this to add `Clone` only where the body needs it.
     pub(super) cloned_types: Rc<RefCell<Vec<Type>>>,
+    /// Function locals whose value crosses the native interrupt boundary.
+    pub(super) send_fn_locals: HashSet<String>,
 }
 
 impl LowerEnv {
@@ -70,7 +70,6 @@ impl LowerEnv {
     pub(crate) fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
-            tracked_float_origins: HashMap::new(),
             fn_name,
             ret_ty: None,
             self_owner: None,
@@ -82,6 +81,7 @@ impl LowerEnv {
             gc_return: false,
             split_view_handles: HashMap::new(),
             cloned_types: Rc::new(RefCell::new(Vec::new())),
+            send_fn_locals: HashSet::new(),
         }
     }
     /// Record the non-AOT handle type for a split-view local (see the field).
@@ -120,6 +120,12 @@ impl LowerEnv {
     pub(super) fn is_uninit_fixed(&self, name: &str) -> bool {
         self.uninit_fixed_locals.contains(name)
     }
+    pub(super) fn mark_send_fn(&mut self, name: &str) {
+        self.send_fn_locals.insert(name.to_string());
+    }
+    pub(super) fn is_send_fn(&self, name: &str) -> bool {
+        self.send_fn_locals.contains(name)
+    }
     pub(super) fn gc_edges_for_expr(&self, expr: &Expr, exclude: Option<&str>) -> Vec<String> {
         let mut names = self.gc_locals.iter().collect::<Vec<_>>();
         names.sort();
@@ -138,13 +144,6 @@ impl LowerEnv {
     /// can never be captured in generated Rust.
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
-        self.tracked_float_origins.remove(name);
-    }
-    pub(super) fn mark_tracked_float(&mut self, name: &str, origin: String) {
-        self.tracked_float_origins.insert(name.to_string(), origin);
-    }
-    pub(super) fn tracked_float_origin(&self, name: &str) -> Option<String> {
-        self.tracked_float_origins.get(name).cloned()
     }
     /// The structured slot for `name`. This is the single fact every engine
     /// resolves a local by; the Rust spellings below derive from it.
@@ -153,6 +152,11 @@ impl LowerEnv {
             Some((slot, _)) => slot.clone(),
             None => TLocal::user(name),
         }
+    }
+    pub(super) fn origin_of(&self, name: &str) -> Option<TBindingOrigin> {
+        self.locals
+            .get(name)
+            .and_then(|(slot, _)| slot.origin.clone())
     }
     pub(super) fn place_of(&self, name: &str) -> String {
         self.local_of(name).rust_place()

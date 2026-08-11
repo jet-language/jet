@@ -107,8 +107,7 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
     if jet_scheduler_panic_should_unwind() {
         panic!("{}", msg);
     }
-    eprintln!("panic: {}", msg);
-    std::process::exit(70);
+    jet_runtime_diagnostic(format!("panic: {msg}"));
 }
 
 // ── D-CANCELMODEL1=C: preemptive cancellation at wait points ─────────────────
@@ -2293,12 +2292,20 @@ pub enum JetSchedulerResult<T> {
     Deadline(String),
 }
 
+fn jet_scheduler_task_failure<T>(result: JetSchedulerResult<T>) -> JetTaskFailure {
+    match result {
+        JetSchedulerResult::Panicked => JetTaskFailure::Panicked("a task panicked".to_string()),
+        JetSchedulerResult::Cancelled => JetTaskFailure::Cancelled,
+        JetSchedulerResult::Deadline(_) => JetTaskFailure::DeadlineBlown,
+        JetSchedulerResult::Value(_) => unreachable!("successful task is not a failure"),
+    }
+}
+
 fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
     if jet_scheduler_panic_should_unwind() {
         std::panic::panic_any(JetDeadlineUnwind { rendered });
     }
-    eprintln!("{rendered}");
-    std::process::exit(70);
+    jet_runtime_diagnostic(rendered);
 }
 
 pub struct JetSchedulerJoin<T> {
@@ -2307,24 +2314,23 @@ pub struct JetSchedulerJoin<T> {
 }
 
 impl<T> JetSchedulerJoin<T> {
-    pub fn join(self) -> T {
+    pub fn join(self) -> JetOutcome<T, JetTaskFailure> {
         // D-CANCELMODEL1=C: join is a wait point. If the joining task is already
         // cancelled, unwind here before blocking.
         jet_task_wait_point_cancel_check();
+        self.join_for_cleanup()
+    }
+
+    /// Drain a child during lexical task-group cleanup.
+    ///
+    /// Cleanup has already made the cancellation decision for every child. It
+    /// must drain each child even when the parent is cancelled, or the parent's
+    /// cancellation would interrupt its own Drop and leave a child running.
+    pub fn join_for_cleanup(self) -> JetOutcome<T, JetTaskFailure> {
         match self.rx.recv() {
-            Ok(JetSchedulerResult::Value(v)) => v,
-            Ok(JetSchedulerResult::Panicked) | Err(_) => {
-                jet_scheduler_fatal("a task panicked");
-            }
-            Ok(JetSchedulerResult::Cancelled) => {
-                // A joined child that was cancelled propagates cancellation up: inside
-                // a task this unwinds as Cancelled, on the host it stops the program.
-                jet_task_deliver_cancel();
-                jet_scheduler_fatal("a task was cancelled");
-            }
-            Ok(JetSchedulerResult::Deadline(rendered)) => {
-                jet_scheduler_propagate_deadline(rendered);
-            }
+            Ok(JetSchedulerResult::Value(v)) => Ok(v),
+            Ok(failure) => Err(jet_scheduler_task_failure(failure)),
+            Err(_) => Err(JetTaskFailure::Panicked("a task panicked".to_string())),
         }
     }
 
@@ -2348,7 +2354,7 @@ impl<T> JetSchedulerJoin<T> {
 fn jet_scheduler_select_tasks<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
     mode: jet_std::JetTaskSelectMode,
-) -> Vec<T> {
+) -> JetOutcome<Vec<T>, JetTaskFailure> {
     use jet_std::{
         jet_task_deadline, jet_task_select, jet_task_wait_policy, JetTaskWaitInterrupt,
     };
@@ -2378,44 +2384,38 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
     );
     jet_scheduler_drain();
     match result {
-        Ok(values) => values,
-        Err(JetSchedulerResult::Deadline(rendered)) => {
-            jet_scheduler_propagate_deadline(rendered)
-        }
-        Err(JetSchedulerResult::Cancelled) => {
-            jet_task_deliver_cancel();
-            jet_scheduler_fatal("a task was cancelled")
-        }
-        Err(JetSchedulerResult::Panicked) => {
-            jet_scheduler_fatal("a task panicked")
-        }
-        Err(JetSchedulerResult::Value(_)) => unreachable!(),
+        Ok(values) => Ok(values),
+        Err(failure) => Err(jet_scheduler_task_failure(failure)),
     }
 }
 
 /// D-CONCCOMB1: join every handle in list order; fail fast and cancel siblings on error.
 pub fn jet_scheduler_all<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> Vec<T> {
+) -> JetOutcome<Vec<T>, JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::All)
 }
 
 /// D-CONCCOMB1/D-RACEWIN1: first successful result wins; cancel losers.
 pub fn jet_scheduler_race<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> T {
-    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)
-        .pop()
-        .expect("race result missing")
+) -> JetOutcome<T, JetTaskFailure> {
+    let mut values = jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)?;
+    match values.pop() {
+        Some(value) => Ok(value),
+        None => unreachable!("race result missing"),
+    }
 }
 
 /// D-CONCCOMB1: first completed result wins (success or failure path visible).
 pub fn jet_scheduler_any<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> T {
-    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)
-        .pop()
-        .expect("any result missing")
+) -> JetOutcome<T, JetTaskFailure> {
+    let mut values = jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)?;
+    match values.pop() {
+        Some(value) => Ok(value),
+        None => unreachable!("any result missing"),
+    }
 }
 
 /// D-SELECT-GENERIC1=A: the one typed select door. Every engine supplies

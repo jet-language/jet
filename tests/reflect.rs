@@ -1,10 +1,12 @@
 //! Integration tests for D-METAREFLECT1 / D-REFLECT1 rich reflection.
 
-use jet::Comptime::{build_distinct_type_info, build_struct_type_info, CtValue};
+mod common;
+
+use jet::Comptime::{build_distinct_type_info, build_struct_type_info, CtReport, CtValue};
 use jet::Diagnostics::Span;
 use jet::AST::{
-    AccessConvention, DistinctDef, Expr, Field, Func, Marker, Param, ParamZone, StructDef, Type,
-    TypeParam,
+    AccessConvention, Dimension, DistinctDef, Expr, Field, Func, Marker, Param, ParamZone,
+    QuantityKind, StructDef, Type, TypeParam,
 };
 
 fn span() -> Span {
@@ -36,6 +38,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         name: name.to_string(),
         name_span: span(),
         type_params: Vec::new(),
+        head_pattern: None,
         params: vec![Param {
             convention: AccessConvention::Read,
             root: false,
@@ -327,5 +330,76 @@ fn distinct_capability_marker_is_visible_in_reflection() {
     assert!(matches!(
         struct_field(&info, "expanded_markers"),
         CtValue::List(values) if values.len() == 1
+    ));
+}
+
+#[test]
+fn range_and_dimension_facts_are_typed_records() {
+    let info = build_distinct_type_info(
+        &DistinctDef {
+            is_pub: true,
+            is_package_pub: false,
+            type_markers: Vec::new(),
+            derives: Vec::new(),
+            quantity: Some((Dimension::base("Length"), QuantityKind::Linear)),
+            name: "Severity".to_string(),
+            name_span: span(),
+            base: Type::Int,
+            base_span: span(),
+            range: Some((0, 10, span())),
+            invariant: None,
+            span: span(),
+        },
+        "main",
+    );
+    let CtValue::List(facts) = struct_field(&info, "facts") else {
+        panic!("facts");
+    };
+    let is_kind = |fact: &CtValue, expected: &str| match struct_field(fact, "kind") {
+        CtValue::Enum { variant, .. } => variant == expected,
+        other => panic!("expected typed fact kind, got {other:?}"),
+    };
+
+    let range = facts
+        .iter()
+        .find(|fact| is_kind(fact, "Range"))
+        .expect("range fact");
+    let CtValue::Present(range_value) = struct_field(struct_field(range, "value"), "range") else {
+        panic!("range fact must carry a present Range");
+    };
+    assert!(matches!(
+        struct_field(range_value, "start"),
+        CtValue::Int(0)
+    ));
+    assert!(matches!(
+        struct_field(range_value, "end"),
+        CtValue::Int(10)
+    ));
+    assert!(matches!(
+        struct_field(struct_field(range, "value"), "dimension"),
+        CtValue::Failed(CtReport::Clean(_))
+    ));
+
+    let dimension = facts
+        .iter()
+        .find(|fact| is_kind(fact, "Dimension"))
+        .expect("dimension fact");
+    let CtValue::Present(dimension_value) =
+        struct_field(struct_field(dimension, "value"), "dimension")
+    else {
+        panic!("dimension fact must carry a present DimensionInfo");
+    };
+    let CtValue::List(axes) = struct_field(dimension_value, "axes") else {
+        panic!("dimension axes");
+    };
+    assert!(axes.iter().any(|axis| {
+        matches!(
+            (struct_field(axis, "name"), struct_field(axis, "exponent")),
+            (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
+        )
+    }));
+    assert!(matches!(
+        struct_field(struct_field(dimension, "value"), "range"),
+        CtValue::Failed(CtReport::Clean(_))
     ));
 }

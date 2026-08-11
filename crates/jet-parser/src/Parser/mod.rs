@@ -607,32 +607,93 @@ mod s61_tests {
         );
     }
 
-    /// D-TASKSCOPE1=A: `g.task => { … }` parses as a scoped spawn call.
+    /// D-CONC-SPAWN1=D: `task work()` parses as a scoped spawn call.
     #[test]
-    fn taskgroup_task_callable_body_parses_as_spawn() {
-        let p =
-            program("fn run() {\n    taskgroup g {\n        h :: g.task => { return 1 }\n    }\n}\n");
+    fn task_keyword_callable_body_parses_as_spawn() {
+        let p = program(
+            "fn run() {\n    task.group g {\n        h :: task work()\n    }\n}\n",
+        );
         let run = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         });
         let body = &run.expect("run").body;
-        let taskgroup = body.iter().find_map(|s| match s {
+        let task_group = body.iter().find_map(|s| match s {
             Stmt::TaskGroup { body, .. } => Some(body),
             _ => None,
         });
-        let bind = taskgroup.expect("taskgroup").iter().find_map(|s| match s {
+        let bind = task_group.expect("task group").iter().find_map(|s| match s {
             Stmt::Val(b) => Some(b),
             _ => None,
         });
         match &bind.expect("binding").init {
             Expr::MethodCall { method, args, .. } => {
-                assert_eq!(method, Syntax::TASKGROUP_SPAWN_METHOD);
+                assert_eq!(method, "spawn");
                 assert_eq!(args.len(), 1);
                 assert!(matches!(args[0].expr, Expr::Lambda(_)));
             }
-            other => panic!("expected g.task => {{ … }} MethodCall, got {other:?}"),
+            other => panic!("expected task work() MethodCall, got {other:?}"),
         }
+    }
+
+    /// D-CONC-SPAWN1=D: selectors nest, and a combinator branch may use a
+    /// block body without introducing another spawn spelling.
+    #[test]
+    fn task_combinators_nest_and_accept_block_branches() {
+        let p = program(
+            "fn run() {\n                result :: task.race {\n                    task.all { one(), two() },\n                    { three() }\n                }\n            }\n",
+        );
+        let run = p.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) if f.name == "run" => Some(f),
+            _ => None,
+        });
+        let binding = run
+            .expect("run")
+            .body
+            .iter()
+            .find_map(|s| match s {
+                Stmt::Val(binding) => Some(binding),
+                _ => None,
+            })
+            .expect("result binding");
+        let Expr::MethodCall { method, args, .. } = &binding.init else {
+            panic!("expected task.race method call, got {:?}", binding.init);
+        };
+        assert_eq!(method, "race");
+        let Expr::ListLit(branches, _) = &args[0].expr else {
+            panic!("expected task.race branch list, got {:?}", args[0].expr);
+        };
+        assert_eq!(branches.len(), 2);
+        assert!(matches!(
+            &branches[0],
+            Expr::MethodCall {
+                method,
+                args,
+                ..
+            } if method == "spawn"
+                && matches!(
+                    args.first().map(|arg| &arg.expr),
+                    Some(Expr::Lambda(Lambda {
+                        body: LambdaBody::Expr(inner),
+                        ..
+                    })) if matches!(inner.as_ref(), Expr::MethodCall { method, .. } if method == "all")
+                )
+        ));
+        assert!(matches!(
+            &branches[1],
+            Expr::MethodCall {
+                method,
+                args,
+                ..
+            } if method == "spawn"
+                && matches!(
+                    args.first().map(|arg| &arg.expr),
+                    Some(Expr::Lambda(Lambda {
+                        body: LambdaBody::Block(_),
+                        ..
+                    }))
+                )
+        ));
     }
 
     /// D-FFI-INLINE1=A / D-FFI-RAWBODY1=A (card #501): `#FFI(c) fn` parses into an inline foreign
@@ -1093,8 +1154,8 @@ fn notify(ready: Bool) =[Net]=> () {
     outer :: loop {
         next(outer)
     }
-    taskgroup group {
-        task :: group.task => fetch()
+    task.group group {
+        task fetch()
     }
     #Grant(caps: FS, Net) {
         use_caps(caps)
@@ -1112,7 +1173,7 @@ fn notify(ready: Bool) =[Net]=> () {
         assert!(once.contains("if ready { send() } else { skip() }"), "{once}");
         assert!(once.contains("loop item, items { audit(item) }"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
-        assert!(once.contains("task :: group.task => fetch()"), "{once}");
+        assert!(once.contains("task fetch()"), "{once}");
         assert!(once.contains("#Grant(caps: FS, Net)"), "{once}");
         let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
         assert_eq!(once, twice);

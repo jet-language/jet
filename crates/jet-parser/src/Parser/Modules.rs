@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
                     "E0960",
                     format!("`{}` is not a module namespace", ns_word),
                     format!(
-                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), `{}` (a package profile), or `{}` (performance policy)",
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), `{}` (a package generation), or `{}` (performance policy)",
                         Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE, Syntax::NS_PERF
                     ),
                     format!(
@@ -195,8 +195,8 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Namespace::Profile => {
-                        let (field, field_span) = self.expect_ident("for a package profile field")?;
-                        self.expect(TokKind::Colon, "after a package profile field")?;
+                        let (field, field_span) = self.expect_ident("for a package generation field")?;
+                        self.expect(TokKind::Colon, "after a package generation field")?;
                         profile_fields.push((field, field_span, self.expr()?));
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
@@ -557,7 +557,7 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
         web_target: Option<crate::Syntax::WebBucket>,
     ) -> Result<Item, Diagnostic> {
-        if is_pub {
+        if is_pub && !is_package_pub {
             self.bump(); // consume `pub`
         }
         let start = self.bump().span; // consume `module`
@@ -577,6 +577,7 @@ impl<'a> Parser<'a> {
                     is_pub,
                     is_package_pub,
                     body: None,
+                    imports: Vec::new(),
                     web_target,
                     instance_identity: None,
                     span: Span::new(start.start, end),
@@ -585,9 +586,30 @@ impl<'a> Parser<'a> {
             TokKind::LBrace => {
                 self.bump(); // consume `{`
                 let mut items = Vec::new();
+                let mut imports = Vec::new();
                 while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                     if matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
+                        continue;
+                    }
+                    if matches!(self.peek().kind, TokKind::KwUse)
+                        || (matches!(self.peek().kind, TokKind::KwPub)
+                            && matches!(self.peek2().kind, TokKind::KwUse))
+                    {
+                        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+                        if is_pub {
+                            self.bump(); // consume `pub`
+                        }
+                        match self.import_decl() {
+                            Ok(mut import) => {
+                                import.is_pub = is_pub;
+                                imports.push(import);
+                            }
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_stmt();
+                            }
+                        }
                         continue;
                     }
                     match self.top_level_item_in_code_module() {
@@ -606,6 +628,7 @@ impl<'a> Parser<'a> {
                     is_pub,
                     is_package_pub,
                     body: Some(items),
+                    imports,
                     web_target,
                     instance_identity: None,
                     span: Span::new(start.start, end),
@@ -654,9 +677,30 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Gt, "to close the generic module parameter list")?;
         self.expect(TokKind::LBrace, "to open the generic module body")?;
         let mut body = Vec::new();
+        let mut imports = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if matches!(self.peek().kind, TokKind::KwUse)
+                || (matches!(self.peek().kind, TokKind::KwPub)
+                    && matches!(self.peek2().kind, TokKind::KwUse))
+            {
+                let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+                if is_pub {
+                    self.bump(); // consume `pub`
+                }
+                match self.import_decl() {
+                    Ok(mut import) => {
+                        import.is_pub = is_pub;
+                        imports.push(import);
+                    }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_stmt();
+                    }
+                }
                 continue;
             }
             match self.top_level_item_in_code_module() {
@@ -675,6 +719,7 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             params,
+            imports,
             body,
             span: Span::new(start.start, end),
         }))
@@ -989,7 +1034,7 @@ impl<'a> Parser<'a> {
                     "E0960",
                     format!("`{}` is not a module namespace", ns_name),
                     format!(
-                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), and `{}` (a package profile)",
+                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), and `{}` (a package generation)",
                         Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE
                     ),
                     format!(

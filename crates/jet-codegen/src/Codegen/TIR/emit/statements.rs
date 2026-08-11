@@ -122,11 +122,11 @@ fn emit_sparse_branch_tree(
         }
         return;
     };
-    out.push_str(&format!("{pad}if *_jet_switch_subject == {pivot} {{\n"));
+    out.push_str(&format!("{pad}if *__jet_switch_subject == {pivot} {{\n"));
     emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
     let middle = arms.len() / 2;
     if middle > 0 {
-        out.push_str(&format!("{pad}}} else if *_jet_switch_subject < {pivot} {{\n"));
+        out.push_str(&format!("{pad}}} else if *__jet_switch_subject < {pivot} {{\n"));
         emit_sparse_branch_tree(
             &arms[..middle],
             else_body,
@@ -153,7 +153,7 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
     for cleanup in cleanups.iter().rev() {
         match cleanup {
             ActiveCleanup::Deferred(id) => {
-                out.push_str(&format!("{}_jet_deferred_close_{}.run();\n", pad, id));
+                out.push_str(&format!("{}__jet_deferred_close_{}.run();\n", pad, id));
             }
             ActiveCleanup::Resource(name) => {
                 out.push_str(&format!("{}{}.close();\n", pad, name));
@@ -173,7 +173,7 @@ fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[
     for active in cleanups.iter().rev() {
         match active {
             ActiveCleanup::Deferred(id) => {
-                cleanup.push_str(&format!("_jet_deferred_close_{}.run(); ", id));
+                cleanup.push_str(&format!("__jet_deferred_close_{}.run(); ", id));
             }
             ActiveCleanup::Resource(name) => cleanup.push_str(&format!("{}.close(); ", name)),
         }
@@ -419,8 +419,8 @@ fn emit_tir_stmt(
             }
             if let Some(promotion) = gc_promotion {
                 let local = mangle(name);
-                let value = format!("_jet_gc_value_{local}");
-                let site = format!("_jet_gc_site_{local}");
+                let value = format!("__jet_gc_value_{local}");
+                let site = format!("__jet_gc_site_{local}");
                 out.push_str(&format!(
                     "{}let {} = {};\n",
                     pad,
@@ -768,7 +768,7 @@ fn emit_tir_stmt(
             id,
         } => {
             out.push_str(&format!(
-                "{}let mut _jet_deferred_close_{} = JetDeferredClose::new(move || {{ let _ = {}; }});\n",
+                "{}let mut __jet_deferred_close_{} = JetDeferredClose::new(move || {{ let _ = {}; }});\n",
                 pad,
                 id,
                 emit_expr_with_cleanups(close, cx, active_deferred_closes)
@@ -824,7 +824,7 @@ fn emit_tir_stmt(
             emit_tir_stmt(init, cx, out, indent + 1, &mut counted_deferred);
             let inner_pad = "    ".repeat(indent + 1);
             if step.is_some() {
-                out.push_str(&format!("{}let mut _jet_loop_first = true;\n", inner_pad));
+                out.push_str(&format!("{}let mut __jet_loop_first = true;\n", inner_pad));
             }
             out.push_str(&format!(
                 "{}{}loop {{\n",
@@ -837,7 +837,7 @@ fn emit_tir_stmt(
             // thereafter run it before retesting. Break/return/failure/panic leave
             // the loop and therefore never execute it.
             if let Some(step) = step {
-                out.push_str(&format!("{}if _jet_loop_first {{ _jet_loop_first = false; }} else {{\n", body_pad));
+                out.push_str(&format!("{}if __jet_loop_first {{ __jet_loop_first = false; }} else {{\n", body_pad));
                 emit_tir_stmt(step, cx, out, indent + 3, &mut counted_deferred);
                 out.push_str(&format!("{}}}\n", body_pad));
             }
@@ -863,7 +863,7 @@ fn emit_tir_stmt(
             let lbl = tir_label_prefix(label);
             if let Some(source) = source {
                 let source = emit_expr_with_cleanups(source, cx, active_deferred_closes);
-                out.push_str(&format!("{}{{ let _jet_range = {};\n", pad, source));
+                out.push_str(&format!("{}{{ let __jet_range = {};\n", pad, source));
                 let range_pad = "    ".repeat(indent + 1);
                 let body_pad = "    ".repeat(indent + 2);
                 let stride = step.as_ref().map(|step| {
@@ -871,27 +871,27 @@ fn emit_tir_stmt(
                 });
                 if let Some(stride) = &stride {
                     out.push_str(&format!(
-                        "{}let _jet_loop_stride = {};\n",
+                        "{}let __jet_loop_stride = {};\n",
                         range_pad, stride
                     ));
                     out.push_str(&format!(
-                        "{}if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n",
+                        "{}if __jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n",
                         range_pad, cx.root_prefix, cx.file
                     ));
                 }
                 for (condition, op) in [(true, ".."), (false, "..=")] {
                     out.push_str(&format!(
-                        "{}{} _jet_range.exclusive {{\n",
+                        "{}{} __jet_range.exclusive {{\n",
                         range_pad,
                         if condition { "if" } else { "} else if !" }
                     ));
                     let step_suffix = if stride.is_some() {
-                        ".step_by(_jet_loop_stride as usize)"
+                        ".step_by(__jet_loop_stride as usize)"
                     } else {
                         ""
                     };
                     out.push_str(&format!(
-                        "{}{}for {} in (_jet_range.start{op}_jet_range.end){step_suffix} {{\n",
+                        "{}{}for {} in (__jet_range.start{op}__jet_range.end){step_suffix} {{\n",
                         body_pad,
                         lbl,
                         mangle(var)
@@ -910,12 +910,12 @@ fn emit_tir_stmt(
             match step {
                 Some(step) => {
                     let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                    out.push_str(&format!("{}{{ let _jet_loop_start = {};\n", pad, s));
-                    out.push_str(&format!("{}    let _jet_loop_end = {};\n", pad, e));
-                    out.push_str(&format!("{}    let _jet_loop_stride = {};\n", pad, st));
-                    out.push_str(&format!("{}    if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                    out.push_str(&format!("{}{{ let __jet_loop_start = {};\n", pad, s));
+                    out.push_str(&format!("{}    let __jet_loop_end = {};\n", pad, e));
+                    out.push_str(&format!("{}    let __jet_loop_stride = {};\n", pad, st));
+                    out.push_str(&format!("{}    if __jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
                     out.push_str(&format!(
-                        "{}{}for {} in (_jet_loop_start{range_op}_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n",
+                        "{}{}for {} in (__jet_loop_start{range_op}__jet_loop_end).step_by(__jet_loop_stride as usize) {{\n",
                         pad,
                         lbl,
                         mangle(var)
@@ -937,20 +937,33 @@ fn emit_tir_stmt(
             if step.is_some() { out.push_str(&format!("{}}}\n", pad)); }
         }
         TStmt::Break(label) => match label {
-            Some(name) => out.push_str(&format!("{}break 'jet_{};\n", pad, name)),
+            Some(name) => out.push_str(&format!(
+                "{}break '{};\n",
+                pad,
+                mangle(name)
+            )),
             None => out.push_str(&format!("{}break;\n", pad)),
         },
         TStmt::BreakValue { label, value } => {
             let value = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             match label {
                 Some(name) => {
-                    out.push_str(&format!("{}break 'jet_{} {};\n", pad, name, value))
+                    out.push_str(&format!(
+                        "{}break '{} {};\n",
+                        pad,
+                        mangle(name),
+                        value
+                    ))
                 }
                 None => out.push_str(&format!("{}break {};\n", pad, value)),
             }
         }
         TStmt::Continue(label) => match label {
-            Some(name) => out.push_str(&format!("{}continue 'jet_{};\n", pad, name)),
+            Some(name) => out.push_str(&format!(
+                "{}continue '{};\n",
+                pad,
+                mangle(name)
+            )),
             None => out.push_str(&format!("{}continue;\n", pad)),
         },
         // c109 Phase 4: an exhaustive enum match. Mirrors `emit_pattern_match_switch`
@@ -1012,7 +1025,7 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}}}\n", pad));
         }
         // c109 Phase 4: an all-range scalar switch. Mirrors `emit_mixed_switch`
-        // (Statement.rs): a wrapping block binds `_jet_switch_subject` (unused here,
+        // (Statement.rs): a wrapping block binds `__jet_switch_subject` (unused here,
         // emitted for parity), then an `if/else if … else` chain of range tests.
         TStmt::RangeSwitch {
             subject,
@@ -1023,7 +1036,7 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}{{\n", pad));
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&format!(
-                "{}let _jet_switch_subject = &({});\n",
+                "{}let __jet_switch_subject = &({});\n",
                 inner_pad, subject_str
             ));
             for (i, (lo, hi, body)) in arms.iter().enumerate() {
@@ -1155,7 +1168,7 @@ fn emit_tir_stmt(
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             out.push_str(&format!(
-                "{pad}{{ let __jet_v = {v}; <{ty} as user_IndexMut>::set(&mut ({b}), {i}, __jet_v); }}\n",
+                "{pad}{{ let __jet_v = {v}; <{ty} as __jet_IndexMut>::set(&mut ({b}), {i}, __jet_v); }}\n",
             ));
         }
         // D-SWIZZLE1: write swizzle — ordered lane stores into the backing array.
@@ -1178,9 +1191,9 @@ fn emit_tir_stmt(
         }
         // c109 Phase 5: collection iteration. Mirrors `emit_for_in` for the two
         // plain `.iter()` shapes (method-call collections are excluded by the gate):
-        //   single: `for _jet_item in (coll).iter().cloned() { let var = _jet_item; … }`
-        //   map k,v: `for (_jet_k, _jet_v) in (coll).iter() { let k = _jet_k.clone();
-        //             let v = _jet_v.clone(); … }`
+        //   single: `for __jet_item in (coll).iter().cloned() { let var = __jet_item; … }`
+        //   map k,v: `for (__jet_k, __jet_v) in (coll).iter() { let k = __jet_k.clone();
+        //             let v = __jet_v.clone(); … }`
         TStmt::ForIn {
             label,
             var,
@@ -1201,11 +1214,11 @@ fn emit_tir_stmt(
             let collection_str = if let Some(step) = step {
                 stride_wrapper = true;
                 let stride = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                out.push_str(&format!("{}{{ let _jet_loop_source = {};\n", pad, source_rust));
-                out.push_str(&format!("{}    let _jet_loop_stride = {};\n", pad, stride));
-                out.push_str(&format!("{}    if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
-                source_storage = "_jet_loop_source".to_string();
-                stride_suffix = ".step_by(_jet_loop_stride as usize)".to_string();
+                out.push_str(&format!("{}{{ let __jet_loop_source = {};\n", pad, source_rust));
+                out.push_str(&format!("{}    let __jet_loop_stride = {};\n", pad, stride));
+                out.push_str(&format!("{}    if __jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                source_storage = "__jet_loop_source".to_string();
+                stride_suffix = ".step_by(__jet_loop_stride as usize)".to_string();
                 source_storage.as_str()
             } else {
                 stride_suffix = String::new();
@@ -1218,7 +1231,7 @@ fn emit_tir_stmt(
             match method_kind {
                 Some(TForInMethod::Chars) => {
                     out.push_str(&format!(
-                        "{}{}for _jet_c in ({recv}).chars(){} {{\n    {}let {} = _jet_c;\n",
+                        "{}{}for __jet_c in ({recv}).chars(){} {{\n    {}let {} = __jet_c;\n",
                         pad,
                         lbl,
                         stride_suffix,
@@ -1229,11 +1242,11 @@ fn emit_tir_stmt(
                 }
                 Some(TForInMethod::LinesFile) => {
                     out.push_str(&format!(
-                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner){} {{\n",
+                        "{}{}for __jet_raw_line in std::io::BufRead::lines(&mut ({}).inner){} {{\n",
                         pad, lbl, collection_str, stride_suffix
                     ));
                     out.push_str(&format!(
-                        "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                        "{}    let {} = __jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1243,16 +1256,16 @@ fn emit_tir_stmt(
                 }
                 Some(TForInMethod::LinesStdin) => {
                     out.push_str(&format!(
-                        "{}{{ let mut _jet_stdin_h = {};\n",
+                        "{}{{ let mut __jet_stdin_h = {};\n",
                         pad, collection_str
                     ));
                     needs_extra_close = true;
                     out.push_str(&format!(
-                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut _jet_stdin_h.inner){} {{\n",
+                        "{}{}for __jet_raw_line in std::io::BufRead::lines(&mut __jet_stdin_h.inner){} {{\n",
                         pad, lbl, stride_suffix
                     ));
                     out.push_str(&format!(
-                        "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                        "{}    let {} = __jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1264,7 +1277,7 @@ fn emit_tir_stmt(
                     // D-PROCESS1=A: adapt Result<Option<Line>> into an iterator so
                     // `.step_by` owns pull counting and `next` cannot skip stride pulls.
                     out.push_str(&format!(
-                        "{}{}for _jet_line_result in std::iter::from_fn(|| {}jet_process_stream_next_line(&({})).transpose()){} {{\n",
+                        "{}{}for __jet_line_result in std::iter::from_fn(|| {}jet_process_stream_next_line(&({})).transpose()){} {{\n",
                         pad,
                         lbl,
                         cx.root_prefix,
@@ -1272,7 +1285,7 @@ fn emit_tir_stmt(
                         stride_suffix,
                     ));
                     out.push_str(&format!(
-                        "{}    let {} = _jet_line_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                        "{}    let {} = __jet_line_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1290,7 +1303,7 @@ fn emit_tir_stmt(
                         _ => unreachable!("unknown encoding reader type: {reader_type}"),
                     };
                     out.push_str(&format!(
-                        "{}{}for _jet_item_result in {}jet_encoding_reader_iter(|| {}{}(&mut ({}))){} {{\n",
+                        "{}{}for __jet_item_result in {}jet_encoding_reader_iter(|| {}{}(&mut ({}))){} {{\n",
                         pad,
                         lbl,
                         cx.root_prefix,
@@ -1300,7 +1313,7 @@ fn emit_tir_stmt(
                         stride_suffix,
                     ));
                     out.push_str(&format!(
-                        "{}    let {} = _jet_item_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                        "{}    let {} = __jet_item_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1315,15 +1328,15 @@ fn emit_tir_stmt(
                     let coll_rust = user_type_rust(coll_type);
                     let iter_rust = user_type_rust(iter_type);
                     out.push_str(&format!(
-                        "{}{{ let mut _jet_it = <{coll_rust} as user_Iterable>::iter(({collection_str}));\n",
+                        "{}{{ let mut __jet_it = <{coll_rust} as __jet_Iterable>::iter(({collection_str}));\n",
                         pad,
                     ));
                     out.push_str(&format!(
-                        "{}    {}for _jet_item in std::iter::from_fn(|| <{iter_rust} as user_Iterator>::next(&mut _jet_it).ok()){} {{\n",
+                        "{}    {}for __jet_item in std::iter::from_fn(|| <{iter_rust} as __jet_Iterator>::next(&mut __jet_it).ok()){} {{\n",
                         pad, lbl, stride_suffix,
                     ));
                     out.push_str(&format!(
-                        "{}        let {} = _jet_item;\n",
+                        "{}        let {} = __jet_item;\n",
                         pad,
                         mangle(var)
                     ));
@@ -1355,38 +1368,38 @@ fn emit_tir_stmt(
                                     )
                             ) {
                                 format!(
-                                    "({}).iter_mut().map(|_jet_view| &mut **_jet_view)",
+                                    "({}).iter_mut().map(|__jet_view| &mut **__jet_view)",
                                     collection_str
                                 )
                             } else {
                                 format!("({}).iter().cloned()", collection_str)
                             };
                             out.push_str(&format!(
-                                "{}{}for (_jet_i, _jet_item) in {}{} .enumerate() {{\n",
+                                "{}{}for (__jet_i, __jet_item) in {}{} .enumerate() {{\n",
                                 pad, lbl, iter_form, stride_suffix
                             ));
                             out.push_str(&format!(
-                                "{}    let {} = _jet_i as i64;\n",
+                                "{}    let {} = __jet_i as i64;\n",
                                 pad,
                                 mangle(var)
                             ));
                             out.push_str(&format!(
-                                "{}    let {} = _jet_item;\n",
+                                "{}    let {} = __jet_item;\n",
                                 pad,
                                 mangle(v2)
                             ));
                         } else {
                             out.push_str(&format!(
-                                "{}{}for (_jet_k, _jet_v) in ({}).iter(){} {{\n",
+                                "{}{}for (__jet_k, __jet_v) in ({}).iter(){} {{\n",
                                 pad, lbl, collection_str, stride_suffix
                             ));
                             out.push_str(&format!(
-                                "{}    let {} = _jet_k.clone();\n",
+                                "{}    let {} = __jet_k.clone();\n",
                                 pad,
                                 mangle(var)
                             ));
                             out.push_str(&format!(
-                                "{}    let {} = _jet_v.clone();\n",
+                                "{}    let {} = __jet_v.clone();\n",
                                 pad,
                                 mangle(v2)
                             ));
@@ -1400,11 +1413,11 @@ fn emit_tir_stmt(
                             ];
                             let tuple = crate::Codegen::Tuples::tuple_struct_name(&fields);
                             out.push_str(&format!(
-                                "{}{}for (_jet_k, _jet_v) in ({}).iter(){} {{\n",
+                                "{}{}for (__jet_k, __jet_v) in ({}).iter(){} {{\n",
                                 pad, lbl, collection_str, stride_suffix
                             ));
                             out.push_str(&format!(
-                                "{}    let {} = {} {{ {}: _jet_k.clone(), {}: _jet_v.clone() }};\n",
+                                "{}    let {} = {} {{ {}: __jet_k.clone(), {}: __jet_v.clone() }};\n",
                                 pad,
                                 mangle(var),
                                 tuple,
@@ -1436,14 +1449,14 @@ fn emit_tir_stmt(
                                 )
                         ) {
                             format!(
-                                "({}).iter_mut().map(|_jet_view| &mut **_jet_view)",
+                                "({}).iter_mut().map(|__jet_view| &mut **__jet_view)",
                                 collection_str
                             )
                         } else {
                             format!("({}).iter().cloned()", collection_str)
                         };
                         out.push_str(&format!(
-                            "{}{}for _jet_item in {} {{\n    {}let {} = _jet_item;\n",
+                            "{}{}for __jet_item in {} {{\n    {}let {} = __jet_item;\n",
                             pad,
                             lbl,
                             format!("{}{}", iter_form, stride_suffix),
@@ -1609,14 +1622,19 @@ fn emit_tir_stmt(
                 pad, cx.root_prefix, closure
             ));
         }
-        TStmt::TaskGroup { group, body } => {
+        TStmt::TaskGroup { group, limit, body } => {
             out.push_str(&format!("{}{{\n", pad));
-            out.push_str(&format!(
-                "{}    let {} = {}jet_std::JetTaskGroup::new();\n",
-                pad,
-                group.rust_place(),
-                cx.root_prefix
-            ));
+            let constructor = limit.as_ref().map_or_else(
+                || format!("{}jet_std::JetTaskGroup::new()", cx.root_prefix),
+                |value| {
+                    format!(
+                        "{}jet_std::JetTaskGroup::with_limit({})",
+                        cx.root_prefix,
+                        emit_tir_expr(value, cx)
+                    )
+                },
+            );
+            out.push_str(&format!("{}    let {} = {};\n", pad, group.rust_place(), constructor));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -1661,8 +1679,15 @@ fn emit_tir_stmt(
             // deferred edit atomically under all the handles' locks at once. A `?`/early
             // return skips the commit, so the guard's Drop discards the deferred edits.
             if *uses_stm {
+                // `edit_txn(&mut __jet_stm, …)` (emit/expressions.rs) always
+                // takes the STM handle by `&mut` — this compiler-internal
+                // local's mut requirement isn't derived from any user-visible
+                // type, so it must be forced here directly (same rustc-reject
+                // family as card #1859's Mailer fix, a different mechanism:
+                // that one is TIR::Let's `is_file_handle` allowlist, this one
+                // is a hand-emitted `let` with no TIR::Let node at all).
                 out.push_str(&format!(
-                    "{}let __jet_stm = {}jet_stm::begin();\n",
+                    "{}let mut __jet_stm = {}jet_stm::begin();\n",
                     inner_pad, cx.root_prefix
                 ));
             }
@@ -1747,7 +1772,7 @@ fn emit_tir_stmt(
         }
         // c109 Phase 15: a mixed comparison/Bool switch — the general `emit_mixed_switch`
         // (Statement.rs) `if/else if … else` chain inside a block that binds
-        // `_jet_switch_subject = &(subject)` (emitted for parity even when unused).
+        // `__jet_switch_subject = &(subject)` (emitted for parity even when unused).
         TStmt::MixedSwitch {
             subject,
             class,
@@ -1758,7 +1783,7 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}{{\n", pad));
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&format!(
-                "{}let _jet_switch_subject = &({});\n",
+                "{}let __jet_switch_subject = &({});\n",
                 inner_pad, subject_str
             ));
             if matches!(class, crate::Codegen::TIR::BranchClass::Bool2) {
@@ -1773,7 +1798,7 @@ fn emit_tir_stmt(
                     .find(|(cond, _)| !branch_bool_literal(cond))
                     .map(|(_, body)| body.as_slice())
                     .expect("classified bool branch has false arm");
-                out.push_str(&format!("{}if *_jet_switch_subject {{\n", inner_pad));
+                out.push_str(&format!("{}if *__jet_switch_subject {{\n", inner_pad));
                 emit_tir_stmts_nested(
                     true_body,
                     cx,
@@ -1795,7 +1820,7 @@ fn emit_tir_stmt(
             }
             if matches!(class, crate::Codegen::TIR::BranchClass::DenseInt) {
                 out.push_str(&format!("{}// jet:branch dense-table\n", inner_pad));
-                out.push_str(&format!("{}match *_jet_switch_subject {{\n", inner_pad));
+                out.push_str(&format!("{}match *__jet_switch_subject {{\n", inner_pad));
                 for (cond, body) in arms {
                     let literal = match &cond.kind {
                         crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match &rhs.kind {
@@ -1915,12 +1940,11 @@ fn emit_tir_stmt(
     }
 }
 
-/// Mirror `loop_label_prefix` (Codegen/Utils.rs) for a resolved label name:
-/// `'jet_<name>: ` or empty. Kept here so the TIR emitter never reaches back
-/// into the AST-side helper with an `Option<(String, Span)>`.
+/// Emit a Rust lifetime label for a resolved name. Generated labels use the
+/// same `__jet_` machine prefix as every other compiler-visible symbol.
 pub(crate) fn tir_label_prefix(label: &Option<String>) -> String {
     match label {
-        Some(n) => format!("'jet_{}: ", n),
+        Some(n) => format!("'{}: ", mangle(n)),
         None => String::new(),
     }
 }

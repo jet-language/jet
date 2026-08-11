@@ -14,7 +14,6 @@ use crate::AST::{
     VariantPayload,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
 
 mod Casing;
 
@@ -61,8 +60,6 @@ impl UninitState {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MethodSig {
-    name_span: Span,
-    is_pub: bool,
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
     /// D-GENERIC-CALL1=A: method-owned type parameters, distinct from the
@@ -93,7 +90,7 @@ pub(crate) struct MethodSig {
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
-        fields: Vec<(String, Span, Type, bool)>,
+        fields: Vec<(String, Span, Type)>,
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
         /// Values of this type must be consumed exactly once (E0140/E0141) and
@@ -249,7 +246,7 @@ impl TypeRegistry {
         self.types.contains_key(name)
     }
 
-    /// A struct the user declared, so codegen emits a `user_<Name>` Rust type
+    /// A struct the user declared, so codegen emits a `__jet_<Name>` Rust type
     /// for it. False for a builtin the comptime evaluator merely models as a
     /// struct, which has no such Rust type.
     pub(crate) fn is_user_struct(&self, name: &str) -> bool {
@@ -273,7 +270,7 @@ impl TypeRegistry {
         self.unit_facts.get(name)
     }
 
-    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool)]> {
+    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type)]> {
         match self.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => Some(fields.as_slice()),
             _ => None,
@@ -479,8 +476,6 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
         let _ = return_view_provenance.set(provenance.clone());
     }
     MethodSig {
-        name_span: f.name_span,
-        is_pub: f.is_pub,
         params: f
             .params
             .iter()
@@ -753,6 +748,11 @@ pub(crate) struct LocalInfo {
     /// Whether this local can cross a task/channel boundary. For ordinary
     /// values this follows the type; for lambdas it also includes captures.
     sendable: bool,
+    /// Whether a function value has the thread-safe representation required by
+    /// `core.os.on_interrupt`. Ordinary `fn` values use `Rc`; only named
+    /// functions and already-proven callback-safe aliases may cross that
+    /// boundary.
+    interrupt_sendable: bool,
     /// D-DATARACE1=C: `#Local` pin on a reactive binding.
     reactive_local: bool,
     /// D-DATARACE1=C: `#Shared` pin on a reactive binding.
@@ -1174,6 +1174,7 @@ pub(crate) enum SendCrossing {
     TaskCapture,
     TaskResult,
     ChannelSend,
+    InterruptCallback,
 }
 
 /// What the driver is compiling — affects `run` / test requirements (M6).
@@ -1200,21 +1201,7 @@ pub(crate) struct ModuleState {
     /// True only for the explicitly selected package/workspace build entry.
     /// Ordinary `fn build` names do not grant compiler-host capabilities.
     allow_compiler_api: bool,
-    func_spans: HashMap<String, Span>,
-    const_spans: HashMap<String, Span>,
-    import_spans: HashMap<String, Span>,
-    /// D-PUBPKG1=A: modules under the same project package/workspace root may
-    /// see `pub(package)` items. Dependency/hangar modules get their own root.
-    package_scope: PathBuf,
     funcs: HashMap<String, FuncSig>,
-    func_pub: HashMap<String, bool>,
-    func_pkg_pub: HashMap<String, bool>,
-    type_pub: HashMap<String, bool>,
-    type_pkg_pub: HashMap<String, bool>,
-    method_pub: HashMap<(String, String), bool>,
-    method_pkg_pub: HashMap<(String, String), bool>,
-    field_pub: HashMap<(String, String), bool>,
-    field_pkg_pub: HashMap<(String, String), bool>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
@@ -1226,7 +1213,7 @@ pub(crate) struct ModuleState {
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
-    /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
+    /// `math.double(x)` resolves to `__jet_math__double(x)` when `math` is in here.
     code_modules: HashMap<String, String>,
     /// Inline module spelling -> compiler semantic identity. Ordinary modules
     /// use their module identity; generic instances use `instance:<digest>`.
@@ -1237,11 +1224,34 @@ pub(crate) struct ModuleState {
     /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
     /// Maps name → (function_name, module_idx).
     unqualified_file: HashMap<String, (String, usize)>,
+    /// D-CORE-USELIST1=A: unqualified Core items imported via `use core.X.[…]`.
+    /// The value is the original Core member name; `core_imports` carries its
+    /// module path so the call lowers through the ordinary Core method path.
+    core_item_imports: HashMap<String, String>,
     /// D-MOD4: `pub use alias.Item` re-exports — items this module exposes on its
     /// own public surface even though they're defined elsewhere. Maps the
     /// exported name → (target_function_name, target_module_idx). A caller doing
     /// `thismod.Item` resolves through here to the real definition.
     reexports: HashMap<String, (String, usize)>,
+    /// D-NAME-WALK1=A: unqualified imports declared inside an inline module.
+    /// The first key is the inline module name; the second is the local item
+    /// name. Inline bodies inherit the enclosing file's maps and overlay these
+    /// entries for their own scope only.
+    inline_unqualified: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: file-module items imported inside an inline module.
+    inline_unqualified_file: HashMap<(String, String), (String, usize)>,
+    /// D-NAME-WALK1=A: core modules imported by item name inside an inline
+    /// module. Kept separate from the file-level map for scope safety.
+    inline_core_imports: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: original Core member names for inline-module imports.
+    inline_core_items: HashMap<(String, String), String>,
+    /// D-NAME-WALK1=A: inline-module `pub use` of another inline function.
+    inline_reexport_inline: HashMap<(String, String), (String, String)>,
+    /// D-NAME-WALK1=A: inline-module `pub use` of a file-module function.
+    inline_reexport_file: HashMap<(String, String), (String, usize)>,
+    /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
+    /// value is the Core module and the second is the original member name.
+    inline_reexport_core: HashMap<(String, String), (String, String)>,
 }
 
 pub(crate) struct Checker<'a> {
@@ -1260,16 +1270,21 @@ pub(crate) struct Checker<'a> {
     unqualified: &'a HashMap<String, String>,
     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
     unqualified_file: &'a HashMap<String, (String, usize)>,
-    /// D-MOD2: pub flags for this module's functions, including inline-module
-    /// items mangled as `M__item`. Used to reject `M.private()` from outside.
-    func_pub: &'a HashMap<String, bool>,
-    /// D-PUBPKG1=A: package-scoped function visibility flags.
-    func_pkg_pub: &'a HashMap<String, bool>,
+    /// D-CORE-USELIST1=A: unqualified Core items in scope (local name → member).
+    core_item_imports: &'a HashMap<String, String>,
+    /// D-NAME-WALK1=A: imports scoped to one inline-module body.
+    inline_unqualified: &'a HashMap<(String, String), String>,
+    inline_unqualified_file: &'a HashMap<(String, String), (String, usize)>,
+    inline_module: Option<String>,
+    /// D-NAME-WALK1=A: public re-exports declared inside inline modules.
+    inline_reexport_inline: &'a HashMap<(String, String), (String, String)>,
+    inline_reexport_file: &'a HashMap<(String, String), (String, usize)>,
+    inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
     module_path: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     current_function_span: Span,
-    reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
+    name_ledger: &'a mut jet_foundation::Names::NameLedger,
     diags: Vec<Diagnostic>,
     /// D-FACT-FLOW1: the one store of per-binding facts — declarations, flow
     /// narrowing, moves, uninitialised places and open borrow windows. Every
@@ -1429,6 +1444,10 @@ pub(crate) struct Checker<'a> {
     lambda_params_are_lending_views: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
+    /// True while checking the callback stored by `core.os.on_interrupt`.
+    /// This boundary retains a callback for asynchronous signal delivery and
+    /// therefore needs stricter capture facts than an ordinary higher-order call.
+    interrupt_callback_depth: usize,
     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
     /// closure parameter — grants it write access with no `&` sigil (the API
     /// contract IS the exclusive lock; `check_lambda` reads this once, at bind
@@ -1983,10 +2002,10 @@ pub use Bundle::{
     bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    specialize_function_types,
+    prepare_script_entries, specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,
 };
-pub use Effects::{DefinitionAnchorFact, EffectSummary, SemIndexEffectFacts};
+pub use Effects::{EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{
     check_memory_facts, project_memory_fact, MemoryCall, MemoryEvent, MemoryEventKind, MemoryFact,
     MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary,

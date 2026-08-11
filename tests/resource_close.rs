@@ -69,7 +69,7 @@ fn defer_close_has_explicit_tir_codegen_and_stable_formatting() {
     let out = compile(SIMPLE);
     assert!(out.rust.contains("JetDeferredClose"), "{}", out.rust);
     assert!(
-        out.rust.contains("user_Close::close(user___jet_resource_resource_")
+        out.rust.contains("__jet_Close::close(__jet_resource_resource_")
             && out.rust.contains(".take())"),
         "{}",
         out.rust
@@ -166,7 +166,7 @@ fn run() {
     let compiled = compile(src);
     assert!(
         compiled.rust.contains(
-            ": JetResource<user_Resource> = JetResource::new(user_resource);"
+            ": JetResource<__jet_Resource> = JetResource::new(__jet_resource);"
         ),
         "{}",
         compiled.rust
@@ -174,7 +174,7 @@ fn run() {
     assert!(
         compiled
             .rust
-            .contains("return user___jet_resource_param_resource.take();"),
+            .contains("return __jet_resource_param_resource.take();"),
         "{}",
         compiled.rust
     );
@@ -302,7 +302,7 @@ fn run() {
 }
 "#;
     let out = compile(src);
-    assert!(out.rust.contains("user_maybe();"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_maybe();"), "{}", out.rust);
     assert_eq!(
         out.rust.matches("JetDeferredClose::new").count(),
         0,
@@ -347,7 +347,7 @@ fn run() {
 "#;
     let rust = compile(src).rust;
     assert_eq!(
-        rust.matches("impl user_Close for JetDbConnection").count(),
+        rust.matches("impl __jet_Close for JetDbConnection").count(),
         1,
         "the referenced database family needs its Close implementation"
     );
@@ -364,7 +364,7 @@ fn run() {
         "jet_mem::JetFixed",
     ] {
         assert_eq!(
-            rust.matches(&format!("impl user_Close for {ty}")).count(),
+            rust.matches(&format!("impl __jet_Close for {ty}")).count(),
             0,
             "an import-only resource family must not emit an unused Close implementation"
         );

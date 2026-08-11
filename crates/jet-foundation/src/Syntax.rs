@@ -37,9 +37,9 @@
 // `--target`, which now takes a declared machine name (`board.<name>`) beside
 // a rustc triple. A named environment composition is a preset:
 // ENV_FIELD_PRESETS (`presets:`) and ENV_FLAG_PRESET (`--preset`) replace the
-// retired `profiles:` field and `--profile` flag, and package/user profiles
-// read as generations in prose. Retires ENV_FIELD_PROFILES and the env
-// namespace's `--profile`; ENV_FLAG_PROFILE_RETIRED exists only to teach.
+// retired environment `profiles:` field, while package/user prose uses
+// generations. The environment selector is `--env`; ENV_FLAG_PROFILE_RETIRED
+// exists only to teach `--preset`.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;

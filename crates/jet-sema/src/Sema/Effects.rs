@@ -515,25 +515,14 @@ pub struct SemIndexEffectFacts {
     pub memory_declarations: Vec<super::MemoryFacts::MemoryFactDeclaration>,
     pub memory_projections:
         HashMap<(String, super::MemoryFacts::MemoryFact), super::MemoryFacts::MemoryProjection>,
-    /// Reference targets proven by sema/name resolution. Key is
-    /// `(module path, reference start, reference end)`. Tooling may copy these
-    /// facts but must never independently resolve by spelling or proximity.
-    pub reference_anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    /// One name ledger produced by sema. Tooling reads it and never resolves
+    /// names independently from spelling or proximity.
+    pub name_ledger: jet_foundation::Names::NameLedger,
     /// D-WEBAPP1=D: statically known `fn app()` application graph (Tower #438).
     pub web_app: Option<jet_foundation::WebApp::WebAppGraph>,
     /// D-FACTMODEL1=A: the one checked registry used by tag, effect, state,
     /// diagnostics, semantic tooling, and reflection consumers.
     pub fact_registry: jet_foundation::Facts::FactRegistry,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DefinitionAnchorFact {
-    pub module_path: String,
-    pub kind: String,
-    pub def_span: Span,
-    /// Resolved semantic identity when source lowering makes module/span
-    /// insufficient (notably applicative generic-module projections).
-    pub semantic_identity: Option<String>,
 }
 
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed
@@ -865,7 +854,7 @@ pub fn check_inferred_purity(
                 if let Some(body) = &module.body {
                     for item in body {
                         if let Item::Func(f) = item {
-                            let identity = format!("{}__{}", module.name, f.name);
+                            let identity = jet_foundation::Names::member_name(&module.name, &f.name);
                             check_one(
                                 f,
                                 None,

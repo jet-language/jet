@@ -10,6 +10,8 @@
 //! emitted-shape tests; those are not AOT/JIT/interpreter synchronization
 //! claims. Run: `scripts/agent/jet-env cargo test --test parity_lint`.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

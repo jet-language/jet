@@ -46,6 +46,9 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ParsedArgsOptions => "ParsedArgsOptions",
         THandleOp::ParsedArgsSubcommand => "ParsedArgsSubcommand",
         THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
+        THandleOp::ProcessSpecMethod { method } => return format!("ProcessSpec:{method}"),
+        THandleOp::ProcessChildMethod { method } => return format!("ProcessChild:{method}"),
+        THandleOp::TerminalSessionResize => "TerminalSessionResize",
         THandleOp::DBWithPolicy => "DBWithPolicy",
         THandleOp::ServiceRuntimeSend => "ServiceRuntimeSend",
         THandleOp::ServiceRuntimeRetry => "ServiceRuntimeRetry",
@@ -180,7 +183,7 @@ fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, D
                     .filter_map(|name| {
                         let value = fields.iter().find_map(|(actual, value)| {
                             (actual == &name
-                                || actual.strip_prefix("user_") == Some(name.as_str()))
+                                || actual.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(name.as_str()))
                                 .then_some(value)
                         })?;
                         Some(CtValue::Struct {
@@ -801,7 +804,7 @@ pub(super) fn eval_handle(
         THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
         THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
         THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),
-        THandleOp::TaskJoin => match recv {
+        THandleOp::TaskJoin | THandleOp::TaskScopeJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()
                 .find_map(|(name, value)| (name == "value").then(|| value.clone()))
@@ -886,6 +889,9 @@ pub(super) fn eval_handle(
         THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),
         THandleOp::PluginCall => Err(unsupported("handle `PluginCall`", span)),
         THandleOp::PluginCallInt => Err(unsupported("handle `PluginCallInt`", span)),
+        // D-LIB-CALLGRANT1=A: interpreter ambient owns the actual loader and
+        // call; this context-free fallback must never invent a second policy.
+        THandleOp::ModOnTick => Err(unsupported("handle `ModOnTick`", span)),
         // D-SHIFT1: `binary.Reader` / `text.Cursor` marshal to the shared
         // `jet_foundation::StreamCursor` kernel AOT splices into its prelude.
         THandleOp::ReaderOver

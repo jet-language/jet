@@ -5,6 +5,8 @@
 //! in its body. Proven claims run these via
 //! `check-capability-ledger.mjs --verify-focused`.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -187,8 +189,8 @@ fn run() {
         panic!("generated codec did not re-enter the front end: {diags:#?}")
     });
     assert!(
-        compiled.rust.contains("impl user_Encode for user_Point")
-            && compiled.rust.contains("impl user_Decode for user_Point"),
+        compiled.rust.contains("impl __jet_Encode for __jet_Point")
+            && compiled.rust.contains("impl __jet_Decode for __jet_Point"),
         "ordinary parsed codec impls must reach TIR/codegen"
     );
     let _ = fs::remove_dir_all(&dir);

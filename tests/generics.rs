@@ -1,5 +1,7 @@
 //! M9 generic instantiation soundness — examples must compile under rustc.
 
+mod common;
+
 use std::process::Command;
 
 #[test]
@@ -96,8 +98,8 @@ fn run() {
         r#"
 module left
 module right
-use left.{boxed as left_boxed}
-use right.{boxed as right_boxed}
+use left.[boxed as left_boxed]
+use right.[boxed as right_boxed]
 module first = left_boxed<Int, 3>
 module equivalent = left_boxed<Int, 3>
 module different_type = left_boxed<String, 3>
@@ -496,12 +498,12 @@ fn run() {
     let compiled = jet::compile(src)
         .unwrap_or_else(|diags| panic!("explicit generic calls failed: {diags:#?}"));
     assert!(
-        compiled.rust.contains("user_identity::<String>"),
+        compiled.rust.contains("__jet_identity::<String>"),
         "AOT output lost the explicit identity type argument:\n{}",
         compiled.rust
     );
     assert!(
-        compiled.rust.contains("user_empty::<i64>"),
+        compiled.rust.contains("__jet_empty::<i64>"),
         "AOT output lost the result-only type argument:\n{}",
         compiled.rust
     );
@@ -546,7 +548,7 @@ fn run() {
     let compiled = jet::compile(source)
         .unwrap_or_else(|diags| panic!("namespaced generic call failed: {diags:#?}"));
     assert!(
-        compiled.rust.contains("user_helpers__identity::<String>"),
+        compiled.rust.contains("__jet_helpers__identity::<String>"),
         "AOT output lost the namespaced explicit type argument:\n{}",
         compiled.rust
     );
@@ -696,9 +698,9 @@ fn run() {
 "#;
     let compiled = jet::compile(source)
         .unwrap_or_else(|diags| panic!("generic method call failed: {diags:#?}"));
-    assert!(compiled.rust.contains("<user_Box<i64>>::user_new"), "{}", compiled.rust);
-    assert!(compiled.rust.contains(".user_convert::<String>"), "{}", compiled.rust);
-    assert!(compiled.rust.contains("user_Box::user_make::<String>"), "{}", compiled.rust);
+    assert!(compiled.rust.contains("<__jet_Box<i64>>::__jet_new"), "{}", compiled.rust);
+    assert!(compiled.rust.contains(".__jet_convert::<String>"), "{}", compiled.rust);
+    assert!(compiled.rust.contains("__jet_Box::__jet_make::<String>"), "{}", compiled.rust);
 
     let root = std::env::temp_dir().join(format!(
         "jet_generic_method_calls_{}",

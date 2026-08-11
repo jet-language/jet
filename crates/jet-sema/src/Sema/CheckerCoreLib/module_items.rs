@@ -8,6 +8,12 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             .map(|declaration| declaration.name.to_string())
             .collect();
     }
+    if module == Syntax::CORE_MEM_MODULE {
+        return Syntax::CORE_MEM_GATE_TIERS
+            .iter()
+            .map(|(item, _)| (*item).to_string())
+            .collect();
+    }
     let items: &[&str] = match module {
         "core.io" => &[
             "Reader",
@@ -335,20 +341,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // UUIDs as `String`, no new nominal type); `v5` is the deterministic
         // namespace+name sibling of the already-shipped `v4`/`v7`.
         "core.uuid" => &["v4", "v7", "v5", "parse"],
-        "core.mem" => &[
-            "Ptr",
-            "from_addr",
-            "volatile_read",
-            "volatile_write",
-            "address_of",
-            // D-PIN1=A: the address-stability contract.
-            "pin",
-            "Pin",
-            "Arena",
-            "Bump",
-            "Pool",
-            "Fixed",
-        ],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.solve" => &["Solver"],
@@ -526,8 +518,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ServiceDelivery",
         ],
         "core.tasks" => &[
-            "spawn",
-            "spawn_group",
             "join_all",
             "wait_any",
             "yield_now",
@@ -921,6 +911,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
         "core.plugin" => &["load"],
+        // D-LIB-CALLGRANT1=A: pinned native Jet library loader.
+        Syntax::CORE_MOD_MODULE => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".
         "core.reactive" => &["signal", "derived", "computed", "effect"],

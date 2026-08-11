@@ -87,7 +87,41 @@ impl OutputFact {
                         fields.get(crate::Syntax::OUTPUT_FIELD_LOADABLE),
                         Some(OutputPayload::Bool(true))
                     )
+        )
+    }
+
+    /// D-LIB-EXPORT1=C: a native Library output asks the driver for the
+    /// static/shared artifacts and the C header.
+    pub fn is_native(&self) -> bool {
+        self.kind == PackageOutputKind::Library
+            && matches!(
+                &self.payload,
+                OutputPayload::Object(fields)
+                    if matches!(
+                        fields.get(crate::Syntax::OUTPUT_FIELD_NATIVE),
+                        Some(OutputPayload::Bool(true))
+                    )
             )
+    }
+
+    /// D-LIB-EXPORT1=C: the checked foreign binding language names requested
+    /// by this Library output. The parser owns the value shape; callers do
+    /// not re-parse manifest text.
+    pub fn binding_languages(&self) -> Vec<String> {
+        let OutputPayload::Object(fields) = &self.payload else {
+            return Vec::new();
+        };
+        let Some(OutputPayload::Array(values)) = fields.get(crate::Syntax::OUTPUT_FIELD_BINDINGS)
+        else {
+            return Vec::new();
+        };
+        values
+            .iter()
+            .filter_map(|value| match value {
+                OutputPayload::String(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -2023,6 +2057,34 @@ fn parse_output_value(key: &str, raw: &str) -> Result<OutputFact, PackageParseEr
                     value,
                 });
             }
+            let native_is_bool = matches!(
+                &payload,
+                OutputPayload::Object(fields)
+                    if matches!(fields.get(&field), Some(OutputPayload::Bool(_)))
+            );
+            if field == crate::Syntax::OUTPUT_FIELD_NATIVE && !native_is_bool {
+                return Err(PackageParseError::InvalidValue {
+                    field: format!("outputs.{key}.{field}"),
+                    value,
+                });
+            }
+            if field == crate::Syntax::OUTPUT_FIELD_BINDINGS {
+                let valid = matches!(
+                    &payload,
+                    OutputPayload::Object(fields)
+                        if matches!(
+                            fields.get(&field),
+                            Some(OutputPayload::Array(values))
+                                if values.iter().all(|value| matches!(value, OutputPayload::String(_)))
+                        )
+                );
+                if !valid {
+                    return Err(PackageParseError::InvalidValue {
+                        field: format!("outputs.{key}.{field}"),
+                        value,
+                    });
+                }
+            }
             Ok((field, scalar(&value)))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -2209,7 +2271,12 @@ fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
     match kind {
         PackageOutputKind::Library => matches!(
             field,
-            "name" | "modules" | "entry" | crate::Syntax::OUTPUT_FIELD_LOADABLE
+            "name"
+                | "modules"
+                | "entry"
+                | crate::Syntax::OUTPUT_FIELD_LOADABLE
+                | crate::Syntax::OUTPUT_FIELD_NATIVE
+                | crate::Syntax::OUTPUT_FIELD_BINDINGS
         ),
         PackageOutputKind::Executable | PackageOutputKind::Service | PackageOutputKind::Check => {
             matches!(field, "name" | "entry")
@@ -2863,6 +2930,34 @@ outputs: .{ mod: .Library.{ loadable: "yes" } }"#,
         )
         .unwrap_err();
         assert!(error.to_string().contains("outputs.mod.loadable"), "{error}");
+    }
+
+    #[test]
+    fn native_library_keeps_binding_requests_structured() {
+        let source = r#"name: "flightlog"
+outputs: .{ core: .Library.{ entry: Flightlog, native: true, bindings: [c, python, swift] } }"#;
+        let facts = PackageFacts::parse(source, "package.jet").unwrap();
+        let output = &facts.outputs["core"];
+        assert!(output.is_native());
+        assert_eq!(
+            output.binding_languages(),
+            vec!["c".to_string(), "python".to_string(), "swift".to_string()]
+        );
+
+        let formatted = format_source(source, "package.jet").unwrap();
+        let reparsed = PackageFacts::parse(&formatted, "package.jet").unwrap();
+        assert_eq!(&reparsed.outputs["core"], output);
+    }
+
+    #[test]
+    fn native_library_requires_a_boolean() {
+        let error = PackageFacts::parse(
+            r#"name: "flightlog"
+outputs: .{ core: .Library.{ native: "yes" } }"#,
+            "package.jet",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("outputs.core.native"), "{error}");
     }
 
     #[test]

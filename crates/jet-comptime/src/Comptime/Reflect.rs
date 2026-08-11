@@ -5,7 +5,10 @@
 //! target type's shape. `.markers` preserves written markers; the expanded
 //! view contains only derives lowered from them.
 
-use crate::AST::{DistinctDef, EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
+use crate::AST::{
+    Dimension, DistinctDef, EnumDef, Field, Func, Marker, StructDef, StructLayout, Type, TypeParam,
+    VariantPayload,
+};
 
 use crate::AST::CtValue;
 
@@ -14,6 +17,7 @@ pub struct ProgramSemanticFacts {
     pub effects: std::collections::HashMap<String, Vec<String>>,
     pub reaches_panic: std::collections::BTreeSet<String>,
     pub fact_registry: jet_foundation::Facts::FactRegistry,
+    pub name_ledger: jet_foundation::Names::NameLedger,
 }
 
 fn identity(module: &str, symbol: &str) -> String {
@@ -150,6 +154,177 @@ fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
     }
 }
 
+fn typed_enum(type_name: &str, variant: &str) -> CtValue {
+    CtValue::Enum {
+        type_name: type_name.to_string(),
+        variant: variant.to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn optional_value(value: Option<CtValue>, ty: &str) -> CtValue {
+    value.map_or_else(
+        || CtValue::absent(Type::Named(ty.to_string())),
+        |value| CtValue::Present(Box::new(value)),
+    )
+}
+
+/// One typed dimension fact. Axes remain records, so `Length^1` is not a
+/// display-only string: callers can inspect the axis and exponent.
+fn dimension_info(dimension: &Dimension) -> CtValue {
+    let axes = dimension
+        .axes()
+        .map(|(name, exponent)| {
+            ct_struct(
+                "DimensionAxis",
+                &[
+                    ("name", ct_str(name)),
+                    ("exponent", CtValue::Int(exponent as i64)),
+                ],
+            )
+        })
+        .collect();
+    ct_struct(
+        "DimensionInfo",
+        &[
+            ("axes", ct_list(axes)),
+            ("identity", ct_str(dimension.identity())),
+            ("display", ct_str(dimension.display_name())),
+        ],
+    )
+}
+
+fn range_info(start: i64, end: i64) -> CtValue {
+    ct_struct(
+        crate::Syntax::TYPE_RANGE,
+        &[("start", CtValue::Int(start)), ("end", CtValue::Int(end))],
+    )
+}
+
+/// Names and paths remain strings because they are stable fact identities; the
+/// fact's meaning is carried by typed kind, members, range, and dimension.
+fn fact_value(
+    kind: &str,
+    name: &str,
+    members: impl IntoIterator<Item = String>,
+    range: Option<CtValue>,
+    dimension: Option<CtValue>,
+) -> CtValue {
+    ct_struct(
+        "FactValue",
+        &[
+            ("kind", typed_enum("FactKind", kind)),
+            ("name", ct_str(name)),
+            (
+                "members",
+                ct_list(members.into_iter().map(ct_str).collect()),
+            ),
+            ("range", optional_value(range, crate::Syntax::TYPE_RANGE)),
+            (
+                "dimension",
+                optional_value(dimension, "DimensionInfo"),
+            ),
+        ],
+    )
+}
+
+fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
+    ct_struct(
+        "FactInfo",
+        &[
+            ("kind", typed_enum("FactKind", kind)),
+            ("name", ct_str(name)),
+            ("path", ct_str(path)),
+            ("value", value),
+        ],
+    )
+}
+
+fn type_dimensions(ty: &Type) -> Vec<CtValue> {
+    match ty {
+        Type::Quantity { dimension, .. } => vec![dimension_info(dimension)],
+        Type::Tagged { inner, .. } => type_dimensions(inner),
+        _ => Vec::new(),
+    }
+}
+
+fn type_range(ty: &Type) -> Option<(i64, i64)> {
+    match ty {
+        Type::IntN { signed, bits } => {
+            let (start, end) = crate::AST::int_range(*signed, *bits);
+            Some((i64::try_from(start).ok()?, i64::try_from(end).ok()?))
+        }
+        Type::Tagged { inner, .. } => type_range(inner),
+        _ => None,
+    }
+}
+
+fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
+    let mut facts = Vec::new();
+    if let Some((start, end)) = type_range(ty) {
+        facts.push(fact_info(
+            "Range",
+            "range",
+            format!("{path}.$range"),
+            fact_value(
+                "Range",
+                "range",
+                std::iter::empty::<String>(),
+                Some(range_info(start, end)),
+                None,
+            ),
+        ));
+    }
+    if let Some((_, dimension)) = ty.quantity_parts() {
+        facts.push(fact_info(
+            "Dimension",
+            "dimension",
+            format!("{path}.$dimension"),
+            fact_value(
+                "Dimension",
+                "dimension",
+                std::iter::empty::<String>(),
+                None,
+                Some(dimension_info(&dimension)),
+            ),
+        ));
+    }
+    facts
+}
+
+fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
+    let mut facts = Vec::new();
+    if let Some((start, end, _)) = definition.range {
+        facts.push(fact_info(
+            "Range",
+            "range",
+            format!("{}.$range", definition.name),
+            fact_value(
+                "Range",
+                "range",
+                std::iter::empty::<String>(),
+                Some(range_info(start, end)),
+                None,
+            ),
+        ));
+    }
+    if let Some((dimension, kind)) = &definition.quantity {
+        facts.push(fact_info(
+            "Dimension",
+            "dimension",
+            format!("{}.$dimension", definition.name),
+            fact_value(
+                "Dimension",
+                "dimension",
+                [kind.name().to_string()],
+                None,
+                Some(dimension_info(dimension)),
+            ),
+        ));
+    }
+    facts
+}
+
 /// D-TYPE2-PLANE1=A: a marker reflects as the typed record its registry row
 /// describes, at every position it may be written — the type, a field, a
 /// method, a variant. Nothing reflects a marker as a bare name.
@@ -267,6 +442,7 @@ pub fn build_field_info(field: &Field) -> CtValue {
             ("name", ct_str(field.name.clone())),
             ("ty", ct_str(field.ty.name())),
             ("markers", ct_list(marker_infos(&field.serde_markers))),
+            ("dimensions", ct_list(type_dimensions(&field.ty))),
             ("is_pub", ct_bool(field.is_pub)),
             (
                 "span",
@@ -289,6 +465,17 @@ pub fn build_method_info(method: &Func) -> CtValue {
         .iter()
         .map(|p| ct_str(format_param(&p.name, &p.ty)))
         .collect();
+    let dimensions = method
+        .params
+        .iter()
+        .flat_map(|param| type_dimensions(&param.ty))
+        .chain(
+            method
+                .return_type
+                .iter()
+                .flat_map(|ty| type_dimensions(ty)),
+        )
+        .collect();
     ct_struct(
         "MethodInfo",
         &[
@@ -305,6 +492,7 @@ pub fn build_method_info(method: &Func) -> CtValue {
             ),
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
+            ("dimensions", ct_list(dimensions)),
             // D-REFLECT1: the retained marker nodes, same source as every other
             // consumer. This was hardcoded empty, so reflection reported that a
             // method carried no markers no matter what was written on it.
@@ -412,30 +600,49 @@ fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
     ))
 }
 
+fn reflected_state_fact(owner: &str, state: &str) -> CtValue {
+    let path = state_path(owner, state);
+    fact_info(
+        "State",
+        state,
+        path.clone(),
+        fact_value("State", state, [path], None, None),
+    )
+}
+
 fn reflected_facts(registry: &jet_foundation::Facts::FactRegistry) -> Vec<CtValue> {
     registry
         .iter()
         .flat_map(|fact| {
             if fact.members.is_empty() {
-                vec![ct_struct(
-                    "FactInfo",
-                    &[
-                        ("kind", ct_str(fact.kind.name())),
-                        ("name", ct_str(fact.name.clone())),
-                        ("path", ct_str(fact.name.clone())),
-                    ],
+                vec![fact_info(
+                    fact.kind.name(),
+                    &fact.name,
+                    fact.name.clone(),
+                    fact_value(
+                        fact.kind.name(),
+                        &fact.name,
+                        std::iter::empty::<String>(),
+                        None,
+                        None,
+                    ),
                 )]
             } else {
                 fact.members
                     .iter()
                     .map(|member| {
-                        ct_struct(
-                            "FactInfo",
-                            &[
-                                ("kind", ct_str(fact.kind.name())),
-                                ("name", ct_str(member)),
-                                ("path", ct_str(format!("{}.{}", fact.name, member))),
-                            ],
+                        let path = format!("{}.{}", fact.name, member);
+                        fact_info(
+                            fact.kind.name(),
+                            member,
+                            path.clone(),
+                            fact_value(
+                                fact.kind.name(),
+                                member,
+                                [path],
+                                None,
+                                None,
+                            ),
                         )
                     })
                     .collect()
@@ -451,6 +658,11 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
 
 pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> CtValue {
     let fields_info: Vec<CtValue> = s.fields.iter().map(build_field_info).collect();
+    let dimensions = s
+        .fields
+        .iter()
+        .flat_map(|field| type_dimensions(&field.ty))
+        .collect::<Vec<_>>();
     let layout = build_struct_layout_info(s);
     let methods_info: Vec<CtValue> = s.methods.iter().map(build_method_info).collect();
     let type_params_info: Vec<CtValue> = s.type_params.iter().map(build_type_param_info).collect();
@@ -476,19 +688,13 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
         )
         .filter_map(|method| transition_info(&s.name, method))
         .collect::<Vec<_>>();
-    let facts = states
+    let mut facts = states
         .iter()
-        .map(|state| {
-            ct_struct(
-                "FactInfo",
-                &[
-                    ("kind", ct_str("State")),
-                    ("name", ct_str(state)),
-                    ("path", ct_str(format!("{}.State.{state}", s.name))),
-                ],
-            )
-        })
+        .map(|state| reflected_state_fact(&s.name, state))
         .collect::<Vec<_>>();
+    for field in &s.fields {
+        facts.extend(type_fact_rows(&format!("{}.{}", s.name, field.name), &field.ty));
+    }
     let (markers, expanded_markers) =
         type_level_marker_views(&s.type_markers, &s.serde_markers, &s.derives);
     ct_struct(
@@ -514,6 +720,7 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
             ("states", ct_list(state_info)),
             ("transitions", ct_list(transition_info)),
             ("facts", ct_list(facts)),
+            ("dimensions", ct_list(dimensions)),
             (
                 "implements",
                 ct_list(
@@ -533,6 +740,11 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
 /// `.expanded_markers`.
 pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
     let layout = layout_info("default", "physical layout unspecified", "distinct declaration", Vec::<(String, String)>::new());
+    let dimensions = d
+        .quantity
+        .as_ref()
+        .map(|(dimension, _)| vec![dimension_info(dimension)])
+        .unwrap_or_default();
     let (markers, expanded_markers) =
         type_level_marker_views(&d.type_markers, &[], &d.derives);
     qualify_info(
@@ -558,7 +770,8 @@ pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
                 ("expanded_markers", ct_list(expanded_markers)),
                 ("states", ct_list(Vec::new())),
                 ("transitions", ct_list(Vec::new())),
-                ("facts", ct_list(Vec::new())),
+                ("facts", ct_list(distinct_fact_rows(d))),
+                ("dimensions", ct_list(dimensions)),
                 ("implements", ct_list(Vec::new())),
             ],
         ),
@@ -568,36 +781,68 @@ pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
     )
 }
 
-fn qualify_info(mut info: CtValue, module: &str, symbol: &str, kind: &str) -> CtValue {
+fn qualify_info(mut info: CtValue, module: &str, identity: &str, kind: &str) -> CtValue {
     if let CtValue::Struct { fields, .. } = &mut info {
         fields.push(("module".to_string(), ct_str(module)));
-        fields.push(("identity".to_string(), ct_str(identity(module, symbol))));
+        fields.push(("identity".to_string(), ct_str(identity)));
         fields.push(("kind".to_string(), ct_str(kind)));
     }
     info
 }
 
-fn qualified_method_info(method: &Func, module: &str, owner: &str) -> CtValue {
+fn qualified_method_info(method: &Func, module: &str, identity: &str) -> CtValue {
     let mut info = build_method_info(method);
     if let CtValue::Struct { fields, .. } = &mut info {
         fields.push(("module".to_string(), ct_str(module)));
-        fields.push(("identity".to_string(), ct_str(format!("{module}::{owner}.{}", method.name))));
+        fields.push((
+            "identity".to_string(),
+            ct_str(format!("{identity}.{}", method.name)),
+        ));
     }
     info
 }
 
-fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
+fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str) -> CtValue {
     let layout = build_enum_layout_info(def);
+    let mut dimensions = Vec::new();
+    let mut facts = Vec::new();
+    for variant in &def.variants {
+        match &variant.payload {
+            VariantPayload::Unit => {}
+            VariantPayload::Single(ty, _) => {
+                dimensions.extend(type_dimensions(ty));
+                facts.extend(type_fact_rows(&format!("{}.{}", def.name, variant.name), ty));
+            }
+            VariantPayload::Named(fields) => {
+                for field in fields {
+                    dimensions.extend(type_dimensions(&field.ty));
+                    facts.extend(type_fact_rows(
+                        &format!("{}.{}.{}", def.name, variant.name, field.name),
+                        &field.ty,
+                    ));
+                }
+            }
+        }
+    }
     let variants = def.variants.iter().map(|variant| {
         let ty = match &variant.payload {
             VariantPayload::Unit => "Unit".to_string(),
             VariantPayload::Single(ty, _) => ty.name(),
             VariantPayload::Named(fields) => format!("{{{}}}", fields.iter().map(|field| format!("{}: {}", field.name, field.ty.name())).collect::<Vec<_>>().join(", ")),
         };
+        let variant_dimensions = match &variant.payload {
+            VariantPayload::Unit => Vec::new(),
+            VariantPayload::Single(ty, _) => type_dimensions(ty),
+            VariantPayload::Named(fields) => fields
+                .iter()
+                .flat_map(|field| type_dimensions(&field.ty))
+                .collect(),
+        };
         ct_struct("FieldInfo", &[
             ("name", ct_str(variant.name.clone())),
             ("ty", ct_str(ty)),
             ("markers", ct_list(marker_infos(&variant.serde_markers))),
+            ("dimensions", ct_list(variant_dimensions)),
             ("is_pub", ct_bool(def.is_pub)),
             ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[
                 ("start", CtValue::Int(variant.name_span.start as i64)),
@@ -613,7 +858,7 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
                 .iter()
                 .flat_map(|implementation| implementation.methods.iter()),
         )
-        .map(|method| qualified_method_info(method, module, &def.name))
+        .map(|method| qualified_method_info(method, module, identity))
         .collect();
     let params = def.type_params.iter().map(build_type_param_info).collect();
     let (markers, expanded_markers) =
@@ -639,9 +884,32 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         ("expanded_markers", ct_list(expanded_markers)),
         ("states", ct_list(Vec::new())),
         ("transitions", ct_list(transitions)),
-        ("facts", ct_list(Vec::new())),
+        ("facts", ct_list(facts)),
+        ("dimensions", ct_list(dimensions)),
         ("implements", ct_list(def.trait_impls.iter().map(|implementation| ct_str(implementation.trait_name.clone())).collect())),
-    ]), module, &def.name, "enum")
+    ]), module, identity, "enum")
+}
+
+fn ledger_module_name(
+    ledger: &jet_foundation::Names::NameLedger,
+    module: usize,
+    fallback: &str,
+) -> String {
+    ledger
+        .module_alias(module)
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn ledger_identity(
+    ledger: &jet_foundation::Names::NameLedger,
+    module: usize,
+    module_name: &str,
+    symbol: &str,
+) -> String {
+    ledger
+        .semantic_identity(module, symbol)
+        .unwrap_or_else(|| identity(module_name, symbol))
 }
 
 /// D-METADEPTH2: read-only, post-sema whole-program snapshot handed only to
@@ -654,14 +922,28 @@ pub fn build_program_info(
         (String, String),
         (Vec<String>, Vec<CtValue>, Vec<CtValue>),
     >::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let module_name = ledger_module_name(&facts.name_ledger, module_idx, &module.alias);
         for item in &module.items {
             if let crate::AST::Item::Impl(implementation) = item {
-                let entry = external_impls.entry((module.alias.clone(), implementation.type_name.clone())).or_default();
+                let entry = external_impls
+                    .entry((module_name.clone(), implementation.type_name.clone()))
+                    .or_default();
                 if let Some(trait_name) = &implementation.trait_name {
                     entry.0.push(trait_name.clone());
                 }
-                entry.1.extend(implementation.methods.iter().map(|method| qualified_method_info(method, &module.alias, &implementation.type_name)));
+                entry.1.extend(implementation.methods.iter().map(|method| {
+                    qualified_method_info(
+                        method,
+                        &module_name,
+                        &ledger_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &implementation.type_name,
+                        ),
+                    )
+                }));
                 entry.2.extend(
                     implementation
                         .methods
@@ -674,7 +956,8 @@ pub fn build_program_info(
     let mut types = Vec::new();
     let mut functions = Vec::new();
     let mut packages = Vec::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let module_name = ledger_module_name(&facts.name_ledger, module_idx, &module.alias);
         let mut package_types = Vec::new();
         let mut package_functions = Vec::new();
         for item in &module.items {
@@ -700,8 +983,8 @@ pub fn build_program_info(
                         .unwrap_or_default();
                     let mut info = qualify_info(
                         build_struct_type_info_with_states(def, &states),
-                        &module.alias,
-                        &def.name,
+                        &module_name,
+                        &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
                         "struct",
                     );
                     if let CtValue::Struct { fields, .. } = &mut info {
@@ -714,16 +997,29 @@ pub fn build_program_info(
                                         .iter()
                                         .flat_map(|implementation| implementation.methods.iter()),
                                 )
-                                .map(|method| qualified_method_info(method, &module.alias, &def.name))
+                                .map(|method| {
+                                    qualified_method_info(
+                                        method,
+                                        &module_name,
+                                        &ledger_identity(
+                                            &facts.name_ledger,
+                                            module_idx,
+                                            &module_name,
+                                            &def.name,
+                                        ),
+                                    )
+                                })
                                 .collect();
                         }
                         if let Some((_, CtValue::List(values))) =
                             fields.iter_mut().find(|(name, _)| name == "facts")
                         {
-                            *values = reflected_facts(&facts.fact_registry);
+                            values.extend(reflected_facts(&facts.fact_registry));
                         }
                     }
-                    if let Some((traits, methods, transitions)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                    if let Some((traits, methods, transitions)) =
+                        external_impls.get(&(module_name.clone(), def.name.clone()))
+                    {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") {
                                 values.extend(traits.iter().cloned().map(ct_str));
@@ -740,15 +1036,21 @@ pub fn build_program_info(
                     package_types.push(info);
                 }
                 crate::AST::Item::Enum(def) => {
-                    let mut info = build_enum_type_info(def, &module.alias);
+                    let mut info = build_enum_type_info(
+                        def,
+                        &module_name,
+                        &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
+                    );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(values))) =
                             fields.iter_mut().find(|(name, _)| name == "facts")
                         {
-                            *values = reflected_facts(&facts.fact_registry);
+                            values.extend(reflected_facts(&facts.fact_registry));
                         }
                     }
-                    if let Some((traits, methods, transitions)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                    if let Some((traits, methods, transitions)) =
+                        external_impls.get(&(module_name.clone(), def.name.clone()))
+                    {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") { values.extend(traits.iter().cloned().map(ct_str)); }
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") { values.extend(methods.iter().cloned()); }
@@ -764,7 +1066,7 @@ pub fn build_program_info(
                         if let Some((_, CtValue::List(values))) =
                             fields.iter_mut().find(|(name, _)| name == "facts")
                         {
-                            *values = reflected_facts(&facts.fact_registry);
+                            values.extend(reflected_facts(&facts.fact_registry));
                         }
                     }
                     if let Some((traits, methods, transitions)) =
@@ -792,7 +1094,7 @@ pub fn build_program_info(
                     package_types.push(info);
                 }
                 crate::AST::Item::Func(func) if func.name != "build" => {
-                    let info = build_function_info(func, &module.alias, facts);
+                    let info = build_function_info(func, module_idx, &module_name, facts);
                     functions.push(info.clone());
                     package_functions.push(info);
                 }
@@ -802,8 +1104,8 @@ pub fn build_program_info(
         packages.push(ct_struct(
             "PackageInfo",
             &[
-                ("name", ct_str(module.alias.clone())),
-                ("identity", ct_str(module.alias.clone())),
+                ("name", ct_str(module_name.clone())),
+                ("identity", ct_str(module_name)),
                 ("types", ct_list(package_types)),
                 ("functions", ct_list(package_functions)),
             ],
@@ -819,8 +1121,13 @@ pub fn build_program_info(
     )
 }
 
-fn build_function_info(func: &Func, module: &str, facts: &ProgramSemanticFacts) -> CtValue {
-    let qualified = identity(module, &func.name);
+fn build_function_info(
+    func: &Func,
+    module_idx: usize,
+    module: &str,
+    facts: &ProgramSemanticFacts,
+) -> CtValue {
+    let qualified = ledger_identity(&facts.name_ledger, module_idx, module, &func.name);
     let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
     ct_struct(
         "FunctionInfo",
@@ -860,7 +1167,7 @@ fn build_function_info(func: &Func, module: &str, facts: &ProgramSemanticFacts) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Diagnostics::Span, AST::Type};
+    use crate::{Diagnostics::Span, AST::{Dimension, QuantityKind, Type}};
 
     fn span() -> Span {
         Span::new(0, 1)
@@ -892,6 +1199,7 @@ mod tests {
             name: name.to_string(),
             name_span: span(),
             type_params: Vec::new(),
+            head_pattern: None,
             params: Vec::new(),
             return_type: Some(Type::Named("String".to_string())),
             return_type_span: Some(span()),
@@ -932,6 +1240,17 @@ mod tests {
             markers: Vec::new(),
             body: Vec::new(),
         }
+    }
+
+    fn struct_field<'a>(value: &'a CtValue, name: &str) -> &'a CtValue {
+        let CtValue::Struct { fields, .. } = value else {
+            panic!("expected struct, got {value:?}");
+        };
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+            .unwrap_or_else(|| panic!("missing field `{name}` in {value:?}"))
     }
 
     #[test]
@@ -1053,5 +1372,63 @@ mod tests {
         assert!(rows.contains("Effect") && rows.contains("Exec"), "{rows}");
         assert!(rows.contains("Tag") && rows.contains("PII"), "{rows}");
         assert!(rows.contains("State") && rows.contains("Door.State.Open"), "{rows}");
+    }
+
+    #[test]
+    fn range_and_dimension_facts_are_typed_records() {
+        let info = build_distinct_type_info(
+            &DistinctDef {
+                is_pub: true,
+                is_package_pub: false,
+                type_markers: Vec::new(),
+                derives: Vec::new(),
+                quantity: Some((Dimension::base("Length"), QuantityKind::Linear)),
+                name: "Severity".to_string(),
+                name_span: span(),
+                base: Type::Int,
+                base_span: span(),
+                range: Some((0, 10, span())),
+                invariant: None,
+                span: span(),
+            },
+            "main",
+        );
+        let CtValue::List(facts) = struct_field(&info, "facts") else {
+            panic!("facts");
+        };
+        let is_kind = |fact: &CtValue, expected: &str| match struct_field(fact, "kind") {
+            CtValue::Enum { variant, .. } => variant == expected,
+            other => panic!("expected typed fact kind, got {other:?}"),
+        };
+
+        let range = facts
+            .iter()
+            .find(|fact| is_kind(fact, "Range"))
+            .expect("range fact");
+        let CtValue::Present(range_value) = struct_field(struct_field(range, "value"), "range")
+        else {
+            panic!("range fact must carry a present Range");
+        };
+        assert!(matches!(struct_field(range_value, "start"), CtValue::Int(0)));
+        assert!(matches!(struct_field(range_value, "end"), CtValue::Int(10)));
+
+        let dimension = facts
+            .iter()
+            .find(|fact| is_kind(fact, "Dimension"))
+            .expect("dimension fact");
+        let CtValue::Present(dimension_value) =
+            struct_field(struct_field(dimension, "value"), "dimension")
+        else {
+            panic!("dimension fact must carry a present DimensionInfo");
+        };
+        let CtValue::List(axes) = struct_field(dimension_value, "axes") else {
+            panic!("dimension axes");
+        };
+        assert!(axes.iter().any(|axis| {
+            matches!(
+                (struct_field(axis, "name"), struct_field(axis, "exponent")),
+                (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
+            )
+        }));
     }
 }

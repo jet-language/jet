@@ -6,6 +6,9 @@ pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// D-ENTRY-SCRIPT1=B: top-level statements remain separate until sema
+    /// materializes the entry file's implicit `fn run`.
+    pub script_body: Vec<Stmt>,
     /// Parser-owned inner boundaries for statement blocks. Each span starts
     /// immediately after `{` and ends immediately before `}`.
     pub block_spans: Vec<Span>,
@@ -96,6 +99,57 @@ pub struct ImportDecl {
 pub struct InlineVersion {
     pub text: String,
     pub span: Span,
+}
+
+/// The target selected by one member in a Core `.[…]` import list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoreListPath {
+    /// The member names another Core module, such as `encoding.json`.
+    Module(String),
+    /// The member names an item inside the longest known Core module prefix.
+    Item { module: String, item: String },
+}
+
+/// D-CORE-USELIST1=A: the std path prefix a `use <prefix>.[…]` list walks, or
+/// `None` when the prefix names something else. The prefix may be any depth, so
+/// `use core.encoding.[json]` walks to `core.encoding.json` exactly as
+/// `use core.[encoding.json]` does. `jet` is the retired spelling of the same
+/// root and resolves to `core`.
+pub fn core_list_prefix(module_alias: &str) -> Option<String> {
+    let rest = module_alias
+        .strip_prefix(Syntax::CORE_SHORT)
+        .or_else(|| module_alias.strip_prefix("jet"))?;
+    (rest.is_empty() || rest.starts_with('.'))
+        .then(|| format!("{}{rest}", Syntax::CORE_SHORT))
+}
+
+/// Resolve one member path in a Core `.[…]` import list. The longest known
+/// module prefix wins, so `core.[math.abs]` and `core.math.[abs]` select the
+/// same Core member while `core.encoding.[json]` selects a submodule.
+pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> {
+    let prefix = core_list_prefix(module_alias)?;
+    let full = format!("{prefix}.{member}");
+    if Syntax::is_known_core_module(&full) {
+        return Some(CoreListPath::Module(full));
+    }
+
+    let parts: Vec<&str> = full.split('.').collect();
+    for split in (1..parts.len()).rev() {
+        let module = parts[..split].join(".");
+        if Syntax::is_known_core_module(&module) {
+            let item = parts[split..].join(".");
+            if !item.is_empty() {
+                return Some(CoreListPath::Item { module, item });
+            }
+        }
+    }
+    None
+}
+
+/// Return the local name for one member in a grouped `use` list. An explicit
+/// alias wins; otherwise a dotted member path binds its final segment.
+pub fn import_item_alias<'a>(original: &'a str, alias: Option<&'a str>) -> &'a str {
+    alias.unwrap_or_else(|| original.rsplit('.').next().unwrap_or(original))
 }
 
 impl ImportDecl {
@@ -298,7 +352,7 @@ pub enum ImportKind {
     File(String, Span),
     /// Bare module name — searched from the project root.
     Module(String, Span),
-    /// D-MOD3/4: `use alias.Item` / `use alias.{A, B as C}` / `pub use alias.Item`
+    /// D-MOD3/4: `use alias.Item` / `use alias.[A, B as C]` / `pub use alias.Item`
     /// D-SELIMPORT1=A: each item may carry an `as alias` — `(original, alias_if_any)`.
     Unqualified {
         module_alias: String,
@@ -335,11 +389,9 @@ pub struct ProgramBundle {
     /// Each entry records the path and sha256 of a file embedded at compile
     /// time. Written to `.jet/lock` by the build driver for reproducibility.
     pub comptime_inputs: Vec<ComptimeInput>,
-    /// Pre-resolved import target indices: `(from_module_idx, import_span) → to_module_idx`.
-    /// Populated by `Loader::load_entry_with_overlay` after all modules are loaded.
-    /// Core-module imports and C imports are absent (they have no loaded module index).
-    /// Empty for single-module bundles created inline (compile_src / check_eval paths).
-    pub import_targets: std::collections::HashMap<(usize, Span), usize>,
+    /// One name ledger. Loader seeds file-import edges; sema fills checked
+    /// declaration, alias, visibility, path, and reference facts.
+    pub name_ledger: crate::Names::NameLedger,
     /// D-RINGLAYER1: optional `runtime:` ceiling from `pkg.jet`.
     pub layer_ceiling: Option<crate::RingLayer::RuntimeLayer>,
     /// D-RINGLAYER1: inferred minimum runtime profile for this package.
@@ -379,6 +431,9 @@ pub struct LoadedModule {
     pub alias: String,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// D-ENTRY-SCRIPT1=B: raw top-level statements from a script file. Sema
+    /// consumes these only for the entry module; imported scripts are errors.
+    pub script_body: Vec<Stmt>,
     /// Checked parser-owned inner boundaries for statement blocks.
     pub block_spans: Vec<Span>,
     /// D-WASM1: optional file-level web bucket ceiling.

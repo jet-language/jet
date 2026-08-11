@@ -1,5 +1,7 @@
 #![allow(dead_code, non_camel_case_types, unexpected_cfgs)]
 
+mod common;
+
 struct JetTCPListener {
     inner: std::net::TcpListener,
 }
@@ -8,14 +10,14 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
-trait user_Encode {}
-impl<T> user_Encode for T {}
+trait __jet_Encode {}
+impl<T> __jet_Encode for T {}
 
-trait user_Decode: Sized {
+trait __jet_Decode: Sized {
     fn from_json_fixture(text: &str) -> Result<Self, String>;
 }
 
-impl user_Decode for String {
+impl __jet_Decode for String {
     fn from_json_fixture(text: &str) -> Result<Self, String> {
         let trimmed = text.trim_start();
         if trimmed.starts_with('{') || trimmed.starts_with('[') || trimmed.starts_with('"') {
@@ -26,11 +28,11 @@ impl user_Decode for String {
     }
 }
 
-fn jet_enc_json_to_string<T: user_Encode>(_value: &T) -> String {
+fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
     r#"{"ok":true}"#.to_string()
 }
 
-fn jet_enc_json_decode<T: user_Decode>(text: &str) -> Result<T, String> {
+fn jet_enc_json_decode<T: __jet_Decode>(text: &str) -> Result<T, String> {
     T::from_json_fixture(text)
 }
 
@@ -78,6 +80,11 @@ thread_local! {
     static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
     static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn jet_runtime_diagnostic(rendered: String) -> ! {
+    eprintln!("{rendered}");
+    std::process::exit(70);
 }
 
 fn jet_scheduler_task_panic_enter() { JET_IN_SCHEDULER_TASK.with(|task| task.set(true)); }

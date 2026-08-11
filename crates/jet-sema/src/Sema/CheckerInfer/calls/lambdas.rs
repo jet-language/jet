@@ -158,6 +158,37 @@ use std::collections::HashSet;
                     let Some((cap_ty, cap_sendable, cap_conv)) = cap else {
                         continue;
                     };
+                    if self.interrupt_callback_depth > 0 {
+                        let problem = if matches!(&cap_ty, Type::Fn { .. }) {
+                            let callback_safe = self
+                                .lookup(name)
+                                .map(|info| info.interrupt_sendable)
+                                .unwrap_or(false);
+                            if callback_safe {
+                                None
+                            } else {
+                                self.sendability_problem(&cap_ty, false).or(Some(
+                                    SendabilityProblem {
+                                        root: None,
+                                        path: Vec::new(),
+                                        kind: SendProblemKind::ClosureCaptures,
+                                    },
+                                ))
+                            }
+                        } else {
+                            self.sendability_problem(&cap_ty, true)
+                        };
+                        if let Some(problem) = problem {
+                            self.report_unsendable(
+                                name,
+                                &cap_ty,
+                                problem,
+                                SendCrossing::InterruptCallback,
+                                lam.span,
+                            );
+                            continue;
+                        }
+                    }
                     if self.is_task_spawn && self.type_contains_cell_guard(&cap_ty) {
                         let problem = self
                             .sendability_problem(&cap_ty, true)
@@ -381,6 +412,7 @@ use std::collections::HashSet;
                         param_conv: Some(AccessConvention::Read),
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
+                        interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
                         task_lint_span: None,
@@ -756,7 +788,7 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
 }
 
 fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Diagnostics::Span) {
-    let target = format!("__jet_collect_{}", span.start);
+    let target = Syntax::generated_name(&format!("collect_{}", span.start));
     rewrite_collect_yields(stmts, &target);
     stmts.insert(
         0,

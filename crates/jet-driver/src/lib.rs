@@ -60,6 +60,7 @@ pub mod QueryService;
 // API-freeze validation via Sema) and was never used by `jetpack` itself, so
 // it lives directly in this crate instead of the shared model.
 pub mod PluginExport;
+pub mod LibraryExport;
 pub mod CompilerExtensionHook;
 pub mod BuildPluginHook;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: `EffectBudget`/`LintPolicy` are
@@ -72,4 +73,5 @@ pub use jet_pkg_model::{
     AdaBind, CBind, CFFI, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, LuaBind, Package, PascalBind, PerlBind, PhpBind, Policy, RBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, ScriptDeps,
     Store,
 };
+pub use jet_pkg_model::JetLib::{JetLibArtifact, JetLibStamp};
 pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};

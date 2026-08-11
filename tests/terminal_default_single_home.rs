@@ -7,6 +7,8 @@
 //! second hand-typed `cols: 80` / `rows: 24` pair reappears anywhere under
 //! `crates/` outside the one home.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

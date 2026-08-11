@@ -69,7 +69,7 @@ pub enum ReportMoment {
 }
 
 impl ReportMoment {
-    fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Compile => "compile",
             Self::Run => "run",
@@ -198,6 +198,9 @@ impl Diagnostic {
 }
 
 impl Diagnostic {
+    /// Build a report from the one typed row. The supplied strings are the
+    /// row's holes after sema has filled them; code, severity, and moment never
+    /// come from a second call-site policy.
     pub fn error(
         code: impl Into<String>,
         what: String,
@@ -205,10 +208,13 @@ impl Diagnostic {
         fix: String,
         span: Option<Span>,
     ) -> Self {
+        let code = code.into();
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         let mut d = Diagnostic {
-            moment: ReportMoment::Compile,
-            severity: Severity::Error,
-            code: code.into(),
+            moment: row.moment,
+            severity: row.severity,
+            code,
             what,
             why,
             fix,
@@ -219,6 +225,49 @@ impl Diagnostic {
         };
         d.attach_teaching_edit();
         d
+    }
+
+    /// The TIR interpreter's internal control-flow sentinels: each unwinds a
+    /// `Result<_, Diagnostic>` cleanly out of `eval_expr`/a task worker without
+    /// ever meaning to reach a renderer (`SOFT_EXIT`: a `panic`/`require`/
+    /// contract failure or an `E3005` trap, after already writing the rendered
+    /// message and exit code into the shared `DevSink` — Source/Interpreter.rs
+    /// and jet-jit/src/jit/deopt.rs both special-case `code == "SOFT_EXIT"`;
+    /// `TASK_CANCELLED`: a task's wait point observed a pending cancel).
+    /// Deliberately NOT registered rows — they must never surface as a real
+    /// user-facing diagnostic — so this skips `error()`'s registry lookup
+    /// instead of panicking on the code every one of them would otherwise
+    /// trigger by construction.
+    fn internal_sentinel(code: &'static str, what: String, why: String, span: Option<Span>) -> Self {
+        let mut d = Diagnostic {
+            moment: ReportMoment::Run,
+            severity: Severity::Error,
+            code: code.to_string(),
+            what,
+            why,
+            fix: String::new(),
+            span,
+            edit: None,
+            detail: None,
+            structured: None,
+        };
+        d.attach_teaching_edit();
+        d
+    }
+
+    /// See `internal_sentinel`.
+    pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Self {
+        Self::internal_sentinel("SOFT_EXIT", what, why, span)
+    }
+
+    /// See `internal_sentinel`.
+    pub fn task_cancelled(span: Option<Span>) -> Self {
+        Self::internal_sentinel(
+            "TASK_CANCELLED",
+            "task cancelled".to_string(),
+            "the owning taskgroup stopped this task".to_string(),
+            span,
+        )
     }
 
     pub fn e0956_unsupported(what: &str, span: Span) -> Self {
@@ -270,10 +319,13 @@ impl Diagnostic {
         fix: String,
         span: Option<Span>,
     ) -> Self {
+        let code = code.into();
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         Diagnostic {
-            moment: ReportMoment::Compile,
-            severity: Severity::Lint,
-            code: code.into(),
+            moment: row.moment,
+            severity: row.severity,
+            code,
             what,
             why,
             fix,
@@ -1014,6 +1066,29 @@ mod crypto_diagnostic_contract_tests {
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
         assert_eq!(render_all_json("x.jet", "", &[]), "");
+    }
+
+    #[test]
+    fn constructors_take_metadata_from_the_typed_row() {
+        let error = Diagnostic::error(
+            "E0102",
+            "nothing named `pirnt` exists here".into(),
+            "only known functions can be called".into(),
+            "did you mean `print`?".into(),
+            None,
+        );
+        assert_eq!(error.severity, Severity::Error);
+        assert_eq!(error.moment, ReportMoment::Compile);
+
+        let lint = Diagnostic::lint(
+            "L2001",
+            "an item is deprecated".into(),
+            "the edition keeps it during migration".into(),
+            "use the replacement".into(),
+            None,
+        );
+        assert_eq!(lint.severity, Severity::Lint);
+        assert_eq!(lint.moment, ReportMoment::Compile);
     }
 
     #[test]

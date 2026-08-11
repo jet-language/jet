@@ -1,13 +1,80 @@
 use super::*;
 use crate::Traits;
-use crate::AST::{AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type};
-use std::collections::HashMap;
+use crate::AST::{
+    AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type, VariantPayload,
+};
+use std::collections::{HashMap, HashSet};
 
 /// Look up the pre-resolved module index for an import. Returns `None` for
 /// core modules, C imports, and unqualified imports (they have no file target).
 #[inline]
+fn import_is_active(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> bool {
+    bundle
+        .name_ledger
+        .effective_alias(module_idx, &imp.import_alias())
+        .is_some()
+}
+
 fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
-    bundle.import_targets.get(&(module_idx, imp.span)).copied()
+    if !import_is_active(bundle, module_idx, imp) {
+        return None;
+    }
+    bundle.name_ledger.import_target(module_idx, imp.span)
+}
+
+fn file_import_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    alias: &str,
+) -> Option<usize> {
+    bundle.modules[module_idx]
+        .imports
+        .iter()
+        .filter(|imp| !matches!(imp.kind, ImportKind::Unqualified { .. }))
+        .filter(|imp| imp.import_alias() == alias)
+        .find_map(|imp| resolve_target(bundle, module_idx, imp))
+}
+
+/// Resolve nominal declarations reached through `use module.Item`. The
+/// selective spelling has no module import edge of its own, so its canonical
+/// owner comes from the ledger alias recorded for the local item binding.
+pub(crate) fn selective_nominal_targets(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> Vec<(usize, String)> {
+    let mut targets = Vec::new();
+    for import in &bundle.modules[module_idx].imports {
+        let ImportKind::Unqualified { items, .. } = &import.kind else {
+            continue;
+        };
+        for (original, local_alias) in items {
+            let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+            let Some(target) = bundle
+                .name_ledger
+                .alias(module_idx, local)
+                .and_then(|alias| alias.target_module)
+            else {
+                continue;
+            };
+            let leaf = original.rsplit('.').next().unwrap_or(original);
+            let is_nominal = bundle.modules[target].items.iter().any(|item| match item {
+                Item::Struct(definition) => definition.name == leaf,
+                Item::Enum(definition) => definition.name == leaf,
+                Item::Distinct(definition) => definition.name == leaf,
+                Item::UnitFamily(family) => family
+                    .distinct_defs()
+                    .iter()
+                    .any(|member| member.name == leaf),
+                _ => false,
+            });
+            if is_nominal && bundle.name_ledger.visible(module_idx, target, leaf) {
+                targets.push((target, leaf.to_string()));
+            }
+        }
+    }
+    targets.sort_unstable();
+    targets.dedup();
+    targets
 }
 
 fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
@@ -16,18 +83,27 @@ fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
             .items
             .iter()
             .any(|item| matches!(item, Item::UnitFamily(family) if family.distinct_defs().iter().any(|member| member.name == name)))
-            .then(|| format!("{}.{}", bundle.modules[target].alias, name))
+            .then(|| {
+                bundle
+                    .name_ledger
+                    .nominal_identity(target, name)
+                    .expect("name ledger must contain every loaded module")
+            })
     })
 }
 
-fn qualify_imported_call_type(
+pub(crate) fn qualify_imported_call_type(
     bundle: &ProgramBundle,
     target: usize,
-    alias: &str,
+    _alias: &str,
     ty: &Type,
 ) -> Type {
     let unit_qualified = qualify_unit_type(bundle, target, ty);
-    crate::Codegen::TIR::qualify_imported_type(bundle, target, alias, &unit_qualified)
+    let owner = bundle
+        .name_ledger
+        .module_identity(target)
+        .expect("name ledger must contain every loaded module");
+    crate::Codegen::TIR::qualify_imported_type(bundle, target, &owner, &unit_qualified)
 }
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneability/hashability checks for any local
@@ -59,69 +135,52 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
     }
 }
 
-/// Build the cross-module type map for all public types defined in imported
-/// file-modules of `module_idx`. Qualified entries retain the written import
-/// alias (`notes.Note`); a bare leaf is kept only when every visible import
-/// resolves that leaf to the same loaded module identity.
+/// Build the cross-module type map with one canonical nominal key per owner.
+/// Import aliases are source lookup projections, never semantic identities.
 pub(crate) fn foreign_type_map(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let mut leaf_modules = HashMap::<String, Option<usize>>::new();
     let module = &bundle.modules[module_idx];
-    let is_local = |name: &str| {
-        module.items.iter().any(|item| match item {
-            Item::Struct(structure) => structure.name == name,
-            Item::Enum(enumeration) => enumeration.name == name,
-            _ => false,
-        })
-    };
     for imp in &module.imports {
         if imp.is_c_import() {
             continue;
         }
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
-            let alias = imp.import_alias();
-            let rust_mod = format!("user_{}", bundle.modules[target].alias);
+            let rust_mod = mangle(&bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
-                    Item::Struct(s) if s.is_pub => {
-                        map.insert(format!("{alias}.{}", s.name), rust_mod.clone());
-                        if !is_local(&s.name) {
-                            match leaf_modules.entry(s.name.clone()) {
-                                std::collections::hash_map::Entry::Vacant(entry) => {
-                                    entry.insert(Some(target));
-                                }
-                                std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                    if entry.get().as_ref() != Some(&target) {
-                                        entry.insert(None);
-                                    }
-                                }
-                            }
+                    Item::Struct(s)
+                        if bundle.name_ledger.visible(module_idx, target, &s.name) =>
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
+                            map.insert(identity, rust_mod.clone());
                         }
                     }
-                    Item::Enum(e) if e.is_pub => {
-                        map.insert(format!("{alias}.{}", e.name), rust_mod.clone());
-                        if !is_local(&e.name) {
-                            match leaf_modules.entry(e.name.clone()) {
-                                std::collections::hash_map::Entry::Vacant(entry) => {
-                                    entry.insert(Some(target));
-                                }
-                                std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                    if entry.get().as_ref() != Some(&target) {
-                                        entry.insert(None);
-                                    }
-                                }
-                            }
+                    Item::Enum(e)
+                        if bundle.name_ledger.visible(module_idx, target, &e.name) =>
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
+                            map.insert(identity, rust_mod.clone());
                         }
                     }
-                    Item::UnitFamily(family) if family.is_pub => {
+                    Item::Distinct(d)
+                        if bundle.name_ledger.visible(module_idx, target, &d.name) =>
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                            map.insert(identity, rust_mod.clone());
+                        }
+                    }
+                    Item::UnitFamily(family) => {
                         for member in family.distinct_defs() {
-                            map.insert(
-                                format!("{}.{}", bundle.modules[target].alias, member.name),
-                                rust_mod.clone(),
-                            );
+                            if bundle.name_ledger.visible(module_idx, target, &member.name) {
+                                if let Some(identity) =
+                                    bundle.name_ledger.nominal_identity(target, &member.name)
+                                {
+                                    map.insert(identity, rust_mod.clone());
+                                }
+                            }
                         }
                     }
                     _ => {}
@@ -129,56 +188,56 @@ pub(crate) fn foreign_type_map(
             }
         }
     }
-    for ((alias, _), (rust_mod, _)) in reexport_call_map(bundle, module_idx) {
-        let Some(target_alias) = rust_mod.strip_prefix("user_") else {
+    for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
+        let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
             continue;
         };
+        map.insert(identity, mangle(&bundle.modules[target].alias));
+    }
+    for ((_, _), (rust_mod, _)) in reexport_call_map(bundle, module_idx) {
         let Some(target) = bundle
             .modules
             .iter()
-            .position(|candidate| candidate.alias == target_alias)
+            .position(|candidate| mangle(&candidate.alias) == rust_mod)
         else {
             continue;
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Struct(s) if s.is_pub => {
-                    map.insert(format!("{alias}.{}", s.name), rust_mod.clone());
-                    if !is_local(&s.name) {
-                        match leaf_modules.entry(s.name.clone()) {
-                            std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert(Some(target));
-                            }
-                            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                if entry.get().as_ref() != Some(&target) {
-                                    entry.insert(None);
-                                }
-                            }
-                        }
+                Item::Struct(s)
+                    if bundle.name_ledger.visible(module_idx, target, &s.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
+                        map.insert(identity, rust_mod.clone());
                     }
                 }
-                Item::Enum(e) if e.is_pub => {
-                    map.insert(format!("{alias}.{}", e.name), rust_mod.clone());
-                    if !is_local(&e.name) {
-                        match leaf_modules.entry(e.name.clone()) {
-                            std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert(Some(target));
-                            }
-                            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                if entry.get().as_ref() != Some(&target) {
-                                    entry.insert(None);
-                                }
+                Item::Enum(e)
+                    if bundle.name_ledger.visible(module_idx, target, &e.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::Distinct(d)
+                    if bundle.name_ledger.visible(module_idx, target, &d.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::UnitFamily(family) => {
+                    for member in family.distinct_defs() {
+                        if bundle.name_ledger.visible(module_idx, target, &member.name) {
+                            if let Some(identity) =
+                                bundle.name_ledger.nominal_identity(target, &member.name)
+                            {
+                                map.insert(identity, rust_mod.clone());
                             }
                         }
                     }
                 }
                 _ => {}
             }
-        }
-    }
-    for (leaf, target) in leaf_modules {
-        if let Some(target) = target {
-            map.insert(leaf, format!("user_{}", bundle.modules[target].alias));
         }
     }
     map
@@ -199,22 +258,99 @@ pub(crate) fn register_foreign_enum_variants(
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
             for item in &bundle.modules[target].items {
                 if let Item::Enum(e) = item {
-                    if e.is_pub {
-                        cx.enum_variants.entry(e.name.clone()).or_insert_with(|| {
+                    if bundle.name_ledger.visible(module_idx, target, &e.name) {
+                        let Some(identity) =
+                            bundle.name_ledger.nominal_identity(target, &e.name)
+                        else {
+                            continue;
+                        };
+                        cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
                             e.variants
                                 .iter()
-                                .map(|v| (v.name.clone(), v.payload.clone()))
+                                .map(|v| {
+                                    (
+                                        v.name.clone(),
+                                        qualify_imported_variant_payload(
+                                            bundle,
+                                            target,
+                                            &identity,
+                                            &v.payload,
+                                        ),
+                                    )
+                                })
                                 .collect()
                         });
                         for v in &e.variants {
                             cx.variant_owner
                                 .entry(v.name.clone())
-                                .or_insert_with(|| e.name.clone());
+                                .or_insert_with(|| identity.clone());
                         }
                     }
                 }
             }
         }
+    }
+    for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
+        let Some(item) = bundle.modules[target].items.iter().find(|item| {
+            matches!(item, Item::Enum(definition) if definition.name == leaf)
+        }) else {
+            continue;
+        };
+        let Item::Enum(e) = item else { continue };
+        let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
+            continue;
+        };
+        cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
+            e.variants
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.name.clone(),
+                        qualify_imported_variant_payload(
+                            bundle,
+                            target,
+                            &identity,
+                            &variant.payload,
+                        ),
+                    )
+                })
+                .collect()
+        });
+        for variant in &e.variants {
+            cx.variant_owner
+                .entry(variant.name.clone())
+                .or_insert_with(|| identity.clone());
+        }
+    }
+}
+
+fn qualify_imported_variant_payload(
+    bundle: &ProgramBundle,
+    target: usize,
+    owner: &str,
+    payload: &VariantPayload,
+) -> VariantPayload {
+    match payload {
+        VariantPayload::Unit => VariantPayload::Unit,
+        VariantPayload::Single(ty, span) => VariantPayload::Single(
+            crate::Codegen::TIR::qualify_imported_type(bundle, target, owner, ty),
+            *span,
+        ),
+        VariantPayload::Named(fields) => VariantPayload::Named(
+            fields
+                .iter()
+                .map(|field| {
+                    let mut qualified = field.clone();
+                    qualified.ty = crate::Codegen::TIR::qualify_imported_type(
+                        bundle,
+                        target,
+                        owner,
+                        &field.ty,
+                    );
+                    qualified
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -225,18 +361,72 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
         let alias = imp.import_alias();
         // S59: C `use` forms target a synthetic merged module by alias.
         if imp.is_c_import() {
+            if !import_is_active(bundle, module_idx, imp) {
+                continue;
+            }
             if let Some(target) = bundle.cffi.target_for(module_idx, &alias) {
                 let stem = &bundle.modules[target].alias;
-                map.insert(alias, format!("user_{}", stem));
+                map.insert(alias, mangle(stem));
             }
             continue;
         }
-        if let Some(target) = resolve_target(bundle, module_idx, imp) {
+        if let Some(target) = bundle
+            .name_ledger
+            .effective_alias(module_idx, &alias)
+            .and_then(|name| name.target_module)
+        {
             let stem = &bundle.modules[target].alias;
-            map.insert(alias, format!("user_{}", stem));
+            map.insert(alias, mangle(stem));
         }
     }
+    for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        map.insert(local, mangle(&bundle.modules[target].alias));
+    }
     map
+}
+
+/// Return selective-import aliases that name a visible bodyless child module.
+/// Sema installs the same child edge in its module-import map; codegen only
+/// projects that edge to the generated Rust module name.
+fn unqualified_file_module_targets(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> Vec<(String, usize)> {
+    let module = &bundle.modules[module_idx];
+    let mut targets = Vec::new();
+    for imp in &module.imports {
+        let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &imp.kind
+        else {
+            continue;
+        };
+        let Some(parent) = file_import_target(bundle, module_idx, module_alias) else {
+            continue;
+        };
+        for (original, local_alias) in items {
+            let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+            let Some(declaration) = bundle.name_ledger.declaration(parent, original) else {
+                continue;
+            };
+            if declaration.kind != "file_module"
+                || !bundle.name_ledger.visible(module_idx, parent, original)
+            {
+                continue;
+            }
+            let Some(target) = bundle
+                .name_ledger
+                .alias(parent, original)
+                .and_then(|alias| alias.target_module)
+            else {
+                continue;
+            };
+            targets.push((local.to_string(), target));
+        }
+    }
+    targets
 }
 
 /// D-MOD4: build the `pub use` re-export call map for `module_idx`. For each
@@ -260,6 +450,47 @@ pub(crate) fn reexport_call_map(
         let target = &bundle.modules[target_idx];
         for reimp in &target.imports {
             let ImportKind::Unqualified {
+                module_alias: _,
+                items,
+                ..
+            } = &reimp.kind
+            else {
+                continue;
+            };
+            for (orig, alias_opt) in items {
+                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                let Some(name) = bundle.name_ledger.effective_alias(target_idx, local) else {
+                    continue;
+                };
+                let Some(real_idx) = name.target_module else {
+                    continue;
+                };
+                if !bundle.name_ledger.visible(module_idx, target_idx, local) {
+                    continue;
+                }
+                let real_name = name
+                    .target
+                    .rsplit_once('.')
+                    .map(|(_, leaf)| leaf)
+                    .unwrap_or(orig)
+                    .to_string();
+                map.insert(
+                    (alias.clone(), local.to_string()),
+                    (mangle(&bundle.modules[real_idx].alias), real_name),
+                );
+            }
+        }
+    }
+    // D-NAME-WALK1=A: an inline module can re-export a file-module item from
+    // the enclosing file. It lowers through the same qualified map as a
+    // top-level file-module re-export; inline-to-inline re-exports use the
+    // separate InlineMangled map below.
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        for reimp in &cm.imports {
+            let ImportKind::Unqualified {
                 module_alias,
                 items,
                 ..
@@ -270,22 +501,16 @@ pub(crate) fn reexport_call_map(
             if !reimp.is_pub {
                 continue;
             }
-            // Resolve `module_alias` within the target module's own imports.
-            let real_idx = target
-                .imports
-                .iter()
-                .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
-                .filter(|i2| i2.import_alias() == *module_alias)
-                .find_map(|i2| resolve_target(bundle, target_idx, i2));
-            if let Some(real_idx) = real_idx {
-                let real_mod = format!("user_{}", bundle.modules[real_idx].alias);
-                for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    map.insert(
-                        (alias.clone(), local.to_string()),
-                        (real_mod.clone(), orig.clone()),
-                    );
-                }
+            let Some(real_idx) = file_import_target(bundle, module_idx, module_alias) else {
+                continue;
+            };
+            let real_mod = mangle(&bundle.modules[real_idx].alias);
+            for (orig, alias_opt) in items {
+                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                map.insert(
+                    (cm.name.clone(), local.to_string()),
+                    (real_mod.clone(), orig.clone()),
+                );
             }
         }
     }
@@ -299,25 +524,39 @@ pub(crate) fn core_import_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
+        if !import_is_active(bundle, module_idx, imp) {
+            continue;
+        }
         if let Some(core_module) = imp.core_module_path() {
             map.insert(imp.import_alias(), core_module);
             continue;
         }
-        // D-MOD3: `use core.item` / `use core.{a,b}` — bind each item name to its
+        // D-MOD3: `use core.item` / `use core.[a, b]` — bind each item name to its
         // full std path so that `item.method(...)` resolves the same way as
-        // `import core.item as item` would.
+        // `use core.item as item` would.
         if let ImportKind::Unqualified {
             module_alias,
             items,
             ..
         } = &imp.kind
         {
-            if module_alias == "core" || module_alias == "jet" {
+            if crate::AST::core_list_prefix(module_alias).is_some() {
                 for (orig, alias_opt) in items {
-                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let full = format!("core.{}", orig);
-                    if crate::Syntax::is_known_core_module(&full) {
-                        map.insert(local.to_string(), full);
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                    if bundle.name_ledger.effective_alias(module_idx, local).is_none() {
+                        continue;
+                    }
+                    match crate::AST::core_list_path(module_alias, orig) {
+                        Some(crate::AST::CoreListPath::Module(module)) => {
+                            map.insert(local.to_string(), module);
+                        }
+                        Some(crate::AST::CoreListPath::Item { module, .. }) => {
+                            // A bare imported Core item lowers as
+                            // `module.item`; keep the module in the ordinary
+                            // core-import map for every backend.
+                            map.insert(local.to_string(), module);
+                        }
+                        None => {}
                     }
                 }
             }
@@ -328,7 +567,7 @@ pub(crate) fn core_import_map(
 
 /// D-MOD3: build unqualified-import maps for codegen.
 /// Returns (inline_map, file_map) where:
-///   inline_map: unqualified name → "alias__method" (for inline code modules)
+///   inline_map: unqualified name → canonical member name (for inline code modules)
 ///   file_map:   unqualified name → (rust_mod_name, fn_name) (for file modules)
 pub(crate) fn unqualified_import_maps(
     bundle: &ProgramBundle,
@@ -336,6 +575,10 @@ pub(crate) fn unqualified_import_maps(
 ) -> (HashMap<String, String>, HashMap<String, (String, String)>) {
     let mut inline_map: HashMap<String, String> = HashMap::new();
     let mut file_map: HashMap<String, (String, String)> = HashMap::new();
+    let file_module_locals: HashSet<String> = unqualified_file_module_targets(bundle, module_idx)
+        .into_iter()
+        .map(|(local, _)| local)
+        .collect();
     let module = &bundle.modules[module_idx];
     // Build a set of inline code module aliases for this module.
     let code_mod_aliases: std::collections::HashSet<String> = module
@@ -359,34 +602,271 @@ pub(crate) fn unqualified_import_maps(
         else {
             continue;
         };
-        if module_alias == "core" || module_alias == "jet" {
+        if crate::AST::core_list_prefix(module_alias).is_some() {
             // Std namespace — handled separately by core_import_map.
             continue;
         }
-        if code_mod_aliases.contains(module_alias.as_str()) {
-            // Inline code module.
-            for (orig, alias_opt) in items {
-                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                let key = format!("{}__{}", module_alias, orig);
-                inline_map.insert(local.to_string(), key);
+        for (orig, alias_opt) in items {
+            let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+            if file_module_locals.contains(local) {
+                continue;
             }
-        } else if let Some(target) = module
-            .imports
-            .iter()
-            .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
-            .filter(|i2| i2.import_alias() == *module_alias)
-            .find_map(|i2| resolve_target(bundle, module_idx, i2))
-        {
-            // File module: resolve the file-import whose alias matches, then point
-            // each unqualified item at that Rust module.
-            let rust_mod = format!("user_{}", bundle.modules[target].alias);
-            for (orig, alias_opt) in items {
-                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                file_map.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
+            let Some(name) = bundle.name_ledger.effective_alias(module_idx, local) else {
+                continue;
+            };
+            if code_mod_aliases.contains(module_alias.as_str()) {
+                // Inline code module. Sema already stored the canonical member
+                // name, including generic-module substitutions.
+                inline_map.insert(local.to_string(), name.target.clone());
+            } else if let Some(target) = name.target_module {
+                // File module. Sema already resolved the alias to its target.
+                let real_name = name
+                    .target
+                    .rsplit_once('.')
+                    .map(|(_, leaf)| leaf)
+                    .unwrap_or(orig)
+                    .to_string();
+                file_map.insert(
+                    local.to_string(),
+                    (mangle(&bundle.modules[target].alias), real_name),
+                );
             }
         }
     }
     (inline_map, file_map)
+}
+
+/// D-NAME-WALK1=A: build the import scopes for functions inside inline
+/// modules. The enclosing file's unqualified maps remain in `Cx`; these maps
+/// contain only body-local bindings and are selected by the emitted mangled
+/// function name.
+pub(crate) fn inline_import_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (
+    HashMap<String, HashMap<String, String>>,
+    HashMap<String, HashMap<String, (String, String)>>,
+    HashSet<String>,
+    HashMap<(String, String), String>,
+) {
+    let module = &bundle.modules[module_idx];
+    let code_module_names: std::collections::HashSet<String> = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::CodeModule(cm) if cm.body.is_some() => Some(cm.name.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut inline_scopes = HashMap::new();
+    let mut file_scopes = HashMap::new();
+    let mut names = std::collections::HashSet::new();
+    let mut inline_reexports = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        let Some(body) = &cm.body else {
+            continue;
+        };
+        let mut inline_scope = HashMap::new();
+        let mut file_scope = HashMap::new();
+        for imp in &cm.imports {
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &imp.kind
+            else {
+                continue;
+            };
+            if code_module_names.contains(module_alias) {
+                for (orig, alias_opt) in items {
+                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                    inline_scope.insert(local.to_string(), format!("{module_alias}__{orig}"));
+                    names.insert(local.to_string());
+                    if imp.is_pub {
+                        inline_reexports.insert(
+                            (cm.name.clone(), local.to_string()),
+                            format!("{module_alias}__{orig}"),
+                        );
+                    }
+                }
+            } else if crate::AST::core_list_prefix(module_alias).is_none() {
+                let target = file_import_target(bundle, module_idx, module_alias);
+                if let Some(target) = target {
+                    let rust_mod = mangle(&bundle.modules[target].alias);
+                    for (orig, alias_opt) in items {
+                        let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                        file_scope.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
+                        names.insert(local.to_string());
+                    }
+                }
+            }
+        }
+        for inner in body {
+            let Item::Func(function) = inner else {
+                continue;
+            };
+            let key = format!("{}__{}", cm.name, function.name);
+            if !inline_scope.is_empty() {
+                inline_scopes.insert(key.clone(), inline_scope.clone());
+            }
+            if !file_scope.is_empty() {
+                file_scopes.insert(key, file_scope.clone());
+            }
+        }
+    }
+    (inline_scopes, file_scopes, names, inline_reexports)
+}
+
+/// D-NAME-WALK1=A: build the Core portion of every inline-module import
+/// scope, plus Core items re-exported by that inline module. Core aliases are
+/// keyed by the emitted `module__function` name so a body-local import cannot
+/// leak into a sibling or enclosing function.
+pub(crate) fn inline_core_import_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (
+    HashMap<String, HashMap<String, String>>,
+    HashMap<(String, String), (String, String)>,
+) {
+    let module = &bundle.modules[module_idx];
+    let mut scopes = HashMap::new();
+    let mut reexports = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        let Some(body) = &cm.body else {
+            continue;
+        };
+        let mut scope = HashMap::new();
+        for imp in &cm.imports {
+            if let Some(core_module) = imp.core_module_path() {
+                scope.insert(imp.import_alias(), core_module);
+                continue;
+            }
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &imp.kind
+            else {
+                continue;
+            };
+            if crate::AST::core_list_prefix(module_alias).is_none() {
+                continue;
+            }
+            for (orig, alias_opt) in items {
+                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref()).to_string();
+                let Some(path) = crate::AST::core_list_path(module_alias, orig) else {
+                    continue;
+                };
+                match path {
+                    crate::AST::CoreListPath::Module(core_module) => {
+                        scope.insert(local, core_module);
+                    }
+                    crate::AST::CoreListPath::Item { module, item } => {
+                        scope.insert(local.clone(), module.clone());
+                        if imp.is_pub {
+                            reexports.insert((cm.name.clone(), local), (module, item));
+                        }
+                    }
+                }
+            }
+        }
+        if scope.is_empty() {
+            continue;
+        }
+        for inner in body {
+            let Item::Func(function) = inner else {
+                continue;
+            };
+            scopes.insert(
+                format!("{}__{}", cm.name, function.name),
+                scope.clone(),
+            );
+        }
+    }
+    (scopes, reexports)
+}
+
+/// Build signature/return entries for selective imports whose target is a file
+/// module. The local key is the spelling used in the body; the second key is
+/// the target's declared function name. This is needed for both top-level and
+/// inline-module `use mod.[item]` calls.
+fn unqualified_file_function_entries(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imports: &[ImportDecl],
+) -> Vec<(
+    String,
+    String,
+    Vec<(AccessConvention, Type)>,
+    Option<Type>,
+)> {
+    let mut entries = Vec::new();
+    for imp in imports {
+        let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &imp.kind
+        else {
+            continue;
+        };
+        let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
+            continue;
+        };
+        for (orig, alias_opt) in items {
+            let local = crate::AST::import_item_alias(orig, alias_opt.as_deref()).to_owned();
+            let Some(item) = bundle.modules[target].items.iter().find(|item| match item {
+                Item::Func(f) => f.name == *orig && f.is_pub,
+                _ => false,
+            }) else {
+                if let Some(Item::CModule(cm)) = bundle.modules[target].items.iter().find(|item| {
+                    matches!(item, Item::CModule(_))
+                }) {
+                    if let Some(function) = cm.functions.iter().find(|function| function.name == *orig) {
+                        entries.push((
+                            local,
+                            orig.clone(),
+                            function
+                                .params
+                                .iter()
+                                .map(|param| (param.convention, param.ty.clone()))
+                                .collect(),
+                            function.return_type.clone(),
+                        ));
+                    }
+                }
+                continue;
+            };
+            let Item::Func(function) = item else {
+                continue;
+            };
+            entries.push((
+                local,
+                orig.clone(),
+                function
+                    .params
+                    .iter()
+                    .map(|param| {
+                        (
+                            param.convention,
+                            qualify_imported_call_type(bundle, target, "", &param.ty),
+                        )
+                    })
+                    .collect(),
+                function
+                    .return_type
+                    .as_ref()
+                    .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
+            ));
+        }
+    }
+    entries
 }
 
 pub(crate) fn import_sig_map(
@@ -396,6 +876,9 @@ pub(crate) fn import_sig_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
+        if !import_is_active(bundle, module_idx, imp) {
+            continue;
+        }
         let alias = imp.import_alias();
         // S59: C `use` forms — pull boundary fn sigs from the synthetic module.
         let target = if imp.is_c_import() {
@@ -411,7 +894,7 @@ pub(crate) fn import_sig_map(
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Func(f) if f.is_pub => {
+                Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
                     map.insert(
                         (alias.clone(), f.name.clone()),
                         f.params
@@ -440,15 +923,52 @@ pub(crate) fn import_sig_map(
             }
         }
     }
+    for (local, original, params, _) in
+        unqualified_file_function_entries(bundle, module_idx, &module.imports)
+    {
+        map.insert((local, original), params);
+    }
+    for item in &module.items {
+        if let Item::CodeModule(cm) = item {
+            for (local, original, params, _) in
+                unqualified_file_function_entries(bundle, module_idx, &cm.imports)
+            {
+                map.insert((local, original), params);
+            }
+        }
+    }
+    for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        for item in &bundle.modules[target].items {
+            if let Item::Func(function) = item {
+                if bundle.name_ledger.visible(module_idx, target, &function.name) {
+                    map.insert(
+                        (local.clone(), function.name.clone()),
+                        function
+                            .params
+                            .iter()
+                            .map(|param| {
+                                (
+                                    param.convention,
+                                    qualify_imported_call_type(bundle, target, "", &param.ty),
+                                )
+                            })
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
-        let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
+        let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
-                    if f.is_pub && f.name == real_fn {
+                    if bundle.name_ledger.visible(module_idx, real_idx, &f.name)
+                        && f.name == real_fn
+                    {
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.params
@@ -485,6 +1005,9 @@ pub(crate) fn import_ret_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
+        if !import_is_active(bundle, module_idx, imp) {
+            continue;
+        }
         let alias = imp.import_alias();
         let target = if imp.is_c_import() {
             match bundle.cffi.target_for(module_idx, &alias) {
@@ -499,7 +1022,7 @@ pub(crate) fn import_ret_map(
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Func(f) if f.is_pub => {
+                Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
                     let ret = f
                         .return_type
                         .as_ref()
@@ -515,12 +1038,43 @@ pub(crate) fn import_ret_map(
             }
         }
     }
+    for (local, original, _, ret) in
+        unqualified_file_function_entries(bundle, module_idx, &module.imports)
+    {
+        map.insert((local, original), ret);
+    }
+    for item in &module.items {
+        if let Item::CodeModule(cm) = item {
+            for (local, original, _, ret) in
+                unqualified_file_function_entries(bundle, module_idx, &cm.imports)
+            {
+                map.insert((local, original), ret);
+            }
+        }
+    }
+    for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        for item in &bundle.modules[target].items {
+            if let Item::Func(function) = item {
+                if bundle.name_ledger.visible(module_idx, target, &function.name) {
+                    map.insert(
+                        (local.clone(), function.name.clone()),
+                        function
+                            .return_type
+                            .as_ref()
+                            .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
+                    );
+                }
+            }
+        }
+    }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
-        let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
+        let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
-                    if f.is_pub && f.name == real_fn {
+                    if bundle.name_ledger.visible(module_idx, real_idx, &f.name)
+                        && f.name == real_fn
+                    {
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.return_type
@@ -565,7 +1119,7 @@ pub(crate) fn emit_program_items(
         _ => false,
     });
     if !cx.root_prefix.is_empty() && has_serde_protocol_impl {
-        out.push_str("use super::{user_Encode, user_Decode, jet_std};\n\n");
+        out.push_str("use super::{__jet_Encode, __jet_Decode, jet_std};\n\n");
     }
     let tuple_shapes = collect_tuple_shapes(items);
     emit_tuple_structs(cx, &tuple_shapes, out);
@@ -598,6 +1152,7 @@ pub(crate) fn emit_program_items(
             }
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
+            | Item::FactDecl(_)
             | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
@@ -678,7 +1233,7 @@ pub(crate) fn emit_program_items(
                             continue;
                         }
                         let mut mangled_f = f.clone();
-                        mangled_f.name = format!("{}__{}", cm.name, f.name);
+                        mangled_f.name = jet_foundation::Names::member_name(&cm.name, &f.name);
                         emit_func(cx, &mangled_f, out);
                     }
                 }

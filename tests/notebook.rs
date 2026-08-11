@@ -1,5 +1,7 @@
 //! #442 notebook kernel — D-NOTEBOOK-SURFACE1/DOC1/TRUST1=D.
 
+mod common;
+
 use jet::REPL::Notebook::{
     decide_render, export_ipynb, export_jet, import_ipynb, merge_by_id, quarantine_outputs,
     run_headless_script, save_jetnb, CellKind, ClientKind, JetNotebook, Kernel, MimeBundle,
@@ -26,12 +28,25 @@ fn shared_session_identical_stale_rules_across_clients() {
         cell.depends_on.push(a.clone());
     }
 
+    let observable_success = |result: &jet::REPL::Notebook::CellExecResult| {
+        result.ok() && result.bundle.text_plain.contains("fx")
+    };
     assert!(kernel
         .execute_cell(ClientKind::FirstParty, &a)
         .unwrap()
         .ok());
     let fx = kernel.execute_cell(ClientKind::JupyterAdapter, &b).unwrap();
-    assert!(fx.ok() || !fx.bundle.text_plain.is_empty() || fx.eval.text.contains("fx") || true);
+
+    let broken = kernel
+        .notebook
+        .add_cell(CellKind::Jet, "print(\"fx\") +")
+        .id
+        .clone();
+    let broken_result = kernel
+        .execute_cell(ClientKind::JupyterAdapter, &broken)
+        .unwrap();
+    assert!(!observable_success(&broken_result));
+    assert!(observable_success(&fx));
 
     let plan = kernel.replay_plan(1, Some("x :: 2")).expect("plan");
     assert!(plan.steps.iter().any(|s| s.kind == jet::REPL::RerunPlan::StepKind::ConfirmEffect)

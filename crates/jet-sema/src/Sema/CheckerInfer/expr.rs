@@ -198,6 +198,78 @@ impl<'a> Checker<'a> {
         Some(Type::Named(type_name))
     }
 
+    /// D-BOUND-HEAD1=A: URL/Path/DateTime heads validate their literal
+    /// skeleton in sema, then reuse the same literal+hole rewrite as checked
+    /// SQL/HTML/Sh. The returned URL type is the internal `Url` nominal; the
+    /// source spelling stays canonical `URL`.
+    pub(crate) fn rewrite_typed_boundary_literal(
+        &mut self,
+        e: &mut Expr,
+        type_name: String,
+        span: Span,
+    ) -> Option<Type> {
+        let Expr::Str(parts, literal_span) = e else {
+            let internal_type = if type_name == Syntax::TYPE_URL {
+                "Url".to_string()
+            } else {
+                type_name.clone()
+            };
+            return self
+                .rewrite_typed_text_literal(e, type_name, span)
+                .map(|_| Type::Named(internal_type));
+        };
+        let has_holes = parts.iter().any(|part| matches!(part, StrPart::Interp(..)));
+        if type_name == Syntax::TYPE_DATETIME && has_holes {
+            self.diags.push(Diagnostic::error(
+                "E0155",
+                "a `DateTime` literal cannot contain interpolation".to_string(),
+                "DateTime values are checked as complete RFC3339 literals before the program runs".to_string(),
+                "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly".to_string(),
+                Some(*literal_span),
+            ));
+            return None;
+        }
+        let mut validation_text = String::new();
+        for part in parts.iter() {
+            match part {
+                StrPart::Lit(text) => validation_text.push_str(text),
+                StrPart::Interp(..) => {
+                    validation_text.push_str(jet_foundation::TypedHeads::HOLE_PLACEHOLDER)
+                }
+            }
+        }
+        let validation = match type_name.as_str() {
+            Syntax::TYPE_URL => crate::Comptime::validate_url_literal(&validation_text),
+            Syntax::TYPE_PATH => {
+                if validation_text.contains('\0') {
+                    Err("a Path cannot contain a NUL character".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+            Syntax::TYPE_DATETIME => crate::Comptime::validate_datetime_literal(&validation_text),
+            _ => unreachable!("typed boundary helper called for another type"),
+        };
+        if let Err(reason) = validation {
+            self.diags.push(Diagnostic::error(
+                "E0155",
+                format!("this `{type_name}` literal is invalid"),
+                reason,
+                format!(
+                    "fix the literal, or parse a runtime String with the ordinary `{type_name}` constructor"
+                ),
+                Some(*literal_span),
+            ));
+            return None;
+        }
+        self.rewrite_typed_text_literal(e, type_name.clone(), span)
+            .map(|_| Type::Named(if type_name == Syntax::TYPE_URL {
+                "Url".to_string()
+            } else {
+                type_name
+            }))
+    }
+
     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
     /// same grammar gate used by the generated linear runtime.
     pub(crate) fn rewrite_regex_literal(
@@ -476,6 +548,37 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    pub(crate) fn normalize_imported_core_expr(&mut self, e: &mut Expr) {
+        let (name, span) = match &*e {
+            Expr::Call(call) => (call.name.clone(), call.name_span),
+            _ => return,
+        };
+        if self.funcs.contains_key(&name) || self.lookup(&name).is_some() {
+            return;
+        }
+        let Some(item) = self.core_item_imports.get(&name).cloned() else {
+            return;
+        };
+        if !self.core_imports.contains_key(&name) {
+            return;
+        }
+        let old = std::mem::replace(e, Expr::Absent(span));
+        let Expr::Call(call) = old else {
+            unreachable!("Core import normalization only replaces calls");
+        };
+        *e = Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(name, call.name_span)),
+            method: item,
+            method_span: call.name_span,
+            owner_type_args: Vec::new(),
+            type_args: call.type_args,
+            args: call.args,
+            recv_type: None,
+            resolved_ret: call.resolved_ret,
+            checked_widen: false,
+        };
+    }
+
     pub(crate) fn normalize_prelude_expr(&mut self, e: &mut Expr) {
         let (name, span) = match &*e {
             Expr::Call(call) => (call.name.clone(), call.name_span),
@@ -529,6 +632,7 @@ impl<'a> Checker<'a> {
     }
 
     fn normalize_contextual_expr(&mut self, e: &mut Expr) {
+        self.normalize_imported_core_expr(e);
         self.normalize_prelude_expr(e);
         // D-FAIL-ERROR1=A: labels make the default-error constructor
         // unambiguous. Outside a Result expectation, the one-message form is
@@ -1264,6 +1368,11 @@ impl<'a> Checker<'a> {
                 if let Some(t) = self.consts.get(name).cloned() {
                     self.record_const_reference(name, *span);
                     return Some(t);
+                }
+                if let Some(item) = self.core_item_imports.get(name).cloned() {
+                    if let Some(module) = self.core_imports.get(name).cloned() {
+                        return self.infer_core_field(&module, &item, *span, *span);
+                    }
                 }
                 if let Some(sig) = self.funcs.get(name).cloned() {
                     // D-METHODMACRO1=A: a bare top-level function name resolved here
@@ -2408,6 +2517,16 @@ impl<'a> Checker<'a> {
                 *e = *inner;
                 return self.rewrite_regex_literal(e, span);
             }
+            (
+                Type::Named(ref type_name),
+                TypedLitBody::Value(inner),
+            ) if matches!(
+                type_name.as_str(),
+                Syntax::TYPE_URL | Syntax::TYPE_PATH | Syntax::TYPE_DATETIME
+            ) => {
+                *e = *inner;
+                return self.rewrite_typed_boundary_literal(e, type_name.clone(), span);
+            }
             (_, TypedLitBody::Value(inner)) => {
                 *e = *inner;
             }
@@ -2848,14 +2967,26 @@ impl<'a> Checker<'a> {
             }
         }
         let idx_ty = self.infer(index)?;
+        // D-QUAL4: user tags are transparent facts, so a tag around a refined
+        // distinct integer must not hide the interval proof from fixed-list
+        // indexing. Preserve compiler-owned tags; some carry nominal or
+        // access policy that is not a user refinement.
+        let mut index_value_ty = &idx_ty;
+        while let Type::Tagged {
+            marker: crate::AST::TagMarker::User(_),
+            inner,
+        } = index_value_ty
+        {
+            index_value_ty = inner.as_ref();
+        }
         match &base_ty {
             Type::List(inner) => {
                 *kind = IndexKind::List;
-                if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
                     return Some(Type::List(inner.clone()));
                 }
-                if idx_ty != Type::Int {
+                if index_value_ty != &Type::Int {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -2873,8 +3004,8 @@ impl<'a> Checker<'a> {
             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
             Type::FixedList { elem, len, .. } => {
                 *kind = IndexKind::List;
-                if idx_ty != Type::Int {
-                    if let Type::Named(name) = &idx_ty {
+                if index_value_ty != &Type::Int {
+                    if let Type::Named(name) = index_value_ty {
                         if let Some((lo, hi)) = self.registry.distinct_range(name) {
                             let base_is_int =
                                 matches!(self.registry.distinct_base(name), Some(Type::Int));
@@ -3375,10 +3506,11 @@ impl<'a> Checker<'a> {
             Type::Apply { name, .. } => name.as_str(),
             _ => return false,
         };
-        let Some(owner_mod) = self.struct_owner_module(type_name, None) else {
+        let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+        let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) else {
             return false;
         };
-        self.computed_field_types_of(owner_mod, type_name)
+        self.computed_field_types_of(owner_mod, lookup_name)
             .is_some_and(|c| c.contains_key(member))
     }
 
@@ -3472,15 +3604,10 @@ impl<'a> Checker<'a> {
             // construction did — otherwise every field read on a foreign-module
             // struct value falls through to "only works on struct and tuple
             // values" (E0302) even though the value genuinely is a struct.
-            let (owner_import_ns, lookup_name) = match type_name.split_once('.') {
-                Some((alias, bare)) if self.imports.contains_key(alias) => {
-                    (Some(alias), bare)
-                }
-                _ => (None, type_name.as_str()),
-            };
+            let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
             if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
-                    if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
+                    if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, lookup_name, member)
@@ -3528,7 +3655,7 @@ impl<'a> Checker<'a> {
             if let Some(owner_mod) = self.struct_owner_module(name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, name) {
                     let subst = self.struct_subst(name, args);
-                    if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
+                    if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, name, member)

@@ -6,24 +6,46 @@
 use crate::Diagnostics::{Diagnostic, Severity};
 use std::path::Path;
 
-/// One diagnostic gate shared by `jet build`, `jet run`, `jet dev`, and check.
-///
-/// Surfaces what parser recovery (`parse_teaching`) and sema (+ optional
-/// extension hooks) already produced. Does not re-check anything (I3).
-/// Returns lints on success; errors on failure.
-pub fn gate_diagnostics(
-    parse_teaching: Vec<Diagnostic>,
-    sema: Vec<Diagnostic>,
-    extension: Vec<Diagnostic>,
+fn package_lints_deny(bundle: &crate::AST::ProgramBundle) -> Vec<String> {
+    let Some(entry) = bundle.modules.get(bundle.entry) else {
+        return Vec::new();
+    };
+    // `compile_src`/eval bundles are intentionally filesystem-free. A package
+    // wall belongs only to a loaded project bundle, whose entry path is real.
+    if !entry.path.is_file() {
+        return Vec::new();
+    }
+    let path = bundle.project_root.join(crate::Syntax::PACKAGE_FILE);
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    jet_foundation::LintPolicy::parse_package_source(&source)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+fn apply_package_lint_policy(
+    bundle: &crate::AST::ProgramBundle,
+    diagnostics: Vec<Diagnostic>,
+) -> Vec<Diagnostic> {
+    let deny = package_lints_deny(bundle);
+    jet_foundation::LintPolicy::apply(&deny, diagnostics)
+}
+
+fn classify_diagnostics(
+    bundle: &crate::AST::ProgramBundle,
+    diagnostics: Vec<Diagnostic>,
+    suppress_build_e0102: bool,
 ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for diagnostic in parse_teaching
-        .into_iter()
-        .chain(sema)
-        .chain(extension)
-    {
+    for diagnostic in apply_package_lint_policy(bundle, diagnostics) {
         match diagnostic.severity {
+            // Generated declarations do not exist during the pre-build
+            // reflection pass. Defer unknown-name errors to the fresh
+            // selected-program sema pass after generation.
+            Severity::Error if suppress_build_e0102 && diagnostic.code == "E0102" => {}
             Severity::Error => errors.push(diagnostic),
             Severity::Lint => lints.push(diagnostic),
         }
@@ -33,6 +55,28 @@ pub fn gate_diagnostics(
     } else {
         Err(errors)
     }
+}
+
+/// One diagnostic gate shared by `jet build`, `jet run`, `jet dev`, and check.
+///
+/// Surfaces what parser recovery (`parse_teaching`) and sema (+ optional
+/// extension hooks) already produced. Does not re-check anything (I3).
+/// Returns lints on success; errors on failure.
+pub fn gate_diagnostics(
+    bundle: &crate::AST::ProgramBundle,
+    parse_teaching: Vec<Diagnostic>,
+    sema: Vec<Diagnostic>,
+    extension: Vec<Diagnostic>,
+) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+    classify_diagnostics(
+        bundle,
+        parse_teaching
+            .into_iter()
+            .chain(sema)
+            .chain(extension)
+            .collect(),
+        false,
+    )
 }
 
 /// Main pipeline: load from file path → sema → ffi → codegen.
@@ -55,6 +99,7 @@ pub fn compile_bundle_path_opts(
         freestanding,
         allow_impure,
         web_target,
+        false,
         false,
         false,
         cross_target,
@@ -86,6 +131,7 @@ pub fn compile_bundle_path_with_target_machine(
         file,
         mode,
         machine.no_os,
+        false,
         false,
         false,
         false,
@@ -390,7 +436,30 @@ pub fn compile_bundle_path_opts_plugin(
     mode: crate::Sema::CompileMode,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_full(file, mode, false, false, false, true, false, cross_target, None)
+    compile_bundle_path_opts_full(file, mode, false, false, false, true, false, false, cross_target, None)
+}
+
+/// Like `compile_bundle_path_opts_plugin`, but for a checked `Library` output
+/// (D-LIB-EXPORT1=C). Library packages do not need an executable `fn run`; the
+/// selected public surface is validated and projected into native artifacts by
+/// the caller after this front-end stage.
+pub fn compile_bundle_path_opts_library(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    explicit_output: Option<&str>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(
+        file,
+        mode,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        None,
+        explicit_output,
+    )
 }
 
 /// Like `compile_bundle_path_opts`, but `debug_linemap = true` routes codegen
@@ -413,6 +482,7 @@ pub fn compile_bundle_path_opts_dbg(
         freestanding,
         allow_impure,
         web_target,
+        false,
         false,
         debug_linemap,
         cross_target,
@@ -446,6 +516,7 @@ pub fn compile_bundle_path_output_opts(
         web_target,
         plugin_target,
         false,
+        false,
         cross_target,
         Some(output),
     )
@@ -457,7 +528,13 @@ fn target_machine_usage_for_file(
 ) -> Result<crate::TargetMachine::TargetMachineUse, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
-    let _lints = gate_diagnostics(std::mem::take(&mut bundle.parse_teaching), diags, Vec::new())?;
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    let _lints = gate_diagnostics(
+        &bundle,
+        parse_teaching,
+        diags,
+        Vec::new(),
+    )?;
     let mmio = collect_mmio_usage(&bundle);
     let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
     core_apis.sort();
@@ -514,6 +591,20 @@ fn core_aliases(module: &crate::AST::LoadedModule) -> std::collections::HashMap<
                     import.alias.clone()
                 };
                 aliases.insert(alias, name.clone());
+            }
+        } else if let crate::AST::ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &import.kind {
+            if let Some(prefix) = crate::AST::core_list_prefix(module_alias) {
+                for (original, alias) in items {
+                    let full = format!("{prefix}.{original}");
+                    if crate::Syntax::is_known_core_module(&full) {
+                        let local = crate::AST::import_item_alias(original, alias.as_deref());
+                        aliases.insert(local.to_string(), full);
+                    }
+                }
             }
         }
     }
@@ -1279,26 +1370,16 @@ fn compile_bundle_path_build_inner(
         Some(&effect_facts),
         &diags,
     );
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
-    for diag in std::mem::take(&mut bundle.parse_teaching)
-        .into_iter()
-        .chain(diags)
-        .chain(extension_diags)
-    {
-        match diag.severity {
-            // Generated declarations do not exist during the pre-build
-            // reflection pass. Defer unknown-name errors to the fresh
-            // selected-program sema pass after generation; that pass still
-            // rejects names that no selected generated source provides.
-            Severity::Error if diag.code == "E0102" && build_span.is_some() => {}
-            Severity::Error => errors.push(diag),
-            Severity::Lint => lints.push(diag),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    let mut lints = classify_diagnostics(
+        &bundle,
+        parse_teaching
+            .into_iter()
+            .chain(diags)
+            .chain(extension_diags)
+            .collect(),
+        build_span.is_some(),
+    )?;
 
     let mut build_run = None;
     let mut filesystem_transaction = None;
@@ -1713,20 +1794,17 @@ fn compile_bundle_path_build_inner(
             planned_facts.as_ref(),
             &planned_diags,
         );
-        let mut planned_errors = Vec::new();
-        for diag in std::mem::take(&mut bundle.parse_teaching)
-            .into_iter()
-            .chain(planned_diags)
-            .chain(extension_diags)
-        {
-            match diag.severity {
-                Severity::Error => planned_errors.push(diag),
-                Severity::Lint => lints.push(diag),
-            }
-        }
-        if !planned_errors.is_empty() {
-            return Err(planned_errors);
-        }
+        let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+        let planned_lints = classify_diagnostics(
+            &bundle,
+            parse_teaching
+                .into_iter()
+                .chain(planned_diags)
+                .chain(extension_diags)
+                .collect(),
+            false,
+        )?;
+        lints.extend(planned_lints);
     }
 
     if let Some(provenance) = generated_lock_provenance.take() {
@@ -1752,6 +1830,8 @@ fn compile_bundle_path_build_inner(
                 web: None,
                 web_partition_report: None,
                 plugin: None,
+                library: None,
+                library_config: None,
                 inferred_layer: bundle.inferred_layer,
                 layer_ceiling: bundle.layer_ceiling,
             },
@@ -1818,6 +1898,8 @@ fn compile_bundle_path_build_inner(
         web,
         web_partition_report: bundle.web_partition_report.clone(),
         plugin,
+        library: None,
+        library_config: None,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     };
@@ -1964,6 +2046,7 @@ fn load_planned_runtime_bundle(
                 is_pub: false,
                 is_package_pub: false,
                 body: Some(items),
+                imports: Vec::new(),
                 web_target,
                 instance_identity: None,
                 span: crate::Diagnostics::Span::new(0, 0),
@@ -1991,6 +2074,7 @@ fn load_planned_runtime_bundle(
                 is_pub: false,
                 is_package_pub: false,
                 body: Some(module.items),
+                imports: module.imports,
                 web_target: module.web_target_ceiling,
                 instance_identity: None,
                 span: crate::Diagnostics::Span::new(0, 0),
@@ -2066,8 +2150,9 @@ fn check_action_generated_sources(
                 }
                 diags
             })?;
-            let mut diags =
+            let generated_diags =
                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
+            let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags);
             diags.retain(|diag| diag.severity == Severity::Error);
             if !diags.is_empty() {
                 for diag in &mut diags {
@@ -2464,12 +2549,15 @@ pub fn program_semantic_facts(
 ) -> crate::Comptime::ProgramSemanticFacts {
     let mut effects = std::collections::HashMap::new();
     let reaches_panic = checked.reachability.nodes_with("panic", "panic");
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             let crate::AST::Item::Func(func) = item else {
                 continue;
             };
-            let qualified = format!("{}::{}", module.alias, func.name);
+            let qualified = checked
+                .name_ledger
+                .semantic_identity(module_idx, &func.name)
+                .unwrap_or_else(|| format!("{}::{}", module.alias, func.name));
             let values = checked
                 .solved
                 .get(&qualified)
@@ -2482,6 +2570,7 @@ pub fn program_semantic_facts(
         effects,
         reaches_panic,
         fact_registry: checked.fact_registry.clone(),
+        name_ledger: checked.name_ledger.clone(),
     }
 }
 
@@ -2612,8 +2701,9 @@ fn materialize_and_check_generated(
                 }
                 diags
             })?;
-            let mut diags =
+            let generated_diags =
                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
+            let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags);
             diags.retain(|diag| diag.severity == Severity::Error);
             if !diags.is_empty() {
                 for diag in &mut diags {
@@ -2950,6 +3040,7 @@ fn compile_bundle_path_opts_full(
     allow_impure: bool,
     web_target: bool,
     plugin_target: bool,
+    library_target: bool,
     debug_linemap: bool,
     cross_target: Option<&str>,
     explicit_output: Option<&str>,
@@ -2994,8 +3085,10 @@ fn compile_bundle_path_opts_full(
     // Freestanding / impure / output / default compile variants here do not
     // surface `SemIndexEffectFacts`. Pass `None` so the hook omits
     // `ReadEffects` honestly — never invent placeholders (D-DX5-HOOK1).
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = gate_diagnostics(
-        std::mem::take(&mut bundle.parse_teaching),
+        &bundle,
+        parse_teaching,
         diags,
         extension_diags,
     )?;
@@ -3062,6 +3155,29 @@ fn compile_bundle_path_opts_full(
     } else {
         None
     };
+    let library_config = if library_target {
+        if web_target || plugin_target {
+            return Err(vec![Diagnostic::error(
+                "E1341",
+                "a Library output cannot also select a backend target".to_string(),
+                "Library artifacts are native static/shared projections (D-LIB-EXPORT1=C), not web or sandbox guest outputs".to_string(),
+                "remove `--target=web`/`--target=plugin` and select the Library output directly".to_string(),
+                None,
+            )]);
+        }
+        let config = crate::LibraryExport::resolve_config(&bundle, explicit_output)?;
+        let surface_errors = crate::LibraryExport::validate_export_surface(&bundle);
+        if !surface_errors.is_empty() {
+            return Err(surface_errors);
+        }
+        crate::LibraryExport::check_and_freeze_version(&bundle, &config.name)?;
+        Some(config)
+    } else {
+        None
+    };
+    let library = library_config.as_ref().map(|config| {
+        crate::Codegen::emit_library(&bundle, &rust, &config.name, &config.bindings)
+    });
     if timing {
         timer.lap("codegen");
         timer.metric("rust_bytes", rust.len() as u128);
@@ -3095,6 +3211,8 @@ fn compile_bundle_path_opts_full(
         web,
         web_partition_report: bundle.web_partition_report.clone(),
         plugin,
+        library,
+        library_config,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })
@@ -3159,6 +3277,7 @@ fn compile_src_with_options_and_policy(
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
+            script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,
@@ -3174,7 +3293,7 @@ fn compile_src_with_options_and_policy(
         ffi_callback_fns: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: std::collections::HashMap::new(),
+        name_ledger: crate::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: std::collections::HashMap::new(),
@@ -3258,6 +3377,8 @@ fn compile_src_with_options_and_policy(
         web,
         web_partition_report: bundle.web_partition_report.clone(),
         plugin: None,
+        library: None,
+        library_config: None,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })
@@ -3367,6 +3488,7 @@ fn check_file_with_effect_facts_impl(
                 &diags,
             );
             diags.extend(extension_diags);
+            let diags = apply_package_lint_policy(&bundle, diags);
             (diags, Some(bundle), facts, dependencies)
         }
         Err(diags) => (
@@ -3419,6 +3541,7 @@ pub fn check_file_with_overlays_and_import_root(
                 &diags,
             );
             diags.extend(extension_diags);
+            let diags = apply_package_lint_policy(&bundle, diags);
             (diags, Some(bundle), facts)
         }
         Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
@@ -3468,6 +3591,7 @@ pub fn check_eval_with_effect_facts(
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
+            script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,
@@ -3483,7 +3607,7 @@ pub fn check_eval_with_effect_facts(
         ffi_callback_fns: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
-        import_targets: std::collections::HashMap::new(),
+        name_ledger: crate::AST::NameLedger::default(),
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: std::collections::HashMap::new(),
@@ -3533,15 +3657,15 @@ pub fn compile_tests(
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
-    let mut errors = Vec::new();
-    for d in diags {
-        if d.severity == Severity::Error {
-            errors.push(d);
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    let _lints = classify_diagnostics(
+        &bundle,
+        parse_teaching
+            .into_iter()
+            .chain(diags)
+            .collect(),
+        false,
+    )?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
@@ -3571,15 +3695,16 @@ pub fn compile_fuzz(
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)
         .map_err(FuzzCompileError::Diagnostics)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
-    let mut errors = Vec::new();
-    for d in diags {
-        if d.severity == Severity::Error {
-            errors.push(d);
-        }
-    }
-    if !errors.is_empty() {
-        return Err(FuzzCompileError::Diagnostics(errors));
-    }
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    let _lints = classify_diagnostics(
+        &bundle,
+        parse_teaching
+            .into_iter()
+            .chain(diags)
+            .collect(),
+        false,
+    )
+    .map_err(FuzzCompileError::Diagnostics)?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(FuzzCompileError::Diagnostics(ffi_diags)),
@@ -3606,15 +3731,18 @@ pub fn compile_bundle_path_with_entry(
     entry_fn: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    let mut diags = crate::Sema::prepare_script_entries(&mut bundle);
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
-    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    diags.extend(crate::Sema::check_bundle(&mut bundle, mode));
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
     // Entry-swap uses plain `check_bundle` (no effect-facts return). Pass
     // `None` → omit `ReadEffects`; do not invent effect rows (D-DX5-HOOK1).
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = gate_diagnostics(
-        std::mem::take(&mut bundle.parse_teaching),
+        &bundle,
+        parse_teaching,
         diags,
         extension_diags,
     )?;
@@ -3645,6 +3773,8 @@ pub fn compile_bundle_path_with_entry(
         web: None,
         web_partition_report: bundle.web_partition_report.clone(),
         plugin: None,
+        library: None,
+        library_config: None,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })
@@ -3681,6 +3811,15 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         if let Item::Func(f) = item {
             if f.name == "run" {
                 f.name = "__jet_unused_run".to_string();
+                // `prepare_script_entries` gives the synthetic script entry
+                // a fallible unit return so ordinary `jet run` can report a
+                // default error. When `jet dev` selects another function,
+                // that parked function is not an entry and must not retain a
+                // fallthrough obligation (E0114).
+                if f.span == f.name_span {
+                    f.return_type = None;
+                    f.return_type_span = None;
+                }
             }
         }
     }
@@ -3722,6 +3861,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         name_span: target.name_span,
         meta: None,
         type_params: target.type_params.clone(),
+        head_pattern: None,
         params: target.params.clone(),
         return_type: target.return_type.clone(),
         return_type_span: target.return_type_span,
@@ -3770,15 +3910,15 @@ pub fn compile_benches(
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Bench);
-    let mut errors = Vec::new();
-    for d in diags {
-        if d.severity == Severity::Error {
-            errors.push(d);
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    let _lints = classify_diagnostics(
+        &bundle,
+        parse_teaching
+            .into_iter()
+            .chain(diags)
+            .collect(),
+        false,
+    )?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),

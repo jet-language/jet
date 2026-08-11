@@ -1,5 +1,7 @@
 //! TIR unsafe and runtime integration tests.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
@@ -144,7 +146,7 @@ cell :: 1337
     // `#Unsafe fn` → `pub unsafe fn …`.
     assert!(
         out.rust
-            .contains("pub unsafe fn user_read_reg(user_addr: i64) -> i64 {"),
+            .contains("pub unsafe fn __jet_read_reg(__jet_addr: i64) -> i64 {"),
         "unsafe fn signature not byte-exact:\n{}",
         out.rust
     );
@@ -152,19 +154,19 @@ cell :: 1337
     // annotates the inferred `p` binding with its resolved `*mut i64` type).
     assert!(
         out.rust
-            .contains("let user_p: *mut i64 = ((user_addr) as usize as *mut i64);"),
+            .contains("let __jet_p: *mut i64 = ((__jet_addr) as usize as *mut i64);"),
         "PtrFromAddr not byte-exact:\n{}",
         out.rust
     );
     assert!(
-        out.rust.contains("return std::ptr::read_volatile(user_p);"),
+        out.rust.contains("return std::ptr::read_volatile(__jet_p);"),
         "volatile_read not byte-exact:\n{}",
         out.rust
     );
     // `mem.address_of(cell)` → the inert address cast (no `unsafe`).
     assert!(
         out.rust
-            .contains("let user_addr: i64 = (&(user_cell) as *const _ as usize as i64);"),
+            .contains("let __jet_addr: i64 = (&(__jet_cell) as *const _ as usize as i64);"),
         "address_of not byte-exact:\n{}",
         out.rust
     );
@@ -225,13 +227,13 @@ fn run() {
     });
     assert!(
         out.rust
-            .contains("let user_p: *mut i64 = ((1073742080i64) as usize as *mut i64);"),
+            .contains("let __jet_p: *mut i64 = ((1073742080i64) as usize as *mut i64);"),
         "PtrFromAddr constant not byte-exact:\n{}",
         out.rust
     );
     assert!(
         out.rust
-            .contains("std::ptr::write_volatile(user_p, user_value);"),
+            .contains("std::ptr::write_volatile(__jet_p, __jet_value);"),
         "volatile_write not byte-exact:\n{}",
         out.rust
     );
@@ -243,7 +245,7 @@ fn run() {
 // ---------------------------------------------------------------------------
 
 /// c109 Phase 19: a GENERIC STRUCT free function — a turbofish struct literal
-/// (`user_Pair::<i64> { … }`), a `Type::Apply` param/return, a `[T]`-field builtin
+/// (`__jet_Pair::<i64> { … }`), a `Type::Apply` param/return, a `[T]`-field builtin
 /// (`copy.items.push(item)`), and the generic-struct value clone (`copy := s`).
 #[test]
 fn generic_struct_fns() {
@@ -283,7 +285,7 @@ p :: Pair<Int>.{ make_pair(1, 2) }
 }
 
 /// c109 Phase 19: a FOREIGN (imported user) struct constructed via the `import_ns`
-/// namespace path (`alias.Note { … }` → `{root}user_note::user_Note { … }`), passed
+/// namespace path (`alias.Note { … }` → `{root}__jet_note::__jet_Note { … }`), passed
 /// across the module boundary, with a field read on the returned value.
 #[test]
 fn foreign_struct_construction() {
@@ -320,7 +322,7 @@ fn run() {
     // The foreign struct head + mangled fields, byte-exact.
     assert!(
         out.rust.contains(
-            "user_note::user_Note { user_title: \"hello\".to_string(), user_pages: 3i64 }"
+            "__jet_note::__jet_Note { __jet_title: \"hello\".to_string(), __jet_pages: 3i64 }"
         ),
         "foreign struct construction not byte-exact:\n{}",
         out.rust
@@ -662,8 +664,8 @@ fn task_join_all_parent_deadline_is_e3003_in_every_tier() {
 use core.tasks as tasks
 fn run() {
     #Context(deadline: 0) {
-        task :: tasks.spawn(() => 10)
-        tasks.join_all([task])
+        handle :: tasks.spawn(() => 10)
+        tasks.join_all([handle])
     }
     print(\"unreachable\")
 }
@@ -762,8 +764,8 @@ fn run() {
     let duplicate = "\
 use core.tasks as tasks
 fn run() {
-    task :: tasks.spawn(() => 10)
-    tasks.join_all([task, task])
+    handle :: tasks.spawn(() => 10)
+    tasks.join_all([handle, handle])
 }
 ";
     let diagnostics = jet::compile(duplicate).expect_err("one handle cannot be joined twice");
@@ -775,9 +777,9 @@ fn run() {
     let reused = "\
 use core.tasks as tasks
 fn run() {
-    task :: tasks.spawn(() => 10)
-    tasks.join_all([task])
-    task.join()
+    handle :: tasks.spawn(() => 10)
+    tasks.join_all([handle])
+    handle.join()
 }
 ";
     let diagnostics = jet::compile(reused).expect_err("joined handle must stay consumed");
@@ -789,8 +791,8 @@ fn run() {
     let borrowed_list = "\
 use core.tasks as tasks
 fn run() {
-    task :: tasks.spawn(() => 10)
-    handles :: [task]
+    handle :: tasks.spawn(() => 10)
+    handles :: [handle]
     tasks.join_all(handles)
 }
 ";
@@ -865,7 +867,7 @@ fn taskgroup_select_receives_from_real_channel() {
     let src = "\
 use core.tasks as tasks
 fn run() {
-    taskgroup g {
+    task.group g {
         (sender, receiver) :: tasks.channel<Int>()
         sender.send(42)
         value :: g.select().recv(receiver).wait()

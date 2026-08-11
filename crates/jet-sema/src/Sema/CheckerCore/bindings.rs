@@ -160,7 +160,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
 impl<'a> Checker<'a> {
     /// Can codegen write this folded value back out as Rust?
     ///
-    /// `CtValue::serialize` renders a struct or enum as `user_<Name> { … }`,
+    /// `CtValue::serialize` renders a struct or enum as `__jet_<Name> { … }`,
     /// which only names a real Rust type when `<Name>` is a user-declared type.
     /// The comptime evaluator also models builtins as structs with an internal
     /// field encoding, and those have no such Rust type. A container is only
@@ -339,6 +339,7 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
+                    interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
                     task_lint_span: None,
@@ -741,7 +742,7 @@ impl<'a> Checker<'a> {
                     // The comptime evaluator models many builtins as a struct
                     // with an internal field encoding (`Set` as `{items}`,
                     // `Duration` as `{ms}`, …). Serializing one emits
-                    // `user_Set { user_items: … }`, naming a Rust type that was
+                    // `__jet_Set { __jet_items: … }`, naming a Rust type that was
                     // never declared, which rustc rejects and I2 counts as an
                     // internal compiler error. Folding here is an optimization
                     // (D-VERDICT-1308-1: failure is silent), so decline it and
@@ -771,6 +772,22 @@ impl<'a> Checker<'a> {
                 self.lambda_value_sendable(lam, &final_ty)
             } else {
                 self.sendability_problem(&final_ty, true).is_none()
+            };
+            let interrupt_sendable = if !matches!(&final_ty, Type::Fn { .. }) {
+                false
+            } else {
+                match &b.init {
+                    Expr::Ident(name, _) => self
+                        .lookup(name)
+                        .map(|info| info.interrupt_sendable)
+                        .unwrap_or_else(|| {
+                            self.funcs.contains_key(name)
+                                || self.unqualified.contains_key(name)
+                                || self.unqualified_file.contains_key(name)
+                        }),
+                    Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, &final_ty),
+                    _ => false,
+                }
             };
             let task_lint_span = if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
                 Some(b.name_span)
@@ -876,6 +893,7 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: binding_sendable,
+                    interrupt_sendable,
                     reactive_local: b.reactive_local(),
                     reactive_shared: b.reactive_shared(),
                     task_lint_span,

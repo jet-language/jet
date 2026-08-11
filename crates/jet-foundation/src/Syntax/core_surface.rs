@@ -191,6 +191,9 @@ pub const RETIRED_TYPE_ERROR: &str = "Error";
 pub const TYPE_UNIT: &str = "()";
 /// Compiler-only name carried by the existing zero-sized runtime value.
 pub const INTERNAL_UNIT_TYPE: &str = "Unit";
+/// D-CHOOSE-HEADS1=A: compiler-private subject name for the one ordinary
+/// pattern table produced from ordered multi-head declarations.
+pub const INTERNAL_MULTI_HEAD_SUBJECT: &str = "__jet_multi_head_subject";
 /// Retired source spelling. The parser reports the migration diagnostic.
 pub const RETIRED_TYPE_VOID: &str = "Void";
 
@@ -435,6 +438,12 @@ pub const TYPE_SH: &str = "Sh";
 /// D-REGEX-LIT1=D: `Regex.{"…"}` is a compile-checked pattern value.
 pub const TYPE_REGEX: &str = "Regex";
 
+/// D-BOUND-HEAD1=A: checked URL/Path/DateTime literal heads. `Url` remains the
+/// internal nominal spelling; source type declarations use the canonical URL.
+pub const TYPE_URL: &str = "URL";
+pub const TYPE_PATH: &str = "Path";
+pub const TYPE_DATETIME: &str = "DateTime";
+
 
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family
@@ -466,7 +475,9 @@ pub const BUILD_INFO_OS: &str = "os";
 pub const FOREIGN_UNSAFE: &str = "unsafe";
 
 /// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
-/// requires `use core.mem`.
+/// requires `use core.mem`. The complete named-item tier map lives in
+/// `CORE_MEM_GATE_TIERS`; the rule and reasons live beside S58 in
+/// `docs/spec/syntax-decisions.md`.
 pub const CORE_MEM_MODULE: &str = "core.mem";
 
 /// D-UNINIT1 (ratified 2026-06-21, opt C): the `#Uninit` binding marker.
@@ -569,8 +580,51 @@ pub const MEM_ALLOC_FREE: &str = "free";
 /// D-ALLOC-C (ratified 2026-06-19): wider allocator API namespace.
 pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 
+/// S58: the two gates for named `core.mem` items.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoreMemGate {
+    /// Naming the item requires `use core.mem`.
+    Import,
+    /// Using the item requires `use core.mem` and `#Unsafe("reason")`.
+    Audit,
+}
+
+/// S58: one tier for every current `core.mem` module item. Keep this table
+/// aligned with `core_module_items("core.mem")` in `jet-sema`.
+pub const CORE_MEM_GATE_TIERS: &[(&str, CoreMemGate)] = &[
+    (TYPE_PTR, CoreMemGate::Import),
+    (MEM_FROM_ADDR, CoreMemGate::Audit),
+    (MEM_VOLATILE_READ, CoreMemGate::Audit),
+    (MEM_VOLATILE_WRITE, CoreMemGate::Audit),
+    (MEM_ADDRESS_OF, CoreMemGate::Import),
+    (MEM_PIN, CoreMemGate::Import),
+    (TYPE_PIN, CoreMemGate::Import),
+    (MEM_ARENA, CoreMemGate::Import),
+    (MEM_BUMP, CoreMemGate::Import),
+    (MEM_POOL, CoreMemGate::Import),
+    (MEM_FIXED, CoreMemGate::Import),
+];
+
+/// Return named `core.mem` item's gate tier.
+pub fn core_mem_gate(item: &str) -> Option<CoreMemGate> {
+    CORE_MEM_GATE_TIERS
+        .iter()
+        .find_map(|(name, gate)| (*name == item).then_some(*gate))
+}
+
+/// Return whether a named `core.mem` item crosses the audit gate. Unknown
+/// names fail closed so a missing table row cannot weaken a safety check.
+pub fn core_mem_requires_audit(item: &str) -> bool {
+    !matches!(core_mem_gate(item), Some(CoreMemGate::Import))
+}
+
 /// D-ARGS1 (ratified 2026-06-22): declarative CLI argument parsing module.
 pub const CORE_ARGS_MODULE: &str = "core.args";
+
+/// D-LIB-CALLGRANT1=A: load a pinned `.jetlib` at a checked grant site.
+pub const CORE_MOD_MODULE: &str = "core.mod";
+pub const MOD_TYPE: &str = "Mod";
+pub const MOD_GRANT_TYPE: &str = "ModGrant";
 
 // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A / D-EMAIL-SMTP-CONFIG1=A: bounded
 // message/MIME plus exact SMTP policy values and one verified transport.
@@ -606,10 +660,6 @@ pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 /// The beginner default is an implicit scope-inferred region (opt A) and never
 /// writes `region`.
 pub const MARKER_REGION: &str = "Region"; // D-BLOCKPLANE1
-
-/// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: structured task group scope. The
-/// keyword remains `taskgroup`; child callable bodies use `=>`.
-pub const KW_TASKGROUP: &str = "taskgroup";
 
 /// D-CTX1 (ratified 2026-06-22, G2): smart-context block marker.
 /// `#context(field: value) { … }` swaps named ambient fields (allocator,

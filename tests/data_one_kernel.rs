@@ -15,6 +15,8 @@
 //!
 //! Run: `cargo test --test data_one_kernel`
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

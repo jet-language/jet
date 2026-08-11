@@ -5,6 +5,7 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ballotGaps } from './store.mjs';
+import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 
 // `updated`/`ratifiedAt` are 'YYYY-MM-DD' (today()); `created` on decisions
 // and `at` on events are full ISO timestamps (now()) — handle both.
@@ -15,6 +16,8 @@ function daysSince(dateStr) {
 }
 
 const EVIDENCE_RE = /verif|green|tests?|evidence/i;
+const DISPUTED_EVIDENCE_RE = /\b(?:not\s+satisfied|blocked|could\s+not|unproven|not\s+run)\b/i;
+const PHASE_SEQ = { frozen: -1, deciding: 0, planning: 1, triage: 1, ready: 2, building: 3, verify: 4, done: 5 };
 
 // ---- rule: done-without-evidence -------------------------------------------
 // A card phase==='done' whose log never mentions verification AND whose
@@ -129,7 +132,71 @@ export function ruleBlockerUnpopulated(s) {
   return findings;
 }
 
-const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard];
+// A met or verified row must not carry evidence that says the work failed or
+// never ran. Reopen the row when the evidence changes the result.
+export function ruleCriteriaEvidenceConflicts(s) {
+  const findings = [];
+  for (const c of s?.cards || []) {
+    for (const item of c.criteria || []) {
+      if (!['met', 'verified'].includes(item.status)) continue;
+      const evidence = String(item.evidence || '').trim();
+      if (!DISPUTED_EVIDENCE_RE.test(evidence)) continue;
+      findings.push({ rule: 'criteria-evidence-conflict', ref: '#' + c.num,
+        msg: '#' + c.num + ' "' + c.title + '" criterion #' + item.n + ' is ' + item.status + ' but its evidence disputes it: ' + evidence });
+    }
+  }
+  return findings;
+}
+
+// Criteria advance the work to verification. A card moved back to an earlier
+// phase must not keep rows that claim the work already passed verification.
+export function ruleCriteriaPhaseDrift(s) {
+  const findings = [];
+  for (const c of s?.cards || []) {
+    const items = c.criteria || [];
+    const phase = PHASE_SEQ[c.phase];
+    if (!items.length || phase == null || phase >= PHASE_SEQ.verify) continue;
+    const verified = items.filter(item => item.status === 'verified').map(item => '#' + item.n);
+    const allSettled = items.every(item => item.status !== 'open');
+    if (!verified.length && !allSettled) continue;
+    const rows = verified.length ? 'verified rows ' + verified.join(', ') : 'all criteria met or verified';
+    findings.push({ rule: 'criteria-phase-drift', ref: '#' + c.num,
+      msg: '#' + c.num + ' "' + c.title + '" is in ' + c.phase + ' but holds ' + rows });
+  }
+  return findings;
+}
+
+// ---- rule: duplicate-suspect -----------------------------------------------
+// Two or more open cards naming the same test, fixture, example, or spec
+// reference usually describe one work slice under different symptoms.
+export function ruleDuplicateSuspects(s) {
+  const byReference = new Map();
+  for (const c of s?.cards || []) {
+    if (!isOpenCard(c)) continue;
+    for (const token of referenceTokens(c.body)) {
+      const group = byReference.get(token) || [];
+      group.push(c);
+      byReference.set(token, group);
+    }
+  }
+
+  const groups = new Map();
+  for (const [token, cards] of byReference) {
+    if (cards.length < 2) continue;
+    const key = cards.map(c => c.id ?? `#${c.num}`).join('|');
+    const group = groups.get(key) || { cards, references: [] };
+    group.references.push(referenceLabel(token));
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].map(({ cards, references }) => ({
+    rule: 'duplicate-suspect',
+    ref: cards.map(c => `#${c.num}`).join(','),
+    msg: `open cards share ${references.join(', ')}: ${cards.map(c => `#${c.num} "${c.title ?? '(untitled)'}"`).join('; ')}`,
+  }));
+}
+
+const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleCriteriaPhaseDrift, ruleDuplicateSuspects];
 
 // ---- --docs mode: ratified decision id still listed in an open-ballot doc --
 // Precise on purpose: only docs/ballots/*.md (not docs/plans/**), since plans

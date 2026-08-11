@@ -793,13 +793,13 @@ fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
 
 mod jet_os_interrupt {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{mpsc, OnceLock};
+    use std::sync::{mpsc, Arc, OnceLock};
 
     static PENDING: AtomicUsize = AtomicUsize::new(0);
     static DISPATCH: OnceLock<Result<mpsc::Sender<Command>, String>> = OnceLock::new();
 
     enum Command {
-        Register(Box<dyn Fn() + Send + 'static>, mpsc::SyncSender<()>),
+        Register(Arc<dyn Fn() + Send + Sync + 'static>, mpsc::SyncSender<()>),
     }
 
     struct PanicBoundary;
@@ -881,7 +881,7 @@ mod jet_os_interrupt {
             std::thread::Builder::new()
                 .name("jet-interrupt".to_string())
                 .spawn(move || {
-                    let mut handlers: Vec<Box<dyn Fn() + Send + 'static>> = Vec::new();
+                    let mut handlers: Vec<Arc<dyn Fn() + Send + Sync + 'static>> = Vec::new();
                     loop {
                         match rx.recv_timeout(std::time::Duration::from_millis(10)) {
                             Ok(Command::Register(handler, ready)) => {
@@ -914,15 +914,12 @@ mod jet_os_interrupt {
         }
     }
 
-    pub fn on_interrupt<F>(handler: F)
-    where
-        F: Fn() + Send + 'static,
-    {
+    pub fn on_interrupt(handler: Arc<dyn Fn() + Send + Sync + 'static>) {
         let tx = dispatcher().unwrap_or_else(|message| {
             super::jet_panic("<core.os>", 0, &format!("core.os.on_interrupt: {message}"))
         });
         let (ready_tx, ready_rx) = mpsc::sync_channel(0);
-        tx.send(Command::Register(Box::new(handler), ready_tx))
+        tx.send(Command::Register(handler, ready_tx))
             .unwrap_or_else(|_| {
                 super::jet_panic(
                     "<core.os>",
@@ -942,10 +939,7 @@ mod jet_os_interrupt {
     }
 }
 
-fn jet_std_os_on_interrupt<F>(handler: F)
-where
-    F: Fn() + Send + 'static,
-{
+fn jet_std_os_on_interrupt(handler: std::sync::Arc<dyn Fn() + Send + Sync + 'static>) {
     jet_os_interrupt::on_interrupt(handler);
 }
 

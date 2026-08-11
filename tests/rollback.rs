@@ -108,7 +108,7 @@ fn run() {
     assert_eq!(stdout, "11\n1\n");
 }
 
-/// Generated Rust contains `snapshot_custom` and `trait user_Rollback`.
+/// Generated Rust contains `snapshot_custom` and `trait __jet_Rollback`.
 /// `unsafe` must not leak outside `mod jet_txn`.
 #[test]
 fn snapshot_custom_in_codegen() {
@@ -154,8 +154,8 @@ fn run() {
         "expected snapshot_custom in generated Rust:\n{rust}"
     );
     assert!(
-        rust.contains("trait user_Rollback"),
-        "expected trait user_Rollback in generated Rust:\n{rust}"
+        rust.contains("trait __jet_Rollback"),
+        "expected trait __jet_Rollback in generated Rust:\n{rust}"
     );
 
     // Strip every vetted prelude region (jet_txn, jet_mem, and the rest of the

@@ -219,10 +219,10 @@ impl<'a> Checker<'a> {
             ) {
                 self.diags.push(Diagnostic::error(
                     "E0040",
-                    format!("`{}` is not in Jet; use `tasks.spawn` instead", call.name),
+                    format!("`{}` is not in Jet; use the `task` keyword instead", call.name),
                     "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
                         .to_string(),
-                    "import `core.tasks as tasks` and call `tasks.spawn(() => your_work())`"
+                    "write `task your_work()` or `task { … }`"
                         .to_string(),
                     Some(call.name_span),
                 ));
@@ -580,8 +580,19 @@ impl<'a> Checker<'a> {
                         return Some(ret);
                     }
                 }
+                // D-NAME-WALK1=A: an inline body overlays its enclosing file's
+                // unqualified maps with its own imports. The local scope wins;
+                // the fallback preserves ordinary file-level `use` behavior.
+                let inline_mangled = self
+                    .inline_module
+                    .as_ref()
+                    .and_then(|module| {
+                        self.inline_unqualified
+                            .get(&(module.clone(), call.name.clone()))
+                    })
+                    .cloned();
                 // D-MOD3: check unqualified inline-module imports (e.g. `use math.clamp`).
-                if let Some(mangled) = self.unqualified.get(&call.name).cloned() {
+                if let Some(mangled) = inline_mangled.or_else(|| self.unqualified.get(&call.name).cloned()) {
                     let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
                     let result = self.infer_code_module_call(
                         &alias,
@@ -593,8 +604,16 @@ impl<'a> Checker<'a> {
                     );
                     return Some(result);
                 }
+                let inline_file = self
+                    .inline_module
+                    .as_ref()
+                    .and_then(|module| {
+                        self.inline_unqualified_file
+                            .get(&(module.clone(), call.name.clone()))
+                    })
+                    .cloned();
                 // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
-                if let Some((fn_name, mod_idx)) = self.unqualified_file.get(&call.name).cloned() {
+                if let Some((fn_name, mod_idx)) = inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned()) {
                     let result = self.infer_import_call(
                         mod_idx,
                         &fn_name,
