@@ -940,7 +940,7 @@ fn split_owner_key(expr: &Expr) -> Option<String> {
             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => expr = inner,
             _ => return None,
         }
-    }
+    };
     let mut key = root?;
     for suffix in suffixes.into_iter().rev() {
         key.push_str(&suffix);

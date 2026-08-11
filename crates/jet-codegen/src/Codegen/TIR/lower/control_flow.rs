@@ -1048,7 +1048,7 @@ pub(crate) fn lower_mixed_switch<'a>(
         };
         // Each arm body has its own lexical bindings.
         let mut branch = clone_env(env);
-        let prefix = if let Some(pattern) = struct_pat.as_ref() {
+        let mut prefix = if let Some(pattern) = struct_pat.as_ref() {
             lower_struct_pattern_bindings(pattern, &subject_ty, cx, &mut branch)
         } else if let Some(pattern) = str_match_pat.as_ref() {
             lower_str_match_pattern_bindings(pattern, cx, &mut branch)
