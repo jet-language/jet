@@ -31,7 +31,8 @@ use super::safety::{
     jit_value_type, opaque_host_handle_ty, record_type_key, user_type_name,
 };
 use super::types_meta::{
-    clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty, JitMeta,
+    clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty,
+    interrupt_callback_signature, JitMeta,
 };
 use super::JitRuntime;
 
@@ -7254,8 +7255,7 @@ impl LowerCtx<'_, '_> {
         fn_ty: &Type,
         args: &[TCallArg],
     ) -> Result<Value, String> {
-        let mut signature = fn_value_signature(self.module, fn_ty, self.meta)?;
-        signature.params.insert(0, AbiParam::new(types::I64));
+        let signature = interrupt_callback_signature(self.module, fn_ty, self.meta)?;
         let sig_ref = self.b.import_signature(signature);
         let callback_index = self.b.ins().iconst(types::I64, 0);
         let environment_index = self.b.ins().iconst(types::I64, 1);
@@ -9529,6 +9529,8 @@ impl LowerCtx<'_, '_> {
                 let id = super::functions_compile::lower_interrupt_named_callback(
                     self.module,
                     name,
+                    &value.ty,
+                    self.meta,
                     self.func_ids,
                 )?;
                 let func_ref = self.module.declare_func_in_func(id, self.b.func);

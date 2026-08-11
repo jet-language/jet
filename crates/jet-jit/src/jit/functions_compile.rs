@@ -11,7 +11,8 @@ use std::collections::{HashMap, HashSet};
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
 use super::types_meta::{
-    clif_ty, fn_value_signature, func_has_receiver, func_signature, jit_fn_name, JitMeta,
+    clif_ty, fn_value_signature, func_has_receiver, func_signature,
+    interrupt_callback_signature, jit_fn_name, JitMeta,
 };
 use super::JitRuntime;
 use crate::{Cell, Collections};
@@ -311,6 +312,8 @@ pub(crate) fn lower_interrupt_callable_lambda(
 pub(crate) fn lower_interrupt_named_callback(
     module: &mut JITModule,
     name: &str,
+    ty: &Type,
+    meta: &JitMeta<'_>,
     func_ids: &HashMap<String, FuncId>,
 ) -> Result<FuncId, String> {
     let target = func_ids
@@ -321,8 +324,7 @@ pub(crate) fn lower_interrupt_named_callback(
     if let Some(cranelift_module::FuncOrDataId::Func(id)) = module.get_name(&wrapper_name) {
         return Ok(id);
     }
-    let mut sig = Signature::new(module.target_config().default_call_conv);
-    sig.params.push(AbiParam::new(types::I64));
+    let sig = interrupt_callback_signature(module, ty, meta)?;
     let id = module
         .declare_function(&wrapper_name, Linkage::Local, &sig)
         .map_err(|error| error.to_string())?;
@@ -335,9 +337,11 @@ pub(crate) fn lower_interrupt_named_callback(
         b.append_block_params_for_function_params(entry);
         b.switch_to_block(entry);
         b.seal_block(entry);
-        let target = module.declare_func_in_func(target, id);
-        b.ins().call(target, &[]);
-        b.ins().return_(&[]);
+        let target = module.declare_func_in_func(target, b.func);
+        let params = b.block_params(entry).to_vec();
+        let call = b.ins().call(target, &params[1..]);
+        let results = b.inst_results(call).to_vec();
+        b.ins().return_(&results);
         b.finalize();
     }
     cranelift_codegen::verify_function(&ctx.func, module.isa())
@@ -380,8 +384,7 @@ fn lower_callable_lambda_with_env(
         TLambdaBody::Expr(_) => false,
     };
     let sig = if capturing {
-        let mut sig = fn_value_signature(module, &fn_ty, meta)?;
-        sig.params.insert(0, AbiParam::new(types::I64)); // env
+        let mut sig = interrupt_callback_signature(module, &fn_ty, meta)?;
         // Block-bodied lambdas often type as Unit when arms `return` Result;
         // Cranelift still needs the real return ABI.
         if (lam.ret.is_some() || block_returns_value) && sig.returns.is_empty() {

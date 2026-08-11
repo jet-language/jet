@@ -396,7 +396,13 @@ impl Plane for Binding {
                     left.interrupt_sendable && right.interrupt_sendable;
                 Some(joined)
             }
-            (Some(one), None) | (None, Some(one)) => Some(one.clone()),
+            (Some(one), None) | (None, Some(one)) => {
+                let mut joined = one.clone();
+                // A missing binding on one reaching path does not prove that
+                // the binding is interrupt-sendable on every path.
+                joined.interrupt_sendable = false;
+                Some(joined)
+            }
             (None, None) => None,
         }
     }
