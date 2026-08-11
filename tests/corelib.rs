@@ -11466,7 +11466,6 @@ fn option_zip_and_lift2_combinators() {
         "option_combinators",
         r#"
 fn missing_float() => Float? = None
-
 fn run() {
     both_a :: Val(2.0)
     both_b :: Val(5.0)
