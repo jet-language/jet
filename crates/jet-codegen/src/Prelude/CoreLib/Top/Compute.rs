@@ -876,6 +876,36 @@ fn jet_compute_copy_checked(tensor: &JetTensor) -> Result<JetTensor, JetComputeE
     Ok(copy)
 }
 
+/// Replace the ambient list projection after a mutable view write-back. The
+/// adapter supplies only the already-marshalled values; storage exclusivity,
+/// mutation policy, and the resulting canonical row-major metadata remain in
+/// the shared Prelude.
+fn jet_compute_replace_data_checked(
+    tensor: &mut JetTensor,
+    values: Vec<f64>,
+) -> Result<(), JetComputeError> {
+    jet_compute_validate_tensor(tensor)?;
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+        ));
+    }
+    let expected = jet_compute_storage_len(&tensor.shape)?;
+    if values.len() != expected {
+        return Err(JetComputeError::InvalidShape(
+            "Tensor write-back length does not match its shape".to_string(),
+        ));
+    }
+    let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
+        return Err(JetComputeError::Unsupported(
+            "Tensor mutable view requires exclusive backing storage".to_string(),
+        ));
+    };
+    *data = values;
+    tensor.strides = jet_compute_row_major_strides(&tensor.shape)?;
+    jet_compute_validate_tensor(tensor)
+}
+
 fn jet_compute_copy(tensor: &JetTensor) -> JetTensor {
     match jet_compute_copy_checked(tensor) {
         Ok(copy) => copy,

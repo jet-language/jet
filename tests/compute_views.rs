@@ -6,10 +6,46 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
+use std::fs;
+
 use tir_support::{
     build_and_run, build_and_run_full, have_rustc, run_default_multi,
     strip_vetted_prelude_modules,
 };
+
+fn run_direct(name: &str, src: &str, force_interpreter: bool) -> (i32, String, String) {
+    use jet::Interpreter::RunOutcome;
+
+    let dir = common::unique_tmp(&format!("compute_views_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let result = match jet::Interpreter::dev_iteration(
+        path.to_str().unwrap(),
+        false,
+        force_interpreter,
+    ) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (exit_code, stdout, stderr),
+        RunOutcome::Problems(diags) => panic!("direct tier rejected compute view source: {diags:?}"),
+    };
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
+fn assert_resident_trace() {
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "compute view proof did not execute tier1 native"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "compute view proof used tier0, deopt, or fallback"
+    );
+}
 
 #[test]
 fn tensor_mutable_window_write_uses_shared_prelude_policy() {
@@ -43,6 +79,15 @@ fn run() {
         "compute views unexpectedly fell back to the interpreter:\n{stderr}"
     );
     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
+
+    jet_jit::reset_jit_trace_for_test();
+    let (code, stdout, stderr) = run_direct("mutable_window_interpreter", src, true);
+    assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
 }
 
 #[test]
@@ -93,6 +138,18 @@ fn run() {
         stderr.contains("Tensor mutable view requires exclusive backing storage"),
         "resident JIT used the wrong Tensor clone policy:\n{stderr}"
     );
+    assert!(stderr.contains("tier1 native"), "resident rejection left tier1:\n{stderr}");
+    assert!(!stderr.contains("tier0 interp"), "resident rejection entered tier0:\n{stderr}");
+
+    jet_jit::reset_jit_trace_for_test();
+    let (code, stdout, stderr) = run_direct("compute_tensor_copy_clone_resident", src, false);
+    assert_ne!(code, 0, "an implicit Tensor clone must retain shared storage");
+    assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
+    assert!(
+        stderr.contains("Tensor mutable view requires exclusive backing storage"),
+        "resident JIT used the wrong Tensor clone policy:\n{stderr}"
+    );
+    assert_resident_trace();
 }
 
 #[test]
@@ -241,5 +298,21 @@ fn run() {
             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
         );
+        assert!(stderr.contains("tier1 native"), "empty-window case left tier1:\n{stderr}");
+        assert!(!stderr.contains("tier0 interp"), "empty-window case entered tier0:\n{stderr}");
+
+        jet_jit::reset_jit_trace_for_test();
+        let (code, stdout, stderr) = run_direct(
+            &format!("compute_tensor_empty_window_resident_{name}"),
+            src,
+            false,
+        );
+        assert_ne!(code, 0, "an empty Tensor element operation must fail");
+        assert_eq!(stdout, "0\n");
+        assert!(
+            stderr.contains("the list has 0 items, so position 0 doesn't exist"),
+            "resident JIT used a non-canonical empty-window element error:\n{stderr}"
+        );
+        assert_resident_trace();
     }
 }

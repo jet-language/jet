@@ -15376,6 +15376,12 @@ impl LowerCtx<'_, '_> {
             // the full set; the tier-0 interpreter covers it too since it re-runs the
             // AST directly. JIT falls through to that fallback ladder for all of these.
             TBuiltinOp::IsEmpty => {
+                if Self::is_view_mut_ty(&recv_ty) {
+                    let (list, _, _) = self.unpack_view_mut(recv_val)?;
+                    let len = self.call_host(self.host.coll.list_len, &[list]);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    return Ok(self.bool_from_icmp(IntCC::Equal, len, zero));
+                }
                 let host = if matches!(&recv_ty, Type::Apply { name, .. } if name == "Set") {
                     self.host.coll.set_len
                 } else if matches!(&recv_ty, Type::Map { .. }) {

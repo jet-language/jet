@@ -1874,6 +1874,9 @@ impl<'a> EvalCtx<'a> {
         let mut expr = expr;
         let mut transparent_depth = 0;
         while let TExprKind::Clone(inner) = &expr.kind {
+            if expr.ty.is_compute_tensor_family() {
+                break;
+            }
             if let Err(diagnostic) = self.enter_source_nesting() {
                 for _ in 0..=transparent_depth {
                     self.leave_source_nesting();
@@ -3672,7 +3675,14 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::ListLit(elems) => self.eval_list_lit_expr(expr, elems, scope),
-            TExprKind::Clone(inner) => self.eval_expr(inner, scope),
+            TExprKind::Clone(inner) => {
+                let value = self.eval_expr(inner, scope)?;
+                if expr.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_clone_value(&value, self.span())
+                } else {
+                    Ok(value)
+                }
+            }
             TExprKind::ExplicitCopy(inner) => {
                 let value = self.eval_expr(inner, scope)?;
                 if expr.ty.is_compute_tensor_family() {

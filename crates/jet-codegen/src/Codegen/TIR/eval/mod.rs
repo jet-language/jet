@@ -718,19 +718,22 @@ pub(super) fn load_view_mut_owner_list(
     let root = scope
         .get(&base)
         .ok_or_else(|| unsupported("view-mut owner", span))?;
-    match project_list_place(root, &path, span)? {
+    let owner = project_list_place(root, &path, span)?;
+    match owner {
         CtValue::List(items) => Ok(items.clone()),
-        CtValue::Struct { type_name, fields }
+        CtValue::Struct {
+            type_name,
+            fields: _,
+        }
             if type_name == "Tensor" || type_name == "JetTensor" =>
         {
-            fields
-                .iter()
-                .find_map(|(name, value)| (name == "data").then_some(value))
-                .and_then(|value| match value {
-                    CtValue::List(items) => Some(items.clone()),
-                    _ => None,
-                })
-                .ok_or_else(|| unsupported("Tensor view owner data", span))
+            match crate::Comptime::ComputeLite::tensor_to_list_value(
+                owner,
+                span,
+            )? {
+                CtValue::List(items) => Ok(items),
+                _ => Err(unsupported("Tensor view owner data", span)),
+            }
         }
         _ => Err(unsupported("view-mut owner list", span)),
     }

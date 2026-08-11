@@ -238,6 +238,13 @@ struct JetComputeTapeHandle {
     tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
 }
 
+const TENSOR_HANDLE_FIELD: &str = "__jet_tensor_handle";
+
+#[derive(Clone)]
+struct JetComputeTensorHandle {
+    tensor: std::sync::Arc<std::sync::Mutex<JetTensor>>,
+}
+
 fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> CtValue {
     CtValue::Closure(std::sync::Arc::new(ClosureData {
         lambda: Lambda {
@@ -251,6 +258,55 @@ fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> 
         return_type: None,
         opaque: Some(CtOpaque::new(JetComputeTapeHandle { tape })),
     }))
+}
+
+fn tensor_handle_to_ct(
+    tensor: std::sync::Arc<std::sync::Mutex<JetTensor>>,
+) -> CtValue {
+    CtValue::Closure(std::sync::Arc::new(ClosureData {
+        lambda: Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            body: LambdaBody::Block(Vec::new()),
+            span: Span::new(0, 0),
+            meta: LambdaMeta::default(),
+        },
+        captured: std::collections::HashMap::new(),
+        return_type: None,
+        opaque: Some(CtOpaque::new(JetComputeTensorHandle { tensor })),
+    }))
+}
+
+fn tensor_handle_from_fields(
+    fields: &[(String, CtValue)],
+    span: Span,
+) -> Result<Option<std::sync::Arc<std::sync::Mutex<JetTensor>>>, Diagnostic> {
+    let Some(value) = fields
+        .iter()
+        .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
+        .map(|(_, value)| value)
+    else {
+        return Ok(None);
+    };
+    let CtValue::Closure(data) = value else {
+        return Err(unsupported("Tensor handle", span));
+    };
+    data.opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
+        .map(|handle| Some(handle.tensor.clone()))
+        .ok_or_else(|| unsupported("Tensor handle", span))
+}
+
+fn tensor_handle(
+    value: &CtValue,
+    span: Span,
+) -> Result<std::sync::Arc<std::sync::Mutex<JetTensor>>, Diagnostic> {
+    let CtValue::Struct { fields, .. } = value else {
+        return Err(unsupported("Tensor", span));
+    };
+    tensor_handle_from_fields(fields, span)?
+        .ok_or_else(|| unsupported("Tensor handle", span))
 }
 
 fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
@@ -319,10 +375,20 @@ fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
 }
 
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
-    tensor_to_ct_inner(tensor, true)
+    let handle = std::sync::Arc::new(std::sync::Mutex::new(tensor.clone()));
+    tensor_to_ct_with_handle(tensor, handle, true)
 }
 
 fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: bool) -> CtValue {
+    let handle = std::sync::Arc::new(std::sync::Mutex::new(tensor.clone()));
+    tensor_to_ct_with_handle(tensor, handle, include_trace)
+}
+
+fn tensor_to_ct_with_handle(
+    tensor: &JetTensor,
+    handle: std::sync::Arc<std::sync::Mutex<JetTensor>>,
+    include_trace: bool,
+) -> CtValue {
     // CtValue owns lists; Prelude remains authority for validation and logical
     // element selection at this engine boundary.
     if let Err(error) = jet_compute_validate_tensor(tensor) {
@@ -381,6 +447,10 @@ fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: bool) -> CtValue {
             ));
         }
     }
+    fields.push((
+        TENSOR_HANDLE_FIELD.to_string(),
+        tensor_handle_to_ct(handle),
+    ));
     CtValue::Struct {
         type_name: "Tensor".to_string(),
         fields,
@@ -593,36 +663,15 @@ fn ct_to_tensor_inner(
     if type_name != "Tensor" && type_name != "JetTensor" {
         return Err(unsupported("Tensor", span));
     }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v)
-            .ok_or_else(|| unsupported("Tensor field", span))
-    };
-    let last_transfer = match field("last_transfer")? {
-        CtValue::Present(value) => Some(ct_to_transfer(value, span)?),
-        CtValue::Failed(CtReport::Clean(_)) => None,
-        _ => return Err(unsupported("Tensor last_transfer", span)),
-    };
-    let trace = if include_trace {
-        match fields.iter().find(|(name, _)| name == "autodiff").map(|(_, value)| value) {
-            Some(CtValue::Present(value)) => Some(trace_from_ct(value, span)?),
-            Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
-            Some(_) => return Err(unsupported("Tensor autodiff trace", span)),
-        }
-    } else {
-        None
-    };
-    let tensor = JetTensor {
-        shape: as_i64_list(field("shape")?, span)?,
-        strides: as_i64_list(field("strides")?, span)?,
-        data: std::sync::Arc::new(as_f64_list(field("data")?, span)?),
-        device: ct_to_device(field("device")?, span)?,
-        last_placement: ct_to_receipt(field("last_placement")?, span)?,
-        last_transfer,
-        trace,
-    };
+    let handle = tensor_handle_from_fields(fields, span)?
+        .ok_or_else(|| unsupported("Tensor handle", span))?;
+    let mut tensor = handle
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?
+        .clone();
+    if !include_trace {
+        tensor.trace = None;
+    }
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
     if let Some(receipt) = &tensor.last_transfer {
@@ -682,7 +731,10 @@ pub fn tensor_view_mut_window(
     args: &[CtValue],
     span: Span,
 ) -> Result<(usize, usize), Diagnostic> {
-    let mut tensor = ct_to_tensor(value, span)?;
+    let handle = tensor_handle(value, span)?;
+    let mut tensor = handle
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
     let view = jet_compute_view_mut_checked(&mut tensor, start, end, exclusive)
         .map_err(|error| unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span))?;
@@ -714,7 +766,10 @@ pub fn tensor_view_set_value(
     replacement: &CtValue,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let mut tensor = ct_to_tensor(value, span)?;
+    let handle = tensor_handle(value, span)?;
+    let mut tensor = handle
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
     let replacement = as_float(replacement, span)?;
     jet_compute_window_set(
@@ -726,7 +781,9 @@ pub fn tensor_view_set_value(
         replacement,
     )
     .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))?;
-    Ok(tensor_to_ct(&tensor))
+    let snapshot = (*tensor).clone();
+    drop(tensor);
+    Ok(tensor_to_ct_with_handle(&snapshot, handle, true))
 }
 
 pub fn tensor_view_list(
@@ -742,6 +799,16 @@ pub fn tensor_view_list(
         view
             .iter()
             .map(|value| CtValue::Float(CtFloat::f64(*value)))
+            .collect(),
+    ))
+}
+
+pub fn tensor_to_list_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    Ok(CtValue::List(
+        jet_compute_tensor_to_list(&tensor)
+            .into_iter()
+            .map(|value| CtValue::Float(CtFloat::f64(value)))
             .collect(),
     ))
 }
@@ -766,22 +833,33 @@ pub fn tensor_copy_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnos
         .map_err(|error| unsupported(&format!("Tensor copy: {}", error.jet_show()), span))
 }
 
+/// The TIR clone node is the implicit Tensor sharing operation. Keep its
+/// storage Arc shared while giving the clone its own canonical handle, exactly
+/// as a Prelude `JetTensor::clone` does at the AOT/JIT boundary.
+pub fn tensor_clone_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    let cloned = tensor.clone();
+    Ok(tensor_to_ct(&cloned))
+}
+
 pub fn tensor_replace_data(
     value: &CtValue,
     items: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let mut tensor = ct_to_tensor(value, span)?;
+    let handle = tensor_handle(value, span)?;
+    let mut tensor = handle
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?;
     let values = as_f64_list(&CtValue::List(items), span)?;
     if values.len() != jet_compute_tensor_values(&tensor).len() {
         return Err(unsupported("Tensor write-back length", span));
     }
-    tensor.strides = jet_compute_row_major_strides(&tensor.shape)
+    jet_compute_replace_data_checked(&mut tensor, values)
         .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
-    tensor.data = std::sync::Arc::new(values);
-    jet_compute_validate_tensor(&tensor)
-        .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
-    Ok(tensor_to_ct(&tensor))
+    let snapshot = (*tensor).clone();
+    drop(tensor);
+    Ok(tensor_to_ct_with_handle(&snapshot, handle, true))
 }
 
 fn map_err(err: JetComputeError) -> CtValue {
