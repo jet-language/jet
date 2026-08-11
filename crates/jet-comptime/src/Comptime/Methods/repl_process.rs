@@ -2,9 +2,11 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
-use crate::AST::CtValue;
+use crate::AST::{CtValue, Type};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
-use super::core_calls::{apply_core_call, apply_impure_core_call, as_string, io_error_value};
+use super::core_calls::{
+    apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
+};
 
 pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {
     let shown = |i: usize, fallback: &str| {
@@ -104,18 +106,42 @@ pub(super) fn apply_repl_fs_call(
 pub fn apply_repl_authorized_core_call(
     module: &str,
     method: &str,
-    mut args: Vec<CtValue>,
+    args: Vec<CtValue>,
     span: Span,
     base_dir: &std::path::Path,
     sink: Option<&mut super::super::Interpreter::DevSink>,
     grants: &[String],
     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
 ) -> Result<CtValue, Diagnostic> {
+    apply_repl_authorized_core_call_with_type(
+        module,
+        method,
+        args,
+        span,
+        base_dir,
+        sink,
+        grants,
+        authorizer,
+        None,
+    )
+}
+
+pub fn apply_repl_authorized_core_call_with_type(
+    module: &str,
+    method: &str,
+    mut args: Vec<CtValue>,
+    span: Span,
+    base_dir: &std::path::Path,
+    sink: Option<&mut super::super::Interpreter::DevSink>,
+    grants: &[String],
+    authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     // REPL eprint is the inline transcript sink. It does not need an effect
     // prompt or a lexical grant; the existing REPL surface keeps it available.
     if module == "core.io" && method == "eprint" {
-        return apply_impure_core_call(
-            module, method, args, span, base_dir, sink, true, None, None,
+        return apply_impure_core_call_with_type(
+            module, method, args, span, base_dir, sink, true, None, None, resolved_ret,
         );
     }
 
@@ -167,7 +193,7 @@ pub fn apply_repl_authorized_core_call(
         return apply_repl_fs_call(method, &args, span, authorizer);
     }
     if module == "core.random" {
-        return apply_core_call(module, method, args, span, true);
+        return apply_core_call_with_type(module, method, args, span, true, resolved_ret);
     }
     let verified_root = if matches!((module, method), ("core.process", "run")) {
         Some(authorizer.verified_root().map_err(|error| {
@@ -179,7 +205,7 @@ pub fn apply_repl_authorized_core_call(
     } else {
         None
     };
-    apply_impure_core_call(
+    apply_impure_core_call_with_type(
         module,
         method,
         args,
@@ -189,6 +215,7 @@ pub fn apply_repl_authorized_core_call(
         true,
         pinned_executable.as_ref(),
         verified_root.as_ref(),
+        resolved_ret,
     )
 }
 

@@ -1,5 +1,6 @@
 //! Exhaustive THandleOp dispatch (#777).
-use crate::Comptime::Builtins::{apply_method, apply_mutating};
+use crate::AST::Type;
+use crate::Comptime::Builtins::{apply_method, apply_mutating_with_type};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::THandleOp;
@@ -14,7 +15,7 @@ mod duration_kernel {
 }
 
 mod time_kernel {
-    include!("../../../Prelude/Core/TimeMonotonic.rs");
+    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
 }
 
 fn handle_op_name(op: &THandleOp) -> String {
@@ -406,6 +407,16 @@ pub(super) fn eval_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    eval_handle_with_type(op, recv, args, span, None)
+}
+
+pub(super) fn eval_handle_with_type(
+    op: &THandleOp,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
     }
@@ -495,21 +506,21 @@ pub(super) fn eval_handle(
         THandleOp::DBClose => Err(unsupported("handle `DBClose`", span)),
         THandleOp::DurationNew { unit, float } => duration_new(recv, unit, *float, span),
         THandleOp::ClockNow => apply_method(recv, "now", args.to_vec(), span),
-        THandleOp::ClockTick => apply_mutating(recv, "tick", args.to_vec(), span),
-        THandleOp::ClockAdvance => apply_mutating(recv, "advance", args.to_vec(), span),
-        THandleOp::ClockWait => apply_mutating(recv, "wait", args.to_vec(), span),
-        THandleOp::RngInt => apply_mutating(recv, "int", args.to_vec(), span),
-        THandleOp::RngFloat => apply_mutating(recv, "float", args.to_vec(), span),
-        THandleOp::RngFloatRange => apply_mutating(recv, "float_range", args.to_vec(), span),
-        THandleOp::RngBool => apply_mutating(recv, "bool", args.to_vec(), span),
-        THandleOp::RngBoolP => apply_mutating(recv, "bool", args.to_vec(), span),
-        THandleOp::RngNormal => apply_mutating(recv, "normal", args.to_vec(), span),
-        THandleOp::RngExponential => apply_mutating(recv, "exponential", args.to_vec(), span),
-        THandleOp::RngBytes => apply_mutating(recv, "bytes", args.to_vec(), span),
-        THandleOp::RngSplit => apply_mutating(recv, "split", args.to_vec(), span),
-        THandleOp::RngPick => apply_mutating(recv, "pick", args.to_vec(), span),
-        THandleOp::RngWeightedPick => apply_mutating(recv, "weighted_pick", args.to_vec(), span),
-        THandleOp::RngSample => apply_mutating(recv, "sample", args.to_vec(), span),
+        THandleOp::ClockTick => apply_mutating_with_type(recv, "tick", args.to_vec(), span, resolved_ret),
+        THandleOp::ClockAdvance => apply_mutating_with_type(recv, "advance", args.to_vec(), span, resolved_ret),
+        THandleOp::ClockWait => apply_mutating_with_type(recv, "wait", args.to_vec(), span, resolved_ret),
+        THandleOp::RngInt => apply_mutating_with_type(recv, "int", args.to_vec(), span, resolved_ret),
+        THandleOp::RngFloat => apply_mutating_with_type(recv, "float", args.to_vec(), span, resolved_ret),
+        THandleOp::RngFloatRange => apply_mutating_with_type(recv, "float_range", args.to_vec(), span, resolved_ret),
+        THandleOp::RngBool => apply_mutating_with_type(recv, "bool", args.to_vec(), span, resolved_ret),
+        THandleOp::RngBoolP => apply_mutating_with_type(recv, "bool", args.to_vec(), span, resolved_ret),
+        THandleOp::RngNormal => apply_mutating_with_type(recv, "normal", args.to_vec(), span, resolved_ret),
+        THandleOp::RngExponential => apply_mutating_with_type(recv, "exponential", args.to_vec(), span, resolved_ret),
+        THandleOp::RngBytes => apply_mutating_with_type(recv, "bytes", args.to_vec(), span, resolved_ret),
+        THandleOp::RngSplit => apply_mutating_with_type(recv, "split", args.to_vec(), span, resolved_ret),
+        THandleOp::RngPick => apply_mutating_with_type(recv, "pick", args.to_vec(), span, resolved_ret),
+        THandleOp::RngWeightedPick => apply_mutating_with_type(recv, "weighted_pick", args.to_vec(), span, resolved_ret),
+        THandleOp::RngSample => apply_mutating_with_type(recv, "sample", args.to_vec(), span, resolved_ret),
         THandleOp::RngShuffle => {
             let mut state = match recv {
                 CtValue::Struct { type_name, fields }
@@ -528,7 +539,13 @@ pub(super) fn eval_handle(
                 }
             };
             let value =
-                crate::Comptime::apply_seeded_rng_method(&mut state, "shuffle", args, span)?;
+                crate::Comptime::apply_seeded_rng_method_with_type(
+                    &mut state,
+                    "shuffle",
+                    args,
+                    span,
+                    resolved_ret,
+                )?;
             *recv = CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(state as i64))],

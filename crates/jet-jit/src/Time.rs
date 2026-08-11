@@ -8,7 +8,6 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
-    include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
@@ -50,7 +49,7 @@ pub(crate) fn ambient_datetime_now_value() -> CtValue {
 }
 
 pub(crate) fn ambient_monotonic_now_ms() -> i64 {
-    time_rt::jet_time_monotonic_now_ns() / 1_000_000
+    jet_foundation::Monotonic::jet_time_monotonic_now_ns() / 1_000_000
 }
 
 pub(crate) fn ambient_instant_value() -> CtValue {
@@ -58,7 +57,7 @@ pub(crate) fn ambient_instant_value() -> CtValue {
         type_name: "Instant".to_string(),
         fields: vec![(
             "start_ns".to_string(),
-            CtValue::Int(time_rt::jet_time_monotonic_now_ns()),
+            CtValue::Int(jet_foundation::Monotonic::jet_time_monotonic_now_ns()),
         )],
     }
 }
@@ -177,7 +176,11 @@ extern "C" fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_time_parse_time(value: i64) -> i64 {
-    match time_rt::JetLocalTime::parse(&clone_string(value)) {
+    fn parse_local_time(value: &str) -> Result<time_rt::JetLocalTime, String> {
+        time_rt::JetLocalTime::parse(value)
+    }
+
+    match parse_local_time(&clone_string(value)) {
         Ok(time) => result_ok(push(TimeValue::LocalTime(time)) as u64),
         Err(error) => result_err(error),
     }

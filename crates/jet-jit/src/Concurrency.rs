@@ -4,7 +4,7 @@ use jet_codegen::scheduler::{
     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_all, jet_scheduler_any,
     jet_scheduler_current_task_trace, jet_scheduler_deliver_shield_exit, jet_scheduler_race,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
-    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_std_time_sleep,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
     jet_scheduler_yield_now, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
     JetSchedulerWait, JetShieldExit, JetTaskControl,
@@ -1048,7 +1048,7 @@ extern "C" fn jet_jit_interval(ms: i64) -> i64 {
 
 extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
     wait_status(|| {
-        jet_scheduler_sleep_ms(millis.max(0) as u64);
+        jet_std_time_sleep(millis);
         0
     })
 }

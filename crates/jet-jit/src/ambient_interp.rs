@@ -631,6 +631,7 @@ fn ambient_random_call(
     method: &str,
     args: Vec<CtValue>,
     span: Span,
+    resolved_ret: Option<&Type>,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if method == "rng"
         || !matches!(
@@ -692,10 +693,14 @@ fn ambient_random_call(
             })? else {
                 return Err(unsupported("random.pick needs a list", span));
             };
-            Ok(crate::Random::ambient_pick(items).map_or_else(
-                || CtValue::absent(Type::Int),
-                |value| CtValue::Present(Box::new(value)),
-            ))
+            match crate::Random::ambient_pick(items) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         "weighted_pick" => {
             let CtValue::List(items) = args.first().ok_or_else(|| {
@@ -725,10 +730,14 @@ fn ambient_random_call(
                     )),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(crate::Random::ambient_weighted_pick(items, &weights).map_or_else(
-                || CtValue::absent(Type::Int),
-                |value| CtValue::Present(Box::new(value)),
-            ))
+            match crate::Random::ambient_weighted_pick(items, &weights) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.weighted_pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         "sample" => {
             let CtValue::List(items) = args.first().ok_or_else(|| {
@@ -788,7 +797,7 @@ fn ambient_time_call(
         ("core.time", "instant") => Ok(crate::Time::ambient_instant_value()),
         ("core.time", "sleep") => {
             let millis = ambient_int_arg(args, 0, "time.sleep", span)?;
-            jet_codegen::scheduler::jet_scheduler_sleep_ms(millis.max(0) as u64);
+            jet_codegen::scheduler::jet_std_time_sleep(millis);
             Ok(CtValue::Unit)
         }
         ("core.time", "start") => Ok(CtValue::Struct {
@@ -810,6 +819,7 @@ pub fn ambient_core_call(
     method: &str,
     args: Vec<CtValue>,
     span: Span,
+    resolved_ret: Option<Type>,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
@@ -830,7 +840,7 @@ pub fn ambient_core_call(
         return Some(result);
     }
     if module == "core.random" {
-        if let Some(result) = ambient_random_call(method, args.clone(), span) {
+        if let Some(result) = ambient_random_call(method, args.clone(), span, resolved_ret.as_ref()) {
             return Some(result);
         }
     }

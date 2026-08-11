@@ -23,6 +23,7 @@ pub mod scheduler {
     pub use jet_foundation::Outcome::{JetOutcome, JetTaskFailure};
     include!("Prelude/Deadline.rs");
     include!("SchedulerHost.rs");
+    include!("Prelude/CoreLib/Top/TimeSleep.rs");
     include!("Prelude/Scheduler.rs");
     include!("Prelude/Stream.rs");
     include!("Prelude/Observe.rs");

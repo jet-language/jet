@@ -1,12 +1,3 @@
-// Deadline clock, budget, and JetDeadlineGuard: card #1747, one home in
-// Prelude/Deadline.rs (included by this AOT emission list and by
-// jet_codegen::scheduler for the JIT host).
-
-fn jet_deadline_remaining_ms() -> Option<i64> {
-    let deadline = jet_ctx_deadline_ms()?;
-    Some(deadline.saturating_sub(jet_std_time_now()))
-}
-
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = jet_std::jet_task_deadline(wait_kind).render();
     if jet_interrupt_handler_should_unwind()
@@ -18,26 +9,6 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     jet_runtime_diagnostic(rendered);
 }
 
-fn jet_deadline_check(wait_kind: &str) {
-    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-        jet_deadline_exceeded(wait_kind);
-    }
-}
-
-fn jet_std_time_sleep(millis: i64) {
-    let want = millis.max(0);
-    if let Some(remaining) = jet_deadline_remaining_ms() {
-        if remaining <= 0 {
-            jet_deadline_exceeded("time sleep");
-        }
-        if want > remaining {
-            jet_scheduler_sleep_ms(remaining as u64);
-            jet_deadline_exceeded("time sleep");
-        }
-    }
-    jet_scheduler_sleep_ms(want as u64);
-    jet_deadline_check("time sleep");
-}
 fn jet_std_time_start() -> jet_std::Stopwatch {
     jet_std::Stopwatch {
         start: std::time::Instant::now(),

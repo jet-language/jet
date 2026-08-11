@@ -9,13 +9,13 @@ use crate::Codegen::TIR::{
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{
-    apply_core_call, apply_impure_core_call, apply_repl_authorized_core_call, CtReport, CtValue,
-    DevSink,
+    apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
+    apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
 use super::builtins::eval_builtin;
-use super::handles::eval_handle;
+use super::handles::eval_handle_with_type;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
@@ -2314,7 +2314,14 @@ impl<'a> EvalCtx<'a> {
         let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
         let is_shuffle = module == "core.random" && method == "shuffle";
         if !is_tier2 {
-            let value = apply_core_call(module, method, argv, source_span, self.repl_mode)?;
+            let value = apply_core_call_with_type(
+                module,
+                method,
+                argv,
+                source_span,
+                self.repl_mode,
+                Some(&expr.ty),
+            )?;
             if is_shuffle {
                 if let Some(place) = args.first() {
                     let items = match &value {
@@ -2338,7 +2345,7 @@ impl<'a> EvalCtx<'a> {
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            apply_repl_authorized_core_call(
+            apply_repl_authorized_core_call_with_type(
                 module,
                 method,
                 argv,
@@ -2347,13 +2354,14 @@ impl<'a> EvalCtx<'a> {
                 sink.as_deref_mut(),
                 &self.repl_grants,
                 reborrow_repl_authorizer(&mut self.repl_authorizer),
+                Some(&expr.ty),
             )
         } else if self.impure_depth > 0 && self.allow_impure {
             let mut sink = self
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            apply_impure_core_call(
+            apply_impure_core_call_with_type(
                 module,
                 method,
                 argv,
@@ -2363,6 +2371,7 @@ impl<'a> EvalCtx<'a> {
                 false,
                 None,
                 None,
+                Some(&expr.ty),
             )
         } else if self.impure_depth == 0 {
             return Err(Diagnostic::error(
@@ -3423,7 +3432,13 @@ impl<'a> EvalCtx<'a> {
                         _ => {}
                     }
                 }
-                let mut result = eval_handle(op, &mut r, &mut argv, self.span())?;
+                let mut result = eval_handle_with_type(
+                    op,
+                    &mut r,
+                    &mut argv,
+                    self.span(),
+                    Some(&expr.ty),
+                )?;
                 let http_json = matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
@@ -4053,11 +4068,12 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                     }
-                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating(
+                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating_with_type(
                         &mut r,
                         &method.name,
                         argv.clone(),
                         self.span(),
+                        Some(&expr.ty),
                     ) {
                         self.write_back_place(recv, r, scope)?;
                         return Ok(ret);
@@ -4660,11 +4676,12 @@ impl<'a> EvalCtx<'a> {
                     for a in args {
                         argv.push(self.eval_expr(a, scope)?);
                     }
-                    let result = match crate::Comptime::Builtins::apply_mutating(
+                    let result = match crate::Comptime::Builtins::apply_mutating_with_type(
                         &mut r,
                         method,
                         argv.clone(),
                         self.span(),
+                        Some(&expr.ty),
                     ) {
                         Ok(v) => v,
                         Err(_) => crate::Comptime::Builtins::apply_method(

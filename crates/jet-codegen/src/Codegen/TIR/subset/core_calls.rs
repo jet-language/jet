@@ -25,6 +25,12 @@ use std::collections::HashSet;
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
+    // The AOT emitter uses the typed `JetLocalTime::parse` expression, while
+    // the resident JIT has an explicit Result<LocalTime, String> adapter.
+    // Keep this special route out of the generic direct-symbol table.
+    if module == "core.time" && method == "parse_time" {
+        return true;
+    }
     // Plain Core calls are rows in the foundation registry. Their argument
     // expressions and resolved value types are checked by the callers below;
     // this lookup owns the call-key coverage decision.

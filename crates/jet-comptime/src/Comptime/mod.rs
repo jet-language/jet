@@ -50,7 +50,8 @@ mod UrlLite;
 pub mod TirBridge;
 
 pub use AmbientRuntime::{
-    ambient_hooks, try_core_call as try_ambient_core_call, try_handle as try_ambient_handle,
+    ambient_hooks, try_core_call as try_ambient_core_call,
+    try_core_call_typed as try_ambient_core_call_typed, try_handle as try_ambient_handle,
     with_ambient,
 };
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
@@ -70,10 +71,12 @@ use crate::{Syntax, TypedHeads};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call,
-    apply_repl_authorized_core_call, display_core_pure_value, eval_regex_replace_all_with,
+    apply_core_call, apply_core_call_with_type, apply_data_line_call, apply_impure_core_call,
+    apply_impure_core_call_with_type,
+    apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
+    display_core_pure_value, eval_regex_replace_all_with,
 };
-pub use Methods::apply_seeded_rng_method;
+pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, vault_comptime_denied,

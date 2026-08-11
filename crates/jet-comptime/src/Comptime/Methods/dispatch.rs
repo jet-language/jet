@@ -25,10 +25,13 @@ use super::super::Interpreter::{Flow, Interp};
 use crate::AST::{as_bytes, CtValue};
 use jet_foundation::Names::{mangle, user_type_rust};
 use super::core_calls::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, as_float, display_core_pure_value,
+    apply_core_call, apply_core_call_with_type, apply_data_line_call,
+    apply_impure_core_call_with_type, as_float, display_core_pure_value,
     eval_regex_replace_all_with, sketch_add, solver_new, solver_require,
 };
-use super::repl_process::apply_repl_authorized_core_call;
+use super::repl_process::{
+    apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
+};
 
 mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
@@ -119,6 +122,16 @@ pub fn apply_seeded_rng_method(
     args: &mut [CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    apply_seeded_rng_method_with_type(state, method, args, span, None)
+}
+
+pub fn apply_seeded_rng_method_with_type(
+    state: &mut u64,
+    method: &str,
+    args: &mut [CtValue],
+    span: Span,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     let float = |index| {
         args.get(index)
             .ok_or_else(|| unsupported("this Rng method argument", span))
@@ -179,29 +192,41 @@ pub fn apply_seeded_rng_method(
         }),
         "pick" => {
             let values = list(0)?;
-            Ok(match seeded_random_kernel::jet_seeded_rng_pick(state, &values.to_vec()) {
-                Some(value) => CtValue::Present(Box::new(value)),
-                None => CtValue::absent(Type::Int),
-            })
+            match seeded_random_kernel::jet_seeded_rng_pick(state, &values.to_vec()) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Rng.pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         "weighted_pick" => {
             let values = list(0)?;
             let weights = list(1)?;
             if values.is_empty() || values.len() != weights.len() {
-                return Ok(CtValue::absent(Type::Int));
+                return Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Rng.weighted_pick needs a resolved element type", span)
+                    })?,
+                ));
             }
             let weights = weights
                 .iter()
                 .map(|weight| as_float(weight, span))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(match seeded_random_kernel::jet_seeded_rng_weighted_pick(
+            match seeded_random_kernel::jet_seeded_rng_weighted_pick(
                 state,
                 &values.to_vec(),
                 &weights,
             ) {
-                Some(value) => CtValue::Present(Box::new(value)),
-                None => CtValue::absent(Type::Int),
-            })
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Rng.weighted_pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         "sample" => {
             let values = list(0)?;

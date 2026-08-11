@@ -682,7 +682,7 @@ impl<'a> Interp<'a> {
                 let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
                 if is_tier2 {
                     if self.repl_mode {
-                        return apply_repl_authorized_core_call(
+                        return apply_repl_authorized_core_call_with_type(
                             &module,
                             method,
                             argv,
@@ -691,6 +691,7 @@ impl<'a> Interp<'a> {
                             self.sink.as_deref_mut(),
                             &self.repl_grants,
                             reborrow_repl_authorizer(&mut self.repl_authorizer),
+                            resolved_ret,
                         );
                     }
                     if self.impure_depth == 0 {
@@ -715,7 +716,7 @@ impl<'a> Interp<'a> {
                             Some(span),
                         ));
                     }
-                    return apply_impure_core_call(
+                    return apply_impure_core_call_with_type(
                         &module,
                         method,
                         argv,
@@ -725,12 +726,20 @@ impl<'a> Interp<'a> {
                         false,
                         None,
                         None,
+                        resolved_ret,
                     );
                 }
                 if matches!((module.as_str(), method), ("core.data", "pivot_sum")) {
                     return self.eval_pivot_sum(argv, span);
                 }
-                return apply_core_call(&module, method, argv, span, self.repl_mode);
+                return apply_core_call_with_type(
+                    &module,
+                    method,
+                    argv,
+                    span,
+                    self.repl_mode,
+                    resolved_ret,
+                );
             }
         }
 
@@ -2067,7 +2076,13 @@ impl<'a> Interp<'a> {
                         _ => None,
                     })
                     .unwrap_or(0);
-                let value = apply_seeded_rng_method(&mut state, method, &mut argv, span)?;
+                let value = apply_seeded_rng_method_with_type(
+                    &mut state,
+                    method,
+                    &mut argv,
+                    span,
+                    resolved_ret,
+                )?;
                 if method == "shuffle" {
                     self.write_back(&args[0].expr, argv[0].clone(), scope)?;
                 }

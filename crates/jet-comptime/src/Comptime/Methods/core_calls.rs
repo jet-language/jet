@@ -9,6 +9,7 @@ use super::super::Diagnostics::unsupported;
 use crate::AST::{as_bytes, CtReport, CtValue};
 
 use super::repl_process::run_repl_process;
+use super::time_deadline_kernel;
 
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
@@ -94,12 +95,8 @@ mod sketch_kernel {
 }
 
 mod time_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
+    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
-}
-
-mod time_deadline_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Deadline.rs");
 }
 
 mod crypto_entropy_kernel {
@@ -717,7 +714,7 @@ fn repl_native_only_module(module: &str) -> Option<&'static str> {
         "core.db" => Some("`core.db` (SQLite)"),
         "core.net" => Some("network sockets (`core.net`)"),
         "core.reactive" => Some("`core.reactive`"),
-        "core.crypto" | "core.crypto.random" => Some("`core.crypto`"),
+        "core.crypto" => Some("`core.crypto`"),
         "core.auth" => Some("`core.auth` token verification"),
         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
         "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
@@ -863,6 +860,20 @@ pub fn apply_core_call(
     span: Span,
     repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
+    apply_core_call_with_type(module, method, args, span, repl_mode, None)
+}
+
+/// Apply a Core call with sema's resolved return type available to erased
+/// adapters. The type is marshalling metadata only; effects and policy remain
+/// owned by the existing registries and Prelude kernels.
+pub fn apply_core_call_with_type(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    repl_mode: bool,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(
@@ -889,8 +900,13 @@ pub fn apply_core_call(
             return result;
         }
     }
-    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
-    {
+    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+        module,
+        method,
+        args.clone(),
+        span,
+        resolved_ret.cloned(),
+    ) {
         return result;
     }
 
@@ -1844,7 +1860,7 @@ pub fn apply_core_call(
                 CtValue::Int(value) => *value,
                 _ => return Err(unsupported("time.sleep expects an Int", span)),
             };
-            std::thread::sleep(std::time::Duration::from_millis(millis.max(0) as u64));
+            time_deadline_kernel::jet_std_time_sleep(millis);
             Ok(CtValue::Unit)
         }
         ("core.time", "start") => Ok(CtValue::Struct {
@@ -1991,10 +2007,14 @@ pub fn apply_core_call(
             let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.pick needs a list", span));
             };
-            Ok(match ambient_random_kernel::pick(&xs) {
-                Some(v) => CtValue::Present(Box::new(v)),
-                None => CtValue::absent(Type::Int),
-            })
+            match ambient_random_kernel::pick(&xs) {
+                Some(v) => Ok(CtValue::Present(Box::new(v))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         ("core.random", "weighted_pick") => {
             let CtValue::List(xs) = one(0)?.clone() else {
@@ -2010,10 +2030,14 @@ pub fn apply_core_call(
                 .iter()
                 .map(|w| as_float(w, span))
                 .collect::<Result<_, _>>()?;
-            Ok(match ambient_random_kernel::weighted_pick(&xs, &weights) {
-                Some(v) => CtValue::Present(Box::new(v)),
-                None => CtValue::absent(Type::Int),
-            })
+            match ambient_random_kernel::weighted_pick(&xs, &weights) {
+                Some(v) => Ok(CtValue::Present(Box::new(v))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.weighted_pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         ("core.random", "sample") => {
             let CtValue::List(xs) = one(0)?.clone() else {
@@ -2590,6 +2614,32 @@ pub fn apply_impure_core_call(
     pinned_executable: Option<&std::fs::File>,
     verified_root: Option<&std::fs::File>,
 ) -> Result<CtValue, Diagnostic> {
+    apply_impure_core_call_with_type(
+        module,
+        method,
+        args,
+        span,
+        base_dir,
+        sink,
+        repl_mode,
+        pinned_executable,
+        verified_root,
+        None,
+    )
+}
+
+pub fn apply_impure_core_call_with_type(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    base_dir: &std::path::Path,
+    sink: Option<&mut super::super::Interpreter::DevSink>,
+    repl_mode: bool,
+    pinned_executable: Option<&std::fs::File>,
+    verified_root: Option<&std::fs::File>,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(
@@ -2614,8 +2664,13 @@ pub fn apply_impure_core_call(
             return result;
         }
     }
-    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
-    {
+    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+        module,
+        method,
+        args.clone(),
+        span,
+        resolved_ret.cloned(),
+    ) {
         return result;
     }
     let one = |i: usize| {
@@ -2976,9 +3031,11 @@ pub fn apply_impure_core_call(
         ("core.compress.gzip", _)
         | ("core.compress.zstd", _)
         | ("core.archive", _)
-        | ("core.perf", _) => apply_core_call(module, method, args, span, repl_mode),
+        | ("core.perf", _) => {
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
+        }
         (module, _) if module.starts_with("core.encoding.") => {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         // Ambient impure depth must not block pure-tier CorePureParity surfaces
         // that TirBridge already evaluates (date/math/measurement/testing/…).
@@ -2987,10 +3044,13 @@ pub fn apply_impure_core_call(
         ("core.io", method)
             if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
         {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.random", _) | ("core.testing", "fake_rng") => {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
+        }
+        ("core.crypto.random", "bytes") => {
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.time.date", _)
         | ("core.time.duration", _)
@@ -3016,14 +3076,16 @@ pub fn apply_impure_core_call(
         | ("core.units", _)
         | ("core.time", _)
         | ("core.time.datetime", _)
-        | ("core.science.measurement", _) => apply_core_call(module, method, args, span, repl_mode),
+        | ("core.science.measurement", _) => {
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
+        }
         // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
         // Keep E3412 for the rest. D-META-EFFECT1: "pure" is what the effect
         // table says, so both tiers agree without a second list here.
         ("core.net", method)
             if jet_foundation::Effects::core_effect("core.net", method).is_none() =>
         {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.net", _) => Err(Diagnostic::error(
             "E3412",

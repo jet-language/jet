@@ -800,6 +800,16 @@ impl CtValue {
         }
     }
 
+    /// Resolve the payload type for a `T?` carrier without inventing a type
+    /// for an empty list. Sema's resolved return type is authoritative; an
+    /// erased adapter must report a missing type instead of guessing.
+    pub fn resolved_option_element_type(resolved_ret: Option<&Type>) -> Option<Type> {
+        match resolved_ret {
+            Some(Type::Option(inner)) => Some((**inner).clone()),
+            _ => None,
+        }
+    }
+
     pub fn jet_show(&self) -> String {
         match self {
             CtValue::Int(n) => n.to_string(),
