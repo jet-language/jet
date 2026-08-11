@@ -13,6 +13,8 @@
 // convention for the same "two independently-built crates can't share Rust
 // types" reason).
 
+use jet_crypto_entropy::jet_crypto_entropy_fill as jet_crypto_entropy_fill_secrets;
+
 use age::secrecy::ExposeSecret;
 use std::io::{Read as _, Write as _};
 use std::str::FromStr;
@@ -334,7 +336,7 @@ fn vault_hash(parts: &[&[u8]]) -> [u8; 32] {
 }
 fn vault_random<const N: usize>() -> Result<[u8; N], JetVaultError> {
     let mut out = [0u8; N];
-    jet_crypto_entropy_fill(&mut out).map_err(|_| JetVaultError::Crypto(JetCryptoError::EntropyUnavailable))?;
+    jet_crypto_entropy_fill_secrets(&mut out).map_err(|_| JetVaultError::Crypto(JetCryptoError::EntropyUnavailable))?;
     Ok(out)
 }
 

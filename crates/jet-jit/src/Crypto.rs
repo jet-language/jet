@@ -16,6 +16,8 @@ pub(crate) mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+    pub(crate) use jet_crypto_entropy::jet_crypto_entropy_fill as jet_crypto_entropy_fill_for_host;
     include!("../../jet-pkg-model/src/Prelude/Crypto.rs");
     include!("../../jet-pkg-model/src/Prelude/VaultNfc.rs");
     include!("../../jet-pkg-model/src/Prelude/SecretsCrypto.rs");
@@ -1433,6 +1435,5 @@ host_fns! {
     vault_expert_prepare_import_signing: "jet_jit_vault_expert_prepare_import_signing" => jet_jit_vault_expert_prepare_import_signing: binary;
     vault_expert_commit_import_signing: "jet_jit_vault_expert_commit_import_signing" => jet_jit_vault_expert_commit_import_signing: binary;
 }
-
 
 

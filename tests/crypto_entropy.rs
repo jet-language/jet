@@ -4,6 +4,7 @@ mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    pub use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 }
 
 use runtime::{

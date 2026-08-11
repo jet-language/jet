@@ -74,7 +74,7 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
 }
 fn jet_crypto_entropy_fill(buf: &mut [u8]) -> Result<(), String> {
-    crate::Crypto::runtime::jet_crypto_entropy_fill(buf).map_err(|error| error.to_string())
+    crate::Crypto::runtime::jet_crypto_entropy_fill_for_host(buf).map_err(|error| error.to_string())
 }
 fn jet_crypto_entropy_zeroize(buf: &mut [u8]) {
     crate::Crypto::runtime::jet_crypto_entropy_zeroize(buf)
