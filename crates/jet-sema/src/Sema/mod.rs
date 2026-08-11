@@ -693,10 +693,10 @@ fn find_forward_refs_inner(
         let crate::AST::Expr::Ident(name, span) = node else {
             return;
         };
-        if let Some(idx) = all_param_names.iter().position(|candidate| candidate == name)
-            && idx >= default_param_idx
-        {
-            found.push((name.clone(), *span));
+        if let Some(idx) = all_param_names.iter().position(|candidate| candidate == name) {
+            if idx >= default_param_idx {
+                found.push((name.clone(), *span));
+            }
         }
     });
 }
