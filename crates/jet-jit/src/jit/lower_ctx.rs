@@ -423,7 +423,7 @@ impl LowerCtx<'_, '_> {
                     .cloned()
                     .unwrap_or(Type::Int);
                 let payload = if heap {
-                    self.unpack_enum_heap_payload(subject, &payload_ty)?
+                    self.unpack_enum_heap_payload(subject, &payload_ty, 0)?
                 } else {
                     self.unpack_enum_scalar(subject, &payload_ty)?
                 };
@@ -438,17 +438,56 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn pattern_binding(pattern: &Pattern) -> Option<(&str, &str)> {
+    fn pattern_binding(pattern: &Pattern) -> Option<(&str, &[PatSlot])> {
         match pattern {
             Pattern::Variant {
                 variant, bindings, ..
             } => bindings
-                .first()
-                .and_then(PatSlot::as_bind)
-                .map(|binding| (variant.as_str(), binding)),
+                .iter()
+                .any(|binding| binding.as_bind().is_some())
+                .then_some((variant.as_str(), bindings.as_slice())),
             Pattern::Or(alternatives, _) => alternatives.first().and_then(Self::pattern_binding),
             _ => None,
         }
+    }
+
+    fn bind_enum_payloads(
+        &mut self,
+        subject: Value,
+        enum_name: &str,
+        variant: &str,
+        bindings: &[PatSlot],
+        heap: bool,
+    ) -> Result<Vec<(String, Option<Variable>, Option<Type>)>, String> {
+        let payload_types = self
+            .meta
+            .enum_variant_payload_types(enum_name, variant)
+            .map(|types| types.to_vec())
+            .unwrap_or_default();
+        let mut bound = Vec::new();
+        for (field_index, binding) in bindings.iter().enumerate() {
+            let Some(name) = binding.as_bind() else {
+                continue;
+            };
+            let payload_ty = payload_types.get(field_index).cloned().ok_or_else(|| {
+                format!(
+                    "jit enum payload field missing: {enum_name}::{variant}[{field_index}]"
+                )
+            })?;
+            let payload = if heap {
+                self.unpack_enum_heap_payload(subject, &payload_ty, field_index)?
+            } else {
+                self.unpack_enum_scalar(subject, &payload_ty)?
+            };
+            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
+            let var = self.fresh_var(payload_clif);
+            self.b.def_var(var, payload);
+            let key = TIR::local_place(name);
+            let old_var = self.vars.insert(key.clone(), var);
+            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
+            bound.push((key, old_var, old_ty));
+        }
+        Ok(bound)
     }
 
     fn emit_dummy_return(&mut self) {
@@ -728,24 +767,19 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// True when this enum match uses heap-boxed payloads (F64, DataTree, or
-    /// the structured EmailError ABI).
-    fn enum_match_uses_f64_heap(&self, arms: &[TIR::TMatchArm]) -> bool {
-        arms.iter().any(|arm| {
-            let Some(variant) = arm.pattern.variant() else {
-                return false;
-            };
-            let Some(enum_name) = arm.pattern.enum_type.as_deref() else {
-                return false;
-            };
-            if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "EmailError") {
-                return true;
-            }
-            self.meta
-                .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
-        })
+    /// True when this enum variant uses a heap record for its payload.
+    fn enum_variant_uses_heap(&self, enum_name: &str, variant: &str) -> bool {
+        if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "EmailError") {
+            return true;
+        }
+        self.meta
+            .enum_variant_payload_types(enum_name, variant)
+            .is_some_and(|types| {
+                types.len() > 1
+                    || types
+                        .first()
+                        .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
+            })
     }
 
     fn is_datatree_value_ty(ty: &Type) -> bool {
@@ -901,21 +935,25 @@ impl LowerCtx<'_, '_> {
         &mut self,
         packed: Value,
         payload_ty: &Type,
+        field_index: usize,
     ) -> Result<Value, String> {
-        let one = self.b.ins().iconst(types::I64, 1);
+        let field = self
+            .b
+            .ins()
+            .iconst(types::I64, (field_index + 1) as i64);
         match self.meta.clif_ty(payload_ty) {
             Some(types::F64) => {
-                Ok(self.call_host(self.host.struct_get_f64, &[packed, one]))
+                Ok(self.call_host(self.host.struct_get_f64, &[packed, field]))
             }
             Some(types::I64) => {
-                Ok(self.call_host(self.host.struct_get_i64, &[packed, one]))
+                Ok(self.call_host(self.host.struct_get_i64, &[packed, field]))
             }
             Some(types::I8) => {
-                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, field]);
                 Ok(self.b.ins().ireduce(types::I8, raw))
             }
             Some(types::I32) => {
-                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, field]);
                 Ok(self.b.ins().ireduce(types::I32, raw))
             }
             other => Err(format!(
@@ -4285,7 +4323,6 @@ impl LowerCtx<'_, '_> {
                 // Ownership clone is a Rust spelling fact; the JIT already owns the
                 // value in a register, so the structured scrutinee is enough.
                 let subj = self.lower_expr(scrutinee)?;
-                let f64_heap = self.enum_match_uses_f64_heap(arms);
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -4304,45 +4341,32 @@ impl LowerCtx<'_, '_> {
                         .enum_type
                         .as_deref()
                         .or_else(|| user_type_name(&scrutinee.ty));
+                    let heap = enum_name
+                        .zip(arm.pattern.variant())
+                        .is_some_and(|(enum_name, variant)| {
+                            self.enum_variant_uses_heap(enum_name, variant)
+                        });
                     let then_block = self.b.create_block();
                     let next = self.b.create_block();
                     let eq = self.lower_pattern_condition(
                         subj,
                         &arm.pattern.pattern,
                         enum_name,
-                        f64_heap,
+                        heap,
                     )?;
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
-                    let bound = if let Some((variant, name)) =
+                    let bound = if let Some((variant, bindings)) =
                         Self::pattern_binding(&arm.pattern.pattern)
                     {
-                                let enum_name =
-                                    enum_name.ok_or("jit enum binding missing type")?;
-                                let payload_ty = self
-                                    .meta
-                                    .enum_variant_payload_types(enum_name, variant)
-                                    .and_then(|tys| tys.first())
-                                    .cloned()
-                                    .unwrap_or(Type::Int);
-                                let payload = if f64_heap {
-                                    self.unpack_enum_heap_payload(subj, &payload_ty)?
-                                } else {
-                                    self.unpack_enum_scalar(subj, &payload_ty)?
-                                };
-                                let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-                                let var = self.fresh_var(payload_clif);
-                                self.b.def_var(var, payload);
-                                let key = TIR::local_place(name);
-                                let old_var = self.vars.insert(key.clone(), var);
-                                let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-                                Some((key, old_var, old_ty))
+                        let enum_name = enum_name.ok_or("jit enum binding missing type")?;
+                        self.bind_enum_payloads(subj, enum_name, variant, bindings, heap)?
                     } else {
-                        None
+                        Vec::new()
                     };
                     self.lower_stmts_scoped(&arm.body)?;
-                    if let Some((key, old_var, old_ty)) = bound {
+                    for (key, old_var, old_ty) in bound {
                         match old_var {
                             Some(var) => {
                                 self.vars.insert(key.clone(), var);
@@ -21586,11 +21610,7 @@ impl LowerCtx<'_, '_> {
             .as_deref()
             .or_else(|| user_type_name(&subj.ty))
             .ok_or("jit enum if-let missing type")?;
-        let f64_heap = self
-            .meta
-            .enum_variant_payload_types(enum_name, variant)
-            .and_then(|tys| tys.first().cloned())
-            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32));
+        let heap = self.enum_variant_uses_heap(enum_name, variant);
         let subject = self.lower_expr(subj)?;
         let ret_ty = clif_ty(result_ty).ok_or("jit if-expr result type unsupported")?;
         let then_block = self.b.create_block();
@@ -21601,7 +21621,7 @@ impl LowerCtx<'_, '_> {
             subject,
             &pattern.pattern,
             Some(enum_name),
-            f64_heap,
+            heap,
         )?;
         self.b
             .ins()
@@ -21609,28 +21629,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
-            let payload_ty = self
-                .meta
-                .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .cloned()
-                .unwrap_or(Type::Int);
-            let payload = if f64_heap {
-                self.unpack_enum_heap_payload(subject, &payload_ty)?
-            } else {
-                self.unpack_enum_scalar(subject, &payload_ty)?
-            };
-            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-            let var = self.fresh_var(payload_clif);
-            self.b.def_var(var, payload);
-            let key = TIR::local_place(name);
-            let old_var = self.vars.insert(key.clone(), var);
-            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-            Some((key, old_var, old_ty))
-        } else {
-            None
-        };
+        let bound = self.bind_enum_payloads(subject, enum_name, variant, bindings, heap)?;
         self.lower_stmts_scoped(then_body)?;
         let mut then_reaches_merge = !self.dead;
         if then_reaches_merge {
@@ -21641,7 +21640,7 @@ impl LowerCtx<'_, '_> {
                 then_reaches_merge = false;
             }
         }
-        if let Some((key, old_var, old_ty)) = bound {
+        for (key, old_var, old_ty) in bound {
             match old_var {
                 Some(var) => {
                     self.vars.insert(key.clone(), var);
@@ -21716,11 +21715,7 @@ impl LowerCtx<'_, '_> {
             .as_deref()
             .or_else(|| user_type_name(&subj.ty))
             .ok_or("jit enum if-let missing type")?;
-        let f64_heap = self
-            .meta
-            .enum_variant_payload_types(enum_name, variant)
-            .and_then(|tys| tys.first().cloned())
-            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32));
+        let heap = self.enum_variant_uses_heap(enum_name, variant);
         let subject = self.lower_expr(subj)?;
         let then_block = self.b.create_block();
         let else_block = self.b.create_block();
@@ -21729,7 +21724,7 @@ impl LowerCtx<'_, '_> {
             subject,
             &pattern.pattern,
             Some(enum_name),
-            f64_heap,
+            heap,
         )?;
         self.b
             .ins()
@@ -21737,30 +21732,9 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
-            let payload_ty = self
-                .meta
-                .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .cloned()
-                .unwrap_or(Type::Int);
-            let payload = if f64_heap {
-                self.unpack_enum_heap_payload(subject, &payload_ty)?
-            } else {
-                self.unpack_enum_scalar(subject, &payload_ty)?
-            };
-            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-            let var = self.fresh_var(payload_clif);
-            self.b.def_var(var, payload);
-            let key = TIR::local_place(name);
-            let old_var = self.vars.insert(key.clone(), var);
-            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-            Some((key, old_var, old_ty))
-        } else {
-            None
-        };
+        let bound = self.bind_enum_payloads(subject, enum_name, variant, bindings, heap)?;
         then_action(self)?;
-        if let Some((key, old_var, old_ty)) = bound {
+        for (key, old_var, old_ty) in bound {
             match old_var {
                 Some(var) => {
                     self.vars.insert(key.clone(), var);
@@ -22058,7 +22032,7 @@ impl LowerCtx<'_, '_> {
                 let entries_ty = payload_ty
                     .clone()
                     .unwrap_or(Type::List(Box::new(Type::Int)));
-                let payload = self.unpack_enum_heap_payload(handle, &entries_ty)?;
+                let payload = self.unpack_enum_heap_payload(handle, &entries_ty, 0)?;
                 let place = temp.clone();
                 old_var = self.vars.remove(&place);
                 old_ty = self.var_tys.remove(&place);
@@ -22072,7 +22046,7 @@ impl LowerCtx<'_, '_> {
                 if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                     if name != "_" {
                         let pty = payload_ty.clone().unwrap_or(Type::Int);
-                        let payload = self.unpack_enum_heap_payload(handle, &pty)?;
+                        let payload = self.unpack_enum_heap_payload(handle, &pty, 0)?;
                         let place = TIR::local_place(name);
                         old_var = self.vars.remove(&place);
                         old_ty = self.var_tys.remove(&place);

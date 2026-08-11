@@ -640,15 +640,6 @@ fn store_mailer(mailer: jet_email::Mailer) -> CtValue {
     mailer_value(mailers.len() - 1)
 }
 
-fn wipe_smtp_config(config: &mut jet_email::SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
-    if let jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
-        (runtime.wipe)(password);
-    }
-    if let Ok(dkim) = &mut config.dkim {
-        (runtime.wipe)(&mut dkim.private_key);
-    }
-}
-
 fn recipient_report_value(report: &jet_email::RecipientReport) -> CtValue {
     structure(
         "RecipientReport",
@@ -699,8 +690,9 @@ pub fn ambient_core_call(
                 },
                 None => return Some(Err(unsupported("email.smtp(): missing config", span))),
             };
-            let smtp_result = jet_email::smtp(&config, copy_secret, kernel_runtime(runtime));
-            wipe_smtp_config(&mut config, runtime);
+            let email_runtime = kernel_runtime(runtime);
+            let smtp_result = jet_email::smtp(&config, copy_secret, email_runtime);
+            jet_email::wipe_config_secrets(&mut config, email_runtime);
             result(smtp_result, store_mailer)
         }
         "smtp_from_env" if args.is_empty() => result(

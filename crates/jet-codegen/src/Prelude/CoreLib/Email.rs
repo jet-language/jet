@@ -286,7 +286,7 @@ pub mod jet_email {
         Ok(Mailer { config, runtime })
     }
 
-    fn wipe_config_secrets(config: &mut SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
+    pub fn wipe_config_secrets(config: &mut SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
         if let SMTPAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
         if let Ok(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }

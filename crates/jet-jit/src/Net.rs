@@ -745,8 +745,8 @@ fn email_address_list_from_handle(
 }
 
 fn email_envelope_from_handle(handle: i64) -> Option<runtime::jet_email::Envelope> {
-    let from = email_address_from_handle(record_get_i64(handle, 0))?;
-    let recipients = email_address_list_from_handle(record_get_i64(handle, 1))?;
+    let from = record_get_i64(handle, 0).and_then(email_address_from_handle)?;
+    let recipients = record_get_i64(handle, 1).and_then(email_address_list_from_handle)?;
     Some(runtime::jet_email::Envelope { from, recipients })
 }
 
@@ -1013,25 +1013,12 @@ extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
         return email_config_error("smtp", "invalid SMTP configuration value");
     };
     let extract = |s: &Vec<u8>| s.clone();
-    match runtime::jet_email::smtp(&config, extract, runtime::email_runtime()) {
-        Ok(mailer) => {
-            if let runtime::jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
-                crate::Crypto::runtime::jet_crypto_zeroize_email_impl(password);
-            }
-            if let Ok(dkim) = &mut config.dkim {
-                crate::Crypto::runtime::jet_crypto_zeroize_email_impl(&mut dkim.private_key);
-            }
-            result_ok(push(NetValue::EmailMailer(mailer)) as u64)
-        }
-        Err(err) => {
-            if let runtime::jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
-                crate::Crypto::runtime::jet_crypto_zeroize_email_impl(password);
-            }
-            if let Ok(dkim) = &mut config.dkim {
-                crate::Crypto::runtime::jet_crypto_zeroize_email_impl(&mut dkim.private_key);
-            }
-            email_err(err)
-        }
+    let email_runtime = runtime::email_runtime();
+    let smtp_result = runtime::jet_email::smtp(&config, extract, email_runtime);
+    runtime::jet_email::wipe_config_secrets(&mut config, email_runtime);
+    match smtp_result {
+        Ok(mailer) => result_ok(push(NetValue::EmailMailer(mailer)) as u64),
+        Err(err) => email_err(err),
     }
 }
 
