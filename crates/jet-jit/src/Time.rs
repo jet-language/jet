@@ -1,6 +1,7 @@
 //! `core.time` / civil-time marshalling hosts for the shared Prelude kernel.
 
 use super::Concurrency;
+use jet_codegen::AST::CtValue;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -19,6 +20,54 @@ pub(crate) enum TimeValue {
     Zone(time_rt::JetZone),
     Zoned(time_rt::JetZonedDateTime),
     LocalTime(time_rt::JetLocalTime),
+}
+
+pub(crate) fn ambient_date_today_value() -> CtValue {
+    let date = time_rt::JetDate::today_utc();
+    CtValue::Struct {
+        type_name: "LocalDate".to_string(),
+        fields: vec![
+            ("year".to_string(), CtValue::Int(date.year())),
+            ("month".to_string(), CtValue::Int(date.month())),
+            ("day".to_string(), CtValue::Int(date.day())),
+        ],
+    }
+}
+
+pub(crate) fn ambient_datetime_now_value() -> CtValue {
+    let datetime = time_rt::JetDateTime::now();
+    CtValue::Struct {
+        type_name: "DateTime".to_string(),
+        fields: vec![
+            ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
+            (
+                "nanos".to_string(),
+                CtValue::Int(datetime.nanosecond()),
+            ),
+        ],
+    }
+}
+
+pub(crate) fn ambient_monotonic_now_ms() -> i64 {
+    time_rt::jet_time_monotonic_now_ns() / 1_000_000
+}
+
+pub(crate) fn ambient_instant_value() -> CtValue {
+    CtValue::Struct {
+        type_name: "Instant".to_string(),
+        fields: vec![(
+            "start_ns".to_string(),
+            CtValue::Int(time_rt::jet_time_monotonic_now_ns()),
+        )],
+    }
+}
+
+extern "C" fn jet_jit_time_start() -> i64 {
+    ambient_monotonic_now_ms()
+}
+
+extern "C" fn jet_jit_stopwatch_elapsed_millis(start_ms: i64) -> i64 {
+    ambient_monotonic_now_ms().saturating_sub(start_ms)
 }
 
 fn push(value: TimeValue) -> i64 {
@@ -310,6 +359,8 @@ host_fns! {
     }
     date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
     date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
+    start: "jet_jit_time_start" => jet_jit_time_start: nullary;
+    stopwatch_elapsed: "jet_jit_stopwatch_elapsed_millis" => jet_jit_stopwatch_elapsed_millis: unary;
     date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;
     datetime_from_timestamp: "jet_jit_datetime_from_timestamp" => jet_jit_datetime_from_timestamp: unary;
     datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;
@@ -326,5 +377,3 @@ host_fns! {
     duration_unit: "jet_jit_time_duration_unit" => jet_jit_time_duration_unit: binary;
     civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
 }
-
-

@@ -50,10 +50,93 @@ mod ambient_random_kernel {
     pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
         jet_std_random_sample(items, count)
     }
+
+    pub(crate) fn int(low: i64, high: i64) -> i64 {
+        jet_std_random_int(low, high)
+    }
+
+    pub(crate) fn float() -> f64 {
+        jet_std_random_float()
+    }
+
+    pub(crate) fn pick<T: Clone>(items: &Vec<T>) -> Option<T> {
+        jet_std_random_pick(items)
+    }
+
+    pub(crate) fn shuffle<T>(items: &mut Vec<T>) {
+        jet_std_random_shuffle(items);
+    }
+
+    pub(crate) fn split(seed: i64) -> jet_std::Rng {
+        jet_std_random_split(seed)
+    }
+}
+
+pub(crate) fn ambient_seed(seed: i64) {
+    ambient_random_kernel::seed(seed);
+}
+
+pub(crate) fn ambient_int(low: i64, high: i64) -> i64 {
+    ambient_random_kernel::int(low, high)
+}
+
+pub(crate) fn ambient_float() -> f64 {
+    ambient_random_kernel::float()
+}
+
+pub(crate) fn ambient_float_range(low: f64, high: f64) -> f64 {
+    ambient_random_kernel::float_range(low, high)
+}
+
+pub(crate) fn ambient_bool(p: f64) -> bool {
+    ambient_random_kernel::bool_p(p)
+}
+
+pub(crate) fn ambient_normal(mean: f64, stddev: f64) -> f64 {
+    ambient_random_kernel::normal(mean, stddev)
+}
+
+pub(crate) fn ambient_exponential(lambda: f64) -> f64 {
+    ambient_random_kernel::exponential(lambda)
+}
+
+pub(crate) fn ambient_bytes(count: i64) -> Vec<u8> {
+    ambient_random_kernel::bytes(count)
+}
+
+pub(crate) fn ambient_pick<T: Clone>(items: &Vec<T>) -> Option<T> {
+    ambient_random_kernel::pick(items)
+}
+
+pub(crate) fn ambient_weighted_pick<T: Clone>(
+    items: &Vec<T>,
+    weights: &Vec<f64>,
+) -> Option<T> {
+    ambient_random_kernel::weighted_pick(items, weights)
+}
+
+pub(crate) fn ambient_sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
+    ambient_random_kernel::sample(items, count)
+}
+
+pub(crate) fn ambient_shuffle<T>(items: &mut Vec<T>) {
+    ambient_random_kernel::shuffle(items);
+}
+
+pub(crate) fn ambient_split(seed: i64) -> i64 {
+    ambient_random_kernel::split(seed).state as i64
 }
 
 extern "C" fn jet_jit_random_seed(n: i64) {
     ambient_random_kernel::seed(n);
+}
+
+extern "C" fn jet_jit_random_int(low: i64, high: i64) -> i64 {
+    ambient_random_kernel::int(low, high)
+}
+
+extern "C" fn jet_jit_random_float() -> f64 {
+    ambient_random_kernel::float()
 }
 
 extern "C" fn jet_jit_random_bool(p: f64) -> i8 {
@@ -70,6 +153,37 @@ extern "C" fn jet_jit_random_normal(mean: f64, stddev: f64) -> f64 {
 
 extern "C" fn jet_jit_random_exponential(lambda: f64) -> f64 {
     ambient_random_kernel::exponential(lambda)
+}
+
+extern "C" fn jet_jit_random_pick(items: i64) -> i64 {
+    let values = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(items).unwrap_or(0);
+        (0..len)
+            .map(|i| rt.heap.list_get_int(items, i).unwrap_or(0))
+            .collect::<Vec<_>>()
+    });
+    pack_option_string(ambient_random_kernel::pick(&values))
+}
+
+extern "C" fn jet_jit_random_shuffle(items: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(items).unwrap_or(0);
+        for i in (1..len).rev() {
+            let j = ambient_random_kernel::int(0, i);
+            let a = rt.heap.list_get_int(items, i).unwrap_or(0);
+            let b = rt.heap.list_get_int(items, j).unwrap_or(0);
+            let _ = rt.heap.list_set_int(items, i, b);
+            let _ = rt.heap.list_set_int(items, j, a);
+        }
+    });
+}
+
+extern "C" fn jet_jit_random_split(seed: i64) -> i64 {
+    let state = ambient_random_kernel::split(seed).state;
+    Concurrency::with_runtime_mut(|rt| {
+        rt.rngs.push(RngState { state });
+        rt.rngs.len() as i64
+    })
 }
 
 extern "C" fn jet_jit_random_bytes(n: i64) -> i64 {
@@ -171,6 +285,10 @@ extern "C" fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
     with_rng(handle, |r| rng_int(r, lo, hi))
 }
 
+extern "C" fn jet_jit_rng_float(handle: i64) -> f64 {
+    with_rng(handle, rng_float)
+}
+
 extern "C" fn jet_jit_rng_float_range(handle: i64, low: f64, high: f64) -> f64 {
     with_rng(handle, |r| {
         seeded_random_kernel::jet_seeded_rng_float_range(&mut r.state, low, high)
@@ -187,6 +305,18 @@ extern "C" fn jet_jit_rng_bool(handle: i64) -> i8 {
     // Match AOT `jet_rng_bool` / comptime seeded rng: LSB of SplitMix64 next.
     with_rng(handle, |r| {
         i8::from(seeded_random_kernel::jet_seeded_rng_bool(&mut r.state))
+    })
+}
+
+extern "C" fn jet_jit_rng_normal(handle: i64, mean: f64, stddev: f64) -> f64 {
+    with_rng(handle, |r| {
+        seeded_random_kernel::jet_seeded_rng_normal(&mut r.state, mean, stddev)
+    })
+}
+
+extern "C" fn jet_jit_rng_exponential(handle: i64, lambda: f64) -> f64 {
+    with_rng(handle, |r| {
+        seeded_random_kernel::jet_seeded_rng_exponential(&mut r.state, lambda)
     })
 }
 
@@ -348,6 +478,8 @@ host_fns! {
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::F64));
         sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_noarg_f64 = Signature::new(cc);
+        sig_noarg_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_i64_i64 = Signature::new(cc);
         sig_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64.returns.push(AbiParam::new(types::I64));
@@ -365,6 +497,13 @@ host_fns! {
         sig_rng_fr.params.push(AbiParam::new(types::F64));
         sig_rng_fr.params.push(AbiParam::new(types::F64));
         sig_rng_fr.returns.push(AbiParam::new(types::F64));
+        let mut sig_rng_f = Signature::new(cc);
+        sig_rng_f.params.push(AbiParam::new(types::I64));
+        sig_rng_f.returns.push(AbiParam::new(types::F64));
+        let mut sig_rng_exp = Signature::new(cc);
+        sig_rng_exp.params.push(AbiParam::new(types::I64));
+        sig_rng_exp.params.push(AbiParam::new(types::F64));
+        sig_rng_exp.returns.push(AbiParam::new(types::F64));
         let mut sig_rng_bool = Signature::new(cc);
         sig_rng_bool.params.push(AbiParam::new(types::I64));
         sig_rng_bool.params.push(AbiParam::new(types::F64));
@@ -375,18 +514,26 @@ host_fns! {
 
     }
     seed: "jet_jit_random_seed" => jet_jit_random_seed: sig_void_i64;
+    int: "jet_jit_random_int" => jet_jit_random_int: sig_i64_i64_i64;
+    float: "jet_jit_random_float" => jet_jit_random_float: sig_noarg_f64;
     bool_p: "jet_jit_random_bool" => jet_jit_random_bool: sig_f64_i8;
     float_range: "jet_jit_random_float_range" => jet_jit_random_float_range: sig_f64_f64_f64;
     normal: "jet_jit_random_normal" => jet_jit_random_normal: sig_f64_f64_f64;
     exponential: "jet_jit_random_exponential" => jet_jit_random_exponential: sig_f64;
     bytes: "jet_jit_random_bytes" => jet_jit_random_bytes: sig_i64_i64;
+    pick: "jet_jit_random_pick" => jet_jit_random_pick: sig_i64_i64;
+    shuffle: "jet_jit_random_shuffle" => jet_jit_random_shuffle: sig_void_i64;
+    split: "jet_jit_random_split" => jet_jit_random_split: sig_i64_i64;
     weighted_pick: "jet_jit_random_weighted_pick" => jet_jit_random_weighted_pick: sig_i64_i64_i64;
     sample: "jet_jit_random_sample" => jet_jit_random_sample: sig_i64_i64_i64;
     rng_new: "jet_jit_rng_new" => jet_jit_rng_new: sig_i64_i64;
     rng_int: "jet_jit_rng_int" => jet_jit_rng_int: sig_i64_i64_i64_i64;
+    rng_float: "jet_jit_rng_float" => jet_jit_rng_float: sig_rng_f;
     rng_float_range: "jet_jit_rng_float_range" => jet_jit_rng_float_range: sig_rng_fr;
     rng_bool: "jet_jit_rng_bool" => jet_jit_rng_bool: sig_rng_bool_default;
     rng_bool_p: "jet_jit_rng_bool_p" => jet_jit_rng_bool_p: sig_rng_bool;
+    rng_normal: "jet_jit_rng_normal" => jet_jit_rng_normal: sig_rng_fr;
+    rng_exponential: "jet_jit_rng_exponential" => jet_jit_rng_exponential: sig_rng_exp;
     rng_pick: "jet_jit_rng_pick" => jet_jit_rng_pick: sig_i64_i64_i64;
     rng_shuffle: "jet_jit_rng_shuffle" => jet_jit_rng_shuffle: sig_void_i64_i64;
     rng_weighted_pick: "jet_jit_rng_weighted_pick" => jet_jit_rng_weighted_pick: sig_i64_i64_i64_i64;
@@ -394,4 +541,3 @@ host_fns! {
     rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
     rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
 }
-

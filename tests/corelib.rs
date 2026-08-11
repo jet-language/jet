@@ -5230,7 +5230,7 @@ fn activate_core() => String {
 
 fn fail() => Int ? IOError {
     return .Err(IOError.InvalidInput(IOContext.{
-        operation: .Resolve,
+        operation: .Read,
         resource: None,
         os_code: None,
         cause: Val("debug"),
@@ -5247,22 +5247,36 @@ fn fail_other() => Int ? IOError {
 }
 
 fn run() {
+    print("{42:Debug}")
+    debug :: "debug"
+    print("{debug:Debug}")
+    print("{[1, 2, 3]:Debug}")
     if fail() == {
         .Ok(_) -> panic("failure succeeded")
-        .Err(error) -> print("{error:Debug}")
+        .Err(error) -> {
+            print("{error:Debug}")
+            print("{error}")
+        }
     }
     if fail_other() == {
         .Ok(_) -> panic("other failure succeeded")
-        .Err(error) -> print("{error:Debug}")
+        .Err(error) -> {
+            print("{error:Debug}")
+            print("{error}")
+        }
     }
 }
 "#;
-    let expected_aot = concat!(
-        "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Some(\"debug\") })\n",
-        "Other(IOContext { operation: Write, resource: Some(\"out.txt\"), os_code: Some(13), cause: Some(\"denied\") })\n",
+    let expected = concat!(
+        "42\n",
+        "\"debug\"\n",
+        "[1, 2, 3]\n",
+        "InvalidInput(IOContext { operation: Read, resource: None, os_code: None, cause: Val(\"debug\") })\n",
+        "invalid input during read: debug\n",
+        "Other(IOContext { operation: Write, resource: Val(\"out.txt\"), os_code: Val(13), cause: Val(\"denied\") })\n",
+        "I/O error during write `out.txt`: denied\n",
     );
-    let expected_dev = expected_aot;
-    let (code, stdout, stderr) = build_and_run(
+    let (code, aot_stdout, stderr) = build_and_run(
         &dir,
         "ioerror_debug",
         source,
@@ -5270,15 +5284,40 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, expected_aot);
+    assert_eq!(aot_stdout, expected);
+    assert!(!aot_stdout.contains("<enum IOOperation>"));
     let file = dir.join("ioerror_debug.jet");
     fs::write(&file, source).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    jet_jit::reset_jit_trace_for_test();
+    let default_jit_stdout = match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
-            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected_dev, ""));
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+            stdout
         }
-        other => panic!("IOError Debug did not run in default dev: {other:?}"),
-    }
+        other => panic!("IOError Show/Debug did not run in default JIT: {other:?}"),
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "IOError Show/Debug must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "IOError Show/Debug must not deopt"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "IOError Show/Debug must not fall back"
+    );
+
+    let forced_interpreter_stdout = match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+            stdout
+        }
+        other => panic!("IOError Show/Debug did not run in forced interpreter: {other:?}"),
+    };
+    assert_eq!(default_jit_stdout, aot_stdout);
+    assert_eq!(forced_interpreter_stdout, aot_stdout);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -10567,7 +10606,7 @@ struct Strict { name: String }
 fn run() {
     result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
     if result == .Err(errors) {
-        loop error; errors {
+            loop error, errors {
             print(error.path)
             print(error.reason)
         }
@@ -10609,12 +10648,12 @@ fn run() {
     malformed := json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}")
     if malformed == .Err(errors) {
         print(errors.len())
-        loop error; errors { print(error.path) }
+        loop error, errors { print(error.path) }
     }
     invalid := json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}")
     if invalid == .Err(errors) {
         print(errors.len())
-        loop error; errors { print(error.path) }
+        loop error, errors { print(error.path) }
     }
 }
 "#;
@@ -11551,6 +11590,7 @@ fn option_zip_and_lift2_combinators() {
         &dir,
         "option_combinators",
         r#"
+fn missing_float() => Float? = None
 fn run() {
     both_a :: Val(2.0)
     both_b :: Val(5.0)
@@ -11558,12 +11598,12 @@ fn run() {
     print(Option.lift2((x, y) => x * y, both_a, both_b))
 
     a_only :: Val(2.0)
-    b_missing ::  None 
+    b_missing :: missing_float()
     print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, a_only, b_missing))
 
-    both_missing_a ::  None 
-    both_missing_b ::  None 
+    both_missing_a :: missing_float()
+    both_missing_b :: missing_float()
     print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
 }
@@ -12522,7 +12562,7 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let name = "float_binding_origin";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 
@@ -12531,7 +12571,8 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
     assert_eq!(
         stdout,
         format!(
-            "tracked `speed` at {}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n",
+            "tracked `speed` at {}:2:12: #Track speed :: 3.5\ntracked `speed` at {}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n",
+            source_path.display(),
             source_path.display()
         )
     );

@@ -20,10 +20,10 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} run                            enter the shell described by ./{pack}
   {bin} dev                            realize the env, then run the project's fn dev()
   {bin} tool run <ref> [-- cmd]        run a package binary ephemerally (D-JPK-TOOLRUN1)
-  {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools profile generation)
+  {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools generation)
   {bin} tool list                      list globally installed tools
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
-  {bin} profile plan <name>             plan a source-backed package profile
+  {bin} profile plan <name>             plan a source-backed package generation
   {bin} browser lock <engine> --binary <path>  lock a browser binary into .jet/lock
   {bin} browser provision <engine>@src realize and lock a browser package
   {bin} browser resolve <engine>       verify and print the locked browser
@@ -134,6 +134,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --affected-since <ref>               (build/test/run) members changed since git ref + dependents
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
+  --env <name>                         select one env.<name> module
+  --preset <name>                      select one declared environment preset
   --push <ref>                         (image) copy locally or publish through OCI Distribution
   --name <name>                        (os switch) override generation name
   --manual <path>                      (os init/image) record manual disk path
@@ -162,7 +164,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::parse::{parse_args, parse_args_for};
+    use super::super::parse::{before_argument_separator, parse_args, parse_args_for};
     use super::super::run_enter_dev::{foreign_flake_path, project_declares_env};
     use super::*;
     use crate::RuntimePolicy;
@@ -190,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn package_profile_is_in_canonical_route_registry_and_help() {
+    fn package_generation_route_is_canonical_and_in_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::PROFILE_SUBCOMMAND));
         assert!(usage_with_color(false).contains("profile plan"));
         assert_eq!(
@@ -310,13 +312,61 @@ mod tests {
 
     #[test]
     fn parses_preset_and_environment_module_separately() {
-        let args: Vec<String> = ["--preset", "work", "--env-profile", "full"]
+        let args: Vec<String> = ["--preset", "work", "--env", "full"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
         let p = parse_args(&args);
         assert_eq!(p.flags.preset.as_deref(), Some("work"));
-        assert_eq!(p.flags.environment_profile.as_deref(), Some("full"));
+        assert_eq!(p.flags.environment.as_deref(), Some("full"));
+    }
+
+    #[test]
+    fn retired_environment_flag_is_not_an_alias() {
+        let args: Vec<String> = ["--env-profile", "full"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert!(p.flags.environment.is_none());
+        assert_eq!(
+            p.positional,
+            vec![String::from("--env-profile"), String::from("full")]
+        );
+
+        let equals_args: Vec<String> = ["--env-profile=full"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let equals = parse_args(&equals_args);
+        assert!(equals.flags.environment.is_none());
+        assert_eq!(
+            equals.positional,
+            vec![String::from("--env-profile=full")]
+        );
+    }
+
+    #[test]
+    fn retired_environment_flag_after_separator_stays_with_child_command() {
+        let args: Vec<String> = ["info", "--", "--env-profile", "full"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let parsed = parse_args(&args);
+        assert_eq!(before_argument_separator(&args), &args[..1]);
+        assert_eq!(parsed.positional, vec![String::from("info")]);
+        assert_eq!(
+            parsed.command,
+            Some(vec![String::from("--env-profile"), String::from("full")])
+        );
+    }
+
+    #[test]
+    fn help_keeps_preset_and_environment_axes_distinct() {
+        let help = usage_with_color(false);
+        assert!(help.contains("--preset <name>"));
+        assert!(help.contains("--env <name>"));
+        assert!(!help.contains("--env-profile"));
     }
 
     // ── D-JPK-SELECTOR1: -p / --affected on build/test/run ──

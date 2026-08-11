@@ -97,6 +97,35 @@ mod time_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
+mod time_deadline_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Deadline.rs");
+}
+
+mod crypto_entropy_kernel {
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+}
+
+fn runtime_date_value(date: time_kernel::JetDate) -> CtValue {
+    CtValue::Struct {
+        type_name: "LocalDate".to_string(),
+        fields: vec![
+            ("year".to_string(), CtValue::Int(date.year())),
+            ("month".to_string(), CtValue::Int(date.month())),
+            ("day".to_string(), CtValue::Int(date.day())),
+        ],
+    }
+}
+
+fn runtime_datetime_value(datetime: time_kernel::JetDateTime) -> CtValue {
+    CtValue::Struct {
+        type_name: "DateTime".to_string(),
+        fields: vec![
+            ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
+            ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
+        ],
+    }
+}
+
 /// D-BOUND-HEAD1: typed DateTime heads validate against the same pure Prelude
 /// parser used by the runtime `core.time.parse_rfc3339` call.
 pub(crate) fn validate_datetime_literal(value: &str) -> Result<(), String> {
@@ -1801,6 +1830,41 @@ pub fn apply_core_call(
             }
         }
         // --- core.time pure constructors ---
+        // Runtime-only clock reads stay on the same Prelude time kernel as
+        // AOT/JIT. The fold gate rejects them before this adapter is reached.
+        ("core.time", "now") => Ok(CtValue::Int(time_deadline_kernel::jet_std_time_now())),
+        ("core.time", "now_utc") => {
+            Ok(runtime_datetime_value(time_kernel::JetDateTime::now()))
+        }
+        ("core.time", "today") => Ok(runtime_date_value(time_kernel::JetDate::today_utc())),
+        ("core.time", "instant") => Ok(CtValue::Struct {
+            type_name: "Instant".to_string(),
+            fields: vec![(
+                "start_ns".to_string(),
+                CtValue::Int(time_kernel::jet_time_monotonic_now_ns()),
+            )],
+        }),
+        ("core.time", "sleep") => {
+            let millis = match one(0)? {
+                CtValue::Int(value) => *value,
+                _ => return Err(unsupported("time.sleep expects an Int", span)),
+            };
+            std::thread::sleep(std::time::Duration::from_millis(millis.max(0) as u64));
+            Ok(CtValue::Unit)
+        }
+        ("core.time", "start") => Ok(CtValue::Struct {
+            type_name: "Stopwatch".to_string(),
+            fields: vec![(
+                "start_ms".to_string(),
+                CtValue::Int(time_kernel::jet_time_monotonic_now_ns() / 1_000_000),
+            )],
+        }),
+        ("core.time.date", "today") => {
+            Ok(runtime_date_value(time_kernel::JetDate::today_utc()))
+        }
+        ("core.time.datetime", "now") => {
+            Ok(runtime_datetime_value(time_kernel::JetDateTime::now()))
+        }
         // D-DET1: testing.fake_clock is the test-facing spelling of the
         // caller-seeded deterministic Clock capability built by Clock.new.
         ("core.testing", "fake_clock") => {
@@ -1965,6 +2029,29 @@ pub fn apply_core_call(
                 _ => return Err(unsupported("random.sample count must be Int", span)),
             };
             Ok(CtValue::List(ambient_random_kernel::sample(&xs, k)))
+        }
+        ("core.random", "shuffle") => {
+            let CtValue::List(mut xs) = one(0)?.clone() else {
+                return Err(unsupported("random.shuffle needs a list", span));
+            };
+            ambient_random_kernel::shuffle(&mut xs);
+            // TIR writes this returned list back through the borrowed place;
+            // the AST dispatcher owns the equivalent write-back path.
+            Ok(CtValue::List(xs))
+        }
+        ("core.crypto.random", "bytes") => {
+            let count = match one(0)? {
+                CtValue::Int(value) => *value,
+                _ => {
+                    return Err(unsupported(
+                        "crypto.random.bytes expects an Int",
+                        span,
+                    ))
+                }
+            };
+            crypto_entropy_kernel::jet_crypto_entropy_bytes(count)
+                .map(CtValue::Bytes)
+                .map_err(|error| unsupported(&error.to_string(), span))
         }
         // --- core.fmt: CtValue adapters over the shared Prelude kernel ---
         ("core.fmt", "number") => {

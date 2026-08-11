@@ -364,7 +364,7 @@ pub enum ContribValue {
     Fleet(FleetLit),
     /// `vmtest.<name>:` — a VM scenario record (D-JOS-VMTEST1).
     VmTest(VmTestLit),
-    /// D-JPK-PROFILE1=D: a source-backed package profile declaration.
+    /// D-JPK-PROFILE1=D: a source-backed package generation declaration.
     Profile(ProfileLit),
     /// D-PERFBUDGET-GRAMMAR1=A: `module perf.<role> { budgets: [...] }`.
     Perf(PerfLit),
@@ -399,7 +399,7 @@ pub struct PerfLit {
 }
 
 /// D-JPK-PROFILE1=D: `profile.<name>`'s source fields. The module evaluator
-/// lowers these fields into the shared package-profile fact graph; no
+/// lowers these fields into the shared package-generation fact graph; no
 /// generation or provider-specific state is stored in the AST.
 #[derive(Debug, Clone)]
 pub struct ProfileLit {
@@ -648,7 +648,7 @@ pub enum Namespace {
     VmTest,
     /// `perf` → typed performance-policy declarations.
     Perf,
-    /// `profile` → source-backed package-profile declarations.
+    /// `profile` → source-backed package-generation declarations.
     Profile,
 }
 

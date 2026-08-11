@@ -13,6 +13,10 @@ mod duration_kernel {
     include!("../../../Prelude/Core/Duration.rs");
 }
 
+mod time_kernel {
+    include!("../../../Prelude/Core/Time.rs");
+}
+
 fn handle_op_name(op: &THandleOp) -> String {
     let name = match op {
         THandleOp::HTTPClientMethod { kind, method } => {
@@ -658,7 +662,27 @@ pub(super) fn eval_handle(
         THandleOp::StderrFlush => Err(unsupported("handle `StderrFlush`", span)),
         THandleOp::StderrIsTty => Err(unsupported("handle `StderrIsTty`", span)),
         THandleOp::StopwatchElapsedMillis => {
-            Err(unsupported("handle `StopwatchElapsedMillis`", span))
+            let CtValue::Struct { type_name, fields } = recv else {
+                return Err(unsupported("StopwatchElapsedMillis receiver", span));
+            };
+            if type_name != "Stopwatch" {
+                return Err(unsupported("StopwatchElapsedMillis receiver", span));
+            }
+            let start_ms = fields
+                .iter()
+                .find_map(|(name, value)| {
+                    (name == "start_ms").then_some(match value {
+                        CtValue::Int(value) => Some(*value),
+                        _ => None,
+                    })
+                })
+                .flatten()
+                .ok_or_else(|| unsupported("StopwatchElapsedMillis start", span))?;
+            Ok(CtValue::Int(
+                time_kernel::jet_time_monotonic_now_ns()
+                    .saturating_div(1_000_000)
+                    .saturating_sub(start_ms),
+            ))
         }
         THandleOp::GameSceneNew => Err(unsupported("handle `GameSceneNew`", span)),
         THandleOp::GameReplayRecord => Err(unsupported("handle `GameReplayRecord`", span)),

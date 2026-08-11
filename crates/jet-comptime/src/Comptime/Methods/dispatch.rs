@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
+use jet_foundation::Effects::{core_requires_comptime_gate, is_nondeterministic_core};
 use crate::AST::{
     AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp,
 };
@@ -77,32 +77,11 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
     unique
 }
 
-/// D-META-EFFECT1: which tier a Core call belongs to is read off its effect
-/// set, not off a list kept here. An ambient effect — one that reaches the
-/// build machine's filesystem, environment, terminal, processes, network,
-/// secrets, or a live store — is Tier 2: it needs `#Impure("reason")` and
-/// `--allow-impure`. Time and Rand stay outside this gate because determinism
-/// already governs them (E3403), and Log/GPU touch nothing the build can
-/// observe.
-fn is_ambient_effect(effect: Effect) -> bool {
-    matches!(
-        effect,
-        Effect::FS
-            | Effect::Env
-            | Effect::IO
-            | Effect::Exec
-            | Effect::Net
-            | Effect::Secret
-            | Effect::DB
-            | Effect::Browser
-    )
-}
-
 pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
     // `app.live(…)` and friends are the web module's live-query registry under
     // the entry alias; resolve the alias before asking for the fact.
     let resolved = if module == "app" { "core.web" } else { module };
-    if core_effect(resolved, method).is_some_and(is_ambient_effect) {
+    if core_requires_comptime_gate(resolved, method) {
         return true;
     }
     // The REPL re-reads ambient randomness between lines, so a folded draw

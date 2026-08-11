@@ -1,6 +1,7 @@
 use super::*;
 use crate::AST::CtReport;
 use super::super::super::Interpreter::reborrow_repl_authorizer;
+use jet_foundation::Effects::core_effect;
 
 fn decode_path(path: &str) -> String {
     if path == "$" {
@@ -652,6 +653,32 @@ impl<'a> Interp<'a> {
                 // must never bake in a decrypted secret (I1).
                 if module == "core.vault" {
                     return Err(vault_comptime_denied(&module, method, span));
+                }
+                // D-DET1 / I9: the AST interpreter is another fold-capable
+                // entry point. Read the same foundation effect law before its
+                // generic adapter so ambient time/random state cannot be
+                // materialized by an implicit comptime evaluation.
+                if !self.repl_mode && self.impure_depth == 0 {
+                    if is_nondeterministic_core(&module, method) {
+                        let api = format!(
+                            "{}.{}",
+                            module.rsplit('.').next().unwrap_or(&module),
+                            method
+                        );
+                        return Err(Diagnostic::e3403(&api, Some(span)));
+                    }
+                    if core_effect(&module, method).is_some() {
+                        return Err(Diagnostic::error(
+                            "E3410",
+                            format!(
+                                "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                            ),
+                            "effectful Core APIs are not allowed in pure comptime evaluation"
+                                .to_string(),
+                            "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime".to_string(),
+                            Some(span),
+                        ));
+                    }
                 }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
