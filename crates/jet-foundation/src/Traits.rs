@@ -1556,6 +1556,7 @@ impl TraitRegistry {
             "ByteBuffer",
             "Clock",
             "Decimal",
+            "DataTree",
             "GameImage",
             "GameSound",
             "Id",

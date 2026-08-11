@@ -3994,6 +3994,10 @@ pub(crate) fn field_type_cloneable(
         }
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
+        // D-SERDE: the dynamic data surface is the Clone-backed DataTree in
+        // every canonical spelling, so records containing it can satisfy the
+        // generated decoder's existing result-retention path.
+        Type::Named(n) if is_json_type_name(n) => true,
         Type::Named(n) => types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
