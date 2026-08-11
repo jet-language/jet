@@ -72,14 +72,6 @@
         }
     }
 
-    // D-DISPLAYDBG1: generated record debug/show rendering uses the same
-    // canonical DataTree projection for both lenses.
-    impl super::JetDebug for DataTree {
-        fn jet_debug(&self) -> String {
-            self.jet_show()
-        }
-    }
-
     // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
     // runtime engine. `decode_traced<T>` sits beside `decode<T>` on every codec
     // that shares this decode machinery. Decoding a `#PublishedSchema` type
