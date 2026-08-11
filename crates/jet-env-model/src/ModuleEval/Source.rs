@@ -56,10 +56,10 @@ pub fn is_module_surface(src: &str) -> bool {
 /// scalar becomes the label. `imports: find(…)` is walked before evaluation;
 /// typed integration calls lower into the same source and environment graph.
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
-    evaluate_env_with_profile(src, base_dir, None)
+    evaluate_env_with_preset(src, base_dir, None)
 }
 
-/// Evaluate one source-backed package profile without realizing or mutating
+/// Evaluate one source-backed package generation without realizing or mutating
 /// the store. This is the production path for `jet profile plan`; callers get
 /// provider identity, source provenance, and collision selections from the
 /// same graph used by environment evaluation.
@@ -74,9 +74,9 @@ pub fn evaluate_package_profile(
         profiles.insert_checked(profile).map_err(|error| {
             Diagnostic::error(
                 "E1332",
-                format!("package profile composition failed: {error}"),
-                "one source-backed package profile cannot silently choose different inheritance, package, or collision facts".to_string(),
-                "merge the declarations so they agree, or give the profiles different names".to_string(),
+                format!("package generation composition failed: {error}"),
+                "one source-backed package generation cannot silently choose different inheritance, package, or collision facts".to_string(),
+                "merge the declarations so they agree, or give the generations different names".to_string(),
                 None,
             )
         })?;
@@ -84,9 +84,9 @@ pub fn evaluate_package_profile(
     let resolved = profiles.resolve(name).map_err(|error| {
         Diagnostic::error(
             "E1332",
-            format!("package profile `{name}` could not be resolved: {error}"),
-            "profile inheritance is resolved parent-first and must remain acyclic".to_string(),
-            "fix the profile name, parent reference, or inheritance cycle".to_string(),
+            format!("package generation `{name}` could not be resolved: {error}"),
+            "generation inheritance is resolved parent-first and must remain acyclic".to_string(),
+            "fix the generation name, parent reference, or inheritance cycle".to_string(),
             None,
         )
     })?;
@@ -100,9 +100,9 @@ pub fn evaluate_package_profile(
             return Err(Diagnostic::error(
                 "E1335",
                 format!(
-                    "package profile `{name}` selects `{provider}` for `{path}`, but that provider is not in the profile"
+                    "package generation `{name}` selects `{provider}` for `{path}`, but that provider is not in the generation"
                 ),
-                "a collision selection must name one exact package contender retained by the source-backed profile".to_string(),
+                "a collision selection must name one exact package contender retained by the source-backed generation".to_string(),
                 "add the selected package ref to `packages`, or select one of the existing contenders".to_string(),
                 None,
             ));
@@ -113,8 +113,8 @@ pub fn evaluate_package_profile(
         let spec = classify_profile_ref(&package.raw, &env.table).map_err(|error| {
             Diagnostic::error(
                 "E1335",
-                format!("package profile `{name}` contains unsupported ref `{}`: {error}", package.raw),
-                "profile package facts must retain one lossless package and provider identity".to_string(),
+                format!("package generation `{name}` contains unsupported ref `{}`: {error}", package.raw),
+                "generation package facts must retain one lossless package and provider identity".to_string(),
                 "use `package@source` with a built-in or declared source".to_string(),
                 None,
             )
@@ -165,34 +165,34 @@ fn classify_profile_ref(
     RefSpec::classify_in(raw, table).map_err(|error| format!("{error:?}"))
 }
 
-/// Evaluate a typed environment with one authoritative profile selection.
+/// Evaluate a typed environment with one authoritative preset selection.
 /// An explicit CLI choice is resolved before ambient hostname/user matching,
-/// so an unrelated ambient profile cannot reject or augment the requested
+/// so an unrelated ambient preset cannot reject or augment the requested
 /// plan.
-pub fn evaluate_env_with_profile(
+pub fn evaluate_env_with_preset(
     src: &str,
     base_dir: &Path,
-    requested_profile: Option<&str>,
+    requested_preset: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
-    evaluate_env_with_profiles(src, base_dir, requested_profile, None)
+    evaluate_env_with_selections(src, base_dir, requested_preset, None)
 }
 
 /// Evaluate an environment while explicitly selecting one `env.<name>`
-/// environment profile. The ordinary CLI uses the deterministic default
+/// environment module. The ordinary CLI uses the deterministic default
 /// (`dev`, then `default`, then lexical order) when it has no selector.
-pub fn evaluate_env_with_environment_profile(
+pub fn evaluate_env_with_environment(
     src: &str,
     base_dir: &Path,
-    requested_environment_profile: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
-    evaluate_env_with_profiles(src, base_dir, None, requested_environment_profile)
+    evaluate_env_with_selections(src, base_dir, None, requested_environment)
 }
 
-pub fn evaluate_env_with_profiles(
+pub fn evaluate_env_with_selections(
     src: &str,
     base_dir: &Path,
-    requested_profile: Option<&str>,
-    requested_environment_profile: Option<&str>,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
     let program = parse_program(src)?;
     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
@@ -250,7 +250,7 @@ pub fn evaluate_env_with_profiles(
     let mut secrets: Vec<String> = Vec::new();
     let mut adapters: Vec<AdapterPlan> = Vec::new();
     let mut lifecycle = EnvironmentLifecycle::default();
-    let mut profiles = PresetSet::default();
+    let mut presets = PresetSet::default();
     let mut package_profiles = PackageProfileSet::default();
     let mut languages = Vec::new();
     let mut files: Vec<ManagedFile> = Vec::new();
@@ -383,13 +383,13 @@ pub fn evaluate_env_with_profiles(
             lifecycle.reload = module.lifecycle.reload.clone();
             lifecycle.reload_explicit = true;
         }
-        for profile in &module.profiles {
-            profiles.insert_checked(profile.clone()).map_err(|error| {
+        for preset in &module.presets {
+            presets.insert_checked(preset.clone()).map_err(|error| {
                 Diagnostic::error(
                     "E1332",
-                    format!("environment profile composition failed: {error}"),
-                    "one environment graph cannot silently choose between different facts for the same profile".to_string(),
-                    "merge the profile declarations so they are identical, or give them different names".to_string(),
+                    format!("environment preset composition failed: {error}"),
+                    "one environment graph cannot silently choose between different facts for the same preset".to_string(),
+                    "merge the preset declarations so they are identical, or give them different names".to_string(),
                     None,
                 )
             })?;
@@ -398,9 +398,9 @@ pub fn evaluate_env_with_profiles(
             package_profiles.insert_checked(profile.clone()).map_err(|error| {
                 Diagnostic::error(
                     "E1332",
-                    format!("package profile composition failed: {error}"),
-                    "one source-backed package profile cannot silently choose different inheritance, package, or collision facts".to_string(),
-                    "merge the declarations so they agree, or give the profiles different names".to_string(),
+                    format!("package generation composition failed: {error}"),
+                    "one source-backed package generation cannot silently choose different inheritance, package, or collision facts".to_string(),
+                    "merge the declarations so they agree, or give the generations different names".to_string(),
                     None,
                 )
             })?;
@@ -526,11 +526,11 @@ pub fn evaluate_env_with_profiles(
         ));
     }
 
-    // Select exactly one environment profile. The selected name is explicit when a host
+    // Select exactly one environment module. The selected name is explicit when a host
     // asks for it; otherwise `dev`, then `default`, then lexical order gives
-    // one stable beginner path instead of silently merging sibling profiles.
+    // one stable beginner path instead of silently merging sibling modules.
     let active_environment =
-        select_active_environment(&environment_names, requested_environment_profile)?;
+        select_active_environment(&environment_names, requested_environment)?;
     let active_key = active_environment
         .as_ref()
         .map(|name| (Namespace::Env, name.clone()));
@@ -567,10 +567,10 @@ pub fn evaluate_env_with_profiles(
             prompt_strip = prompt_strip_mode(strip);
         }
     }
-    let selected_names = requested_profile
+    let selected_names = requested_preset
         .map(|name| vec![name.to_string()])
         .unwrap_or_else(|| {
-            profiles.auto_select_many(
+            presets.auto_select_many(
                 &std::env::var("HOSTNAME").unwrap_or_default(),
                 &std::env::var("USER")
                     .or_else(|_| std::env::var("USERNAME"))
@@ -578,7 +578,7 @@ pub fn evaluate_env_with_profiles(
             )
         });
     let selected_preset = (!selected_names.is_empty())
-        .then(|| profiles.resolve_many(&selected_names))
+        .then(|| presets.resolve_many(&selected_names))
         .transpose()
         .map_err(|error| {
             Diagnostic::error(
@@ -589,8 +589,8 @@ pub fn evaluate_env_with_profiles(
                 None,
             )
         })?;
-    if let Some(profile) = &selected_preset {
-        for package in &profile.packages {
+    if let Some(preset) = &selected_preset {
+        for package in &preset.packages {
             push_unique(&mut package_refs, package.clone());
         }
     }
@@ -624,7 +624,7 @@ pub fn evaluate_env_with_profiles(
         dev_services,
         secrets,
         lifecycle,
-        profiles: profiles.profiles.values().cloned().collect(),
+        presets: presets.presets.values().cloned().collect(),
         languages,
         selected_preset,
         language_expansion,
@@ -642,9 +642,9 @@ pub fn evaluate_env_with_profiles(
 
 fn select_active_environment(
     names: &std::collections::BTreeSet<String>,
-    requested_environment_profile: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> Result<Option<String>, Diagnostic> {
-    if let Some(name) = requested_environment_profile {
+    if let Some(name) = requested_environment {
         if names.contains(name) {
             return Ok(Some(name.to_string()));
         }

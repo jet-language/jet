@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
                     "E0960",
                     format!("`{}` is not a module namespace", ns_word),
                     format!(
-                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), `{}` (a package profile), or `{}` (performance policy)",
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), `{}` (a package generation), or `{}` (performance policy)",
                         Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE, Syntax::NS_PERF
                     ),
                     format!(
@@ -195,8 +195,8 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Namespace::Profile => {
-                        let (field, field_span) = self.expect_ident("for a package profile field")?;
-                        self.expect(TokKind::Colon, "after a package profile field")?;
+                        let (field, field_span) = self.expect_ident("for a package generation field")?;
+                        self.expect(TokKind::Colon, "after a package generation field")?;
                         profile_fields.push((field, field_span, self.expr()?));
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
@@ -1034,7 +1034,7 @@ impl<'a> Parser<'a> {
                     "E0960",
                     format!("`{}` is not a module namespace", ns_name),
                     format!(
-                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), and `{}` (a package profile)",
+                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), and `{}` (a package generation)",
                         Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE
                     ),
                     format!(
