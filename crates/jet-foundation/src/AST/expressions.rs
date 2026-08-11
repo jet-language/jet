@@ -759,8 +759,10 @@ impl Expr {
             f(e);
             match e {
                 Expr::Str(parts, _) => {
-                    for StrPart::Interp(inner, _) in parts {
-                        walk(inner, f);
+                    for part in parts {
+                        if let StrPart::Interp(inner, _) = part {
+                            walk(inner, f);
+                        }
                     }
                 }
                 Expr::ListLit(items, _) => items.iter_mut().for_each(|item| walk(item, f)),
