@@ -63,6 +63,9 @@ fn project_file_with_runtime_on_compiler_stack(
     };
     let workspace_overlay_policy = jet_semindex::workspace_overlay_policy_for_entry(path)
         .map_err(|diagnostic| vec![diagnostic])?;
+    resolver
+        .revalidate_file(&checked)
+        .map_err(|error| vec![error.diagnostic()])?;
     Ok(project_checked(
         path,
         &src,
@@ -303,11 +306,18 @@ fn matching_member_root(
             .map_err(|error| error.diagnostic())?;
     }
     matches.sort_by_key(|member| member.path.components().count());
-    Ok(matches
+    let result = matches
         .into_iter()
         .filter(|member| entry.path.starts_with(&member.path))
         .map(|member| member.path)
-        .last())
+        .last();
+    resolver
+        .revalidate_directory(&entry)
+        .map_err(|error| error.diagnostic())?;
+    resolver
+        .revalidate_root()
+        .map_err(|error| error.diagnostic())?;
+    Ok(result)
 }
 
 fn path_is_within(path: &Path, root: &Path) -> bool {
@@ -372,16 +382,22 @@ fn collect_project_files(
                     for member in snapshot.plan.members {
                         let member_dir = root.join(member.path);
                         push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PACKAGE_FILE));
-                        collect_jet_files(&member_dir, &mut paths);
                     }
                 }
                 Err(diagnostic) => authority_diagnostic = Some(diagnostic),
             }
         }
     }
-    if workspace_root.is_none() {
-        collect_jet_files(manifest_root.unwrap_or(project_root), &mut paths);
+    if let Some(resolver) = resolver.as_ref() {
+        match resolver.discover_source_files() {
+            Ok(source_files) => paths.extend(source_files.into_iter().map(|file| file.path)),
+            Err(error) => authority_diagnostic.get_or_insert_with(|| error.diagnostic()),
+        }
     }
+    let authority_root = resolver
+        .as_ref()
+        .map(|resolver| resolver.root())
+        .unwrap_or(project_root);
     paths.sort();
     paths.dedup();
     let mut files = Vec::new();
@@ -389,7 +405,7 @@ fn collect_project_files(
         let Some(resolver) = resolver.as_ref() else {
             break;
         };
-        let relative = match path.strip_prefix(project_root) {
+        let relative = match path.strip_prefix(authority_root) {
             Ok(relative) => relative,
             Err(_) => {
                 authority_diagnostic.get_or_insert_with(|| {
@@ -409,25 +425,30 @@ fn collect_project_files(
             authority_diagnostic.get_or_insert_with(|| error.diagnostic());
             continue;
         }
-        let bytes = checked.bytes;
-            let kind = if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::PACKAGE_FILE) {
+        let bytes = checked.bytes.clone();
+        let kind = if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::PACKAGE_FILE) {
                 "package"
             } else if workspace_source
                 .as_ref()
                 .is_some_and(|source| path.as_path() == source.as_path())
+            {
                 "workspace"
             } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::ENV_FILE) {
                 "env"
-            } else if rel_path(project_root, &path) == jet_driver::Syntax::UNIFIED_LOCK_FILE {
+            } else if rel_path(authority_root, &path) == jet_driver::Syntax::UNIFIED_LOCK_FILE {
                 "lock"
             } else {
                 "source"
             };
-            files.push(ProjectFileRec {
-                path: rel_path(project_root, &path),
+        if let Err(error) = resolver.revalidate_file(&checked) {
+            authority_diagnostic.get_or_insert_with(|| error.diagnostic());
+            continue;
+        }
+        files.push(ProjectFileRec {
+                path: rel_path(authority_root, &path),
                 revision: format!("sha256-{}", SHA256::sha256_hex(&bytes)),
                 kind: kind.to_string(),
-            });
+        });
     }
     (files, authority_diagnostic)
 }
@@ -445,33 +466,6 @@ fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
         .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
     {
         paths.push(path.to_path_buf());
-    }
-}
-
-fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    // Watch every source so import edits immediately change project-part state.
-    // Semantic consumers filter with ProjectPartsReport::should_index.
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name == ".git" || name == ".jet" || name == "target" || name == "build" {
-            continue;
-        }
-        if path.is_dir() {
-            collect_jet_files(&path, out);
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) == Some(jet_driver::Syntax::FILE_EXT)
-            && path.file_name().and_then(|n| n.to_str()) != Some(jet_driver::Syntax::PAYLOAD_FILE)
-        {
-            out.push(path);
-        }
     }
 }
 
@@ -837,16 +831,75 @@ pub(super) struct EnvProjectJson {
 }
 
 pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
-    let path = project_root.join(jet_driver::Syntax::ENV_FILE);
-    let Ok(src) = fs::read_to_string(&path) else {
+    let resolver = match AuthorityResolver::open(project_root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: String::new(),
+            }
+        }
+        Err(error) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&error.diagnostic()),
+            }
+        }
+    };
+    let checked = match resolver.checked_file(Path::new(jet_driver::Syntax::ENV_FILE)) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: String::new(),
+            }
+        }
+        Err(error) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&error.diagnostic()),
+            }
+        }
+    };
+    let src = match checked.text() {
+        Ok(src) => src,
+        Err(error) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&error.diagnostic()),
+            }
+        }
+    };
+    if let Err(error) = resolver.revalidate_file(&checked) {
         return EnvProjectJson {
             envs: String::new(),
             services: String::new(),
-            diagnostics: String::new(),
+            diagnostics: diagnostic_json(&error.diagnostic()),
         };
+    }
+    let plan = match jet_env_model::ModuleEval::evaluate_env(&src, project_root) {
+        Ok(plan) => plan,
+        Err(d) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&d),
+            }
+        }
     };
-    match jet_env_model::ModuleEval::evaluate_env(&src, project_root) {
-        Ok(plan) => {
+    if let Err(error) = resolver.revalidate_file(&checked) {
+        return EnvProjectJson {
+            envs: String::new(),
+            services: String::new(),
+            diagnostics: diagnostic_json(&error.diagnostic()),
+        };
+    }
+    {
             let packages = plan
                 .package_refs
                 .iter()
@@ -910,12 +963,6 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
                 services,
                 diagnostics: String::new(),
             }
-        }
-        Err(d) => EnvProjectJson {
-            envs: String::new(),
-            services: String::new(),
-            diagnostics: diagnostic_json(&d),
-        },
     }
 }
 
@@ -990,16 +1037,19 @@ fn dev_service_project_json(service: &jet_env_model::ModuleEval::DevServicePlan)
 }
 
 pub(super) fn lock_project_json(project_root: &Path) -> String {
-    let lock_path = project_root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE);
-    if !lock_path.is_file() {
+    let Ok(resolver) = AuthorityResolver::open(project_root) else {
+        return String::new();
+    };
+    let Ok(lock) = resolver.checked_file(Path::new(jet_driver::Syntax::UNIFIED_LOCK_FILE)) else {
+        return String::new();
+    };
+    let revision = format!("sha256-{}", SHA256::sha256_hex(&lock.bytes));
+    if resolver.revalidate_file(&lock).is_err() {
         return String::new();
     }
-    let revision = fs::read(&lock_path)
-        .map(|bytes| format!("sha256-{}", SHA256::sha256_hex(&bytes)))
-        .unwrap_or_else(|_| source_revision(""));
     format!(
         "{{\"path\":{},\"revision\":{},\"kind\":\"unified\"}}",
-        json_str(&rel_path(project_root, &lock_path)),
+        json_str(&rel_path(project_root, &lock.path)),
         json_str(&revision)
     )
 }

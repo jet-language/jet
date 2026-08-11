@@ -2,9 +2,8 @@
 //!
 //! External tools (IDEs, CI scripts, Canvas) can call `WorkspaceLock::load`
 //! to get a static workspace index from `.jet/lock` without evaluating Jet
-//! and without depending on `jetpack`'s engine crate. An arbitrary authority
-//! may contribute persisted overlay policy through the same lock, but never
-//! contributes or validates member-index facts.
+//! and without depending on `jetpack`'s engine crate. Only the canonical
+//! `workspace.jet` index may supply member-index facts.
 //!
 //! The write path (`WorkspaceLock::write`) needs `jetpack::RuntimePolicy` for
 //! file locking; it lives in `jetpack::WorkspaceLock` and re-exports this
@@ -26,11 +25,19 @@ pub const WORKSPACE_LOCK: &str = Syntax::UNIFIED_LOCK_FILE;
 /// required for a safe workspace index. Callers must not silently treat that
 /// state as an empty workspace.
 pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
-    let lock = Lock::load(workspace_root)?;
+    let resolver = AuthorityResolver::open(workspace_root).ok()?;
+    let lock_file = match resolver.checked_file(Path::new(WORKSPACE_LOCK)) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return None,
+        Err(_) => return None,
+    };
+    let raw = lock_file.text().ok()?;
+    resolver.revalidate_file(&lock_file).ok()?;
+    let lock = Lock::parse(&raw).ok()?;
+    resolver.revalidate_file(&lock_file).ok()?;
     if lock.workspace_source_digest.is_none() {
         return None;
     }
-    let resolver = AuthorityResolver::open(workspace_root).ok()?;
     let source = match resolver.resolve_workspace_source() {
         Ok(source) => source,
         Err(_) => return None,
@@ -39,6 +46,11 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
         resolver.revalidate_source(source).ok()?;
     }
     let workspace_source_role = source.as_ref().map(|source| source.role);
+    if workspace_source_role
+        .is_some_and(|role| role != crate::WorkspacePlan::WorkspaceSourceRole::Index)
+    {
+        return None;
+    }
     let workspace_source_present = source.is_some();
     let source_digest = source
         .as_ref()
@@ -57,10 +69,9 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
         return None;
     }
     let is_index = workspace_source_role
-        .is_none_or(|role| role == crate::WorkspacePlan::WorkspaceSourceRole::Index);
+        == Some(crate::WorkspacePlan::WorkspaceSourceRole::Index);
     if !is_index && !lock.workspace_members.is_empty() {
-        // An arbitrary authority may persist overlay facts in this lock, but
-        // its source is never a D-WORKSPACE2 member index.
+        // Only a checked workspace index may persist member-index facts.
         return None;
     }
     if is_index && !lock.workspace_members.is_empty() {
@@ -86,7 +97,7 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             let checked = resolver.checked_package(relative).ok()?;
             resolver.revalidate_member(&checked.member).ok()?;
             let physical_path = checked.member.directory.path.clone();
-            let canonical_relative = resolver.relative_identity(&checked.member.directory.path).ok()?;
+            let canonical_relative = resolver.relative_identity(&checked.member.directory).ok()?;
             if canonical_relative != member.canonical_path {
                 return None;
             }
@@ -128,6 +139,7 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     } else {
         Vec::new()
     };
+    resolver.revalidate_file(&lock_file).ok()?;
     Some(WorkspacePlan {
         comptime_inputs: lock.comptime_inputs.clone(),
         overlay_policy: lock.workspace_overlay_policy,

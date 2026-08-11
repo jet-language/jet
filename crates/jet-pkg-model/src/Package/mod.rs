@@ -24,7 +24,7 @@ pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
 pub use Edit::{add_dep, remove_dep};
 
-use crate::Authority::{AuthorityError, AuthorityResolver};
+use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
@@ -514,7 +514,7 @@ impl PackageFacts {
                     match resolver.checked_file(&with_extension) {
                         Ok(file) => file,
                         Err(error) if error.is_missing() => {
-                            let discovered = discover_config_path(resolver.root(), &relative)?;
+                            let discovered = discover_config_path(resolver, &relative)?;
                             resolver
                                 .checked_file(&discovered)
                                 .map_err(authority_package_error)?
@@ -523,7 +523,7 @@ impl PackageFacts {
                     }
                 }
                 Err(error) if error.is_missing() => {
-                    let discovered = discover_config_path(resolver.root(), &relative)?;
+                    let discovered = discover_config_path(resolver, &relative)?;
                     resolver
                         .checked_file(&discovered)
                         .map_err(authority_package_error)?
@@ -544,7 +544,11 @@ impl PackageFacts {
             resolver
                 .revalidate_file(&checked)
                 .map_err(authority_package_error)?;
-            parsed.push(ConfigFacts::parse(&text, path.display().to_string())?);
+            let config = ConfigFacts::parse(&text, path.display().to_string())?;
+            resolver
+                .revalidate_file(&checked)
+                .map_err(authority_package_error)?;
+            parsed.push(config);
         }
         self.compose(parsed)
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
@@ -685,6 +689,16 @@ impl PackageFacts {
             Err(error) if error.is_missing() => None,
             Err(error) => return Err(format!("{}: {error}", self.origin)),
         };
+        if let Some(run) = &run {
+            resolver
+                .revalidate_file(run)
+                .map_err(|error| format!("{}: {error}", self.origin))?;
+        }
+        if let Some(main) = &main {
+            resolver
+                .revalidate_file(main)
+                .map_err(|error| format!("{}: {error}", self.origin))?;
+        }
         if let Some(main) = main {
             if run.is_some() {
                 return Err(format!(
@@ -719,7 +733,10 @@ impl PackageFacts {
             let output = self
                 .select_output("run", None, None)
                 .map_err(|error| format!("{}: {error}", self.origin))?;
-            let Some(entry) = self.entry_path(root, output) else {
+            let Some(entry) = self
+                .entry_path_checked(&resolver, output)
+                .map_err(|error| format!("{}: {error}", self.origin))?
+            else {
                 return Err(format!(
                     "{}: typed output `{}` has no unique source entry for `{}`",
                     self.origin,
@@ -742,70 +759,106 @@ impl PackageFacts {
         root: &std::path::Path,
         output: &OutputFact,
     ) -> Option<std::path::PathBuf> {
-        let entry = output.entry.as_deref()?;
+        let resolver = AuthorityResolver::open(root).ok()?;
+        self.entry_path_checked(&resolver, output).ok().flatten()
+    }
+
+    fn entry_path_checked(
+        &self,
+        resolver: &AuthorityResolver,
+        output: &OutputFact,
+    ) -> Result<Option<std::path::PathBuf>, AuthorityError> {
+        let Some(entry) = output.entry.as_deref() else {
+            return Ok(None);
+        };
         let parts = entry.split('.').collect::<Vec<_>>();
         if (parts.len() != 1 && parts.len() != 2)
             || parts.iter().any(|part| !is_identifier(part))
         {
-            return None;
+            return Ok(None);
         }
-        let files = self.source_files(root);
-        if parts.len() == 1 {
+        let files = self.source_files_checked(resolver)?;
+        let result = if parts.len() == 1 {
             let matches = files
-                .into_iter()
-                .filter(|path| path.parent() == Some(root))
-                .filter(|path| file_has_top_level_function(path, parts[0]))
-                .collect::<Vec<_>>();
-            return (matches.len() == 1).then(|| matches.into_iter().next().unwrap());
-        }
-        let sources = parse_sources(&files)?;
-        let mut targets = sources
-            .iter()
-            .filter(|source| source.path.parent() == Some(root))
-            .flat_map(|source| imported_module_targets(root, source, parts[0], &sources))
-            .collect::<Vec<_>>();
-        targets.sort();
-        targets.dedup();
-        let matches = if targets.len() == 1 {
-            sources
                 .iter()
-                .filter(|source| source.path == targets[0])
-                .filter(|source| {
-                    unique_top_level_function(&source.program, parts[1])
-                        .is_some_and(|function| function.is_pub)
-                })
-                .map(|source| source.path.clone())
-                .collect::<Vec<_>>()
+                .filter(|file| file.relative.components().count() == 1)
+                .filter(|file| file_has_top_level_function(file, parts[0]))
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
         } else {
-            Vec::new()
+            let Some(sources) = parse_sources(&files) else {
+                return Ok(None);
+            };
+            let mut targets = sources
+                .iter()
+                .filter(|source| source.path.parent() == Some(resolver.root()))
+                .flat_map(|source| {
+                    imported_module_targets(resolver.root(), source, parts[0], &sources)
+                })
+                .collect::<Vec<_>>();
+            targets.sort();
+            targets.dedup();
+            let matches = if targets.len() == 1 {
+                sources
+                    .iter()
+                    .filter(|source| source.path == targets[0])
+                    .filter(|source| {
+                        unique_top_level_function(&source.program, parts[1])
+                            .is_some_and(|function| function.is_pub)
+                    })
+                    .map(|source| source.path.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
         };
-        (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+        for file in &files {
+            resolver.revalidate_file(file)?;
+        }
+        resolver.revalidate_root()?;
+        Ok(result)
     }
 
     fn source_files(&self, root: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let mut files = Vec::new();
-        collect_jet_files(root, &mut files);
-        files.retain(|path| {
-            let reserved = path
+        let Ok(resolver) = AuthorityResolver::open(root) else {
+            return Vec::new();
+        };
+        self.source_files_checked(&resolver)
+            .map(|files| files.into_iter().map(|file| file.path).collect())
+            .unwrap_or_default()
+    }
+
+    fn source_files_checked(
+        &self,
+        resolver: &AuthorityResolver,
+    ) -> Result<Vec<CheckedFile>, AuthorityError> {
+        let mut files = resolver.discover_source_files()?;
+        files.retain(|file| {
+            let reserved = file
+                .relative
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| {
-                    name == crate::Syntax::PACKAGE_FILE || name == crate::Syntax::PAYLOAD_FILE
+                    name == crate::Syntax::PACKAGE_FILE
+                        || name == crate::Syntax::PAYLOAD_FILE
+                        || name == crate::Syntax::LEGACY_ENTRY_FILE
                 });
             let config = self
                 .resolved_config_paths
                 .iter()
                 .chain(self.configs.iter())
                 .any(|name| {
-                    let candidate = root.join(name);
-                    path == &candidate
+                    let candidate = std::path::Path::new(name);
+                    &file.relative == candidate
                         || (candidate.extension().is_none()
-                            && path == &candidate.with_extension("jet"))
+                            && file.relative == candidate.with_extension("jet"))
                 });
             !reserved && !config
         });
-        files.sort();
-        files
+        files.sort_by(|left, right| left.relative.cmp(&right.relative));
+        Ok(files)
     }
 
     pub fn validate_members(&self) -> Result<(), ComposeError> {
@@ -878,11 +931,10 @@ impl PackageFacts {
                     .map_err(authority_package_error)?]
             };
             for candidate in candidates {
-                let candidate_path = candidate.directory.path.clone();
                 let canonical = resolver
-                    .relative_identity(&candidate_path)
+                    .relative_identity(&candidate.directory)
                     .map_err(authority_package_error)?;
-                if canonical == "`.`" {
+                if canonical == "." {
                     return Err(PackageParseError::Composition(format!(
                         "member reference `{relative}` resolves to its Package root"
                     )));
@@ -906,8 +958,12 @@ impl PackageFacts {
                 }
                 physical.push(canonical);
                 names.push(name);
+                resolver
+                    .revalidate_member(&candidate)
+                    .map_err(authority_package_error)?;
             }
         }
+        resolver.revalidate_root().map_err(authority_package_error)?;
         Ok(names)
     }
 }
@@ -2394,39 +2450,25 @@ fn config_wrapper<'a>(text: &'a str) -> Result<Option<(String, &'a str)>, Packag
 }
 
 fn discover_config_path(
-    dir: &std::path::Path,
+    resolver: &AuthorityResolver,
     name: &str,
 ) -> Result<std::path::PathBuf, PackageParseError> {
     let mut matches = Vec::new();
-    let entries = std::fs::read_dir(dir).map_err(|error| {
-        PackageParseError::Composition(format!(
-            "couldn't discover Config `{name}` in `{}`: {error}",
-            dir.display()
-        ))
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            PackageParseError::Composition(format!(
-                "couldn't discover Config `{name}` in `{}`: {error}",
-                dir.display()
-            ))
-        })?;
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("jet") {
-            continue;
-        }
-        if path
+    let files = resolver
+        .discover_files(Path::new("."), Some(crate::Syntax::FILE_EXT))
+        .map_err(authority_package_error)?;
+    for file in files {
+        if file
+            .relative
             .file_name()
             .and_then(|value| value.to_str())
             .is_some_and(|value| value.starts_with('_'))
         {
             continue;
         }
-        let text = std::fs::read_to_string(&path).map_err(|error| {
-            PackageParseError::Composition(format!("couldn't read Config `{}`: {error}", path.display()))
-        })?;
-        match ConfigFacts::parse(&text, path.display().to_string()) {
-            Ok(facts) if facts.name.as_deref() == Some(name) => matches.push(path),
+        let text = file.text().map_err(authority_package_error)?;
+        match ConfigFacts::parse(&text, file.path.display().to_string()) {
+            Ok(facts) if facts.name.as_deref() == Some(name) => matches.push(file.relative),
             Ok(_) => {}
             Err(error) if text.contains("Config") => return Err(error),
             Err(_) => {}
@@ -2437,11 +2479,11 @@ fn discover_config_path(
         [path] => Ok(path.clone()),
         [] => Err(PackageParseError::Composition(format!(
             "Config `{name}` was not found under `{}`",
-            dir.display()
+            resolver.root().display()
         ))),
         _ => Err(PackageParseError::Composition(format!(
             "Config `{name}` is ambiguous under `{}`",
-            dir.display()
+            resolver.root().display()
         ))),
     }
 }
@@ -2608,39 +2650,22 @@ fn is_identifier(value: &str) -> bool {
         })
 }
 
-fn collect_jet_files(root: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(root) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || name == "target" || name == "build" {
-            continue;
-        }
-        if path.is_dir() {
-            collect_jet_files(&path, files);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jet") {
-            files.push(path);
-        }
-    }
-}
-
 struct ParsedSource {
     path: std::path::PathBuf,
     program: crate::AST::Program,
 }
 
-fn parse_sources(files: &[std::path::PathBuf]) -> Option<Vec<ParsedSource>> {
+fn parse_sources(files: &[CheckedFile]) -> Option<Vec<ParsedSource>> {
     files
         .iter()
-        .map(|path| {
-            let source = std::fs::read_to_string(path).ok()?;
+        .map(|file| {
+            let source = file.text().ok()?;
             let (tokens, lex_diags) = crate::Lexer::lex(&source);
             if !lex_diags.is_empty() {
                 return None;
             }
             Some(ParsedSource {
-                path: path.clone(),
+                path: file.path.clone(),
                 program: crate::Parser::parse(&tokens).ok()?,
             })
         })
@@ -2718,8 +2743,8 @@ fn import_target_paths(
     paths
 }
 
-fn file_has_top_level_function(path: &std::path::Path, wanted: &str) -> bool {
-    let Ok(source) = std::fs::read_to_string(path) else { return false };
+fn file_has_top_level_function(file: &CheckedFile, wanted: &str) -> bool {
+    let Ok(source) = file.text() else { return false };
     let mut depth = 0i32;
     let mut token = String::new();
     let mut saw_fn = false;

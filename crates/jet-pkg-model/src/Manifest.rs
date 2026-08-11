@@ -328,7 +328,11 @@ pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
     if let Err(error) = resolver.revalidate_file(&checked.file) {
         return Some(Err(error.diagnostic()));
     }
-    Some(parse(&checked.file.path, &raw))
+    let result = parse(&checked.file.path, &raw);
+    if let Err(error) = resolver.revalidate_file(&checked.file) {
+        return Some(Err(error.diagnostic()));
+    }
+    Some(result)
 }
 
 /// Validate the toolchain constraint from `package.jet`. Returns E1208 on mismatch.

@@ -57,7 +57,7 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .unwrap_or_else(|_| start.to_path_buf());
     loop {
         if package_manifest_present(&dir)
-            || dir.join(Syntax::ENV_FILE).is_file()
+            || env_file_present(&dir)
             || workspace_source_present(&dir)
         {
             return Some(dir);
@@ -71,6 +71,16 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         dir = parent.to_path_buf();
     }
     None
+}
+
+fn env_file_present(dir: &Path) -> bool {
+    match AuthorityResolver::open(dir) {
+        Ok(resolver) => match resolver.checked_file(Path::new(Syntax::ENV_FILE)) {
+            Ok(file) => resolver.revalidate_file(&file).is_ok(),
+            Err(error) => !error.is_missing(),
+        },
+        Err(error) => !error.is_missing(),
+    }
 }
 
 fn nearest_workspace_root(start: &Path) -> Option<PathBuf> {
@@ -210,11 +220,13 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
         None => {
             let lock = WorkspaceLock::load(&dir);
             if lock.is_none() {
-                let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
-                let looks_like_workspace_lock = match std::fs::read_to_string(&path) {
-                    Ok(source) => crate::Lock::looks_like_workspace_lock(&source),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                let (path, looks_like_workspace_lock) = match workspace_lock_source(&dir) {
+                    Ok(Some((path, source))) => {
+                        (path, crate::Lock::looks_like_workspace_lock(&source))
+                    }
+                    Ok(None) => (dir.join(Syntax::UNIFIED_LOCK_FILE), false),
                     Err(error) => {
+                        let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
                         let mut diagnostic = crate::Lock::e1202_workspace(
                             &path.display().to_string(),
                         );
@@ -254,6 +266,20 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
         ),
         None => RefSpec::WorkspaceIndex::empty(),
     }
+}
+
+fn workspace_lock_source(
+    dir: &Path,
+) -> Result<Option<(PathBuf, String)>, jet_pkg_model::Authority::AuthorityError> {
+    let resolver = AuthorityResolver::open(dir)?;
+    let file = match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let source = file.text()?;
+    resolver.revalidate_file(&file)?;
+    Ok(Some((file.path, source)))
 }
 
 #[cfg(test)]

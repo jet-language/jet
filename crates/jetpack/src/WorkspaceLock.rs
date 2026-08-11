@@ -26,23 +26,46 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
     };
     super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
         std::fs::create_dir_all(&lock_dir)?;
-        let mut lock = match std::fs::read_to_string(&lock_path) {
-            Ok(raw) => jet_pkg_model::Lock::parse(&raw).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("existing lock is malformed: {error}"),
-                )
-            })?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => empty_lock(),
-            Err(error) => return Err(error),
-        };
-        lock.version = Lock::LOCK_VERSION;
         let resolver = AuthorityResolver::open(workspace_root).map_err(|error| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("workspace authority cannot be opened: {error}"),
             )
         })?;
+        let existing_lock = match resolver.checked_file(Path::new(WORKSPACE_LOCK)) {
+            Ok(file) => Some(file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace lock cannot be opened: {error}"),
+                ))
+            }
+        };
+        let mut lock = match &existing_lock {
+            Some(file) => {
+                let raw = file.text().map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("existing lock is not valid text: {error}"),
+                    )
+                })?;
+                resolver.revalidate_file(file).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("existing lock changed during read: {error}"),
+                    )
+                })?;
+                jet_pkg_model::Lock::parse(&raw).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("existing lock is malformed: {error}"),
+                    )
+                })?
+            }
+            None => empty_lock(),
+        };
+        lock.version = Lock::LOCK_VERSION;
         let source = resolver
             .resolve_workspace_source()
             .map_err(|error| {
@@ -71,6 +94,11 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                     format!("workspace authority changed before lock write: {error}"),
                 )
             })?;
+        } else if !plan.members.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "workspace lock members require a checked workspace.jet index",
+            ));
         }
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
@@ -105,7 +133,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                     )
                 })?;
                 let canonical_relative = resolver
-                    .relative_identity(&checked.member.directory.path)
+                    .relative_identity(&checked.member.directory)
                     .map_err(|error| {
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
@@ -138,6 +166,30 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         for ci in &plan.comptime_inputs {
             if !lock.comptime_inputs.iter().any(|e| e.path == ci.path) {
                 lock.comptime_inputs.push(ci.clone());
+            }
+        }
+        if let Some(existing_lock) = &existing_lock {
+            resolver.revalidate_file(existing_lock).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("existing lock changed before write: {error}"),
+                )
+            })?;
+        } else {
+            match resolver.checked_file(Path::new(WORKSPACE_LOCK)) {
+                Ok(file) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace lock appeared during write: {}", file.path.display()),
+                    ));
+                }
+                Err(error) if error.is_missing() => {}
+                Err(error) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace lock changed during write: {error}"),
+                    ));
+                }
             }
         }
         std::fs::write(lock_path, Lock::write(&lock))

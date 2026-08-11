@@ -74,15 +74,15 @@ pub fn load_checked(dir: &Path) -> Option<Result<WorkspaceSnapshot, Diagnostic>>
     if let Err(error) = resolver.revalidate_source(&source) {
         return Some(Err(error.diagnostic()));
     }
+    if source.role != WorkspaceSourceRole::Index {
+        return None;
+    }
     let plan = match evaluate_with_resolver(&source.source, dir, source.role, &resolver) {
         Ok(plan) => plan,
         Err(diagnostic) => return Some(Err(diagnostic)),
     };
     if let Err(error) = resolver.revalidate_source(&source) {
         return Some(Err(error.diagnostic()));
-    }
-    if source.role != WorkspaceSourceRole::Index {
-        return None;
     }
     Some(Ok(WorkspaceSnapshot { source, plan }))
 }
@@ -335,7 +335,7 @@ fn validate_member_path(
     let has_members = !member.manifest.facts.members.is_empty();
     let name = member.manifest.facts.name.clone();
     let canonical_path = resolver
-        .relative_identity(&member.directory.path)
+        .relative_identity(&member.directory)
         .map_err(|error| authority_diagnostic(error, span))?;
     if members.iter().any(|member| member.canonical_path == canonical_path) {
         return Err(Diagnostic::error(
@@ -741,7 +741,7 @@ module workspace {
         let tmp = tempdir("member-malformed-metadata");
         let package = tmp.join("packages/app");
         std::fs::create_dir_all(&package).unwrap();
-        std::fs::write(package.join(Syntax::PAYLOAD_FILE), "not package metadata\n").unwrap();
+        std::fs::write(package.join(Syntax::PACKAGE_FILE), "not package metadata\n").unwrap();
         let error = evaluate(
             "module workspace { members: [\"./packages/app\"] }\n",
             &tmp,
@@ -862,17 +862,17 @@ module workspace {
     }
 
     #[test]
-    fn find_discovers_pkg_jet_directories() {
+    fn find_discovers_package_jet_directories() {
         let tmp = tempdir("workspace-find");
-        // packages/hello/pkg.jet
+        // packages/hello/package.jet
         let hello = tmp.join("packages/hello");
         std::fs::create_dir_all(&hello).unwrap();
-        std::fs::write(hello.join(Syntax::PAYLOAD_FILE), "name: \"hello\"\n").unwrap();
-        // packages/ranker/pkg.jet
+        std::fs::write(hello.join(Syntax::PACKAGE_FILE), "name: \"hello\"\n").unwrap();
+        // packages/ranker/package.jet
         let ranker = tmp.join("packages/ranker");
         std::fs::create_dir_all(&ranker).unwrap();
-        std::fs::write(ranker.join(Syntax::PAYLOAD_FILE), "name: \"ranker\"\n").unwrap();
-        // packages/lib (no pkg.jet — should be ignored)
+        std::fs::write(ranker.join(Syntax::PACKAGE_FILE), "name: \"ranker\"\n").unwrap();
+        // packages/lib (no package.jet — should be ignored)
         let lib = tmp.join("packages/lib");
         std::fs::create_dir_all(lib).unwrap();
 
@@ -954,8 +954,8 @@ module workspace {
         let ranker = packages.join("ranker");
         std::fs::create_dir_all(&hello).unwrap();
         std::fs::create_dir_all(&ranker).unwrap();
-        std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
-        std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
+        std::fs::write(hello.join(Syntax::PACKAGE_FILE), "name: \"hello\"\n").unwrap();
+        std::fs::write(ranker.join(Syntax::PACKAGE_FILE), "name: \"ranker\"\n").unwrap();
         std::fs::write(
             dir.join(crate::Syntax::WORKSPACE_FILE),
             "module workspace {\n    members: find(\"./packages\")\n}\n",
@@ -1020,7 +1020,7 @@ module workspace {
         let dir = tempdir("ws-canonical-wins");
         let packages = dir.join("packages/hello");
         std::fs::create_dir_all(&packages).unwrap();
-        std::fs::write(packages.join(Syntax::PAYLOAD_FILE), "name: \"hello\"\n").unwrap();
+        std::fs::write(packages.join(Syntax::PACKAGE_FILE), "name: \"hello\"\n").unwrap();
         std::fs::write(
             dir.join(Syntax::WORKSPACE_FILE),
             "module workspace { members: find(\"./packages\") }\n",

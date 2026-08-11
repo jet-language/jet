@@ -715,7 +715,10 @@ fn run_workspace_members(
     if let Err(error) = resolver.revalidate_source(&source) {
         return report_select_error(theme, &error.diagnostic());
     }
-    let ordered_members = MemberSelect::dependency_order(dir, plan_members);
+    let ordered_members = match MemberSelect::dependency_order(dir, plan_members) {
+        Ok(ordered_members) => ordered_members,
+        Err(diagnostic) => return report_select_error(theme, &diagnostic),
+    };
     for (idx, member) in ordered_members.iter().enumerate() {
         let checked = match resolver.checked_member(std::path::Path::new(&member.path)) {
             Ok(checked) => checked,

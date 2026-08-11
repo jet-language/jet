@@ -12,9 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Diagnostics::Diagnostic;
-use crate::Package;
-use crate::SHA256;
 use crate::WorkspaceFile::{WorkspaceMember, WorkspacePlan};
+use jet_pkg_model::Authority::AuthorityResolver;
 
 /// CLI selection request for a workspace command.
 #[derive(Debug, Clone, Default)]
@@ -61,7 +60,7 @@ pub fn select_members(
         } else {
             members_affected_vs_cache(root, plan)
         };
-        let with_deps = close_under_dependents(root, plan, &changed);
+        let with_deps = close_under_dependents(root, plan, &changed)?;
         for name in with_deps {
             selected.insert(name);
         }
@@ -78,12 +77,23 @@ pub fn select_members(
 /// Return selected workspace members in deterministic local-dependency order.
 ///
 /// The workspace index remains the source-order tie breaker.  A member is
-/// ordered after any selected member named by its `pkg.jet` dependency list;
+/// ordered after any selected member named by its `package.jet` dependency list;
 /// external dependencies do not affect this order.  Package resolution owns
 /// dependency-cycle diagnostics, so a malformed cycle keeps the stable source
 /// order here instead of inventing a second diagnostic authority in the
 /// workspace runner.
-pub fn dependency_order(root: &Path, members: &[WorkspaceMember]) -> Vec<WorkspaceMember> {
+pub fn dependency_order(
+    root: &Path,
+    members: &[WorkspaceMember],
+) -> Result<Vec<WorkspaceMember>, Diagnostic> {
+    let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
+    dependency_order_checked(&resolver, members).map_err(|error| error.diagnostic())
+}
+
+fn dependency_order_checked(
+    resolver: &AuthorityResolver,
+    members: &[WorkspaceMember],
+) -> Result<Vec<WorkspaceMember>, jet_pkg_model::Authority::AuthorityError> {
     let names: HashMap<&str, usize> = members
         .iter()
         .enumerate()
@@ -93,13 +103,9 @@ pub fn dependency_order(root: &Path, members: &[WorkspaceMember]) -> Vec<Workspa
     let mut indegree = vec![0usize; members.len()];
 
     for (index, member) in members.iter().enumerate() {
-        let manifest_path = crate::Manifest::manifest_path_in(&member_abs(root, member));
-        let manifest = std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|source| Package::PackageFacts::parse(&source, manifest_path.display().to_string()).ok());
-        let Some(manifest) = manifest else {
-            continue;
-        };
+        let checked = resolver.checked_member(Path::new(&member.path))?;
+        resolver.revalidate_member(&checked)?;
+        let manifest = checked.manifest.facts;
         let mut seen = HashSet::new();
         for dependency_name in manifest.deps.keys() {
             let Some(&dependency_index) = names.get(dependency_name.as_str()) else {
@@ -141,7 +147,8 @@ pub fn dependency_order(root: &Path, members: &[WorkspaceMember]) -> Vec<Workspa
             ordered.push(member.clone());
         }
     }
-    ordered
+    resolver.revalidate_root()?;
+    Ok(ordered)
 }
 
 /// Persist member input hashes after a successful workspace build so the next
@@ -152,9 +159,19 @@ pub fn record_member_input_hashes(root: &Path, members: &[WorkspaceMember]) {
         let _ = std::fs::create_dir_all(parent);
     }
     let mut existing = load_member_input_hashes(root);
+    let Ok(resolver) = AuthorityResolver::open(root) else {
+        return;
+    };
     for member in members {
-        let abs = member_abs(root, member);
-        existing.insert(member.name.clone(), SHA256::tree_hash(&abs));
+        let Ok(checked) = resolver.checked_member(Path::new(&member.path)) else {
+            continue;
+        };
+        let Ok(hash) = resolver.source_tree_hash(&checked.directory) else {
+            continue;
+        };
+        if resolver.revalidate_member(&checked).is_ok() {
+            existing.insert(member.name.clone(), hash);
+        }
     }
     let mut lines: Vec<String> = existing
         .into_iter()
@@ -202,11 +219,16 @@ fn members_affected_vs_cache(root: &Path, plan: &WorkspacePlan) -> BTreeSet<Stri
         }
         return out;
     }
+    let resolver = AuthorityResolver::open(root).ok();
     for m in &plan.members {
-        let abs = member_abs(root, m);
-        let current = SHA256::tree_hash(&abs);
+        let current = resolver.as_ref().and_then(|resolver| {
+            let checked = resolver.checked_member(Path::new(&m.path)).ok()?;
+            let hash = resolver.source_tree_hash(&checked.directory).ok()?;
+            resolver.revalidate_member(&checked).ok()?;
+            Some(hash)
+        });
         match cached.get(&m.name) {
-            Some(prev) if prev == &current => {}
+            Some(prev) if current.as_ref().is_some_and(|current| prev == current) => {}
             _ => {
                 out.insert(m.name.clone());
             }
@@ -292,8 +314,8 @@ fn close_under_dependents(
     root: &Path,
     plan: &WorkspacePlan,
     seeds: &BTreeSet<String>,
-) -> BTreeSet<String> {
-    let reverse = reverse_dependents(root, plan);
+) -> Result<BTreeSet<String>, Diagnostic> {
+    let reverse = reverse_dependents(root, plan)?;
     let mut out = seeds.clone();
     let mut stack: Vec<String> = seeds.iter().cloned().collect();
     while let Some(name) = stack.pop() {
@@ -305,22 +327,25 @@ fn close_under_dependents(
             }
         }
     }
-    out
+    Ok(out)
 }
 
-/// Map member name → members that depend on it (direct deps from `pkg.jet`).
-fn reverse_dependents(root: &Path, plan: &WorkspacePlan) -> HashMap<String, Vec<String>> {
+/// Map member name → members that depend on it (direct deps from `package.jet`).
+fn reverse_dependents(
+    root: &Path,
+    plan: &WorkspacePlan,
+) -> Result<HashMap<String, Vec<String>>, Diagnostic> {
+    let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
     let names: HashSet<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
     let mut reverse: HashMap<String, Vec<String>> = HashMap::new();
     for m in &plan.members {
-        let abs = member_abs(root, m);
-        let pkg_jet = crate::Manifest::manifest_path_in(&abs);
-        let Ok(src) = std::fs::read_to_string(&pkg_jet) else {
-            continue;
-        };
-        let Ok(manifest) = Package::PackageFacts::parse(&src, pkg_jet.display().to_string()) else {
-            continue;
-        };
+        let checked = resolver
+            .checked_member(Path::new(&m.path))
+            .map_err(|error| error.diagnostic())?;
+        resolver
+            .revalidate_member(&checked)
+            .map_err(|error| error.diagnostic())?;
+        let manifest = checked.manifest.facts;
         for dep_name in manifest.deps.keys() {
             if names.contains(dep_name.as_str()) {
                 reverse
@@ -330,7 +355,8 @@ fn reverse_dependents(root: &Path, plan: &WorkspacePlan) -> HashMap<String, Vec<
             }
         }
     }
-    reverse
+    resolver.revalidate_root().map_err(|error| error.diagnostic())?;
+    Ok(reverse)
 }
 
 fn member_name_index(plan: &WorkspacePlan) -> HashMap<&str, &WorkspaceMember> {
@@ -338,15 +364,6 @@ fn member_name_index(plan: &WorkspacePlan) -> HashMap<&str, &WorkspaceMember> {
         .iter()
         .map(|m| (m.name.as_str(), m))
         .collect()
-}
-
-fn member_abs(root: &Path, member: &WorkspaceMember) -> PathBuf {
-    let p = Path::new(&member.path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        root.join(p)
-    }
 }
 
 fn normalize_member_prefix(path: &str) -> String {
@@ -492,7 +509,7 @@ mod tests {
             format!("deps: {{\n{dep_lines}}}\n")
         };
         std::fs::write(
-            abs.join("pkg.jet"),
+            abs.join(crate::Syntax::PACKAGE_FILE),
             format!("name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}"),
         )
         .unwrap();
@@ -532,7 +549,7 @@ mod tests {
         let root = unique_dir("dependency-order");
         let dependent = write_member(&root, "app", "packages/app", &["shared"]);
         let dependency = write_member(&root, "shared", "packages/shared", &[]);
-        let ordered = dependency_order(&root, &[dependent, dependency]);
+        let ordered = dependency_order(&root, &[dependent, dependency]).unwrap();
         let names: Vec<_> = ordered.iter().map(|member| member.name.as_str()).collect();
         assert_eq!(names, ["shared", "app"]);
         let _ = std::fs::remove_dir_all(&root);

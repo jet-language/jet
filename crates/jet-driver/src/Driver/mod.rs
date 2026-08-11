@@ -11,19 +11,41 @@ fn package_lints_deny(bundle: &crate::AST::ProgramBundle) -> Vec<String> {
     let Some(entry) = bundle.modules.get(bundle.entry) else {
         return Vec::new();
     };
-    // `compile_src`/eval bundles are intentionally filesystem-free. A package
-    // wall belongs only to a loaded project bundle, whose entry path is real.
-    if !entry.path.is_file() {
-        return Vec::new();
-    }
-    let path = bundle.project_root.join(crate::Syntax::PACKAGE_FILE);
-    let Ok(source) = std::fs::read_to_string(path) else {
+    let resolver = match AuthorityResolver::open(&bundle.project_root) {
+        Ok(resolver) => resolver,
+        Err(_) => return Vec::new(),
+    };
+    let relative = entry
+        .path
+        .strip_prefix(resolver.root())
+        .or_else(|_| entry.path.strip_prefix(&bundle.project_root))
+        .ok();
+    let Some(relative) = relative else {
         return Vec::new();
     };
-    jet_foundation::LintPolicy::parse_package_source(&source)
+    let Ok(entry_file) = resolver.checked_file(relative) else {
+        return Vec::new();
+    };
+    if resolver.revalidate_file(&entry_file).is_err() {
+        return Vec::new();
+    }
+    let Ok(manifest) = resolver.checked_manifest(std::path::Path::new(".")) else {
+        return Vec::new();
+    };
+    let Ok(source) = manifest.file.text() else {
+        return Vec::new();
+    };
+    if resolver.revalidate_file(&manifest.file).is_err() {
+        return Vec::new();
+    }
+    let deny = jet_foundation::LintPolicy::parse_package_source(&source)
         .ok()
         .flatten()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if resolver.revalidate_file(&manifest.file).is_err() {
+        return Vec::new();
+    }
+    deny
 }
 
 fn apply_package_lint_policy(
@@ -1251,7 +1273,7 @@ fn compile_bundle_path_build_inner(
         }
         (None, None) => crate::Loader::load_entry_with_overlay(file, None, false)?,
     };
-    // D-BUILDSCOPE1: a package owns one optional build entry in `pkg.jet`.
+    // D-BUILDSCOPE1: a package owns one optional build entry in `package.jet`.
     // Load that source through the same loader/sema/interpreter path as a
     // file-local entry, while retaining the ordinary runtime bundle for the
     // post-build compile.  Imported build functions remain inert: only this
@@ -1274,18 +1296,25 @@ fn compile_bundle_path_build_inner(
             Ok(Some(source))
                 if source.role == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index =>
             {
-                let entry_identity = std::fs::canonicalize(entry_path)
-                    .map_err(|error| vec![Diagnostic::error(
+                let entry_name = entry_path.file_name().ok_or_else(|| {
+                    vec![Diagnostic::error(
                         "E1334",
                         "workspace entry cannot be resolved".to_string(),
-                        error.to_string(),
+                        "the workspace entry must name one regular file".to_string(),
                         "use an existing regular run.jet entry".to_string(),
                         None,
-                    )])?;
+                    )]
+                })?;
+                let checked_entry = resolver
+                    .checked_file(std::path::Path::new(entry_name))
+                    .map_err(|error| vec![error.diagnostic()])?;
+                resolver
+                    .revalidate_file(&checked_entry)
+                    .map_err(|error| vec![error.diagnostic()])?;
                 resolver
                     .revalidate_source(&source)
                     .map_err(|error| vec![error.diagnostic()])?;
-                source.checked.path == entry_identity
+                source.checked.path == checked_entry.path
             }
             Ok(Some(_)) | Ok(None) => false,
             Err(error) => return Err(vec![error.workspace_diagnostic()]),
@@ -2353,6 +2382,9 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
                 None,
             )]
         })?;
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
         if !manifest.name.is_empty() {
             return Ok(manifest.name);
         }
@@ -2391,6 +2423,9 @@ fn package_build_entry_source(
     if normalize_project_path(project_root, &entry_path)
         == normalize_project_path(project_root, &package_path)
     {
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
         return Ok(None);
     }
     let source = checked
@@ -2400,8 +2435,12 @@ fn package_build_entry_source(
     resolver
         .revalidate_file(&checked.file)
         .map_err(|error| vec![error.diagnostic()])?;
-    Ok(crate::Package::build_entry_source(&source)
-        .map(|source| (package_path, source)))
+    let result = crate::Package::build_entry_source(&source)
+        .map(|source| (package_path, source));
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(result)
 }
 
 fn package_manifest_build_overlay(
@@ -2448,8 +2487,12 @@ fn package_manifest_build_overlay(
     resolver
         .revalidate_file(&checked.file)
         .map_err(|error| vec![error.diagnostic()])?;
-    Ok(crate::Package::build_entry_source(&source)
-        .map(|source| (checked.file.path, source)))
+    let result = crate::Package::build_entry_source(&source)
+        .map(|source| (checked.file.path.clone(), source));
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(result)
 }
 
 fn package_manifest_has_build_entry(
@@ -2483,7 +2526,11 @@ fn package_manifest_has_build_entry(
     resolver
         .revalidate_file(&checked.file)
         .map_err(|error| vec![error.diagnostic()])?;
-    Ok(crate::Package::build_entry_source(&source).is_some())
+    let result = crate::Package::build_entry_source(&source).is_some();
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(result)
 }
 
 fn validate_build_authority(

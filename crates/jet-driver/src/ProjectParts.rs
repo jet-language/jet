@@ -4,6 +4,7 @@
 use crate::AST::{ImportKind, Item};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::{Lexer, Parser, Syntax};
+use jet_pkg_model::Authority::AuthorityResolver;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -120,8 +121,20 @@ pub fn scan_with_diagnostics(
     root: &Path,
     overlays: &[(PathBuf, String)],
 ) -> (ProjectPartsReport, Vec<ProjectPartScanFailure>) {
-    let mut files = Vec::new();
-    collect_jet_files(root, &mut files);
+    let resolver = AuthorityResolver::open(root).ok();
+    let checked_files = resolver
+        .as_ref()
+        .and_then(|resolver| resolver.discover_source_files().ok())
+        .unwrap_or_default();
+    let mut files = checked_files
+        .iter()
+        .filter(|file| {
+            !file.relative.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+                name == Syntax::PACKAGE_FILE || name == Syntax::PAYLOAD_FILE
+            })
+        })
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
     files.extend(
         overlays
             .iter()
@@ -142,23 +155,24 @@ pub fn scan_with_diagnostics(
         let source = if let Some((_, source)) = overlays.iter().rev().find(|(p, _)| p == &path) {
             source.clone()
         } else {
-            match std::fs::read_to_string(&path) {
+            let Some(file) = checked_files.iter().find(|file| file.path == path) else {
+                continue;
+            };
+            if let Some(resolver) = resolver.as_ref() {
+                if resolver.revalidate_file(file).is_err() {
+                    continue;
+                }
+            }
+            match file.text() {
                 Ok(source) => source,
-                Err(_) => {
+                Err(error) => {
                     failures.push(ProjectPartScanFailure {
                         module_names: path
                             .file_stem()
                             .and_then(|stem| stem.to_str())
                             .map(|stem| vec![stem.to_string()])
                             .unwrap_or_default(),
-                        problem: Diagnostic::error(
-                            "E0603",
-                            format!("can't read the file `{}`", path.display()),
-                            "an explicit project import needs a readable Jet source file"
-                                .to_string(),
-                            "restore read access to the file, or remove the import".to_string(),
-                            None,
-                        ),
+                        problem: error.diagnostic(),
                         path,
                     });
                     continue;
@@ -185,6 +199,14 @@ pub fn scan_with_diagnostics(
                 continue;
             }
         };
+        if let Some(file) = checked_files.iter().find(|file| file.path == path) {
+            if resolver
+                .as_ref()
+                .is_some_and(|resolver| resolver.revalidate_file(file).is_err())
+            {
+                continue;
+            }
+        }
         for import in &program.imports {
             let ImportKind::Module(name, _) = &import.kind else {
                 continue;
@@ -232,6 +254,11 @@ pub fn scan_with_diagnostics(
             });
         }
     }
+    if let Some(resolver) = resolver {
+        if resolver.revalidate_root().is_err() {
+            return (ProjectPartsReport::default(), Vec::new());
+        }
+    }
     (report, failures)
 }
 
@@ -243,34 +270,6 @@ fn declared_module_names(tokens: &[Lexer::Token]) -> Vec<String> {
             _ => None,
         })
         .collect()
-}
-
-fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || matches!(name.as_ref(), "target" | "build" | "node_modules") {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            collect_jet_files(&path, out);
-        } else if file_type.is_file()
-            && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
-            && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PACKAGE_FILE)
-            && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PAYLOAD_FILE)
-        {
-            out.push(path);
-        }
-    }
 }
 
 #[cfg(test)]
