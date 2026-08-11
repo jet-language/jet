@@ -1,9 +1,11 @@
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, AbiParam, Endianness, InstBuilder, MemFlags, Signature, Value};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::Codegen::TIR::{
-    self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda, TLambdaBody, TStmt,
+    self, JitProgram, TExpr, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda,
+    TLambdaBody, TStmt,
 };
 use jet_foundation::AST::Type;
 use std::collections::{HashMap, HashSet};
@@ -62,6 +64,166 @@ fn pack_spawn_return(
         Some(ty) if ty == types::I64 => Ok(val),
         None => Ok(val),
         other => Err(format!("jit spawn return unsupported: {ret_ty:?} ({other:?})")),
+    }
+}
+
+/// Build the one ABI thunk used by the shared OptionLift2 Prelude operation.
+/// The thunk is deliberately policy-free: it turns the Prelude's two packed
+/// payload words back into the callable's real Cranelift argument types, calls
+/// the original function value, and returns packed result bits.
+pub(crate) fn lower_option_lift2_adapter(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    fn_ty: &Type,
+    sequence: &mut u64,
+) -> Result<FuncId, String> {
+    let original_sig = fn_value_signature(module, fn_ty, meta)?;
+    let name = jet_foundation::Syntax::generated_name(&format!(
+        "jit_option_lift2_adapter_{}",
+        *sequence
+    ));
+    *sequence = sequence.saturating_add(1);
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    sig.params.extend([
+        AbiParam::new(types::I64),
+        AbiParam::new(types::I64),
+        AbiParam::new(types::I64),
+    ]);
+    sig.returns.push(AbiParam::new(types::I64));
+    let id = module
+        .declare_function(&name, Linkage::Local, &sig)
+        .map_err(|error| error.to_string())?;
+    let mut ctx = module.make_context();
+    ctx.func.signature = sig;
+    let mut fbcx = FunctionBuilderContext::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let values = b.block_params(entry).to_vec();
+        let params = fn_ty_params(fn_ty);
+        if params.len() != 2 {
+            return Err("jit OptionLift2 callable arity unsupported".to_string());
+        }
+        let callable = values[0];
+        let raw_arg = |b: &mut FunctionBuilder<'_, '_>, bits: Value, ty: &Type| {
+            match meta
+                .clif_ty(ty)
+                .ok_or_else(|| format!("jit OptionLift2 callable parameter unsupported: {ty:?}"))?
+            {
+                clif if clif == types::F64 => Ok(b.ins().bitcast(
+                    types::F64,
+                    MemFlags::new().with_endianness(Endianness::Little),
+                    bits,
+                )),
+                clif if clif == types::I8 => Ok(b.ins().ireduce(types::I8, bits)),
+                clif if clif == types::I32 => Ok(b.ins().ireduce(types::I32, bits)),
+                clif if clif == types::I64 => Ok(bits),
+                clif => Err(format!(
+                    "jit OptionLift2 callable parameter unsupported: {ty:?} ({clif:?})"
+                )),
+            }
+        };
+        let left = raw_arg(&mut b, values[1], &params[0])?;
+        let right = raw_arg(&mut b, values[2], &params[1])?;
+        let fn_ptr_ref = module.declare_func_in_func(host.callable_fn, b.func);
+        let fn_ptr_call = b.ins().call(fn_ptr_ref, &[callable]);
+        let fn_ptr = b.inst_results(fn_ptr_call)[0];
+        let env_ref = module.declare_func_in_func(host.callable_env, b.func);
+        let env_call = b.ins().call(env_ref, &[callable]);
+        let env = b.inst_results(env_call)[0];
+        let has_env_ref = module.declare_func_in_func(host.callable_has_env, b.func);
+        let has_env_call = b.ins().call(has_env_ref, &[callable]);
+        let has_env = b.inst_results(has_env_call)[0];
+        let zero_i8 = b.ins().iconst(types::I8, 0);
+        let is_captured = b.ins().icmp(IntCC::NotEqual, has_env, zero_i8);
+        let plain = b.create_block();
+        let captured = b.create_block();
+        let merge = b.create_block();
+        b.append_block_param(merge, types::I64);
+        b.ins().brif(is_captured, captured, &[], plain, &[]);
+
+        let pack_result = |b: &mut FunctionBuilder<'_, '_>, value: Value| {
+            match fn_ty_return(fn_ty) {
+                Some(ret) => match meta.clif_ty(ret) {
+                    Some(clif) if clif == types::F64 => Ok(b.ins().bitcast(
+                        types::I64,
+                        MemFlags::new().with_endianness(Endianness::Little),
+                        value,
+                    )),
+                    Some(clif) if clif == types::I8 || clif == types::I32 => {
+                        Ok(b.ins().uextend(types::I64, value))
+                    }
+                    Some(clif) if clif == types::I64 => Ok(value),
+                    Some(clif) => Err(format!(
+                        "jit OptionLift2 callable result unsupported: {ret:?} ({clif:?})"
+                    )),
+                    None => Ok(b.ins().iconst(types::I64, 0)),
+                },
+                None => Ok(b.ins().iconst(types::I64, 0)),
+            }
+        };
+
+        b.switch_to_block(plain);
+        b.seal_block(plain);
+        let plain_sig = b.import_signature(original_sig.clone());
+        let call = b.ins().call_indirect(plain_sig, fn_ptr, &[left, right]);
+        let plain_result = if original_sig.returns.is_empty() {
+            b.ins().iconst(types::I64, 0)
+        } else {
+            let result = b.inst_results(call)[0];
+            pack_result(&mut b, result)?
+        };
+        b.ins().jump(merge, &[plain_result]);
+
+        b.switch_to_block(captured);
+        b.seal_block(captured);
+        let mut captured_sig = original_sig.clone();
+        captured_sig.params.insert(0, AbiParam::new(types::I64));
+        let captured_sig = b.import_signature(captured_sig);
+        let call = b
+            .ins()
+            .call_indirect(captured_sig, fn_ptr, &[env, left, right]);
+        let captured_result = if original_sig.returns.is_empty() {
+            b.ins().iconst(types::I64, 0)
+        } else {
+            let result = b.inst_results(call)[0];
+            pack_result(&mut b, result)?
+        };
+        b.ins().jump(merge, &[captured_result]);
+
+        b.switch_to_block(merge);
+        b.seal_block(merge);
+        let result = b.block_params(merge)[0];
+        b.ins().return_(&[result]);
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{name}: verifier: {error:?}"))?;
+    module
+        .define_function(id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    // This thunk is declared reentrantly while its enclosing function is
+    // lowered, so it must never be replayed by the warm-function capture.
+    super::tier_cache::abort_capture();
+    module.clear_context(&mut ctx);
+    Ok(id)
+}
+
+fn fn_ty_params(ty: &Type) -> &[Type] {
+    match ty {
+        Type::Fn { params, .. } => params,
+        _ => &[],
+    }
+}
+
+fn fn_ty_return(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Fn { ret, .. } => ret.as_deref(),
+        _ => None,
     }
 }
 
@@ -264,8 +426,9 @@ pub(crate) fn lower_callable_lambda(
     runtime: &mut JitRuntime,
 ) -> Result<FuncId, String> {
     let capturing = !lam.captures.is_empty();
-    // Capturing callables are supported when every capture is an i64 handle/scalar
-    // (HTTPHandler middleware closures). Prep is AOT-only Rust clone text.
+    // Capturing callables are supported when every capture is a resident scalar
+    // or opaque handle. `prep` is AOT-only Rust clone text; the target-neutral
+    // capture list below supplies the resident environment.
     if !lam.prep.is_empty() && !capturing {
         return Err("jit callable captures unsupported".to_string());
     }
@@ -366,8 +529,18 @@ pub(crate) fn lower_callable_lambda(
                     .module
                     .declare_func_in_func(lctx.host.coll.list_get, lctx.b.func);
                 let call = lctx.b.ins().call(host, &[env, idx_v, line]);
-                let val = lctx.b.inst_results(call)[0];
+                let raw = lctx.b.inst_results(call)[0];
                 let clif = meta.clif_ty(ty).unwrap_or(types::I64);
+                let val = match clif {
+                    t if t == types::F64 => lctx.b.ins().bitcast(
+                        types::F64,
+                        MemFlags::new().with_endianness(Endianness::Little),
+                        raw,
+                    ),
+                    t if t == types::I8 => lctx.b.ins().ireduce(types::I8, raw),
+                    t if t == types::I32 => lctx.b.ins().ireduce(types::I32, raw),
+                    _ => raw,
+                };
                 let var = lctx.fresh_var(clif);
                 lctx.b.def_var(var, val);
                 lctx.vars.insert(place.clone(), var);
@@ -429,6 +602,136 @@ pub(crate) fn lower_callable_lambda(
     // the existing Cell-handle case just below `publish_capture` in
     // `tier_cache.rs`: opt this whole compile out of warm-run caching rather
     // than risk replaying a subtly wrong closure.
+    super::tier_cache::abort_capture();
+    module.clear_context(&mut ctx);
+    Ok(id)
+}
+
+/// Compile an OptionLift2 function-value factory without cloning its TIR
+/// expression. The factory body is borrowed only during this compilation
+/// pass, while the generated function owns the resulting machine code.
+pub(crate) fn lower_option_lift2_factory(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    body: &TExpr,
+    captures: &[(String, String, Type)],
+    name: String,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+) -> Result<FuncId, String> {
+    let fn_ty = Type::Fn {
+        params: Vec::new(),
+        ret: Some(Box::new(body.ty.clone())),
+        effect_bound: None,
+        param_contract: None,
+        return_view_provenance: None,
+    };
+    // The factory always receives one opaque environment word. Empty-capture
+    // calls pass zero, so the host has one ABI entry point and never has to
+    // choose a second OptionLift2 policy path.
+    let mut sig = fn_value_signature(module, &fn_ty, meta)?;
+    sig.params.insert(0, AbiParam::new(types::I64));
+    let id = module
+        .declare_function(&name, Linkage::Local, &sig)
+        .map_err(|error| error.to_string())?;
+    let mut ctx = module.make_context();
+    ctx.func.signature = sig;
+    let mut fbcx = FunctionBuilderContext::new();
+    let mut vars = HashMap::new();
+    let mut var_tys = HashMap::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let values = b.block_params(entry).to_vec();
+        let mut lctx = LowerCtx {
+            b: &mut b,
+            module,
+            host,
+            runtime,
+            meta,
+            vars: &mut vars,
+            var_tys: &mut var_tys,
+            raw_slots: HashMap::new(),
+            real_address_values: HashSet::new(),
+            func_ids,
+            spawn_site,
+            spawn_func_ids,
+            spawn_lambdas,
+            loop_stack: Vec::new(),
+            dead: false,
+            next_var: 0,
+            method_struct: None,
+            ret_clif: meta.clif_ty(&body.ty),
+            ret_range: false,
+            ret_cell_layout: 0,
+            cell_frame: false,
+            shield_depth: 0,
+            deadline_depth: 0,
+            switch_subject: None,
+            yield_sender: None,
+            stream_consumers: Vec::new(),
+            in_shared_transaction: false,
+            shared_transaction_depth: 0,
+            unsafe_depth: 0,
+            scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
+            deferred_shared_guards: Vec::new(),
+            task_groups: Vec::new(),
+            in_lexical_exit: false,
+            txn_stack: Vec::new(),
+        };
+        if !captures.is_empty() {
+            let env = values[0];
+            let line = lctx.b.ins().iconst(types::I32, 0);
+            for (index, (_, place, ty)) in captures.iter().enumerate() {
+                let index = lctx.b.ins().iconst(types::I64, index as i64);
+                let host = lctx
+                    .module
+                    .declare_func_in_func(lctx.host.coll.list_get, lctx.b.func);
+                let call = lctx.b.ins().call(host, &[env, index, line]);
+                let raw = lctx.b.inst_results(call)[0];
+                let clif = meta
+                    .clif_ty(ty)
+                    .ok_or_else(|| format!("jit OptionLift2 factory capture unsupported: {ty:?}"))?;
+                let value = match clif {
+                    t if t == types::F64 => lctx.b.ins().bitcast(
+                        types::F64,
+                        MemFlags::new().with_endianness(Endianness::Little),
+                        raw,
+                    ),
+                    t if t == types::I8 => lctx.b.ins().ireduce(types::I8, raw),
+                    t if t == types::I32 => lctx.b.ins().ireduce(types::I32, raw),
+                    _ => raw,
+                };
+                let var = lctx.fresh_var(clif);
+                lctx.b.def_var(var, value);
+                lctx.vars.insert(place.clone(), var);
+                lctx.var_tys.insert(place.clone(), ty.clone());
+            }
+        }
+        let value = lctx.lower_expr(body)?;
+        let normalize = lctx
+            .module
+            .declare_func_in_func(lctx.host.callable_normalize, lctx.b.func);
+        let call = lctx.b.ins().call(normalize, &[value]);
+        let value = lctx.b.inst_results(call)[0];
+        lctx.emit_lexical_exit(Some(value), false, lctx.shield_depth)?;
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{name}: verifier: {error:?}"))?;
+    module
+        .define_function(id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    // The factory is a reentrant ABI thunk even when its environment is empty.
+    // Keep the warm cache from replaying a function-id sequence that omitted it.
     super::tier_cache::abort_capture();
     module.clear_context(&mut ctx);
     Ok(id)

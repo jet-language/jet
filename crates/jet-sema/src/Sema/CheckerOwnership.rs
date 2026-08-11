@@ -569,6 +569,7 @@ impl<'a> Checker<'a> {
         projections: &[crate::AST::ViewSourceProjection],
         span: Span,
     ) -> Vec<ViewPlace> {
+        let actual = actual.without_parens();
         let leading_fields: Vec<String> = projections
             .iter()
             .map_while(|projection| match projection {
@@ -2428,7 +2429,8 @@ impl<'a> Checker<'a> {
         &mut self,
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
-        if let Expr::Copy(inner, _) | Expr::Paren(inner, _) | Expr::Try(inner, _, _) = init {
+        let init = init.without_parens();
+        if let Expr::Copy(inner, _) | Expr::Try(inner, _, _) = init {
             return self.view_call_sources(inner);
         }
         if let Expr::Ident(name, _) = init {
@@ -2712,7 +2714,7 @@ impl<'a> Checker<'a> {
             ..
         } = init
         {
-            if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+            if let Expr::Ident(enum_name, _) = receiver.as_ref().without_parens() {
                 if let Some(payload) = self
                     .resolve_enum_variants_cloned(enum_name)
                     .and_then(|variants| variants.get(method).cloned())
@@ -2754,7 +2756,7 @@ impl<'a> Checker<'a> {
         } = init
         {
             if method == Syntax::MEM_PIN
-                && matches!(receiver.as_ref(), Expr::Ident(alias, _)
+                && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
                     if self.core_imports.get(alias).is_some_and(|m| m == Syntax::CORE_MEM_MODULE))
             {
                 return args
@@ -2881,10 +2883,11 @@ impl<'a> Checker<'a> {
         if method != Syntax::METHOD_VIEW {
             return Vec::new();
         }
+        let receiver = receiver.as_ref().without_parens();
         let Some(mut place) = self.place_from_expr(receiver) else {
             return Vec::new();
         };
-        let kind = match receiver.as_ref() {
+        let kind = match receiver {
             Expr::Ident(name, _) => self
                 .view_kind(name)
                 .unwrap_or_else(|| self.view_kind_for_place(&place)),

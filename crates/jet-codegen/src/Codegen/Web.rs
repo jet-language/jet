@@ -40,6 +40,13 @@ pub struct WebArtifacts {
 }
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
+const JS_EXECUTION_PRELUDE: &str = concat!(
+    include_str!("../Prelude/Core/Option.js"),
+    "\n",
+    include_str!("../Prelude/Core/FixedList.js"),
+    "\n",
+    include_str!("../Prelude/Core/FloatProvenance.js"),
+);
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
 
 /// D-WEBTIR1=A: data-only fact reported by codegen's TIR coverage gate.
@@ -657,6 +664,64 @@ fn web_wasm_expr_supported(
             web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Absent => true,
+        TIR::TExprKind::DistinctConvert {
+            arg, op, fallible, ..
+        } if web_distinct_convert_supported(op, *fallible) => {
+            web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::OptionLift2 { f, a, b } => {
+            web_wasm_expr_supported(f, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(a, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(b, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::FnValue { kind } => match kind {
+            TIR::TFnValueKind::NamedFn { name: Some(name), .. } => {
+                wasm_callee_bucket(bundle, &local_web_key(file_prefix, name))
+                    == Some(WebBucket::Wasm)
+            }
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: Some(lambda),
+                ..
+            } => match &lambda.executable {
+                TIR::TLambdaBody::Expr(body) => {
+                    web_wasm_expr_supported(body, bundle, file_prefix, reconstructions)
+                }
+                TIR::TLambdaBody::Block(body) => {
+                    web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+                }
+            },
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: None,
+                ..
+            } => false,
+            TIR::TFnValueKind::Call { callee, args } => {
+                web_wasm_expr_supported(callee, bundle, file_prefix, reconstructions)
+                    && args.iter().all(|arg| {
+                        web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
+                    })
+            }
+        },
+        TIR::TExprKind::Lambda(lam) => match &lam.executable {
+            TIR::TLambdaBody::Expr(body) => {
+                web_wasm_expr_supported(body, bundle, file_prefix, reconstructions)
+            }
+            TIR::TLambdaBody::Block(body) => {
+                web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+            }
+        },
+        TIR::TExprKind::NumericMethod {
+            recv,
+            op: TIR::TNumericOp::Origin(_) | TIR::TNumericOp::CastAs { .. },
+        } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::HostCall(host) => match host.as_ref() {
+            TIR::THostCall::FixedListIndex { base, index, .. } => {
+                web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
+                    && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
+            }
+            _ => false,
+        },
         TIR::TExprKind::EnumLit { payload, .. } => match payload {
             TIR::TEnumPayload::Unit => true,
             TIR::TEnumPayload::Positional(args) => args.iter().all(|arg| {
@@ -935,6 +1000,19 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
     }
 }
 
+/// Distinct conversion lowering is already resolved by sema/TIR. Web only
+/// marshals that resolved operation; range checks remain part of the same
+/// conversion shape used by native emission.
+fn web_distinct_convert_supported(op: &TIR::TNumericOp, fallible: bool) -> bool {
+    match op {
+        TIR::TNumericOp::CastAs { .. } => true,
+        TIR::TNumericOp::TryFrom { .. }
+        | TIR::TNumericOp::FloatToInt { .. }
+        | TIR::TNumericOp::FloatNarrow { .. } => fallible,
+        _ => false,
+    }
+}
+
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
@@ -945,6 +1023,9 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
         E::Borrow { place, .. } => web_expr_supported(place),
         E::DistinctCtor { arg, .. } => web_expr_supported(arg),
+        E::DistinctConvert {
+            arg, op, fallible, ..
+        } if web_distinct_convert_supported(op, *fallible) => web_expr_supported(arg),
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::EnumLit { payload, .. } => match payload {
@@ -961,8 +1042,34 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             .iter()
             .all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
         E::Index { base, index, .. } => web_expr_supported(base) && web_expr_supported(index),
+        E::HostCall(host) => match host.as_ref() {
+            TIR::THostCall::FixedListIndex { base, index, .. } => {
+                web_expr_supported(base) && web_expr_supported(index)
+            }
+            _ => false,
+        },
         E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
         E::Absent => true,
+        E::OptionLift2 { f, a, b } => {
+            web_expr_supported(f) && web_expr_supported(a) && web_expr_supported(b)
+        }
+        E::FnValue { kind } => match kind {
+            TIR::TFnValueKind::NamedFn { name: Some(_), .. } => true,
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: Some(lambda),
+                ..
+            } => web_lambda_supported(lambda),
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: None,
+                ..
+            } => false,
+            TIR::TFnValueKind::Call { callee, args } => {
+                web_expr_supported(callee)
+                    && args.iter().all(|arg| web_expr_supported(&arg.value))
+            }
+        },
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => {
@@ -979,7 +1086,12 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 && web_expr_supported(recv)
                 && args.iter().all(web_expr_supported)
         }
-        E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } | TIR::TNumericOp::FloatToInt { .. } } => web_expr_supported(recv),
+        E::NumericMethod {
+            recv,
+            op: TIR::TNumericOp::Origin(_)
+                | TIR::TNumericOp::CastAs { .. }
+                | TIR::TNumericOp::FloatToInt { .. },
+        } => web_expr_supported(recv),
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
         E::IfExpr {
             cond,
@@ -1480,6 +1592,17 @@ fn find_named_web_type(items: &[Item], name: &str) -> bool {
     })
 }
 
+fn find_distinct_web_base(items: &[Item], name: &str) -> Option<Type> {
+    items.iter().find_map(|item| match item {
+        Item::Distinct(def) if def.name == name => Some(def.base.clone()),
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .and_then(|body| find_distinct_web_base(body, name)),
+        _ => None,
+    })
+}
+
 fn items_have_explicit_unit_display(items: &[Item], type_name: &str) -> bool {
     let unit = items.iter().any(|item| match item {
         Item::UnitFamily(family) => family
@@ -1554,6 +1677,18 @@ fn bundle_has_named_web_type(bundle: &ProgramBundle, name: &str) -> bool {
         .modules
         .iter()
         .any(|module| find_named_web_type(&module.items, name))
+}
+
+fn bundle_distinct_web_base(bundle: &ProgramBundle, name: &str) -> Option<Type> {
+    if let Some((alias, leaf)) = name.split_once('.') {
+        return bundle_module_index_for_alias(bundle, alias)
+            .and_then(|index| bundle.modules.get(index))
+            .and_then(|module| find_distinct_web_base(&module.items, leaf));
+    }
+    bundle
+        .modules
+        .iter()
+        .find_map(|module| find_distinct_web_base(&module.items, name))
 }
 
 fn collect_wasm_unions(
@@ -2278,6 +2413,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
 
 fn wasm_ty(ty: &Type) -> Option<&'static str> {
     match ty {
+        Type::Tagged { inner, .. } => wasm_ty(inner),
         Type::Int | Type::IntN { signed: true, .. } => Some("i64"),
         Type::IntN { signed: false, .. } => Some("u64"),
         Type::Float | Type::Float32 => Some("f64"),
@@ -2296,6 +2432,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
 
 fn wasm_storage_ty(ty: &Type) -> Option<String> {
     Some(match ty {
+        Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
         Type::Int | Type::IntN { signed: true, .. } => "i64".to_string(),
         Type::IntN { signed: false, .. } => "u64".to_string(),
         Type::Float | Type::Float32 => "f64".to_string(),
@@ -2327,6 +2464,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
 
 fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
     Some(match ty {
+        Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
         }
@@ -2336,11 +2474,28 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
             wasm_internal_ty(ok, bundle)?,
             wasm_internal_ty(err, bundle)?
         ),
+        Type::Fn { params, ret, .. } => {
+            let params = params
+                .iter()
+                .map(|param| wasm_internal_ty(param, bundle))
+                .collect::<Option<Vec<_>>>()?;
+            let ret = ret
+                .as_deref()
+                .map(|ret| wasm_internal_ty(ret, bundle))
+                .transpose()?
+                .map(|ret| format!(" -> {ret}"))
+                .unwrap_or_default();
+            format!("fn({}){ret}", params.join(", "))
+        }
         Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
         Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
             user_type_rust(name.rsplit('.').next().unwrap_or(name))
         }
+        Type::Named(name) => wasm_internal_ty(
+            &bundle_distinct_web_base(bundle, name)?,
+            bundle,
+        )?,
         _ => wasm_ty(ty)?.to_string(),
     })
 }
@@ -2389,6 +2544,7 @@ fn wasm_param_rust_ty(
         (AccessConvention::Move, ty) if is_map_string_int(ty) => {
             Some("std::collections::BTreeMap<String, i64>".to_string())
         }
+        (AccessConvention::Read, Type::Fn { .. }) => Some(owned),
         (AccessConvention::Read, t) if t.is_scalar() => Some(owned),
         (AccessConvention::Read, _) => Some(format!("&{owned}")),
         (AccessConvention::Write, _) => Some(format!("&mut {owned}")),
@@ -2420,6 +2576,7 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
 
 fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
     match ty {
+        Type::Tagged { inner, .. } => wasm_export_ty(inner),
         // Packed (ptr,len) u64 on the C ABI; internal jet_wasm_* still uses String / Vec.
         Type::String => Some("u64"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("u64"),
@@ -3117,6 +3274,73 @@ fn emit_wasm_if_value(
     Ok(())
 }
 
+fn wasm_emit_distinct_convert(
+    name: &str,
+    arg: &TIR::TExpr,
+    op: &TIR::TNumericOp,
+    range: Option<(i64, i64)>,
+    fallible: bool,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
+    let input = wasm_emit_expr(arg, funcs, file_prefix, reconstructions)?;
+    let error = |spelling: &str| {
+        format!(
+            "{:?}.to_string()",
+            format!("value doesn't fit in {spelling}")
+        )
+    };
+    match op {
+        TIR::TNumericOp::CastAs { dst_rust } => {
+            let converted = format!("(({input}) as {dst_rust})");
+            if !fallible {
+                return Ok(converted);
+            }
+            let Some((lo, hi)) = range else {
+                return Ok(format!("Ok({converted})"));
+            };
+            Ok(format!(
+                "{{ let __jet_value = {converted}; if __jet_value >= {lo} && __jet_value <= {hi} {{ Ok(__jet_value) }} else {{ Err({}) }} }}",
+                error(name)
+            ))
+        }
+        TIR::TNumericOp::TryFrom {
+            dst_rust,
+            dst_spelling,
+            ..
+        } if fallible => {
+            let converted = format!(
+                "<{dst_rust}>::try_from(({input}) as i128).map_err(|_| {})",
+                error(dst_spelling)
+            );
+            if let Some((lo, hi)) = range {
+                Ok(format!(
+                    "({converted}).and_then(|__jet_value| if __jet_value >= {lo} && __jet_value <= {hi} {{ Ok(__jet_value) }} else {{ Err({}) }})",
+                    error(name)
+                ))
+            } else {
+                Ok(converted)
+            }
+        }
+        TIR::TNumericOp::FloatToInt {
+            dst_rust,
+            dst_spelling,
+            lower,
+            upper_exclusive,
+            ..
+        } if fallible => Ok(format!(
+            "{{ let __jet_value = ({input}); if __jet_value.is_finite() && __jet_value >= ({lower} as _) && __jet_value < ({upper_exclusive} as _) {{ Ok(__jet_value.trunc() as {dst_rust}) }} else {{ Err({}) }} }}",
+            error(dst_spelling)
+        )),
+        TIR::TNumericOp::FloatNarrow { dst_spelling } if fallible => Ok(format!(
+            "{{ let __jet_value = ({input}); if __jet_value.is_finite() && __jet_value >= -(f32::MAX as f64) && __jet_value <= f32::MAX as f64 {{ Ok(__jet_value as f32) }} else {{ Err({}) }} }}",
+            error(dst_spelling)
+        )),
+        _ => Err(()),
+    }
+}
+
 fn wasm_emit_expr(
     expr: &TIR::TExpr,
     funcs: &[FuncWeb],
@@ -3290,6 +3514,21 @@ fn wasm_emit_expr(
                 format!("vec![{elements}]")
             }
         }
+        TIR::TExprKind::HostCall(host) => match host.as_ref() {
+            TIR::THostCall::FixedListIndex {
+                base,
+                index,
+                line,
+            } => {
+                let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
+                let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
+                let file = file_prefix.unwrap_or_default();
+                format!(
+                    "{{ let __jet_fixed = ({base}); jet_fixed_list_index(__jet_fixed.len(), ({index}).0, |__jet_i| __jet_fixed[__jet_i].clone()).unwrap_or_else(|__jet_error| jet_panic({file:?}, {line}, &__jet_error.message())) }}"
+                )
+            }
+            _ => return Err(()),
+        },
         TIR::TExprKind::Present(inner) => format!(
             "Ok({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
@@ -3303,6 +3542,66 @@ fn wasm_emit_expr(
             "Err({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
+        TIR::TExprKind::DistinctConvert {
+            name,
+            arg,
+            op,
+            range,
+            fallible,
+        } => wasm_emit_distinct_convert(
+            name,
+            arg,
+            op,
+            *range,
+            *fallible,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?,
+        TIR::TExprKind::OptionLift2 { f, a, b } => format!(
+            "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || ({}))",
+            wasm_emit_expr(a, funcs, file_prefix, reconstructions)?,
+            wasm_emit_expr(b, funcs, file_prefix, reconstructions)?,
+            wasm_emit_expr(f, funcs, file_prefix, reconstructions)?
+        ),
+        TIR::TExprKind::FnValue { kind } => match kind {
+            TIR::TFnValueKind::NamedFn {
+                name: Some(name), ..
+            } => {
+                let key = local_web_key(file_prefix, name);
+                let mut callees = funcs
+                    .iter()
+                    .filter(|func| func.key == key && func.bucket == WebBucket::Wasm);
+                callees.next().ok_or(())?;
+                if callees.next().is_some() {
+                    return Err(());
+                }
+                format!("jet_wasm_{key}")
+            }
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: Some(lambda),
+                ..
+            } => wasm_tir_lambda(lambda, funcs, file_prefix, reconstructions)?,
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: None,
+                ..
+            } => return Err(()),
+            TIR::TFnValueKind::Call { callee, args } => format!(
+                "({})({})",
+                wasm_emit_expr(callee, funcs, file_prefix, reconstructions)?,
+                args.iter()
+                    .map(|arg| {
+                        wasm_emit_call_arg(arg, funcs, file_prefix, reconstructions)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ")
+            ),
+        },
+        TIR::TExprKind::Lambda(lam) => {
+            wasm_tir_lambda(lam, funcs, file_prefix, reconstructions)?
+        }
         TIR::TExprKind::EnumLit {
             enum_type,
             variant,
@@ -3397,6 +3696,22 @@ fn wasm_emit_expr(
             if callees.next().is_some() { return Err(()); }
             format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
+        TIR::TExprKind::NumericMethod {
+            recv,
+            op: TIR::TNumericOp::Origin(origin),
+        } => format!(
+            "{{ let _ = ({}); jet_float_origin({:?}) }}",
+            wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
+            origin.as_deref()
+        ),
+        TIR::TExprKind::NumericMethod {
+            recv,
+            op: TIR::TNumericOp::CastAs { dst_rust },
+        } => format!(
+            "(({}) as {})",
+            wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
+            dst_rust
+        ),
         TIR::TExprKind::IfExpr {
             cond,
             then_body,
@@ -3423,6 +3738,53 @@ fn wasm_emit_expr(
     })
 }
 
+fn wasm_tir_lambda(
+    lam: &TIR::TLambda,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
+    let params = lam
+        .source_params
+        .iter()
+        .map(|param| mangle(param))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let move_kw = if lam.is_move { "move " } else { "" };
+    let closure = match &lam.executable {
+        TIR::TLambdaBody::Expr(body) => Ok(format!(
+            "{move_kw}|{params}| ({})",
+            wasm_emit_expr(body, funcs, file_prefix, reconstructions)?
+        )),
+        TIR::TLambdaBody::Block(body) => {
+            let mut rendered = String::new();
+            emit_wasm_body(
+                body,
+                &mut rendered,
+                1,
+                funcs,
+                file_prefix,
+                reconstructions,
+            )?;
+            Ok(format!("{move_kw}|{params}| {{\n{rendered}}}"))
+        }
+    }?;
+    let wrapped = if lam.arc {
+        format!("std::sync::Arc::new({closure})")
+    } else if lam.rc {
+        format!("std::rc::Rc::new({closure})")
+    } else if lam.boxed {
+        format!("Box::new({closure})")
+    } else {
+        closure
+    };
+    if lam.prep.is_empty() {
+        Ok(wrapped)
+    } else {
+        Ok(format!("{{ {} {} }}", lam.prep, wrapped))
+    }
+}
+
 fn web_emit_error(f: &FuncWeb) -> WebTirUnsupported {
     WebTirUnsupported { func_name: f.name.clone(), span: f.span }
 }
@@ -3438,6 +3800,7 @@ fn emit_js_app(
          import * as jetDom from \"./jet_dom_runtime.js\";\n\n",
     );
     out.push_str(JS_POWER_PRELUDE);
+    out.push_str(JS_EXECUTION_PRELUDE);
     let mut handlers = Vec::new();
     let exports: Vec<&FuncWeb> = funcs
         .iter()
@@ -4492,6 +4855,104 @@ fn tir_js_err_field(
     }
 }
 
+fn js_host_int_bounds(host_kind: i64) -> Option<(&'static str, &'static str)> {
+    Some(match host_kind {
+        0 => ("-128", "127"),
+        1 => ("-32768", "32767"),
+        2 => ("-2147483648", "2147483647"),
+        3 => ("-9223372036854775808", "9223372036854775807"),
+        4 => ("0", "255"),
+        5 => ("0", "65535"),
+        6 => ("0", "4294967295"),
+        7 => ("0", "9223372036854775807"),
+        _ => return None,
+    })
+}
+
+fn js_option_result(value: &str) -> String {
+    format!("{{ tag: \"Ok\", values: [{value}] }}")
+}
+
+fn js_option_error(message: &str) -> String {
+    format!(
+        "{{ tag: \"Err\", values: [{}] }}",
+        json_quote(message)
+    )
+}
+
+fn tir_js_distinct_convert(
+    name: &str,
+    arg: &TIR::TExpr,
+    op: &TIR::TNumericOp,
+    range: Option<(i64, i64)>,
+    fallible: bool,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
+    let input = tir_js_expr(arg, funcs, file_prefix)?;
+    let integer = |dst_rust: &str| dst_rust.contains('i') || dst_rust.contains('u');
+    match op {
+        TIR::TNumericOp::CastAs { dst_rust } => {
+            let converted = if integer(dst_rust) {
+                format!("BigInt({input})")
+            } else {
+                format!("Number({input})")
+            };
+            if !fallible {
+                return Ok(converted);
+            }
+            let Some((lo, hi)) = range else {
+                return Ok(js_option_result(&converted));
+            };
+            let (lo, hi) = if integer(dst_rust) {
+                (format!("{lo}n"), format!("{hi}n"))
+            } else {
+                (lo.to_string(), hi.to_string())
+            };
+            Ok(format!(
+                "(() => {{ const __jet_value = {converted}; return __jet_value >= {lo} && __jet_value <= {hi} ? {} : {}; }})()",
+                js_option_result("__jet_value"),
+                js_option_error(&format!("value doesn't fit in {name}"))
+            ))
+        }
+        TIR::TNumericOp::TryFrom {
+            host_kind,
+            dst_spelling,
+            ..
+        } if fallible => {
+            let (lo, hi) = range
+                .map(|(lo, hi)| (lo.to_string(), hi.to_string()))
+                .or_else(|| {
+                    js_host_int_bounds(*host_kind)
+                        .map(|(lo, hi)| (lo.to_string(), hi.to_string()))
+                })
+                .ok_or(())?;
+            let value = "BigInt(__jet_input)";
+            Ok(format!(
+                "(() => {{ const __jet_input = {input}; const __jet_value = {value}; return __jet_value >= {lo}n && __jet_value <= {hi}n ? {} : {}; }})()",
+                js_option_result("__jet_value"),
+                js_option_error(&format!("value doesn't fit in {dst_spelling}"))
+            ))
+        }
+        TIR::TNumericOp::FloatToInt {
+            dst_spelling,
+            lower,
+            upper_exclusive,
+            ..
+        } if fallible => Ok(format!(
+            "(() => {{ const __jet_value = Number({input}); return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? {} : {}; }})()",
+            js_option_result("BigInt(Math.trunc(__jet_value))"),
+            js_option_error(&format!("value doesn't fit in {dst_spelling}"))
+        )),
+        TIR::TNumericOp::FloatNarrow { dst_spelling } if fallible => Ok(format!(
+            "(() => {{ const __jet_value = Number({input}); return Number.isFinite(__jet_value) && __jet_value >= -3.4028234663852886e38 && __jet_value <= 3.4028234663852886e38 ? {} : {}; }})()",
+            js_option_result("__jet_value"),
+            js_option_error(&format!("value doesn't fit in {dst_spelling}"))
+        )),
+        _ => Err(()),
+    }
+}
+
 fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
@@ -4509,7 +4970,20 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             Type::FixedList { len, .. } => format!("Array({len})"),
             _ => "void 0".to_string(),
         },
-        E::HostCall(_) => return Err(()),
+        E::HostCall(host) => match host.as_ref() {
+            TIR::THostCall::FixedListIndex {
+                base,
+                index,
+                line,
+            } => format!(
+                "jet_fixed_list_index({}, {}, {}, {})",
+                tir_js_expr(base, funcs, file_prefix)?,
+                tir_js_expr(index, funcs, file_prefix)?,
+                json_quote(file_prefix.unwrap_or_default()),
+                line
+            ),
+            _ => return Err(()),
+        },
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
         // carries the same rules the Prelude helpers do.
         E::Binary {
@@ -4548,6 +5022,21 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
         E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
+        E::DistinctConvert {
+            name,
+            arg,
+            op,
+            range,
+            fallible,
+        } => tir_js_distinct_convert(
+            name,
+            arg,
+            op,
+            *range,
+            *fallible,
+            funcs,
+            file_prefix,
+        )?,
         E::Field { recv, field, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field)),
         E::StructLit { fields, .. }
             if matches!(&expr.ty, Type::Named(name) if name == Syntax::TYPE_ERR) =>
@@ -4599,6 +5088,35 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             "{{ tag: \"Err\", values: [{}] }}",
             tir_js_expr(inner, funcs, file_prefix)?
         ),
+        E::OptionLift2 { f, a, b } => format!(
+            "jet_option_lift2({}, {}, () => ({}))",
+            tir_js_expr(a, funcs, file_prefix)?,
+            tir_js_expr(b, funcs, file_prefix)?,
+            tir_js_expr(f, funcs, file_prefix)?
+        ),
+        E::FnValue { kind } => match kind {
+            TIR::TFnValueKind::NamedFn {
+                name: Some(name), ..
+            } => local_web_key(file_prefix, name),
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: Some(lambda),
+                ..
+            } => tir_js_lambda(lambda, funcs, file_prefix)?,
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: None,
+                ..
+            } => return Err(()),
+            TIR::TFnValueKind::Call { callee, args } => format!(
+                "({})({})",
+                tir_js_expr(callee, funcs, file_prefix)?,
+                args.iter()
+                    .map(|arg| tir_js_expr(&arg.value, funcs, file_prefix))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ")
+            ),
+        },
         E::MapLit(entries) => {
             let abi_int_values = matches!(
                 &expr.ty,
@@ -4696,6 +5214,14 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             }
         }
         E::NumericMethod { recv, op } => match op {
+            TIR::TNumericOp::Origin(origin) => format!(
+                "jet_float_origin({}, {})",
+                tir_js_expr(recv, funcs, file_prefix)?,
+                origin
+                    .as_deref()
+                    .map(json_quote)
+                    .unwrap_or_else(|| "null".to_string())
+            ),
             TIR::TNumericOp::CastAs { dst_rust }
                 if dst_rust.contains("i") || dst_rust.contains("u") =>
             {
@@ -4784,22 +5310,45 @@ fn tir_js_lambda(
             ""
         }
     };
-    match &lam.executable {
+    let closure = match &lam.executable {
         TIR::TLambdaBody::Expr(body) => {
             let expr = tir_js_expr(body, funcs, file_prefix)?;
-            Ok(format!(
+            format!(
                 "{}({params}) => ({expr})",
                 async_kw(&expr),
-            ))
+            )
         }
         TIR::TLambdaBody::Block(body) => {
             let mut rendered = String::new();
             emit_tir_js_body(body, &mut rendered, funcs, file_prefix, 1)?;
-            Ok(format!(
+            format!(
                 "{}({params}) => {{\n{rendered}}}",
                 async_kw(&rendered),
-            ))
+            )
         }
+    };
+    let cloned_captures = lam
+        .captures
+        .iter()
+        .filter(|(source, runtime, _)| source != runtime)
+        .map(|(source, _, _)| web_place(source))
+        .collect::<Vec<_>>();
+    if cloned_captures.is_empty() {
+        Ok(closure)
+    } else {
+        // A lowered clone capture has a generated runtime place, but JS emits
+        // that place back to the source name via `web_place`. Bind the source
+        // name as an IIFE parameter so the closure snapshots the value at
+        // creation time, matching Rust's clone-capture prelude. The factory
+        // still owns this expression, so OptionLift2 never evaluates it on an
+        // absent operand.
+        let args = cloned_captures.join(", ");
+        Ok(format!(
+            "(({}) => ({}))({})",
+            cloned_captures.join(", "),
+            closure,
+            args
+        ))
     }
 }
 
@@ -4926,6 +5475,12 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     // D-FAIL-CARRIER1=A: the very same carrier file the native prelude puts
     // first, so `T?` and `T ? E` mean one thing on the web tier too.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
+    "\n",
+    include_str!("../Prelude/Core/Option.rs"),
+    "\n",
+    include_str!("../Prelude/Core/FixedList.rs"),
+    "\n",
+    include_str!("../Prelude/Core/FloatProvenance.rs"),
     "\n",
     include_str!("../Prelude/Core/Power.rs"),
     "\n",

@@ -825,6 +825,20 @@ fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)
 }
 
 impl Type {
+    /// D-QUAL4=A: remove only user value-fact tags while preserving compiler
+    /// tags that carry nominal identity or access policy.
+    pub fn without_user_tags(&self) -> &Type {
+        let mut ty = self;
+        while let Type::Tagged {
+            marker: TagMarker::User(_),
+            inner,
+        } = ty
+        {
+            ty = inner.as_ref();
+        }
+        ty
+    }
+
     /// Visit matched pairs under the shared composite carriers.
     ///
     /// The walker owns structural recursion for `List`, `Option`, `Result`,

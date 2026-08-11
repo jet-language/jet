@@ -36,6 +36,8 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         stream_senders: std::collections::HashMap::new(),
         next_stream_channel: -1,
         next_stream_sender: -1,
+        next_option_lift2_thunk: 0,
+        jit_callables: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
         task_groups: Vec::new(),
@@ -127,6 +129,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     drop(stream_consumers);
     rt.next_stream_channel = -1;
     rt.next_stream_sender = -1;
+    rt.jit_callables.clear();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();

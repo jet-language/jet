@@ -2971,15 +2971,9 @@ impl<'a> Checker<'a> {
         // distinct integer must not hide the interval proof from fixed-list
         // indexing. Preserve compiler-owned tags; some carry nominal or
         // access policy that is not a user refinement.
-        let mut index_value_ty = &idx_ty;
-        while let Type::Tagged {
-            marker: crate::AST::TagMarker::User(_),
-            inner,
-        } = index_value_ty
-        {
-            index_value_ty = inner.as_ref();
-        }
-        match &base_ty {
+        let index_value_ty = idx_ty.without_user_tags();
+        let collection_ty = base_ty.without_user_tags();
+        match collection_ty {
             Type::List(inner) => {
                 *kind = IndexKind::List;
                 if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
@@ -3107,7 +3101,7 @@ impl<'a> Checker<'a> {
             // owned-copy or mutable-view Prelude path; scalar indexing has no
             // one-axis result type and is not part of this surface.
             Type::Named(name) if name == "Tensor"
-                || matches!(&base_ty, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")) => {
+                || matches!(collection_ty, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")) => {
                 if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
                     Some(Type::Named("Tensor".to_string()))

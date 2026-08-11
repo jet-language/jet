@@ -594,6 +594,44 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
     })
 }
 
+extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit fixed-list index: bad handle");
+        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |position| {
+            rt.heap.list_get_int(list, position as i64).unwrap_or_default()
+        }) {
+            Ok(value) => value,
+            Err(error) => {
+                rt.set_trap(&error.message());
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit fixed-list index f64: bad handle");
+        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |position| {
+            rt.heap
+                .list_get_float(list, position as i64)
+                .unwrap_or_default()
+        }) {
+            Ok(value) => value,
+            Err(error) => {
+                rt.set_trap(&error.message());
+                0.0
+            }
+        }
+    })
+}
+
 fn jet_jit_list_get_range(list: i64, idx: i64) -> (i64, i64, bool) {
     Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_range(list, idx) {
         Some(value) => value,
@@ -3480,6 +3518,8 @@ host_fns! {
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
+    fixed_list_get: "jet_jit_fixed_list_get" => jet_jit_fixed_list_get: sig_get;
+    fixed_list_get_f64: "jet_jit_fixed_list_get_f64" => jet_jit_fixed_list_get_f64: sig_get_f64;
     list_get_range_start: "jet_jit_list_get_range_start" => jet_jit_list_get_range_start: sig_get_range_scalar;
     list_get_range_end: "jet_jit_list_get_range_end" => jet_jit_list_get_range_end: sig_get_range_scalar;
     list_get_range_exclusive: "jet_jit_list_get_range_exclusive" => jet_jit_list_get_range_exclusive: sig_get_range_exclusive;

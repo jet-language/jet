@@ -171,6 +171,7 @@ fn lower_lambda_expecting_with_host_borrow(
         .iter()
         .chain(extra_cloned.iter())
     {
+        let tracked_origin = env.tracked_float_origin(name);
         let cap = format!(
             "__jet_cap_{}",
             crate::Syntax::generated_suffix(&mangle(name))
@@ -188,6 +189,9 @@ fn lower_lambda_expecting_with_host_borrow(
             .unwrap_or_else(|| Type::Named("Unit".to_string()));
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
         lam_env.bind(name, TLocal::generated(&cap), Some(cap_ty));
+        if let Some(origin) = tracked_origin {
+            lam_env.mark_tracked_float(name, origin);
+        }
     }
     // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
@@ -212,8 +216,12 @@ fn lower_lambda_expecting_with_host_borrow(
             let cap_ty = env
                 .ty_of(&name)
                 .unwrap_or_else(|| Type::Named("Unit".to_string()));
+            let tracked_origin = env.tracked_float_origin(&name);
             // Body still reads the outer place (no `__jet_cap_` rebind).
             captures.push((name.clone(), crate::Codegen::TIR::local_place(&name), cap_ty));
+            if let Some(origin) = tracked_origin {
+                lam_env.mark_tracked_float(&name, origin);
+            }
         }
     }
     // Params bind as `mangle(name)` (no deref), typed from the annotation, falling

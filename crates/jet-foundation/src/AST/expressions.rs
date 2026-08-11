@@ -673,6 +673,16 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// D-FMTPARENS1=A: author grouping is transparent to semantic shape.
+    /// Keep the unwrapping in the AST so every consumer shares one helper.
+    pub fn without_parens(&self) -> &Expr {
+        let mut expr = self;
+        while let Expr::Paren(inner, _) = expr {
+            expr = inner.as_ref();
+        }
+        expr
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Expr::Str(_, s)

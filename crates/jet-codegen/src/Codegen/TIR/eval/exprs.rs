@@ -22,6 +22,23 @@ use super::{
     unsupported, EvalCallable, EvalCtx, Flow,
 };
 
+struct EvalOptionValue(CtValue);
+
+impl crate::option_lift2::JetOptionValue for EvalOptionValue {
+    type Item = CtValue;
+
+    fn jet_option_is_present(&self) -> bool {
+        matches!(self.0, CtValue::Present(_))
+    }
+
+    fn jet_option_into_item(self) -> Self::Item {
+        match self.0 {
+            CtValue::Present(value) => *value,
+            _ => unreachable!("option payload requested from absence"),
+        }
+    }
+}
+
 fn progress_parts(
     value: &CtValue,
 ) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
@@ -4253,17 +4270,16 @@ impl<'a> EvalCtx<'a> {
                         )),
                     }
                 }
-                crate::Codegen::TIR::THostCall::FixedListIndex { base, index } => {
+                crate::Codegen::TIR::THostCall::FixedListIndex { base, index, .. } => {
                     let b = self.eval_expr(base, scope)?;
                     let idx = as_int(&self.eval_expr(index, scope)?, self.span())?;
                     match b {
-                        CtValue::List(xs) => {
-                            if idx < 0 || idx as usize >= xs.len() {
-                                Err(unsupported("fixed-list index oob", self.span()))
-                            } else {
-                                Ok(xs[idx as usize].clone())
-                            }
-                        }
+                        CtValue::List(xs) => crate::fixed_list::jet_fixed_list_index(
+                            xs.len(),
+                            idx,
+                            |position| xs[position].clone(),
+                        )
+                        .map_err(|error| unsupported(&error.message(), self.span())),
                         other => {
                             if let Some(r) =
                                 crate::Comptime::MathLayout::lane_at(&other, idx, self.span())
@@ -5516,7 +5532,32 @@ impl<'a> EvalCtx<'a> {
                     &mut scratch,
                 )?))
             }
-            TExprKind::OptionLift2 { .. } => Err(unsupported("expr `OptionLift2`", self.span())),
+            TExprKind::OptionLift2 { f, a, b } => {
+                let a = self.eval_expr(a, scope)?;
+                let b = self.eval_expr(b, scope)?;
+                if matches!(&a, CtValue::Failed(CtReport::Told(_)))
+                    || matches!(&b, CtValue::Failed(CtReport::Told(_)))
+                {
+                    return Err(unsupported("option lift2 operands", self.span()));
+                }
+                let mut callable = None;
+                crate::option_lift2::jet_option_lift2(
+                    EvalOptionValue(a),
+                    EvalOptionValue(b),
+                    || Ok(CtValue::absent(expr.ty.clone())),
+                    |value| value,
+                    || {
+                        move |left, right| {
+                            self.apply_callable_once(
+                                f,
+                                &mut callable,
+                                vec![left, right],
+                                scope,
+                            )
+                        }
+                    },
+                )
+            }
             TExprKind::ClosureMethod { recv, op, args } => {
                 self.eval_closure_method(recv, op, args, scope)
             }
@@ -5673,16 +5714,36 @@ impl<'a> EvalCtx<'a> {
                 TFnValueKind::NamedFn {
                     name: Some(name), ..
                 } => Ok(self.store_callable(EvalCallable::Named(name))),
-                TFnValueKind::NamedFn { name: None, .. } => {
-                    Err(unsupported("rendered function coercion", self.span()))
+                TFnValueKind::NamedFn {
+                    name: None,
+                    lambda: Some(lambda),
+                    ..
+                } => {
+                    let mut captured = scope.clone();
+                    for (source, runtime, _) in &lambda.captures {
+                        if runtime != source {
+                            if let Some(value) = scope.get(source).cloned() {
+                                captured.insert(runtime.clone(), value);
+                            }
+                        }
+                    }
+                    Ok(self.store_callable(EvalCallable::Lambda {
+                        lambda,
+                        captured,
+                    }))
                 }
+                TFnValueKind::NamedFn {
+                    name: None,
+                    lambda: None,
+                    ..
+                } => Err(unsupported("rendered function coercion", self.span())),
                 TFnValueKind::Call { callee, args } => {
                     let callable = self.eval_expr(callee, scope)?;
                     let mut argv = Vec::with_capacity(args.len());
                     for arg in args {
                         argv.push(self.eval_expr(&arg.value, scope)?);
                     }
-                    self.call_callable(&callable, argv)
+                    self.call_callable_in_scope(&callable, argv, scope)
                 }
             },
             TExprKind::ModuleCall { form, args, .. } => {
@@ -5936,7 +5997,7 @@ impl<'a> EvalCtx<'a> {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }
             TNumericOp::Origin(origin) => Ok(CtValue::Str(
-                origin.clone().unwrap_or_else(|| "untracked".to_string()),
+                crate::float_provenance::jet_float_origin(origin.as_deref()),
             )),
             TNumericOp::CastAs { dst_rust } => {
                 // Match AOT `(({recv}) as {dst_rust})` / JIT CastAs lowering:

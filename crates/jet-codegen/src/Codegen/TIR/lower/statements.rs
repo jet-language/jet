@@ -36,6 +36,12 @@ use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
+fn mark_tracked_float_binding(b: &crate::AST::Binding, ty: &Type, cx: &Cx, env: &mut LowerEnv) {
+    if let Some(origin) = tracked_float_origin(b, ty.without_user_tags(), cx) {
+        env.mark_tracked_float(&b.name, origin);
+    }
+}
+
 /// Preserve contextual union typing when a sema-resolved comptime value stays
 /// as a `CtLit`. The literal must remain a single fact for JIT/interpreter, but
 /// its serialized AOT form still needs the generated union enum wrapper.
@@ -502,6 +508,7 @@ fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
                 kind: TFnValueKind::NamedFn {
                     wrapper: crate::Codegen::emit_named_fn_value_sync(cx, name, &init.ty),
                     name: Some(name.clone()),
+                    lambda: None,
                 },
             };
         }
@@ -1203,6 +1210,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let ty =
                     b.ty.as_ref()
                         .expect("E0421 ensures a `Type.{ uninit }` binding has a type");
+                let ty = ty.without_user_tags();
                 let slot = if matches!(ty, Type::FixedList { .. }) {
                     env.mark_uninit_fixed(&b.name);
                     TLocal::user(&b.name).as_uninit_fixed()
@@ -1210,6 +1218,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     TLocal::user(&b.name).as_uninit_scalar()
                 };
                 env.bind(&b.name, slot, b.ty.clone());
+                mark_tracked_float_binding(b, ty, cx, env);
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let mut",
@@ -1229,7 +1238,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
             if b.arena_view {
                 let init = lower_expr(&b.init, cx, env);
+                let track_ty = b.ty.as_ref().unwrap_or(&init.ty);
                 env.bind(&b.name, TLocal::user(&b.name).through_ref(), b.ty.clone());
+                mark_tracked_float_binding(b, track_ty, cx, env);
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1258,6 +1269,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         TLocal::user(&b.name).through_ref()
                     };
                     env.bind(&b.name, slot, b.ty.clone());
+                    mark_tracked_float_binding(
+                        b,
+                        b.ty.as_ref().unwrap_or(&init.ty),
+                        cx,
+                        env,
+                    );
                     return TStmt::Let {
                         name: b.name.clone(),
                         kw: "let",
@@ -1316,22 +1333,28 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 matches!(elem, Type::TraitObject(_))
                     || matches!(elem, Type::Named(name) if cx.trait_names.contains(name))
             };
-            let skip_ct_list_bake = matches!(b.ty.as_ref(), Some(Type::FixedList { .. }))
+            let binding_ty = b.ty.as_ref().map(Type::without_user_tags);
+            let skip_ct_list_bake = matches!(binding_ty, Some(Type::FixedList { .. }))
                 || matches!(
-                    b.ty.as_ref(),
+                    binding_ty,
                     Some(Type::List(elem)) if matches!(elem.as_ref(), Type::IntN { .. }) || is_trait_elem(elem)
                 );
             if b.ct.is_some() && !skip_ct_list_bake {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
+                let init_ty = b
+                    .ty
+                    .as_ref()
+                    .map(|ty| ty.without_user_tags().clone())
+                    .unwrap_or(Type::Int);
                 let init = TExpr {
-                    ty: b.ty.clone().unwrap_or(Type::Int),
+                    ty: init_ty,
                     kind: lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref()).unwrap_or_else(|| {
                         b.ct
                             .as_ref()
                             .map(|v| {
                                 let value = b.ty.as_ref().map_or_else(
                                     || v.clone(),
-                                    |ty| bake_comptime_value_with_type(v, ty, cx),
+                                    |ty| bake_comptime_value_with_type(v, ty.without_user_tags(), cx),
                                 );
                                 TExprKind::CtLit(value)
                             })
@@ -1339,9 +1362,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }),
                 };
                 env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
-                if let Some(origin) = tracked_float_origin(b, &init.ty, cx) {
-                    env.mark_tracked_float(&b.name, origin);
-                }
+                mark_tracked_float_binding(b, &init.ty, cx, env);
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1359,16 +1380,20 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
             // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
             // binding got, and rustc rejected the un-boxed struct literals (I2).
-            let want = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            let want = b
+                .ty
+                .as_ref()
+                .map(|ty| ty.without_user_tags().clone())
+                .unwrap_or_else(|| init.ty.clone());
             init = preserve_typed_list_shape(init, &want, cx);
             // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
             // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
             // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.
-            if let Some(fl @ Type::FixedList { .. }) = &b.ty {
+            if let Some(fl @ Type::FixedList { .. }) = b.ty.as_ref().map(Type::without_user_tags) {
                 init.ty = fl.clone();
             }
             // D-UNIONTYPE1=A: member → union inject at the binding boundary.
-            if let Some(want) = &b.ty {
+            if let Some(want) = b.ty.as_ref().map(Type::without_user_tags) {
                 init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want);
             }
             // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
@@ -1376,7 +1401,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
             // columnar empty constructor `user_<S>_columns::from_aos(vec![])` using
             // the binding's declared type.
-            if let Some(decl @ Type::List(inner)) = &b.ty {
+            if let Some(decl @ Type::List(inner)) = b.ty.as_ref().map(Type::without_user_tags) {
                 if let Some(columns_ty) = cx.columnar_list_type(inner) {
                     if matches!(&init.kind, TExprKind::ListLit(es) if es.is_empty()) {
                         init = TExpr {
@@ -1413,12 +1438,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             true,
                         )
                     );
+                    let init_ty = init.ty.clone();
+                    let lambda = match std::mem::replace(&mut init.kind, TExprKind::Unit) {
+                        TExprKind::Lambda(lambda) => Some(lambda),
+                        other => {
+                            init.kind = other;
+                            None
+                        }
+                    };
                     init = TExpr {
-                        ty: init.ty.clone(),
+                        ty: init_ty,
                         kind: TExprKind::FnValue {
                             kind: TFnValueKind::NamedFn {
                                 wrapper: coerced,
                                 name: None,
+                                lambda,
                             },
                         },
                     };
@@ -1426,7 +1460,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
             // Totality: if the source omitted the type, infer it ONCE here from
             // the init's already-resolved type. Codegen never infers.
-            let ty = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            let ty = b
+                .ty
+                .as_ref()
+                .map(|ty| ty.without_user_tags().clone())
+                .unwrap_or_else(|| init.ty.clone());
             let send_fn = env.is_send_fn(&b.name)
                 && matches!(&ty, Type::Fn { .. })
                 && !mut_fn;
@@ -1510,7 +1548,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     b.gc_promotion.is_some() || b.gc_transferred,
                 )
             };
-            let track_origin = tracked_float_origin(b, &ty, cx);
             let binding_name = if is_resource {
                 crate::Syntax::generated_name(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
@@ -1521,10 +1558,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             } else {
                 TLocal::user(&binding_name)
             };
-            env.bind(&b.name, slot, Some(ty));
-            if let Some(origin) = &track_origin {
-                env.mark_tracked_float(&b.name, origin.clone());
-            }
+            env.bind(&b.name, slot, Some(ty.clone()));
+            mark_tracked_float_binding(b, &ty, cx, env);
             if b.gc_promotion.is_some() || b.gc_transferred {
                 env.mark_gc(&b.name);
             }

@@ -51,6 +51,7 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
                         wrapper: crate::Codegen::emit_named_fn_value_sync(cx, name, &ty),
                         name: Some(name.clone()),
+                        lambda: None,
                     },
                 },
             }
