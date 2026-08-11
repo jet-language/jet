@@ -1565,15 +1565,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
                 }
                 TIfCond::IfLet { pattern, subj } => {
-                    matches!(&pattern.pattern, Pattern::Variant { .. })
-                        && !matches!(
-                            &subj.ty,
-                            Type::Named(n)
-                                if matches!(
-                                    n.as_str(),
-                                    "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-                                )
-                        )
+                    matches!(
+                        &pattern.pattern,
+                        Pattern::Variant { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
+                    )
                         && resident_safe_expr(subj, callees)
                 }
                 TIfCond::IsNone { .. } | TIfCond::Matches { .. } | TIfCond::And { .. } => false,
