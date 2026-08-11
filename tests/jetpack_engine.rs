@@ -2266,7 +2266,7 @@ module env.full {
     let missing_stderr = String::from_utf8_lossy(&missing.stderr);
     assert!(missing_stderr.contains("E1337"), "stderr: {missing_stderr}");
     assert!(
-        missing_stderr.contains("environment profile `missing` is not declared"),
+        missing_stderr.contains("environment module `missing` is not declared"),
         "stderr: {missing_stderr}"
     );
 }
