@@ -1738,6 +1738,9 @@ $header :: \"<html>\"
 fn wrap(s: String) => String {
     return \"{$header}: {s}\"
 }
+fn run() {
+    wrap(\"body\")
+}
 ";
         assert!(covers_after_sema(src, "wrap"));
     }
