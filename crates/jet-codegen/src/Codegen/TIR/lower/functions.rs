@@ -399,12 +399,14 @@ fn collect_return_clone_types_from_type(ty: &Type, cx: &Cx, out: &mut Vec<Type>)
     let expanded = cx.expand_type_aliases(ty);
     match &expanded {
         Type::Apply { name, args } => {
-            if cx
+            let lookup_name = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+            let carries_clone_bound = cx
                 .struct_type_params
                 .get(name)
+                .or_else(|| cx.struct_type_params.get(lookup_name))
                 .is_some_and(|params| !params.is_empty())
-                && cx.cloneable.contains(name)
-            {
+                && (cx.cloneable.contains(name) || cx.cloneable.contains(lookup_name));
+            if carries_clone_bound {
                 out.extend(args.iter().cloned());
             }
             for arg in args {

@@ -71,12 +71,13 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
-        let Some(owner) = self.struct_owner_module(type_name, None) else { return };
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else { return };
         let target = if owner == self.module_idx {
-            self.registry.method(type_name, method).map(|sig| (self.module_path.to_string(), sig.name_span))
+            self.registry.method(leaf, method).map(|sig| (self.module_path.to_string(), sig.name_span))
         } else {
             self.modules.and_then(|modules| modules.get(owner)).and_then(|module| {
-                module.registry.method(type_name, method).map(|sig| (module.module_path.clone(), sig.name_span))
+                module.registry.method(leaf, method).map(|sig| (module.module_path.clone(), sig.name_span))
             })
         };
         if let Some((module_path, def_span)) = target {

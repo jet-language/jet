@@ -1478,21 +1478,24 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         for item in &imported.items {
             match item {
                 Item::Struct(s) => {
-                    struct_type_params.insert(
-                        s.name.clone(),
-                        s.type_params.iter().map(|param| param.name.clone()).collect(),
-                    );
-                    struct_fields.insert(
-                        s.name.clone(),
-                        s.fields
-                            .iter()
-                            .map(|field| format!("user_{}", field.name))
-                            .collect(),
-                    );
-                    struct_field_types.insert(
-                        s.name.clone(),
-                        s.fields.iter().map(|field| field.ty.clone()).collect(),
-                    );
+                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                        let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
+                        struct_type_params.insert(
+                            name.clone(),
+                            s.type_params.iter().map(|param| param.name.clone()).collect(),
+                        );
+                        struct_fields.insert(
+                            name.clone(),
+                            s.fields
+                                .iter()
+                                .map(|field| format!("user_{}", field.name))
+                                .collect(),
+                        );
+                        struct_field_types.insert(
+                            name,
+                            s.fields.iter().map(|field| field.ty.clone()).collect(),
+                        );
+                    }
                     for field in &s.fields {
                         register_union_type(
                             &field.ty,

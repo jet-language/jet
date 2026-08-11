@@ -27,14 +27,10 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // in sema; codegen erases the annotation (no codegen path reads `f.is_pure` outside
     // these gates). So a `#Pure fn` lowers + emits byte-identically to a plain fn — the
     // body's calls are ordinary `Call`/`MethodCall` nodes covered by earlier phases.
-    // c109 Phase 17: GENERIC free functions are covered when every type parameter is a
-    // plain `<T>` / bounded `<T: Trait>` form (the clause renders via `render_generics`)
-    // and the body uses only type-var values by-value (returned/passed/stored). A generic
-    // STRUCT instantiation/method (`make_pair`/`push` — turbofish struct lits, `[T]`-field
-    // builtins) is deferred: exclude any function whose param/return mentions a generic
-    // struct type or whose body constructs one. The type-var param/return types are
-    // admitted by `is_subset_param_ty` (`is_type_var_name`); a generic struct `Apply` type
-    // is NOT covered (stays excluded), so such a function exits at the param/return check.
+    // c109 Phase 17/19: GENERIC free functions are covered when every type parameter is a
+    // plain `<T>` / bounded `<T: Trait>` form (the clause renders via `render_generics`),
+    // the body uses only covered values, and any generic struct application is admitted by
+    // the same `is_subset_param_ty`/`is_covered_generic_struct_ty` shape used by lowering.
     if f.type_params.is_empty() {
         // Non-generic: no type-var should appear (defensive — sema wouldn't allow it).
     }

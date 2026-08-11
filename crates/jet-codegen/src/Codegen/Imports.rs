@@ -19,6 +19,16 @@ fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
             .then(|| format!("{}.{}", bundle.modules[target].alias, name))
     })
 }
+
+fn qualify_imported_call_type(
+    bundle: &ProgramBundle,
+    target: usize,
+    alias: &str,
+    ty: &Type,
+) -> Type {
+    let unit_qualified = qualify_unit_type(bundle, target, ty);
+    crate::Codegen::TIR::qualify_imported_type(bundle, target, alias, &unit_qualified)
+}
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneability/hashability checks for any local
 /// structs or enums that reference those foreign types as fields.
@@ -49,14 +59,16 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
     }
 }
 
-/// Build a map from pub type name → Rust module path for all types defined in
-/// imported file-modules of `module_idx`. Used by codegen to qualify cross-module
-/// type references (e.g. `Note` → `user_note::user_Note`).
+/// Build the cross-module type map for all public types defined in imported
+/// file-modules of `module_idx`. Qualified entries retain the written import
+/// alias (`notes.Note`); a bare leaf is kept only when every visible import
+/// resolves that leaf to the same loaded module identity.
 pub(crate) fn foreign_type_map(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
+    let mut leaf_modules = HashMap::<String, Option<usize>>::new();
     let module = &bundle.modules[module_idx];
     let is_local = |name: &str| {
         module.items.iter().any(|item| match item {
@@ -70,14 +82,39 @@ pub(crate) fn foreign_type_map(
             continue;
         }
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
+            let alias = imp.import_alias();
             let rust_mod = format!("user_{}", bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
-                    Item::Struct(s) if s.is_pub && !is_local(&s.name) => {
-                        map.insert(s.name.clone(), rust_mod.clone());
+                    Item::Struct(s) if s.is_pub => {
+                        map.insert(format!("{alias}.{}", s.name), rust_mod.clone());
+                        if !is_local(&s.name) {
+                            match leaf_modules.entry(s.name.clone()) {
+                                std::collections::hash_map::Entry::Vacant(entry) => {
+                                    entry.insert(Some(target));
+                                }
+                                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                    if entry.get().as_ref() != Some(&target) {
+                                        entry.insert(None);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Item::Enum(e) if e.is_pub && !is_local(&e.name) => {
-                        map.insert(e.name.clone(), rust_mod.clone());
+                    Item::Enum(e) if e.is_pub => {
+                        map.insert(format!("{alias}.{}", e.name), rust_mod.clone());
+                        if !is_local(&e.name) {
+                            match leaf_modules.entry(e.name.clone()) {
+                                std::collections::hash_map::Entry::Vacant(entry) => {
+                                    entry.insert(Some(target));
+                                }
+                                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                    if entry.get().as_ref() != Some(&target) {
+                                        entry.insert(None);
+                                    }
+                                }
+                            }
+                        }
                     }
                     Item::UnitFamily(family) if family.is_pub => {
                         for member in family.distinct_defs() {
@@ -90,6 +127,58 @@ pub(crate) fn foreign_type_map(
                     _ => {}
                 }
             }
+        }
+    }
+    for ((alias, _), (rust_mod, _)) in reexport_call_map(bundle, module_idx) {
+        let Some(target_alias) = rust_mod.strip_prefix("user_") else {
+            continue;
+        };
+        let Some(target) = bundle
+            .modules
+            .iter()
+            .position(|candidate| candidate.alias == target_alias)
+        else {
+            continue;
+        };
+        for item in &bundle.modules[target].items {
+            match item {
+                Item::Struct(s) if s.is_pub => {
+                    map.insert(format!("{alias}.{}", s.name), rust_mod.clone());
+                    if !is_local(&s.name) {
+                        match leaf_modules.entry(s.name.clone()) {
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(Some(target));
+                            }
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                if entry.get().as_ref() != Some(&target) {
+                                    entry.insert(None);
+                                }
+                            }
+                        }
+                    }
+                }
+                Item::Enum(e) if e.is_pub => {
+                    map.insert(format!("{alias}.{}", e.name), rust_mod.clone());
+                    if !is_local(&e.name) {
+                        match leaf_modules.entry(e.name.clone()) {
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(Some(target));
+                            }
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                if entry.get().as_ref() != Some(&target) {
+                                    entry.insert(None);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (leaf, target) in leaf_modules {
+        if let Some(target) = target {
+            map.insert(leaf, format!("user_{}", bundle.modules[target].alias));
         }
     }
     map
@@ -327,7 +416,12 @@ pub(crate) fn import_sig_map(
                         (alias.clone(), f.name.clone()),
                         f.params
                             .iter()
-                            .map(|p| (p.convention, qualify_unit_type(bundle, target, &p.ty)))
+                            .map(|p| {
+                                (
+                                    p.convention,
+                                    qualify_imported_call_type(bundle, target, &alias, &p.ty),
+                                )
+                            })
                             .collect(),
                     );
                 }
@@ -359,7 +453,17 @@ pub(crate) fn import_sig_map(
                             (alias.clone(), item.clone()),
                             f.params
                                 .iter()
-                                .map(|p| (p.convention, qualify_unit_type(bundle, real_idx, &p.ty)))
+                                .map(|p| {
+                                    (
+                                        p.convention,
+                                        qualify_imported_call_type(
+                                            bundle,
+                                            real_idx,
+                                            &alias,
+                                            &p.ty,
+                                        ),
+                                    )
+                                })
                                 .collect(),
                         );
                     }
@@ -399,7 +503,7 @@ pub(crate) fn import_ret_map(
                     let ret = f
                         .return_type
                         .as_ref()
-                        .map(|ty| qualify_unit_type(bundle, target, ty));
+                        .map(|ty| qualify_imported_call_type(bundle, target, &alias, ty));
                     map.insert((alias.clone(), f.name.clone()), ret);
                 }
                 Item::CModule(cm) => {
@@ -421,7 +525,14 @@ pub(crate) fn import_ret_map(
                             (alias.clone(), item.clone()),
                             f.return_type
                                 .as_ref()
-                                .map(|ty| qualify_unit_type(bundle, real_idx, ty)),
+                                .map(|ty| {
+                                    qualify_imported_call_type(
+                                        bundle,
+                                        real_idx,
+                                        &alias,
+                                        ty,
+                                    )
+                                }),
                         );
                     }
                 }

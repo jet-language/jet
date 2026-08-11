@@ -2308,18 +2308,35 @@ fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
     program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
 }
 
+fn struct_metadata_keys(
+    bundle: &ProgramBundle,
+    owner_idx: usize,
+    type_name: &str,
+) -> Vec<String> {
+    let keys = if owner_idx == bundle.entry {
+        vec![type_name.to_string()]
+    } else {
+        crate::Codegen::TIR::imported_type_owners(bundle, owner_idx)
+            .into_iter()
+            .map(|owner| crate::Codegen::TIR::imported_type_name(&owner, type_name))
+            .collect()
+    };
+    keys
+}
+
 fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String, bool)>> {
     let mut out = HashMap::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
-                out.insert(
-                    s.name.clone(),
-                    s.fields
-                        .iter()
-                        .map(|f| (f.name.clone(), f.redact))
-                        .collect(),
-                );
+                let fields = s
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.redact))
+                    .collect();
+                for key in struct_metadata_keys(bundle, module_idx, &s.name) {
+                    out.insert(key, fields.clone());
+                }
             }
         }
     }
@@ -2330,16 +2347,17 @@ fn collect_struct_field_types(
     bundle: &ProgramBundle,
 ) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
     let mut out = HashMap::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
-                out.insert(
-                    s.name.clone(),
-                    s.fields
-                        .iter()
-                        .map(|f| (f.name.clone(), f.ty.clone()))
-                        .collect(),
-                );
+                let fields = s
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect();
+                for key in struct_metadata_keys(bundle, module_idx, &s.name) {
+                    out.insert(key, fields.clone());
+                }
             }
         }
     }

@@ -51,8 +51,9 @@ impl<'a> Checker<'a> {
             Type::Apply { name, .. } => name.as_str(),
             _ => return None,
         };
-        let owner = self.struct_owner_module(name, None)?;
-        let fields = self.struct_fields_of(owner, name)?;
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        let fields = self.struct_fields_of(owner, leaf)?;
         if let Some((_, _, ty, _)) = fields.iter().find(|(known, ..)| known == field) {
             return Some(ty.clone());
         }
@@ -4250,12 +4251,13 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             };
-            if let Some(fields) = self.registry.struct_fields(&type_name) {
+            let (_, dispatch_type_name) = Self::split_type_name(&type_name);
+            if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
                 if let Some((_, _, field_ty, _)) =
                     fields.iter().find(|(fname, _, _, _)| fname == method)
                 {
                     if matches!(field_ty, Type::Fn { .. }) {
-                        *recv_type_out = Some(type_name.clone());
+                        *recv_type_out = Some(dispatch_type_name.to_string());
                         let mut callee =
                             Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
                         let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
@@ -4312,7 +4314,7 @@ impl<'a> Checker<'a> {
             }
             let mut call_access = self.call_access_frame();
             let pre_inferred_method = self.instantiate_method_type_args(
-                &type_name,
+                dispatch_type_name,
                 method,
                 &mut msig,
                 type_args,
@@ -4321,7 +4323,10 @@ impl<'a> Checker<'a> {
                 &mut call_access,
             );
             self.record_method_reference(&type_name, method, span);
-            self.record_edge(crate::Sema::effect_key(Some(&type_name), method), span);
+            self.record_edge(
+                crate::Sema::effect_key(Some(dispatch_type_name), method),
+                span,
+            );
             if msig.is_static {
                 self.diags.push(Diagnostic::error(
                     "E0311",
@@ -4331,7 +4336,7 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
-            *recv_type_out = Some(type_name.clone());
+            *recv_type_out = Some(dispatch_type_name.to_string());
             // `mut self` methods change the receiver: it must be changeable,
             // free of an active `for` borrow, and not aliased by an argument.
             if msig.self_conv == Some(AccessConvention::Write) {
@@ -4372,7 +4377,7 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_method_args(
-                &type_name,
+                dispatch_type_name,
                 method,
                 &msig,
                 Some(receiver),

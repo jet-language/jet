@@ -29,16 +29,15 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
-        if let Some(sig) = self.registry.method(type_name, method) {
-            return Some((self.module_idx, sig.clone()));
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        if owner == self.module_idx {
+            return self.registry.method(leaf, method).cloned().map(|sig| (owner, sig));
         }
-        let mods = self.modules?;
-        self.imports.values().find_map(|&idx| {
-            self.type_is_pub_in(idx, type_name)
-                .then(|| mods[idx].registry.method(type_name, method).cloned())
-                .flatten()
-                .map(|sig| (idx, sig))
-        })
+        self.modules
+            .and_then(|modules| modules.get(owner))
+            .and_then(|module| module.registry.method(leaf, method).cloned())
+            .map(|sig| (owner, sig))
     }
 
     pub(crate) fn instantiate_method_sig(
@@ -47,11 +46,33 @@ impl<'a> Checker<'a> {
         sig: &mut MethodSig,
         args: &[Type],
     ) {
+        let (import_ns, leaf) = Self::split_type_name(type_name);
         let declared = self
-            .trait_reg
-            .struct_params
-            .get(type_name)
-            .or_else(|| self.trait_reg.enum_params.get(type_name));
+            .struct_owner_module(leaf, import_ns)
+            .and_then(|owner| {
+                if owner == self.module_idx {
+                    self.trait_reg
+                        .struct_params
+                        .get(leaf)
+                        .or_else(|| self.trait_reg.enum_params.get(leaf))
+                } else {
+                    self.modules.and_then(|modules| {
+                        modules.get(owner).and_then(|module| {
+                            module
+                                .trait_reg
+                                .struct_params
+                                .get(leaf)
+                                .or_else(|| module.trait_reg.enum_params.get(leaf))
+                        })
+                    })
+                }
+            })
+            .or_else(|| {
+                self.trait_reg
+                    .struct_params
+                    .get(leaf)
+                    .or_else(|| self.trait_reg.enum_params.get(leaf))
+            });
         let Some(params) = declared else {
             return;
         };
@@ -212,11 +233,12 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(soft_public_use(method, span));
         }
+        let (_, dispatch_type_name) = Self::split_type_name(type_name);
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
-                .get(type_name)
-                .or_else(|| self.trait_reg.enum_params.get(type_name))
+                .get(dispatch_type_name)
+                .or_else(|| self.trait_reg.enum_params.get(dispatch_type_name))
                 .cloned()
         } else {
             self.modules.and_then(|modules| {
@@ -224,8 +246,8 @@ impl<'a> Checker<'a> {
                     module
                         .trait_reg
                         .struct_params
-                        .get(type_name)
-                        .or_else(|| module.trait_reg.enum_params.get(type_name))
+                        .get(dispatch_type_name)
+                        .or_else(|| module.trait_reg.enum_params.get(dispatch_type_name))
                         .cloned()
                 })
             })
@@ -344,7 +366,7 @@ impl<'a> Checker<'a> {
             return msig.return_type.clone();
         }
         let pre_inferred_method = self.instantiate_method_type_args(
-            type_name,
+            dispatch_type_name,
             method,
             &mut msig,
             method_type_args,
@@ -353,7 +375,7 @@ impl<'a> Checker<'a> {
             &mut call_access,
         );
         self.record_method_reference(type_name, method, span);
-        self.record_edge(super::effect_key(Some(type_name), method), span);
+        self.record_edge(super::effect_key(Some(dispatch_type_name), method), span);
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",
@@ -364,7 +386,7 @@ impl<'a> Checker<'a> {
             ));
         }
         self.check_method_args(
-            type_name,
+            dispatch_type_name,
             method,
             &msig,
             None,
@@ -953,6 +975,87 @@ impl<'a> Checker<'a> {
             }
         }
         found
+    }
+
+    pub(crate) fn split_type_name(type_name: &str) -> (Option<&str>, &str) {
+        type_name
+            .rsplit_once('.')
+            .map_or((None, type_name), |(alias, leaf)| (Some(alias), leaf))
+    }
+
+    pub(crate) fn struct_fields_for_type_name(
+        &self,
+        type_name: &str,
+    ) -> Option<&[(String, Span, Type, bool)]> {
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        self.struct_fields_of(owner, leaf)
+    }
+
+    pub(crate) fn type_implements_trait_for_name(
+        &self,
+        type_name: &str,
+        trait_name: &str,
+    ) -> bool {
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return self.trait_reg.implements_trait(type_name, trait_name);
+        };
+        if owner == self.module_idx {
+            self.trait_reg.implements_trait(leaf, trait_name)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .is_some_and(|module| module.trait_reg.implements_trait(leaf, trait_name))
+        }
+    }
+
+    pub(crate) fn capability_type_context(
+        &self,
+        ty: &Type,
+    ) -> (
+        Type,
+        &crate::Sema::TypeRegistry,
+        &crate::Traits::TraitRegistry,
+    ) {
+        let (name, args) = match ty {
+            Type::Named(name) => (name.as_str(), None),
+            Type::Apply { name, args } => (name.as_str(), Some(args.as_slice())),
+            _ => return (ty.clone(), self.registry, self.trait_reg),
+        };
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return (ty.clone(), self.registry, self.trait_reg);
+        };
+        let normalized = match args {
+            None => Type::Named(leaf.to_string()),
+            Some(args) => Type::Apply {
+                name: leaf.to_string(),
+                args: args.to_vec(),
+            },
+        };
+        if owner == self.module_idx {
+            (normalized, self.registry, self.trait_reg)
+        } else if let Some(module) = self.modules.and_then(|modules| modules.get(owner)) {
+            (normalized, &module.registry, &module.trait_reg)
+        } else {
+            (ty.clone(), self.registry, self.trait_reg)
+        }
+    }
+
+    pub(crate) fn is_equatable_type(&self, ty: &Type) -> bool {
+        let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::is_equatable(&normalized, registry, trait_reg)
+    }
+
+    pub(crate) fn types_comparable_type(&self, ty: &Type) -> bool {
+        let (normalized, registry, _) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::types_comparable(&normalized, registry)
+    }
+
+    pub(crate) fn incomparable_field_type(&self, ty: &Type) -> Option<String> {
+        let (normalized, registry, _) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::incomparable_field(&normalized, registry)
     }
 
     pub(crate) fn struct_fields_of(

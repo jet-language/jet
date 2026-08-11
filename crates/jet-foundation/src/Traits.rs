@@ -1014,7 +1014,10 @@ impl TraitRegistry {
             Type::Tagged { inner, .. } => {
                 self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
-            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => true,
+            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => type_params
+                .iter()
+                .find(|param| param.name == *name)
+                .is_some_and(|param| param.bounds.iter().any(|bound| bound == trait_name)),
             Type::Named(name) => foreign_supports(name, trait_name)
                 .unwrap_or_else(|| self.implements_trait(name, trait_name)),
             Type::Int

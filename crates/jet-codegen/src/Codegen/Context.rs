@@ -165,7 +165,8 @@ pub(crate) struct Cx {
     pub(crate) coverage: bool,
     /// Import alias -> Rust module name (`user_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
-    /// Cross-module pub type name -> Rust module path (e.g. `Note` -> `user_note`).
+    /// Cross-module pub type name -> Rust module path. Bare leaves remain for
+    /// unique imports; owner-qualified names (`note.Note`) preserve aliases.
     pub(crate) foreign_types: HashMap<String, String>,
     /// D-MOD4: `(alias, item)` -> `(real Rust module, real fn)` for `pub use`
     /// re-exports, so `text.wrap` lowers to the module that actually defines it.
@@ -2116,7 +2117,15 @@ impl Cx {
                 format!("*mut {}", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } => {
-                let head = if let Some((alias, leaf)) = name.split_once('.') {
+                let head = if let Some(rust_mod) = self.foreign_types.get(name) {
+                    let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                    format!(
+                        "{}{}::{}",
+                        self.root_prefix,
+                        rust_mod,
+                        user_type_rust(leaf)
+                    )
+                } else if let Some((alias, leaf)) = name.split_once('.') {
                     self.import_mods.get(alias).map_or_else(
                         || user_type_rust(name),
                         |rust_mod| {
@@ -2508,7 +2517,7 @@ pub(crate) fn register_bundle_unit_metadata(
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
-        reexport_call_map, unqualified_import_maps,
+        reexport_call_map, unqualified_import_maps, update_cloneability_with_foreign_types,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
@@ -2517,6 +2526,8 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         .iter()
         .any(|module| module.alias == "core_archive");
     cx.foreign_types = foreign_type_map(bundle, module_idx);
+    crate::Codegen::TIR::register_imported_struct_shapes(cx, bundle, module_idx);
+    update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     cx.import_sigs = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);

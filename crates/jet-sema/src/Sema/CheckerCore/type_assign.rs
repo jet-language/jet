@@ -947,7 +947,7 @@ impl<'a> Checker<'a> {
                     .map_or((None, name), |(alias, leaf)| (Some(alias), leaf));
                 let owner = self.struct_owner_module(type_name, import_ns)?;
                 self.struct_fields_of(owner, type_name)
-                    .map(|_| (owner, type_name))
+                    .map(|_| (owner, type_name.to_owned()))
             };
             match (identity(want), identity(got)) {
                 (Some((want_owner, want_name)), Some((got_owner, got_name))) => {

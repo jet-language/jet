@@ -546,6 +546,32 @@ impl<'a> Checker<'a> {
             else_body: &mut Option<Vec<Stmt>>,
             span: Span,
         ) {
+            // D-FLOWTYPE1: a statement `if x == None { ... } else { ... }`
+            // has the same present-value path as the value-position form.
+            // Normalize the condition and swap the branches at the root so
+            // the ordinary condition-binding path narrows the present arm.
+            if arms.len() == 1 && else_body.is_some() {
+                self.rewrite_optional_flow_ne_none(&mut arms[0].cond);
+                if let Some((name, name_span, cond_span)) =
+                    atomic_absent_optional_subject(&arms[0].cond)
+                {
+                    if self.flow_narrowable_optional_inner(&name).is_some() {
+                        let body = else_body
+                            .as_mut()
+                            .expect("else body checked as present above");
+                        std::mem::swap(&mut arms[0].body, body);
+                        arms[0].cond = Expr::PatternTest {
+                            subject: Box::new(Expr::Ident(name.clone(), name_span)),
+                            pattern: Pattern::Present {
+                                binding: name,
+                                binding_span: name_span,
+                                span: cond_span,
+                            },
+                            span: cond_span,
+                        };
+                    }
+                }
+            }
             let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
             let subj_ty = self.infer(subject);
             let subj_name = match &*subject {
@@ -801,24 +827,7 @@ impl<'a> Checker<'a> {
             }
             if let Some(body) = else_body {
                 self.flow = outside_table.clone();
-                let else_narrow = (arms.len() == 1)
-                    .then(|| atomic_absent_optional_subject(&arms[0].cond))
-                    .flatten()
-                    .and_then(|(name, name_span, _)| {
-                        self.flow_narrowable_optional_inner(&name)
-                            .map(|inner| (name, name_span, inner))
-                    });
-                if let Some((name, name_span, inner)) = else_narrow {
-                    self.push_scope();
-                    let restore_moved = self.declare_condition_binding(&name, name_span, inner);
-                    self.check_block(body, false);
-                    self.pop_scope();
-                    if let Some((name, at)) = restore_moved {
-                        self.flow.moved.set(&name, at);
-                    }
-                } else {
-                    self.check_block(body, true);
-                }
+                self.check_block(body, true);
                 paths.push(self.flow.clone());
             } else if can_skip_every_arm {
                 // Skipping every arm is itself a path through here.

@@ -22,11 +22,12 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 }
 
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
-/// Char, String, a covered *plain user struct* (c109 Phase 3), a covered
+/// Char, String, a covered *plain user struct* (c109 Phase 3) or generic
+/// struct application (c109 Phase 19), a covered
 /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
 /// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Generic type variables
-/// are admitted when active in the enclosing function; generic struct
-/// applications and recursive (boxed) types are still out.
+/// are admitted when active in the enclosing function; recursive (boxed) types
+/// remain out of the value subset.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     let ty = cx.expand_type_aliases(ty);
     // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
@@ -327,6 +328,9 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
+    if is_foreign_type_name(name, cx) {
+        return false;
+    }
     // The base must be a known user struct (not an enum/trait/foreign/prelude type).
     if !cx.struct_fields.contains_key(name) {
         return false;
@@ -457,10 +461,9 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         || layout_handle_rust_type(name).is_some()
 }
 
-/// A foreign type is recorded by leaf name, while a resolved qualified type
-/// keeps its source import alias (`note.Note`). TIR must accept both spellings
-/// for the same imported value. The alias map preserves which imported module
-/// supplied the qualified spelling when multiple modules share the leaf.
+/// A foreign type may be referenced by its bare leaf or by its source-qualified
+/// import alias (`note.Note`). Qualified shape keys are authoritative: they keep
+/// same-named exports from different modules distinct.
 pub(crate) fn is_foreign_type_name(name: &str, cx: &Cx) -> bool {
     if cx.foreign_types.contains_key(name) {
         return true;
@@ -468,7 +471,14 @@ pub(crate) fn is_foreign_type_name(name: &str, cx: &Cx) -> bool {
     let Some((alias, leaf)) = name.rsplit_once('.') else {
         return false;
     };
-    cx.import_mods.contains_key(alias) && cx.foreign_types.contains_key(leaf)
+    let qualified = crate::Codegen::TIR::imported_type_name(alias, leaf);
+    if cx.import_mods.contains_key(alias) && cx.struct_fields.contains_key(&qualified) {
+        return true;
+    }
+    cx.import_mods
+        .get(alias)
+        .zip(cx.foreign_types.get(leaf))
+        .is_some_and(|(import_mod, foreign_mod)| import_mod == foreign_mod)
 }
 
 /// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the
@@ -495,7 +505,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
 /// subset? The `import_ns` struct-literal branch emits
 /// `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED field names.
 /// Cover it when: the import alias resolves in `cx.import_mods` (so the module head is
-/// total), the type is a registered cross-module type (`cx.foreign_types`), and every
+/// total), the owner-qualified shape is registered, and every
 /// turbofish type arg is a covered/type-var value. The field VALUES are checked in-subset
 /// by the caller; the foreign struct's field *types* live in another module and don't
 /// affect the emit (the head + mangled field names are the whole shape). A trait-coerced
@@ -509,10 +519,13 @@ pub(crate) fn foreign_struct_lit_in_subset(
     let Some(alias) = import_ns else {
         return false;
     };
-    if !cx.import_mods.contains_key(alias) {
+    let Some(import_mod) = cx.import_mods.get(alias) else {
         return false;
-    }
-    if !cx.foreign_types.contains_key(type_name) {
+    };
+    let qualified = crate::Codegen::TIR::imported_type_name(alias, type_name);
+    if cx.foreign_types.get(&qualified) != Some(import_mod)
+        && !cx.struct_fields.contains_key(&qualified)
+    {
         return false;
     }
     type_args

@@ -169,8 +169,9 @@ pub(crate) fn core_enum_or_prelude(name: &str) -> bool {
     net_handle_rust_type(name).is_some() || alloc_handle_rust_type(name).is_some()
 }
 
-/// c109 Phase 3: `ty` is a plain user struct the subset can lower. It must be a
-/// bare `Type::Named(S)` that:
+/// c109 Phase 3: `ty` is a plain user struct the subset can lower. A qualified
+/// foreign `Type::Named(alias.S)` uses the foreign-value gate below; local user
+/// structs must be bare and:
 ///  - is a known struct (`cx.struct_fields` has it), not an enum/trait/generic;
 ///  - is NOT a compiler/prelude/foreign/core type (those use different Rust
 ///    heads and field spellings the subset does not emit);
@@ -183,6 +184,12 @@ pub(crate) fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Named(name) = ty else {
         return false;
     };
+    // Sema may retain the import alias on a resolved foreign nominal. The
+    // coverage table stores imported shapes by leaf, while the foreign-value
+    // predicate owns the alias check; use that one identity rule here too.
+    if name.rsplit_once('.').is_some() || cx.foreign_types.contains_key(name) {
+        return is_covered_foreign_value_ty(ty, cx);
+    }
     struct_is_covered(name, cx, &mut HashSet::new())
 }
 
