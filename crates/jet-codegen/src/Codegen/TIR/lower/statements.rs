@@ -1551,6 +1551,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kind,
                 span,
             } => {
+                debug_assert!(
+                    !matches!(kind, IndexKind::Unknown),
+                    "sema-to-TIR handoff violated"
+                );
                 // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the
                 // subset gate must have already excluded `IndexKind::Unknown` before
                 // routing here — an `Unknown` default reaching lowering means sema

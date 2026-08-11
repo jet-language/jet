@@ -324,7 +324,7 @@ fn dedupe_soft_public_lints(diagnostics: &mut Vec<Diagnostic>) {
         let Some(span) = diagnostic.span else {
             return true;
         };
-        seen.insert((span.start, span.end))
+        seen.insert((diagnostic.code.clone(), diagnostic.what.clone(), span.start, span.end))
     });
 }
 
@@ -3590,6 +3590,25 @@ mod structure_tests {
         let mut diagnostics = vec![soft_public(), soft_public()];
         dedupe_soft_public_lints(&mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn distinct_soft_public_names_at_one_occurrence_are_preserved() {
+        let span = Span::new(4, 8);
+        let soft_public = |name: &str| {
+            Diagnostic::lint(
+                "L0601",
+                format!("`{name}` is a soft-public API"),
+                "a leading underscore allows outside use".to_string(),
+                "use a public name".to_string(),
+                Some(span),
+            )
+        };
+        let mut diagnostics = vec![soft_public("_x"), soft_public("_y")];
+        dedupe_soft_public_lints(&mut diagnostics);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].what, "`_x` is a soft-public API");
+        assert_eq!(diagnostics[1].what, "`_y` is a soft-public API");
     }
 
     #[test]
