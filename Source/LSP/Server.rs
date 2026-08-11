@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use crate::AST::{ParamZone, ProgramBundle};
+use crate::AST::ProgramBundle;
 use jet_driver::QueryService::CompilerQueries;
 #[cfg(test)]
 use jet_queries::{FileKey, QueryKey};
@@ -1138,7 +1138,12 @@ fn signature_help_response(
                 .map(|part| format!(r#"{{"label":"{}"}}"#, json_escape(part.as_str())))
                 .collect::<Vec<_>>()
                 .join(",");
-            let active = signature_active_parameter(&call, param_contract, parameter_parts.len());
+            let active = jet_semindex::binder_active_parameter(
+                call.active_label.as_deref(),
+                call.active_param,
+                param_contract,
+                parameter_parts.len(),
+            );
             (label, params_json, active)
         }
         _ => return Some(response(id, "null")),
@@ -2082,30 +2087,6 @@ fn call_argument_label(argument: &str) -> Option<String> {
         return None;
     }
     Some(argument[..label_len].to_string())
-}
-
-fn signature_active_parameter(
-    call: &ActiveCall,
-    contract: &[(String, String, ParamZone)],
-    param_count: usize,
-) -> usize {
-    if param_count == 0 {
-        return 0;
-    }
-    if let Some(label) = &call.active_label {
-        if let Some(index) = contract.iter().position(|(_, public, zone)| {
-            *zone != ParamZone::PositionalOnly && public == label
-        }) {
-            return index.min(param_count - 1);
-        }
-    }
-    contract
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, _, zone))| *zone != ParamZone::LabelOnly)
-        .nth(call.active_param)
-        .map(|(index, _)| index.min(param_count - 1))
-        .unwrap_or_else(|| call.active_param.min(param_count - 1))
 }
 
 fn callee_name_before_paren(bytes: &[u8], paren: usize) -> Option<String> {

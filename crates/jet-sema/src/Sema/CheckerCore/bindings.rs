@@ -1104,6 +1104,7 @@ impl<'a> Checker<'a> {
                                 ret: Some(Box::new(args[0].clone())),
                                 effect_bound: None,
                                 param_contract: None,
+                call_metadata: None,
                                 return_view_provenance: None,
                             };
                             let types = [Type::Named("Tensor".to_string()), pull_ty];

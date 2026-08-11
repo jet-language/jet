@@ -2862,6 +2862,7 @@ fn lower_method_call_impl(
                                 ret: expected_hook_result.clone().map(Box::new),
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             },
                             kind: TExprKind::Lambda(Box::new(tl)),
                         };
@@ -2920,6 +2921,7 @@ fn lower_method_call_impl(
                                 ret: None,
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             },
                             kind: TExprKind::Lambda(Box::new(tl)),
                         };
@@ -3398,6 +3400,7 @@ fn lower_method_call_impl(
                                 ret: Some(Box::new(ret)),
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lower_lambda_expecting_value(
                                 lam, cx, env, &params,
@@ -3730,6 +3733,7 @@ fn lower_method_call_impl(
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }],
@@ -3896,6 +3900,7 @@ fn lower_method_call_impl(
                                 ret: Some(Box::new(ty)),
                                 effect_bound: None,
                                 param_contract: None,
+                call_metadata: None,
                                 return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lowered)),
@@ -3923,6 +3928,7 @@ fn lower_method_call_impl(
                                 ret: Some(Box::new(value_ty.clone())),
                                 effect_bound: None,
                                 param_contract: None,
+                call_metadata: None,
                                 return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lowered)),
@@ -3965,6 +3971,7 @@ fn lower_method_call_impl(
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }],
@@ -4118,6 +4125,7 @@ fn lower_method_call_impl(
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     };
@@ -4447,6 +4455,7 @@ fn lower_method_call_impl(
                                     ret: Some(Box::new(Type::String)),
                                     effect_bound: None, return_view_provenance: None,
                                     param_contract: None,
+                call_metadata: None,
                                 },
                                 kind: TExprKind::Lambda(Box::new(
                                     lower_lambda_expecting_value(lam, cx, env, &params),
@@ -4469,6 +4478,7 @@ fn lower_method_call_impl(
                                     ret: Some(Box::new(Type::Named("Unit".to_string()))),
                                     effect_bound: None,
                                     param_contract: None,
+                call_metadata: None,
                                     return_view_provenance: None,
                                 },
                                 kind: TExprKind::Lambda(Box::new(lowered)),
@@ -5377,6 +5387,7 @@ fn lower_method_call_impl(
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }

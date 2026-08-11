@@ -171,6 +171,19 @@ pub struct FunctionObligations {
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
+/// Declaration-side call slots carried by a function value. Public labels and
+/// zones remain callable obligations; this row carries the defaults,
+/// conventions, and rest slots needed to bind a value call.
+#[derive(Debug, Clone)]
+pub struct FunctionCallMetadata {
+    /// Declaration-local names used only to resolve default bodies. They are
+    /// not public callable labels or semantic-index identity.
+    pub names: Vec<String>,
+    pub defaults: Vec<Option<Expr>>,
+    pub variadic: Vec<bool>,
+    pub conventions: Vec<AccessConvention>,
+}
+
 impl FunctionObligations {
     fn canonical(&self) -> String {
         let effects = self.effect_bound.as_ref().map_or_else(String::new, |row| {
@@ -587,6 +600,9 @@ pub enum Type {
         /// identity; sema also checks directional compatibility. `None` means
         /// the callable has no declared call contract.
         param_contract: Option<Vec<(String, super::ParamZone)>>,
+        /// D-APILABEL1/D-NARG-D2/D-VARIADIC1: declaration-side call slots for
+        /// function-value calls.
+        call_metadata: Option<FunctionCallMetadata>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
         /// at parse time (names resolve then and are not kept on the type).
@@ -1218,6 +1234,7 @@ impl Type {
                     .map(|return_type| Box::new(return_type.erased_carrier())),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1363,11 +1380,12 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
+            Type::Fn { params, ret, effect_bound, param_contract, call_metadata, return_view_provenance } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1753,6 +1771,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let labelled = Type::Fn {
@@ -1760,6 +1779,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), ParamZone::LabelOnly)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
 
@@ -1810,6 +1830,7 @@ mod tests {
             })),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));
@@ -1891,6 +1912,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), zone)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
         let positional = callable(ParamZone::PositionalOnly);
@@ -1901,6 +1923,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
 

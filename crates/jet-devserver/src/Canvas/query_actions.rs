@@ -210,7 +210,7 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
     let mut entries = Vec::new();
     let mut project_functions = Vec::new();
     for def in index.definitions() {
-        let SymbolKind::Function { params, ret } = &def.kind else {
+        let SymbolKind::Function { params, ret, .. } = &def.kind else {
             continue;
         };
         if def.module_path.starts_with("core.") {

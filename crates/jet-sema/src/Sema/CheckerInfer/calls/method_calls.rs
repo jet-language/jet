@@ -2381,6 +2381,7 @@ impl<'a> Checker<'a> {
                                 ret: None,
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             };
                             let saved_esc = self.lambda_escapes;
                             let saved_exp = self.expected_type.clone();
@@ -2902,6 +2903,7 @@ impl<'a> Checker<'a> {
                             })),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                         &mut args[1],
                     );
@@ -3009,6 +3011,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(method, 1, &cb, &mut args[1]);
                     }

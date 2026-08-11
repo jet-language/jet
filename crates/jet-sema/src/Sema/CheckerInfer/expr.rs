@@ -1283,6 +1283,9 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::Ident(name, span) => {
+                if let Some(ty) = self.binder_ref_types.get(name) {
+                    return Some(ty.clone());
+                }
                 // D-LOOPLABEL3=A: loop labels share the ordinary namespace but
                 // are control names, not runtime values.
                 if self.loop_labels.iter().any(|label| label == name) {
@@ -2334,6 +2337,7 @@ impl<'a> Checker<'a> {
                         })),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     }),
                     _ => self.expected_type.clone(),
                 };
@@ -3395,6 +3399,7 @@ impl<'a> Checker<'a> {
                             ret: sig.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.diags.push(crate::Sema::FFI::e3203(&ty, span));
                         return Some(ty);

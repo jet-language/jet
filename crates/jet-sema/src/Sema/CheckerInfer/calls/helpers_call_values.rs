@@ -31,13 +31,7 @@ impl<'a> Checker<'a> {
                 convention: AccessConvention::Read,
                 expr: Expr::Str(vec![StrPart::Lit(value)], span),
                 span,
-                flags: crate::AST::CallArgFlags {
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    is_trailing_block: false,
-                    c_callback_symbol: false,
-                    source_index: None,
-                },
+                flags: Default::default(),
                 label: None,
                 spread: false,
             }
@@ -66,7 +60,7 @@ impl<'a> Checker<'a> {
         pub(crate) fn infer_call_value(
             &mut self,
             callee: &mut Box<Expr>,
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
             span: Span,
         ) -> Option<Type> {
             if is_inline_compute_transform(self, callee) {
@@ -105,6 +99,7 @@ impl<'a> Checker<'a> {
                 ret,
                 effect_bound,
                 param_contract,
+                call_metadata,
                 ..
             } = callee_ty.clone()
             else {
@@ -149,18 +144,35 @@ impl<'a> Checker<'a> {
             // binder. An absent contract is an unlabelled function type, so
             // the empty contract still rejects a written label as E0764 while
             // leaving bare arguments in their ordinary positional shape.
-            let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = param_contract
-                .as_deref()
-                .unwrap_or(&[])
-                .iter()
-                .map(|(label, zone)| crate::Sema::CallBinder::BindParam {
-                    label,
-                    name: label,
-                    zone: *zone,
-                    default: None,
-                    convention: AccessConvention::Read,
-                    variadic: false,
-                    core_default: None,
+            let metadata = call_metadata.as_ref();
+            let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..params.len())
+                .map(|index| {
+                    let (label, zone) = param_contract
+                        .as_deref()
+                        .and_then(|contract| contract.get(index))
+                        .map(|(label, zone)| (label.as_str(), *zone))
+                        .unwrap_or(("", crate::AST::ParamZone::Either));
+                    crate::Sema::CallBinder::BindParam {
+                        label,
+                        name: metadata
+                            .and_then(|meta| meta.names.get(index))
+                            .map(String::as_str)
+                            .unwrap_or(label),
+                        zone,
+                        default: metadata
+                            .and_then(|meta| meta.defaults.get(index))
+                            .and_then(|default| default.as_ref()),
+                        convention: metadata
+                            .and_then(|meta| meta.conventions.get(index))
+                            .copied()
+                            .unwrap_or(AccessConvention::Read),
+                        ty: params.get(index),
+                        variadic: metadata
+                            .and_then(|meta| meta.variadic.get(index))
+                            .copied()
+                            .unwrap_or(false),
+                        core_default: None,
+                    }
                 })
                 .collect();
             let mut owned: Vec<crate::AST::CallArg> = args.to_vec();
@@ -171,13 +183,83 @@ impl<'a> Checker<'a> {
             let bound = crate::Sema::CallBinder::bind_call_args(
                 &callee_name, &bind, &mut owned, span, &mut self.diags,
             );
-            if bound.is_none() || owned.len() != args.len() {
+            self.register_binder_refs(&owned);
+            if bound.is_none() {
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
                 return ret.map(|r| *r);
             }
-            args.clone_from_slice(&owned);
+            *args = owned;
+            if metadata.is_some_and(|meta| meta.variadic.last().copied().unwrap_or(false)) {
+                let fake_sig = crate::AST::FuncSig {
+                    params: params
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(index, ty)| {
+                            (
+                                metadata
+                                    .and_then(|meta| meta.conventions.get(index))
+                                    .copied()
+                                    .unwrap_or(AccessConvention::Read),
+                                ty,
+                            )
+                        })
+                        .collect(),
+                    root_param: false,
+                    return_type: ret.as_deref().cloned(),
+                    return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+                    is_extern: false,
+                    is_unsafe: false,
+                    is_pure: false,
+                    is_foreign_thread_safe: false,
+                    is_sanitizer: false,
+                    is_must_use: false,
+                    is_c_abi: false,
+                    c_abi_name: None,
+                    foreign_effect_root: None,
+                    param_info: (0..params.len())
+                        .map(|index| {
+                            (
+                                metadata
+                                    .and_then(|meta| meta.names.get(index))
+                                    .cloned()
+                                    .or_else(|| {
+                                        param_contract
+                                            .as_deref()
+                                            .and_then(|contract| contract.get(index))
+                                            .map(|(label, _)| label.clone())
+                                    })
+                                    .unwrap_or_default(),
+                                metadata
+                                    .and_then(|meta| meta.defaults.get(index))
+                                    .is_some_and(|default| default.is_some()),
+                            )
+                        })
+                        .collect(),
+                    param_call: param_contract.clone().unwrap_or_default(),
+                    defaults: metadata
+                        .map(|meta| meta.defaults.clone())
+                        .unwrap_or_else(|| vec![None; params.len()]),
+                    param_variadic: metadata
+                        .map(|meta| meta.variadic.clone())
+                        .unwrap_or_else(|| vec![false; params.len()]),
+                    variadic_bounds: None,
+                    param_view_from_names: Vec::new(),
+                };
+                let mut packed = crate::AST::Call {
+                    name: callee_name.clone(),
+                    name_span: span,
+                    type_args: Vec::new(),
+                    args: std::mem::take(args),
+                    resolved_ret: None,
+                    range_checked: false,
+                    widen_approx: false,
+                };
+                self.normalize_variadic_call(&mut packed, &fake_sig);
+                *args = packed.args;
+            }
             if args.len() != params.len() {
                 self.diags.push(Diagnostic::error(
                     "E0104",

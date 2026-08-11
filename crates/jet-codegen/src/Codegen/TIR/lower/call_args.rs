@@ -144,6 +144,14 @@ pub(crate) fn lower_one_call_arg(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TCallArg {
+    let saved_binder_refs = env.binder_refs.clone();
+    for (name, slot, ty) in &a.flags.binder_refs {
+        let site = a.flags.binder_site.unwrap_or(a.span.start as u32);
+        env.binder_refs.insert(
+            name.clone(),
+            (format!("__jet_arg{site}_{slot}"), ty.clone()),
+        );
+    }
     let resource_move = matches!(
         (&a.expr, &conv),
         (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
@@ -189,6 +197,7 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
+    env.binder_refs = saved_binder_refs;
     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
     let value = match (&conv, value) {
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {

@@ -1279,12 +1279,14 @@ impl Cx {
                 ret,
                 param_contract,
                 effect_bound,
+                call_metadata,
                 return_view_provenance,
             } => Type::Fn {
                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(
@@ -3256,6 +3258,16 @@ pub(crate) fn build_cx_items(
                                 .map(|p| (p.call_label().to_string(), p.zone))
                                 .collect()
                         }),
+                        call_metadata: Some(crate::AST::FunctionCallMetadata {
+                            names: f.params.iter().map(|p| p.name.clone()).collect(),
+                            defaults: f
+                                .params
+                                .iter()
+                                .map(|p| p.default.as_deref().cloned())
+                                .collect(),
+                            variadic: f.params.iter().map(|p| p.variadic).collect(),
+                            conventions: f.params.iter().map(|p| p.convention).collect(),
+                        }),
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
@@ -3382,6 +3394,7 @@ pub(crate) fn build_cx_items(
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                     );
                 }
@@ -3404,6 +3417,7 @@ pub(crate) fn build_cx_items(
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                     );
                 }
@@ -3585,6 +3599,16 @@ pub(crate) fn build_cx_items(
                                             .iter()
                                             .map(|p| (p.call_label().to_string(), p.zone))
                                             .collect()
+                                    }),
+                                    call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                        names: f.params.iter().map(|p| p.name.clone()).collect(),
+                                        defaults: f
+                                            .params
+                                            .iter()
+                                            .map(|p| p.default.as_deref().cloned())
+                                            .collect(),
+                                        variadic: f.params.iter().map(|p| p.variadic).collect(),
+                                        conventions: f.params.iter().map(|p| p.convention).collect(),
                                     }),
                                 },
                             );

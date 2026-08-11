@@ -19,13 +19,16 @@ use crate::Diagnostics::{Diagnostic, Span};
 pub(crate) struct BindParam<'a> {
     /// The label a caller writes (`Param::call_label`).
     pub label: &'a str,
-    /// The local name the body reads. A later parameter's default expression
-    /// may reference it, so substitution keys off this and not `label`.
+    /// The declaration-local name a default expression may reference. The
+    /// binder rewrites that reference to a private slot temp; it never copies
+    /// a supplied argument AST into the default.
     pub name: &'a str,
     pub zone: ParamZone,
     /// D-NARG-D2: the `= expr` default, already registered on the signature.
     pub default: Option<&'a crate::AST::Expr>,
     pub convention: crate::AST::AccessConvention,
+    /// Declaration type used to type compiler-private default references.
+    pub ty: Option<&'a crate::AST::Type>,
     /// D-VARIADIC1: a rest parameter. It collects the trailing arguments, so
     /// it is never "missing" and never carries a default.
     pub variadic: bool,
@@ -114,6 +117,7 @@ pub(crate) fn bind_params_from_sig(sig: &crate::AST::FuncSig) -> Vec<BindParam<'
                 .get(index)
                 .map(|(convention, _)| *convention)
                 .unwrap_or(crate::AST::AccessConvention::Read),
+            ty: sig.params.get(index).map(|(_, ty)| ty),
             variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
             core_default: None,
         })
@@ -250,8 +254,9 @@ pub(crate) fn bind_call_args(
 
 /// Reorder `args` into declaration order and fill every unbound parameter with
 /// its default. Defaults run after the supplied arguments, in declaration
-/// order, and may reference an earlier parameter — so each one is substituted
-/// against the arguments already placed to its left (D-NARG-D2).
+/// order. A default reference names a private declaration-slot temp, so a
+/// supplied side-effect expression is evaluated once by source-order lowering
+/// and is never cloned into the default (D-NARG-D2).
 fn rewrite(
     params: &[BindParam<'_>],
     args: &mut Vec<CallArg>,
@@ -272,6 +277,8 @@ fn rewrite(
                 // Lowering reads this back to keep the ratified evaluation
                 // order across the reorder the binder just performed.
                 arg.flags.source_index = Some(*index);
+                arg.flags.binder_slot = Some(position);
+                arg.flags.binder_site = Some(call_span.start as u32);
                 args.push(arg);
                 sources.push(ArgSource::Written(*index));
             }
@@ -282,16 +289,41 @@ fn rewrite(
             // covered. Nothing to place.
             continue;
         };
-        let earlier: Vec<String> = params
+        let earlier: Vec<(String, String)> = params
             .iter()
             .take(position)
-            .map(|p| p.name.to_string())
+            .enumerate()
+            .map(|(slot, p)| {
+                (
+                    p.name.to_string(),
+                    format!("__jet_binder_ref_{}_{}", call_span.start, slot),
+                )
+            })
+            .collect();
+        let ref_pairs: Vec<(&str, String)> = earlier
+            .iter()
+            .map(|(name, replacement)| (name.as_str(), replacement.clone()))
+            .collect();
+        let binder_refs = earlier
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, (_, replacement))| {
+                params
+                    .get(slot)
+                    .and_then(|param| param.ty)
+                    .map(|ty| (replacement.clone(), slot, ty.clone()))
+            })
             .collect();
         args.push(CallArg {
             convention: params[position].convention,
-            expr: super::substitute_param_refs(default, &earlier, args),
+            expr: super::substitute_param_refs(default, &ref_pairs),
             span: call_span,
-            flags: Default::default(),
+            flags: crate::AST::CallArgFlags {
+                binder_slot: Some(position),
+                binder_refs,
+                binder_site: Some(call_span.start as u32),
+                ..Default::default()
+            },
             label: None,
             spread: false,
         });
@@ -308,7 +340,10 @@ fn rewrite(
         }
     }
     let binding = Binding { sources };
-    if binding.is_source_ordered() {
+    let has_inserted_slot = args
+        .iter()
+        .any(|arg| arg.flags.binder_slot.is_some() && arg.flags.source_index.is_none());
+    if binding.is_source_ordered() && !has_inserted_slot {
         // Nothing moved, so lowering needs no temporaries. Clearing the marks
         // keeps the ordinary call shape identical to before the binder ran.
         for arg in args.iter_mut() {

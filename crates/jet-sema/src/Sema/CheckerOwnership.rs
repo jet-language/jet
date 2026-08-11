@@ -5382,6 +5382,7 @@ impl<'a> Checker<'a> {
             ret: Some(value.clone()),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let saved_expected = self.expected_type.clone();
@@ -5594,6 +5595,7 @@ impl<'a> Checker<'a> {
             ret: expected_return.map(Box::new),
             effect_bound: None, return_view_provenance: None,
             param_contract: None,
+                call_metadata: None,
         };
         let saved_exp = self.expected_type.clone();
         self.expected_type = Some(expected);

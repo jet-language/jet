@@ -418,6 +418,42 @@ pub fn function_parameter_parts(
     parts
 }
 
+/// Map the argument slot the shared binder consumes to the visible LSP
+/// parameter index. Declaration slots include label-only parameters; the
+/// rendered signature does not include the `*` separator, so the two indices
+/// must not be used interchangeably.
+pub fn binder_active_parameter(
+    active_label: Option<&str>,
+    active_positional: usize,
+    contract: &[(String, String, AST::ParamZone)],
+    visible_parameter_count: usize,
+) -> usize {
+    if visible_parameter_count == 0 {
+        return 0;
+    }
+    let declaration_slot = active_label
+        .and_then(|label| {
+            contract.iter().position(|(_, public, zone)| {
+                *zone != AST::ParamZone::PositionalOnly && public == label
+            })
+        })
+        .or_else(|| {
+            contract
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, _, zone))| *zone != AST::ParamZone::LabelOnly)
+                .nth(active_positional)
+                .map(|(index, _)| index)
+        });
+    let visible_index = declaration_slot.map_or(active_positional, |slot| {
+        contract[..slot]
+            .iter()
+            .filter(|(_, _, zone)| *zone != AST::ParamZone::LabelOnly)
+            .count()
+    });
+    visible_index.min(visible_parameter_count - 1)
+}
+
 fn method_fact(
     scope: &str,
     owner: &str,
@@ -866,16 +902,27 @@ fn definition_kind(kind: &SymbolKind) -> &'static str {
 
 fn definition_signature(def: &SymbolDef) -> String {
     match &def.kind {
-        SymbolKind::Function { params, ret } => format!(
-            "({})->{};view_source={}",
-            params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
-            ret.as_deref().unwrap_or("()"),
-            def.view_provenance
+        SymbolKind::Function {
+            params,
+            call_contract,
+            ret,
+        } => {
+            let call_contract = call_contract
                 .iter()
-                .map(|provenance| provenance.canonical())
+                .map(|(label, zone, variadic)| format!("{label}:{zone}:{variadic}"))
                 .collect::<Vec<_>>()
-                .join("|"),
-        ),
+                .join(",");
+            format!(
+                "({})->{};call_contract=[{call_contract}];view_source={}",
+                params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
+                ret.as_deref().unwrap_or("()"),
+                def.view_provenance
+                    .iter()
+                    .map(|provenance| provenance.canonical())
+                    .collect::<Vec<_>>()
+                    .join("|"),
+            )
+        }
         SymbolKind::Struct { fields } => format!("{{{}}}", fields.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(",")),
         SymbolKind::Enum { variants } => format!("variants:{}", variants.len()),
         _ => definition_kind(&def.kind).to_string(),

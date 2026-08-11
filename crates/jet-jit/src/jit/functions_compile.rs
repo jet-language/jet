@@ -274,6 +274,7 @@ pub(crate) fn lower_callable_lambda(
         ret: lam.ret.clone().map(Box::new),
         effect_bound: None,
         param_contract: None,
+                call_metadata: None,
         return_view_provenance: None,
     };
     let block_returns_value = match &lam.executable {

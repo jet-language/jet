@@ -879,6 +879,7 @@ impl<'a> Checker<'a> {
                 call.name_span,
                 &mut self.diags,
             );
+            self.register_binder_refs(&call.args);
             if bound.is_none() {
                 // The call's arguments never resolved to parameters, so
                 // arity and per-position type errors below would all be

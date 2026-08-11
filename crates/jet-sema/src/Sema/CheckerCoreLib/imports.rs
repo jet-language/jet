@@ -128,6 +128,7 @@ impl<'a> Checker<'a> {
                 }
                 return sig.return_type.clone();
             }
+            self.register_binder_refs(args);
             // Homogeneous rest parameters are lowered as one list slot after
             // binding. Trait-bounded heterogeneous rests retain their source
             // tail for the dedicated per-arity path.
@@ -386,6 +387,7 @@ impl<'a> Checker<'a> {
                         }
                         return sig.return_type.clone();
                     }
+                    self.register_binder_refs(args);
                 }
                 // Homogeneous rest parameters are one declaration slot in the
                 // binder and one list slot at the module boundary. Keep the

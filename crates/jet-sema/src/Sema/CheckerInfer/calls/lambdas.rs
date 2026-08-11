@@ -689,6 +689,7 @@ use std::collections::HashSet;
                 // types, checked against this value at the call site).
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: lambda_return_view_provenance,
             })
         }

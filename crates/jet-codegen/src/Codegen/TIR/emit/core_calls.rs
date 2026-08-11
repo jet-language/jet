@@ -12,7 +12,7 @@ use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
-use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::{TExpr, TExprKind};
 
 fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
     let Type::Tuple(fields) = ty else {
@@ -1056,25 +1056,16 @@ pub(crate) fn emit_tir_core_call(
         // D-DET1: deterministic injected Clock capability constructor.
         
         ("core.game", "run") => {
-            let replay = if args.len() >= 2
-                && matches!(args[1].ty, Type::Named(ref n) if n == "GameReplay")
-            {
-                format!("Some(&({}))", arg(1))
-            } else {
+            let replay = if matches!(&args[1].kind, TExprKind::Absent) {
                 "None".to_string()
-            };
-            let backend_idx = if args.len() >= 2
-                && matches!(args[1].ty, Type::Named(ref n) if n == "GameBackend")
-            {
-                Some(1)
-            } else if args.len() >= 3 {
-                Some(2)
             } else {
-                None
+                format!("Some(&({}))", arg(1))
             };
-            let backend = backend_idx
-                .map(|i| format!("Some(&({}))", arg(i)))
-                .unwrap_or_else(|| "None".to_string());
+            let backend = if matches!(&args[2].kind, TExprKind::Absent) {
+                "None".to_string()
+            } else {
+                format!("Some(&({}))", arg(2))
+            };
             format!(
                 "{root}jet_game_run(&mut ({scene}), {replay}, {backend})",
                 root = cx.root_prefix,
@@ -2844,7 +2835,9 @@ pub(crate) fn emit_tir_core_call(
         
         
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
-        ("core.http.server", "bind") if args.len() == 3 => {
+        ("core.http.server", "bind")
+            if args.len() == 3 && !matches!(&args[2].kind, TExprKind::Absent) =>
+        {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
                 "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHTTPError::IO {{ operation: e }})",
@@ -2855,7 +2848,9 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         
-        ("core.http.server", "serve") if args.len() == 3 => {
+        ("core.http.server", "serve")
+            if args.len() == 3 && !matches!(&args[2].kind, TExprKind::Absent) =>
+        {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
                 "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHTTPError::IO {{ operation: e }})",

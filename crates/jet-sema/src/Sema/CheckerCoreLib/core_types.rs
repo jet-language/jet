@@ -1080,28 +1080,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-pub(super) fn game_run_label_error(
-    diags: &mut Vec<Diagnostic>,
-    label: &str,
-    arg: &crate::AST::CallArg,
-    index: usize,
-    span: Span,
-) {
-    let (expected, fix) = if index == 1 {
-        ("replay or backend", "write `replay:` here, `backend:` here for a two-argument backend call, or drop the label")
-    } else {
-        ("backend", "write `backend:` here, or drop the label")
-    };
-    let label_span = arg.label.as_ref().map(|(_, s)| *s).unwrap_or(span);
-    diags.push(Diagnostic::error(
-        "E0764",
-        format!("`game.run` has no `{label}:` option at argument {}", index + 1),
-        format!("this position accepts {expected}"),
-        fix.to_string(),
-        Some(label_span),
-    ));
-}
-
 /// D-MIGRATE3=A: field access on the reserved generic `DecodeResult<T>` —
 /// `.value: T` and `.migration: MigrationStatus`. Mirrors [`core_struct_field`]
 /// for the one reserved core type that carries a generic type argument
@@ -1134,6 +1112,7 @@ pub(crate) fn core_generic_struct_field(
                 ret: Some(Box::new(args[0].clone())),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             }),
             "grads" => Some(args[0].clone()),

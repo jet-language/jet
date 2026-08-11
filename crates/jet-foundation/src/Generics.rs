@@ -121,6 +121,7 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         Type::Fn {
             params,
             param_contract,
+            call_metadata,
             ret,
             effect_bound,
             return_view_provenance,
@@ -133,6 +134,7 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             // D-APILABEL1=A: the call contract is identity, not a substitutable
             // type, so it survives instantiation unchanged.
             param_contract: param_contract.clone(),
+            call_metadata: call_metadata.clone(),
             return_view_provenance: return_view_provenance.clone(),
         },
         Type::Tuple(fields) => Type::Tuple(
@@ -881,6 +883,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), zone)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
         let required = Type::Apply {

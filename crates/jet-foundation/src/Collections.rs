@@ -2206,6 +2206,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None,
                     effect_bound: None,
                     param_contract: None,
+                call_metadata: None,
                     return_view_provenance: None,
                 },
             ]),
@@ -2215,6 +2216,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None, // sema refines V from closure's actual return
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "filter" | "find" | "any" | "all"
             // D-ITER1: closure bool predicates.
@@ -2223,12 +2225,14 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: Some(Box::new(Type::Bool)),
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None,
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             // D-ITER1: key-extracting closure methods.
             "sort_by" | "min_by" | "max_by" | "group_by" | "count_by" => Some(vec![Type::Fn {
@@ -2236,6 +2240,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None, // sema refines key type
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "reduce" | "fold" => Some(vec![
                 Type::Int, // init — sema refines
@@ -2244,6 +2249,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: Some(Box::new(Type::Int)),
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
             ]),
             "scan" => Some(vec![
@@ -2253,6 +2259,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: Some(Box::new(Type::Int)), // sema refines
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
             ]),
             "flat_map" => Some(vec![Type::Fn {
@@ -2260,6 +2267,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None, // sema refines the returned list's element type
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             // D-FAILCOMP1: filter_map(f: T -> V?E) → [V]; keeps ok, drops err.
             // ret: None so any Result return is accepted; sema refines V via calls.rs.
@@ -2268,6 +2276,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None,
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             // D-PARCAPTURE1=D: parallel adapters. `para_fold` separates fresh
             // worker state, per-item stepping, and deterministic merging.
@@ -2276,12 +2285,14 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None, // sema refines V from closure body
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "para_filter" | "para_partition" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Bool)),
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "para_fold" => Some(vec![
                 Type::Fn {
@@ -2289,18 +2300,21 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None, // sema refines accumulator from seed factory
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
                 Type::Fn {
                     params: vec![Type::Int, (**inner).clone()],
                     ret: Some(Box::new(Type::Int)), // sema refines
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
                 Type::Fn {
                     params: vec![Type::Int, Type::Int],
                     ret: Some(Box::new(Type::Int)),
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
             ]),
             // D-ITER1: non-closure adapters.
@@ -2333,6 +2347,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 effect_bound: None,
                 return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "chunk_while" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone(), (**inner).clone()],
@@ -2340,6 +2355,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 effect_bound: None,
                 return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             // D-DYNARRAY1: `.view(a..b)` — both range ends are Int (parsed
             // specially; always arrives as exactly 2 args).
@@ -2362,6 +2378,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 effect_bound: None,
                 return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "map" | "flat_map" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
@@ -2369,6 +2386,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 effect_bound: None,
                 return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             "fold" => Some(vec![
                 Type::Int,
@@ -2378,6 +2396,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
             ]),
             "each" => Some(vec![Type::Fn {
@@ -2385,6 +2404,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None,
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             _ => Some(vec![]),
         },
@@ -2413,6 +2433,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None, // sema refines R from the closure's actual return
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             }]),
             _ => Some(vec![]),
         },
@@ -2435,6 +2456,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(value)),
                         effect_bound: None,
                         param_contract: None,
+                call_metadata: None,
                         return_view_provenance: None,
                     }])
                 }
@@ -2443,6 +2465,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None,
                     effect_bound: None,
                     param_contract: None,
+                call_metadata: None,
                     return_view_provenance: None,
                 }]),
                 _ => Some(vec![]),
@@ -2459,6 +2482,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None,
                     effect_bound: None,
                     param_contract: None,
+                call_metadata: None,
                     return_view_provenance: None,
                 }]),
                 "split" => Some(vec![
@@ -2467,6 +2491,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: None,
                         effect_bound: None,
                         param_contract: None,
+                call_metadata: None,
                         return_view_provenance: None,
                     },
                     Type::Fn {
@@ -2474,6 +2499,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: None,
                         effect_bound: None,
                         param_contract: None,
+                call_metadata: None,
                         return_view_provenance: None,
                     },
                 ]),
@@ -2548,6 +2574,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: None,
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "on_priority" => Some(vec![
@@ -2558,6 +2585,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: None,
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "emit" => Some(vec![payload]),
@@ -2574,12 +2602,14 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             match method {
                 "on" | "once" => Some(vec![
                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None, param_contract: None, return_view_provenance: None },
+                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None, param_contract: None,
+                call_metadata: None, return_view_provenance: None },
                 ]),
                 "on_priority" => Some(vec![
                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
                     Type::Int,
-                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None, param_contract: None, return_view_provenance: None },
+                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None, param_contract: None,
+                call_metadata: None, return_view_provenance: None },
                 ]),
                 "emit_async" => Some(vec![payload]),
                 _ => Some(vec![]),
@@ -2596,6 +2626,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(result)),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "on_priority" => Some(vec![
@@ -2606,6 +2637,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(result)),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "run" => Some(vec![payload, result]),
@@ -2627,6 +2659,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(decision)),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "on_priority" => Some(vec![
@@ -2637,6 +2670,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(decision)),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "run" => Some(vec![payload]),
@@ -2659,6 +2693,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None,
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
             ]),
             _ => Some(vec![]),
@@ -2691,6 +2726,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 }]),
                 "each" => Some(vec![Type::Fn {
                     params: vec![elem.clone()],
@@ -2698,6 +2734,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 }]),
                 "map" | "flat_map" => Some(vec![Type::Fn {
                     params: vec![elem],
@@ -2705,6 +2742,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 }]),
                 "fold" => Some(vec![
                     Type::Int, // init — sema refines
@@ -2714,6 +2752,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         effect_bound: None,
                         return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 _ => Some(vec![]),
@@ -2741,6 +2780,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: Some(Box::new(Type::Bool)),
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 }]),
                 _ => Some(vec![]),
             }
@@ -2768,6 +2808,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(Type::Int)),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ]),
                 "map" => Some(vec![Type::Fn {
@@ -2775,6 +2816,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None, // sema refines R from the closure's actual return
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 }]),
                 _ => Some(vec![]),
             }

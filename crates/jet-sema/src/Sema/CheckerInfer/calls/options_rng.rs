@@ -78,6 +78,7 @@ impl<'a> Checker<'a> {
                 ret: None, // sema refines R from the closure's actual return
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             };
             let saved_esc = self.lambda_escapes;
             self.lambda_escapes = false;

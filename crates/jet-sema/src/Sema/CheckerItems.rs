@@ -563,12 +563,14 @@ impl<'a> Checker<'a> {
                     .get(index + self_offset)
                     .map(|(convention, _)| *convention)
                     .unwrap_or(crate::AST::AccessConvention::Read),
+                ty: sig.params.get(index + self_offset).map(|(_, ty)| ty),
                 variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
                 core_default: None,
             })
             .collect();
         let bound =
             crate::Sema::CallBinder::bind_call_args(method, &params, args, span, &mut self.diags);
+        self.register_binder_refs(args);
         if bound.is_none() {
             // Nothing bound, so every later check would be about slots that do
             // not exist. Report each argument's own problems only.
@@ -885,6 +887,7 @@ impl<'a> Checker<'a> {
                 zone: param.zone,
                 default: param.default.as_deref(),
                 convention: param.convention,
+                ty: Some(&param.ty),
                 variadic: param.variadic,
                 core_default: None,
             })
@@ -903,6 +906,7 @@ impl<'a> Checker<'a> {
             }
             return sig.return_type.clone();
         }
+        self.register_binder_refs(args);
 
         // `TraitMethodSig` stores a variadic parameter's element type, while
         // the emitted method ABI receives the normalized list. Use the same
