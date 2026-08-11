@@ -1730,6 +1730,7 @@ fn mk(k: Kind) => Query {
 
     #[test]
     fn covers_comptime_const_in_interpolation() {
+        install_comptime_bridge();
         // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
         // value into the interpolation operand, so this needs the full sema pass.
         let src = "\
