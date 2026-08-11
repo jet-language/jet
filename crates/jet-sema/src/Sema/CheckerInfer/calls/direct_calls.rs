@@ -899,7 +899,10 @@ impl<'a> Checker<'a> {
             // `Codegen/CModule.rs`'s `NUL_PANIC`).
             if sig.is_c_abi {
                 for (index, arg) in call.args.iter().enumerate() {
-                    let declaration_index = arg.flags.source_index.unwrap_or(index);
+                    // The binder has already rewritten `call.args` into
+                    // declaration order. `source_index` is only the caller's
+                    // original position for evaluation-order lowering.
+                    let declaration_index = index;
                     let is_string_param = matches!(
                         sig.params.get(declaration_index),
                         Some((_, Type::String))
