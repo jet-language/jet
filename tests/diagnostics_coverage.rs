@@ -272,6 +272,7 @@ fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
     }
     for name in [
         "bind_missing_e3208.txt",
+        "bind_data_invalid_e3208.txt",
         "doctor_l2101.txt",
         "fetch_no_git_e1203.txt",
         "repl_e1801.txt",

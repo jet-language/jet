@@ -45,6 +45,7 @@ mod runtime {
             Null,
             Boolean(bool),
             Number(f64),
+            Integer(i64),
             Text(String),
             Array(Vec<JSON>),
             Object(std::collections::BTreeMap<String, JSON>),
@@ -933,6 +934,5 @@ host_fns! {
     email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
     email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
 }
-
 
 

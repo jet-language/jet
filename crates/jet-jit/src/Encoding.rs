@@ -30,6 +30,7 @@ pub(crate) mod json_rt {
         Null,
         Boolean(bool),
         Number(f64),
+        Integer(i64),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),

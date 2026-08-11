@@ -241,6 +241,7 @@ fn jet_browser_string(value: &jet_std::JSON, key: &str) -> Result<String, JetBro
 
 fn jet_browser_id(value: &jet_std::JSON) -> Option<i64> {
     match jet_browser_get(value, "id") {
+        Some(jet_std::JSON::Integer(value)) if *value >= 0 => Some(*value),
         Some(jet_std::JSON::Number(value))
             if value.is_finite()
                 && value.fract() == 0.0
@@ -324,6 +325,7 @@ fn jet_browser_event_network_facts(
         .unwrap_or_default();
     let status_code = jet_browser_get(params, "response")
         .and_then(|response| match jet_browser_get(response, "status") {
+            Some(jet_std::JSON::Integer(value)) if (0..=599).contains(value) => Some(*value),
             Some(jet_std::JSON::Number(n)) if n.is_finite() && *n >= 0.0 && *n <= 599.0 => {
                 Some(*n as i64)
             }
@@ -446,7 +448,7 @@ fn jet_browser_command_with_timeout(
     let id = state.next_id;
     state.next_id += 1;
     let request = jet_browser_object(vec![
-        ("id", jet_std::JSON::Number(id as f64)),
+        ("id", jet_std::JSON::Integer(id)),
         ("method", jet_browser_text(method)),
         ("params", params),
     ]);
@@ -883,7 +885,7 @@ fn jet_browser_fulfill_request(
         "network.provideResponse",
         jet_browser_object(vec![
             ("request", jet_browser_text(request_id)),
-            ("statusCode", jet_std::JSON::Number(status as f64)),
+            ("statusCode", jet_std::JSON::Integer(status)),
             ("body", body_value),
         ]),
     )

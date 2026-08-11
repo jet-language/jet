@@ -50,6 +50,26 @@ impl __jet_Encode for char {
         jet_std::DataTree::Text(self.to_string())
     }
 }
+impl __jet_Encode for JetDate {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(self.to_string_fmt())
+    }
+}
+impl __jet_Encode for JetLocalTime {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(self.to_string_fmt())
+    }
+}
+impl __jet_Encode for JetDateTime {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(self.format_rfc3339())
+    }
+}
+impl __jet_Encode for jet_std::Duration {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Int(self.ns)
+    }
+}
 impl __jet_Encode for u8 {
     fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
 }
@@ -164,6 +184,37 @@ impl __jet_Decode for char {
             _ => Err(jet_std::FieldError::one(format!(
                 "expected a single Char, found {:?}",
                 s
+            ))),
+        }
+    }
+}
+impl __jet_Decode for JetDate {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        let value = String::jet_decode(t)?;
+        JetDate::parse(&value).map_err(|error| jet_std::FieldError::one(format!("expected Date: {error}")))
+    }
+}
+impl __jet_Decode for JetLocalTime {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        let value = String::jet_decode(t)?;
+        JetLocalTime::parse(&value)
+            .map_err(|error| jet_std::FieldError::one(format!("expected LocalTime: {error}")))
+    }
+}
+impl __jet_Decode for JetDateTime {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        let value = String::jet_decode(t)?;
+        JetDateTime::parse_rfc3339(&value)
+            .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
+    }
+}
+impl __jet_Decode for jet_std::Duration {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        match t {
+            jet_std::DataTree::Int(ns) => Ok(jet_std::Duration { ns: *ns }),
+            other => Err(jet_std::FieldError::one(format!(
+                "expected Duration, found {}",
+                jet_std::datatree_kind(other)
             ))),
         }
     }

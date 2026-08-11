@@ -1322,6 +1322,7 @@
         Null,
         Boolean(bool),
         Number(f64),
+        Integer(i64),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),
@@ -1495,6 +1496,11 @@
             format!("{}ns", self.ns)
         }
     }
+    impl super::JetDebug for Duration {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for JSONError {
         fn jet_show(&self) -> String {
             format!("line {}: {}", self.line, self.message)
@@ -1541,6 +1547,7 @@
         }
         pub fn int(&self) -> Result<i64, String> {
             match self {
+                JSON::Integer(n) => Ok(*n),
                 JSON::Number(f) => {
                     let n = *f as i64;
                     if (n as f64 - f).abs() < 0.5 {
@@ -1575,6 +1582,7 @@
         }
         pub fn float(&self) -> Result<f64, String> {
             match self {
+                JSON::Integer(n) => Ok(*n as f64),
                 JSON::Number(f) => Ok(*f),
                 _ => Err(format!(
                     "expected number, got {}",

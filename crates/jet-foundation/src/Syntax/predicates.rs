@@ -401,9 +401,18 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     }
     prev[b.len()]
 }
-use super::{
-    CORE_EMAIL_MODULE, CORE_MOD_MODULE, STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER,
+use super::core_surface::{
+    CLOCK_TYPE, CORE_EMAIL_MODULE, CORE_MOD_MODULE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE,
+    KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR, STDLIB_DSL_BLOCK_MARKERS, TYPE_DATETIME, TYPE_ERR,
+    TYPE_FRACTION, TYPE_INSTANT, TYPE_PATH, TYPE_REGEX, TYPE_URL,
 };
+use super::effects_surface::KW_STATE_DECL;
+use super::math_layout::{
+    FOREIGN_MATCH, KW_COMPTIME, KW_SWITCH, TYPE_BIT_SET, TYPE_BYTE_BUFFER, TYPE_DATA, TYPE_JSON,
+    TYPE_RESULT,
+};
+use super::package_files::{JET_KEYWORD_LIST, JET_TYPE_LIST};
+use super::{canonical_name_case, NameCase};
 
 /// D-NAME-SIGIL1=A: every compiler-visible generated symbol uses one reserved
 /// machine prefix. Keep this helper below the syntax surface so sema, engines,
@@ -444,6 +453,128 @@ pub fn classify_identifier(name: &str) -> IdentifierClass {
     } else {
         IdentifierClass::Ordinary
     }
+}
+
+/// The complete reserved-name policy for generated, user-visible source.
+///
+/// `JET_KEYWORD_LIST` is the canonical current surface. Contextual `state`
+/// remains legal in ordinary declaration positions, while the additional
+/// spellings below are lexer keywords, literals, or foreign teaching words
+/// that must not be emitted. Generated source must obey the lexer and its
+/// teaching redirects, not the smaller completion list. Type names also share
+/// the canonical built-in/Core tables.
+pub fn is_reserved_generated_name(name: &str) -> bool {
+    (JET_KEYWORD_LIST.contains(&name) && name != KW_STATE_DECL)
+        || matches!(
+            name,
+            KW_MUTATE
+                | KW_MOVE
+                | KW_COPY
+                | KW_CONST
+                | KW_COMPTIME
+                | KW_SWITCH
+                | KW_YIELD
+                | FOREIGN_MATCH
+                | LIT_NULL
+        )
+        || JET_TYPE_LIST.contains(&name)
+        || crate::Collections::is_reserved_type(name)
+        || crate::CoreModuleExports::is_core_type_name(name)
+        || matches!(
+            name,
+            TYPE_DATA
+                | TYPE_JSON
+                | TYPE_REGEX
+                | TYPE_URL
+                | TYPE_PATH
+                | TYPE_DATETIME
+                | CLOCK_TYPE
+                | TYPE_INSTANT
+                | TYPE_FRACTION
+                | TYPE_RESULT
+                | TYPE_ERR
+                | RETIRED_TYPE_ERROR
+        )
+}
+
+/// Turn an external name into a legal, canonical Jet identifier and repair
+/// every lexer/core-reserved result. All binders call this helper so their
+/// generated fields and types cannot drift apart in their name policy.
+pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> String {
+    // Clark-expanded names use `{uri}local` notation. The opening delimiter
+    // is namespace syntax, not part of the generated source identifier.
+    let raw = raw.trim_start_matches(['@', '$']);
+    let raw = raw.strip_prefix('{').unwrap_or(raw);
+    let mut normalized = String::new();
+    let mut previous_lower_or_digit = false;
+    for ch in raw.chars() {
+        if ch == '_' {
+            if !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            previous_lower_or_digit = false;
+        } else if ch.is_alphanumeric() {
+            if case == NameCase::Snake
+                && ch.is_uppercase()
+                && previous_lower_or_digit
+                && !normalized.ends_with('_')
+            {
+                normalized.push('_');
+            }
+            normalized.extend(ch.to_lowercase().take(if case == NameCase::Snake { 1 } else { 0 }));
+            if case == NameCase::Pascal {
+                normalized.push(ch);
+            }
+            previous_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
+        } else if normalized.is_empty() {
+            // Do not turn leading wire punctuation into a source-level
+            // leading underscore. Preserve an explicit leading `_` above.
+            previous_lower_or_digit = false;
+        } else if !normalized.ends_with('_') {
+            normalized.push('_');
+            previous_lower_or_digit = false;
+        }
+    }
+    while normalized.ends_with('_') {
+        normalized.pop();
+    }
+    if normalized.is_empty() {
+        normalized = fallback.to_string();
+    }
+    let mut result = canonical_name_case(&normalized, case);
+    while result.ends_with('_') {
+        result.pop();
+    }
+    if result.is_empty() {
+        result = canonical_name_case(fallback, case);
+    }
+
+    // A preserved soft-public `_` is legal only before an alphabetic name.
+    // Repair `_1name` and other non-identifier starts before the general
+    // leading-character repair below.
+    let body = result.strip_prefix('_').unwrap_or(&result);
+    if body.chars().next().is_some_and(|ch| !ch.is_alphabetic()) {
+        result = body.to_string();
+    }
+    if result.is_empty() {
+        result = canonical_name_case(fallback, case);
+    }
+    let first = result.strip_prefix('_').unwrap_or(&result).chars().next();
+    if first.is_some_and(|ch| !ch.is_alphabetic()) {
+        let prefix = match case {
+            NameCase::Pascal => "Type",
+            NameCase::Snake => "field_",
+        };
+        result.insert_str(0, prefix);
+    }
+    let suffix = match case {
+        NameCase::Pascal => "Type",
+        NameCase::Snake => "_field",
+    };
+    while result == "_" || result.starts_with("__") || is_reserved_generated_name(&result) {
+        result.push_str(suffix);
+    }
+    result
 }
 
 #[cfg(test)]

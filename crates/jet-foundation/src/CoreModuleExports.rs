@@ -108,6 +108,17 @@ pub fn core_leaf_kind(module: &str, leaf: &str) -> Option<CoreLeafKind> {
     lookup(CORE_MODULE_EXPORTS, module, leaf)
 }
 
+/// Whether `name` is a type exported by any registered Core module.
+///
+/// Generated declarations use this same Core export table when choosing a
+/// user-visible type name. Keeping the query here prevents binders from
+/// carrying a second, inevitably stale list of Core names.
+pub fn is_core_type_name(name: &str) -> bool {
+    CORE_MODULE_EXPORTS
+        .iter()
+        .any(|(_, leaves)| leaves.iter().any(|(leaf, _)| *leaf == name))
+}
+
 /// The one generic lookup every module table (production or test) resolves
 /// through — adding a module is a data row here, never a new match arm.
 fn lookup(
