@@ -641,7 +641,14 @@ fn unqualified_file_function_entries(
                             function
                                 .params
                                 .iter()
-                                .map(|param| (param.convention, param.ty.clone()))
+                                .map(|param| {
+                                    let ty = if param.variadic {
+                                        Type::List(Box::new(param.ty.clone()))
+                                    } else {
+                                        param.ty.clone()
+                                    };
+                                    (param.convention, ty)
+                                })
                                 .collect(),
                             function.return_type.clone(),
                         ));
@@ -659,10 +666,12 @@ fn unqualified_file_function_entries(
                     .params
                     .iter()
                     .map(|param| {
-                        (
-                            param.convention,
-                            qualify_unit_type(bundle, target, &param.ty),
-                        )
+                        let ty = if param.variadic {
+                            Type::List(Box::new(param.ty.clone()))
+                        } else {
+                            param.ty.clone()
+                        };
+                        (param.convention, qualify_unit_type(bundle, target, &ty))
                     })
                     .collect(),
                 function
@@ -705,7 +714,14 @@ pub(crate) fn import_sig_map(
                         (alias.clone(), f.name.clone()),
                         f.params
                             .iter()
-                            .map(|p| (p.convention, qualify_unit_type(bundle, target, &p.ty)))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, qualify_unit_type(bundle, target, &ty))
+                            })
                             .collect(),
                     );
                 }
@@ -715,7 +731,14 @@ pub(crate) fn import_sig_map(
                             (alias.clone(), ef.name.clone()),
                             ef.params
                                 .iter()
-                                .map(|p| (p.convention, p.ty.clone()))
+                                .map(|p| {
+                                    let ty = if p.variadic {
+                                        Type::List(Box::new(p.ty.clone()))
+                                    } else {
+                                        p.ty.clone()
+                                    };
+                                    (p.convention, ty)
+                                })
                                 .collect(),
                         );
                     }
@@ -748,7 +771,12 @@ pub(crate) fn import_sig_map(
                             .params
                             .iter()
                             .map(|param| {
-                                (param.convention, qualify_unit_type(bundle, target, &param.ty))
+                                let ty = if param.variadic {
+                                    Type::List(Box::new(param.ty.clone()))
+                                } else {
+                                    param.ty.clone()
+                                };
+                                (param.convention, qualify_unit_type(bundle, target, &ty))
                             })
                             .collect(),
                     );
@@ -771,7 +799,14 @@ pub(crate) fn import_sig_map(
                             (alias.clone(), item.clone()),
                             f.params
                                 .iter()
-                                .map(|p| (p.convention, qualify_unit_type(bundle, real_idx, &p.ty)))
+                                .map(|p| {
+                                    let ty = if p.variadic {
+                                        Type::List(Box::new(p.ty.clone()))
+                                    } else {
+                                        p.ty.clone()
+                                    };
+                                    (p.convention, qualify_unit_type(bundle, real_idx, &ty))
+                                })
                                 .collect(),
                         );
                     }

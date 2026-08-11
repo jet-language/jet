@@ -1373,7 +1373,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lower_one_call_arg(a, conv, env, cx)
                         })
                         .collect();
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: call_return_type_with_args(
                             cx,
                             &mangled_key,
@@ -1387,6 +1387,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             type_args: call.type_args.clone(),
                             args,
                         },
+                    };
+                    return match source_arg_order(&call.args) {
+                        Some(order) => preserve_source_arg_order(
+                            lowered,
+                            &order,
+                            call.args.len(),
+                            call.name_span.start as u32,
+                        ),
+                        None => lowered,
                     };
                 }
                 // c109 Phase 14: unqualified file-module import (`emit_call`'s
@@ -1422,7 +1431,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .cloned()
                         .flatten()
                         .unwrap_or_else(unit_type);
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::Qualified {
@@ -1432,6 +1441,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             type_args: call.type_args.clone(),
                             args,
                         },
+                    };
+                    return match source_arg_order(&call.args) {
+                        Some(order) => preserve_source_arg_order(
+                            lowered,
+                            &order,
+                            call.args.len(),
+                            call.name_span.start as u32,
+                        ),
+                        None => lowered,
                     };
                 }
             }
@@ -1567,9 +1585,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // per-arity function `VariadicBound.rs` synthesizes; record the
             // arity so the post-pass in `Codegen/mod.rs` knows to emit it.
             if let Some((fixed, _bounds)) = cx.variadic_bound_fns.get(&call.name).cloned() {
-                return crate::Codegen::VariadicBound::lower_variadic_bound_call(
+                let lowered = crate::Codegen::VariadicBound::lower_variadic_bound_call(
                     call, fixed, cx, env,
                 );
+                return match source_arg_order(&call.args) {
+                    Some(order) => preserve_source_arg_order(
+                        lowered,
+                        &order,
+                        call.args.len(),
+                        call.name_span.start as u32,
+                    ),
+                    None => lowered,
+                };
             }
             // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
             // decided here, totally — via the shared `lower_one_call_arg` (the single

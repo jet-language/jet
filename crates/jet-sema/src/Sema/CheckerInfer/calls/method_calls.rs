@@ -4335,6 +4335,7 @@ impl<'a> Checker<'a> {
                 *resolved_ret_out = ret.clone();
                 return ret;
             }
+            self.normalize_method_variadic_call(method, &msig, args, span);
             let mut call_access = self.call_access_frame();
             let pre_inferred_method = self.instantiate_method_type_args(
                 &type_name,

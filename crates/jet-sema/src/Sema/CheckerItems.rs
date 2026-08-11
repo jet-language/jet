@@ -238,6 +238,13 @@ impl<'a> Checker<'a> {
         .unwrap_or_default();
         let mut call_access = self.call_access_frame();
         let mut pre_inferred = None;
+        // Bind before receiver-type inference too: generic constructors use
+        // their arguments to infer the owner type, so labels must already be
+        // in declaration order when that inference walks them.
+        if !self.bind_method_args(method, &msig, args, span) {
+            return msig.return_type.clone();
+        }
+        self.normalize_method_variadic_call(method, &msig, args, span);
         if method == "new" && owner_type_args.is_empty() {
             if !declared.is_empty() {
                 let expected = self.expected_type.clone();
@@ -345,9 +352,6 @@ impl<'a> Checker<'a> {
             }
         }
         Self::instantiate_method_sig_from(&mut msig, &declared, owner_type_args);
-        if !self.bind_method_args(method, &msig, args, span) {
-            return msig.return_type.clone();
-        }
         let pre_inferred_method = self.instantiate_method_type_args(
             type_name,
             method,
@@ -537,9 +541,6 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         span: Span,
     ) -> bool {
-        if sig.param_info.is_empty() {
-            return true;
-        }
         // `params` is self-first when there is a receiver; `param_info` already
         // excludes it, so the conventions line up after the skip.
         let self_offset = usize::from(sig.self_conv.is_some());
@@ -579,6 +580,55 @@ impl<'a> Checker<'a> {
         true
     }
 
+    /// Normalize a method's homogeneous rest tail before generic inference.
+    /// Method calls share the free-call binder, but their method signature is
+    /// stored without a `FuncSig`; this adapter gives the one variadic
+    /// normalizer the same declaration-order list slot.
+    pub(crate) fn normalize_method_variadic_call(
+        &mut self,
+        method: &str,
+        sig: &MethodSig,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) {
+        if !sig.param_variadic.last().copied().unwrap_or(false) {
+            return;
+        }
+        let self_offset = usize::from(sig.self_conv.is_some());
+        let mut packed = crate::AST::Call {
+            name: method.to_string(),
+            name_span: span,
+            type_args: Vec::new(),
+            args: std::mem::take(args),
+            resolved_ret: None,
+            range_checked: false,
+            widen_approx: false,
+        };
+        let fake_sig = crate::AST::FuncSig {
+            params: sig.params[self_offset..].to_vec(),
+            root_param: false,
+            return_type: sig.return_type.clone(),
+            return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+            is_extern: false,
+            is_unsafe: false,
+            is_pure: false,
+            is_foreign_thread_safe: false,
+            is_sanitizer: false,
+            is_must_use: sig.must_use,
+            is_c_abi: false,
+            c_abi_name: None,
+            foreign_effect_root: None,
+            param_info: sig.param_info.clone(),
+            param_call: sig.param_call.clone(),
+            defaults: sig.defaults.clone(),
+            param_variadic: sig.param_variadic.clone(),
+            variadic_bounds: None,
+            param_view_from_names: Vec::new(),
+        };
+        self.normalize_variadic_call(&mut packed, &fake_sig);
+        *args = packed.args;
+    }
+
     pub(crate) fn check_method_args(
         &mut self,
         type_name: &str,
@@ -606,44 +656,6 @@ impl<'a> Checker<'a> {
                     checker.record_call_receiver_access(receiver, convention, span);
                 }
             });
-        }
-
-        // D-VARIADIC1: pack a method rest-parameter the same way free functions do
-        // (I8). After packing, arity is the fixed non-self count (last slot = list).
-        if sig.param_variadic.last().copied().unwrap_or(false) {
-            let self_offset = usize::from(sig.self_conv.is_some());
-            let mut packed = crate::AST::Call {
-                name: method.to_string(),
-                name_span: span,
-                type_args: Vec::new(),
-                args: std::mem::take(args),
-                resolved_ret: None,
-                range_checked: false,
-                widen_approx: false,
-            };
-            let fake_sig = crate::AST::FuncSig {
-                params: sig.params[self_offset..].to_vec(),
-                root_param: false,
-                return_type: sig.return_type.clone(),
-                return_view_provenance: crate::AST::ViewProvenanceCell::new(),
-                is_extern: false,
-                is_unsafe: false,
-                is_pure: false,
-                is_foreign_thread_safe: false,
-                is_sanitizer: false,
-                is_must_use: sig.must_use,
-                is_c_abi: false,
-                c_abi_name: None,
-                foreign_effect_root: None,
-                param_info: sig.param_info.clone(),
-                param_call: sig.param_call.clone(),
-                defaults: sig.defaults.clone(),
-                param_variadic: sig.param_variadic.clone(),
-                variadic_bounds: None,
-                param_view_from_names: Vec::new(),
-            };
-            self.normalize_variadic_call(&mut packed, &fake_sig);
-            *args = packed.args;
         }
 
         if args.len() != expected_args {
@@ -851,7 +863,7 @@ impl<'a> Checker<'a> {
         method: &str,
         sig: &crate::AST::TraitMethodSig,
         receiver: &Expr,
-        args: &mut [crate::AST::CallArg],
+        args: &mut Vec<crate::AST::CallArg>,
         span: Span,
     ) -> Option<Type> {
         let (receiver_param, params) = sig
@@ -861,13 +873,115 @@ impl<'a> Checker<'a> {
             .map_or((None, sig.params.as_slice()), |(receiver, params)| {
                 (Some(receiver), params)
             });
-        if args.len() != params.len() {
+
+        // Trait-object dispatch has no `FuncSig`, but its `Param` rows carry
+        // the same public contract. Feed those rows to the one binder before
+        // any dynamic-dispatch arity or type work, just as static methods do.
+        let bind_params: Vec<crate::Sema::CallBinder::BindParam<'_>> = params
+            .iter()
+            .map(|param| crate::Sema::CallBinder::BindParam {
+                label: param.call_label(),
+                name: &param.name,
+                zone: param.zone,
+                default: param.default.as_deref(),
+                convention: param.convention,
+                variadic: param.variadic,
+                core_default: None,
+            })
+            .collect();
+        if crate::Sema::CallBinder::bind_call_args(
+            method,
+            &bind_params,
+            args,
+            span,
+            &mut self.diags,
+        )
+        .is_none()
+        {
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return sig.return_type.clone();
+        }
+
+        // `TraitMethodSig` stores a variadic parameter's element type, while
+        // the emitted method ABI receives the normalized list. Use the same
+        // normalizer as free and concrete methods for homogeneous rest
+        // parameters. Trait-bounded heterogeneous rests remain source-sized
+        // here; their dynamic ABI has no single list element type.
+        let variadic = params.last().is_some_and(|param| param.variadic);
+        let homogeneous_variadic = variadic
+            && params
+                .last()
+                .is_none_or(|param| param.variadic_bound_list.is_none());
+        if homogeneous_variadic {
+            let fake_sig = crate::AST::FuncSig {
+                params: params
+                    .iter()
+                    .map(|param| {
+                        let ty = if param.variadic {
+                            crate::AST::Type::List(Box::new(param.ty.clone()))
+                        } else {
+                            param.ty.clone()
+                        };
+                        (param.convention, ty)
+                    })
+                    .collect(),
+                root_param: false,
+                return_type: sig.return_type.clone(),
+                return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+                is_extern: false,
+                is_unsafe: false,
+                is_pure: sig.is_pure,
+                is_foreign_thread_safe: false,
+                is_sanitizer: false,
+                is_must_use: false,
+                is_c_abi: false,
+                c_abi_name: None,
+                foreign_effect_root: None,
+                param_info: params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.default.is_some()))
+                    .collect(),
+                param_call: params
+                    .iter()
+                    .map(|param| (param.call_label().to_string(), param.zone))
+                    .collect(),
+                defaults: params
+                    .iter()
+                    .map(|param| param.default.as_deref().cloned())
+                    .collect(),
+                param_variadic: params.iter().map(|param| param.variadic).collect(),
+                variadic_bounds: None,
+                param_view_from_names: Vec::new(),
+            };
+            let mut packed = crate::AST::Call {
+                name: method.to_string(),
+                name_span: span,
+                type_args: Vec::new(),
+                args: std::mem::take(args),
+                resolved_ret: None,
+                range_checked: false,
+                widen_approx: false,
+            };
+            self.normalize_variadic_call(&mut packed, &fake_sig);
+            *args = packed.args;
+        }
+
+        let expected_args = params.len();
+        let fixed = params.len().saturating_sub(1);
+        let arity_ok = if variadic && !homogeneous_variadic {
+            args.len() >= fixed
+        } else {
+            args.len() == expected_args
+        };
+        if !arity_ok {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
                     "`{method}` expects {} argument{}, got {}",
-                    params.len(),
-                    if params.len() == 1 { "" } else { "s" },
+                    expected_args,
+                    if expected_args == 1 { "" } else { "s" },
                     args.len()
                 ),
                 "every argument must match a parameter (not counting `self`)".to_string(),
@@ -892,14 +1006,24 @@ impl<'a> Checker<'a> {
                 }
             });
         }
-        for (arg, param) in args.iter_mut().zip(params) {
-            if param.convention == AccessConvention::Read && !param.ty.is_scalar() {
+        for (index, arg) in args.iter_mut().enumerate() {
+            let Some(param) = params
+                .get(if variadic && index >= fixed { fixed } else { index })
+            else {
+                continue;
+            };
+            let param_ty = if variadic && homogeneous_variadic && index >= fixed {
+                Type::List(Box::new(param.ty.clone()))
+            } else {
+                param.ty.clone()
+            };
+            if param.convention == AccessConvention::Read && !param_ty.is_scalar() {
                 self.borrow_ctx = true;
             }
             let saved_expected = self.expected_type.clone();
-            self.expected_type = Some(param.ty.clone());
+            self.expected_type = Some(param_ty.clone());
             let arg_ty = self.with_call_access(&mut call_access, |checker| {
-                checker.check_call_argument_access(arg, param.convention, &param.ty, true);
+                checker.check_call_argument_access(arg, param.convention, &param_ty, true);
                 let inferred = checker.infer(&mut arg.expr);
                 checker.check_call_argument_captures(&arg.expr);
                 inferred
@@ -909,21 +1033,21 @@ impl<'a> Checker<'a> {
                 let arg_ty = self.widen_numeric_argument(
                     &mut arg.expr,
                     arg_ty,
-                    &param.ty,
+                    &param_ty,
                     param.convention,
                 );
                 let reported =
-                    self.check_type_assignable(&param.ty, &arg_ty, arg.expr.span());
-                if !reported && arg_ty != param.ty {
+                    self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                if !reported && arg_ty != param_ty {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
                             "`{method}` wants {}, but this is {}",
-                            param.ty.show(),
+                            param_ty.show(),
                             arg_ty.show()
                         ),
                         "every argument must match its parameter's type".to_string(),
-                        type_fix_hint(&param.ty, &arg_ty),
+                        type_fix_hint(&param_ty, &arg_ty),
                         Some(arg.expr.span()),
                     ));
                 }

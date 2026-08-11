@@ -726,11 +726,17 @@ fn semantic_shape(
         SymKind::Function {
             params,
             param_contract,
+            param_variadic,
             ret,
             effects,
             effect_via,
         } => {
-            let params = function_parameter_parts(params, param_contract).join(", ");
+            let params = function_parameter_parts(
+                params,
+                param_contract,
+                param_variadic,
+            )
+            .join(", ");
             let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
             let arrow = if let Some((param, _)) = effect_via {
                 format!(" =[via {param}]=>")

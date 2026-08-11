@@ -136,8 +136,13 @@ pub(crate) fn bind_call_args(
     call_span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Binding> {
-    let mut slots: Vec<Option<usize>> = vec![None; params.len()];
+    // A variadic parameter is one declaration slot but may receive many
+    // written arguments. Keep every source index instead of collapsing the
+    // tail to its first argument; the variadic normalizer packs the tail only
+    // after the call has been bound.
+    let mut slots: Vec<Vec<usize>> = vec![Vec::new(); params.len()];
     let mut first_label: Option<Span> = None;
+    let mut next_positional = 0usize;
     let mut ok = true;
 
     for (index, arg) in args.iter().enumerate() {
@@ -156,12 +161,25 @@ pub(crate) fn bind_call_args(
                     continue;
                 }
                 // Positional arguments fill declaration order from the left.
-                match params.get(index) {
+                // Once the fixed parameters are full, a final variadic slot
+                // owns every remaining bare argument.
+                while next_positional < params.len()
+                    && !params[next_positional].variadic
+                    && !slots[next_positional].is_empty()
+                {
+                    next_positional += 1;
+                }
+                match params.get(next_positional) {
                     Some(param) if param.zone == ParamZone::LabelOnly => {
                         diags.push(label_required(callee, param.label, arg.span));
                         ok = false;
                     }
-                    Some(_) => slots[index] = Some(index),
+                    Some(param) => {
+                        slots[next_positional].push(index);
+                        if !param.variadic {
+                            next_positional += 1;
+                        }
+                    }
                     // Arity is reported by the caller's own check.
                     None => {}
                 }
@@ -180,12 +198,12 @@ pub(crate) fn bind_call_args(
                     ok = false;
                     continue;
                 }
-                if slots[position].is_some() {
+                if !slots[position].is_empty() {
                     diags.push(repeated_label(callee, label, *label_span));
                     ok = false;
                     continue;
                 }
-                slots[position] = Some(index);
+                slots[position].push(index);
             }
         }
     }
@@ -197,7 +215,7 @@ pub(crate) fn bind_call_args(
     let missing: Vec<usize> = slots
         .iter()
         .enumerate()
-        .filter(|(position, slot)| slot.is_none() && !params[*position].optional())
+        .filter(|(position, slot)| slot.is_empty() && !params[*position].optional())
         .map(|(position, _)| position)
         .collect();
 
@@ -237,17 +255,17 @@ pub(crate) fn bind_call_args(
 fn rewrite(
     params: &[BindParam<'_>],
     args: &mut Vec<CallArg>,
-    slots: &[Option<usize>],
+    slots: &[Vec<usize>],
     call_span: Span,
 ) -> Binding {
-    // Arguments the binder never placed (a variadic tail, or an arity error
-    // the caller reports) keep their written order after the bound prefix.
+    // Arguments the binder never placed (an arity error the caller reports)
+    // keep their written order after the bound prefix.
     let mut taken: Vec<Option<CallArg>> = args.drain(..).map(Some).collect();
     let mut sources = Vec::with_capacity(params.len());
 
-    for (position, slot) in slots.iter().enumerate() {
-        match slot {
-            Some(index) => {
+    for (position, indices) in slots.iter().enumerate() {
+        if !indices.is_empty() {
+            for index in indices {
                 let mut arg = taken[*index]
                     .take()
                     .expect("each argument binds to at most one parameter");
@@ -257,32 +275,37 @@ fn rewrite(
                 args.push(arg);
                 sources.push(ArgSource::Written(*index));
             }
-            None => {
-                let Some(default) = params[position].default_expr(call_span) else {
-                    // A variadic rest parameter, or a slot a diagnostic
-                    // already covered. Nothing to place.
-                    continue;
-                };
-                let earlier: Vec<String> = params
-                    .iter()
-                    .take(position)
-                    .map(|p| p.name.to_string())
-                    .collect();
-                args.push(CallArg {
-                    convention: params[position].convention,
-                    expr: super::substitute_param_refs(default, &earlier, args),
-                    span: call_span,
-                    flags: Default::default(),
-                    label: None,
-                    spread: false,
-                });
-                sources.push(ArgSource::Default);
-            }
+            continue;
         }
-    }
-    for arg in taken.into_iter().flatten() {
-        args.push(arg);
+        let Some(default) = params[position].default_expr(call_span) else {
+            // A variadic rest parameter, or a slot a diagnostic already
+            // covered. Nothing to place.
+            continue;
+        };
+        let earlier: Vec<String> = params
+            .iter()
+            .take(position)
+            .map(|p| p.name.to_string())
+            .collect();
+        args.push(CallArg {
+            convention: params[position].convention,
+            expr: super::substitute_param_refs(default, &earlier, args),
+            span: call_span,
+            flags: Default::default(),
+            label: None,
+            spread: false,
+        });
         sources.push(ArgSource::Default);
+    }
+    for (index, arg) in taken.into_iter().enumerate() {
+        if let Some(arg) = arg {
+            args.push(arg);
+            // This is a written argument that had no declaration slot. Keep
+            // its source identity so the normal arity diagnostic does not
+            // turn it into a fake default and source-order lowering stays
+            // truthful.
+            sources.push(ArgSource::Written(index));
+        }
     }
     let binding = Binding { sources };
     if binding.is_source_ordered() {

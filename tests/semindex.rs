@@ -957,6 +957,33 @@ fn run() {
 }
 
 #[test]
+fn semindex_dossier_preserves_method_call_contract() {
+    let src = r#"
+struct Client {
+    host: String
+}
+
+impl Client {
+    fn connect(self, host: String, /, timeout seconds: Int = 30, *, tls enabled: Bool = true, rest: ...String) => String {
+        return host
+    }
+}
+
+fn run() {}
+"#;
+    let path = temp_fixture("dossier_method_contract.jet", src);
+    let dossier = open(&path).expect("method contract fixture indexes").dossier("Client");
+    let connect = dossier
+        .members
+        .iter()
+        .find(|member| member.name == "connect")
+        .expect("connect method fact");
+    assert!(connect.signature.contains("timeout seconds: Int"), "{}", connect.signature);
+    assert!(connect.signature.contains("*, tls enabled: Bool"), "{}", connect.signature);
+    assert!(connect.signature.contains("rest: ...String"), "{}", connect.signature);
+}
+
+#[test]
 fn semindex_dossier_bypass_facts() {
     // D-LINTPOLICY1=A (the override law, card #505): every spelled bypass
     // — `#Unsafe(reason)` region, `#Unsafe(reason) fn`, `.drop(reason)`, and

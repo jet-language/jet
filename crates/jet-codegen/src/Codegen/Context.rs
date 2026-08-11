@@ -3250,7 +3250,12 @@ pub(crate) fn build_cx_items(
                             .collect(),
                         ret: f.return_type.clone().map(Box::new),
                         effect_bound: None,
-                        param_contract: None,
+                        param_contract: (!f.params.is_empty()).then(|| {
+                            f.params
+                                .iter()
+                                .map(|p| (p.call_label().to_string(), p.zone))
+                                .collect()
+                        }),
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
@@ -3415,7 +3420,14 @@ pub(crate) fn build_cx_items(
                         m.params
                             .iter()
                             .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, ty)
+                            })
                             .collect(),
                     );
                     cx.method_rets
@@ -3539,15 +3551,41 @@ pub(crate) fn build_cx_items(
                             );
                             cx.sigs.insert(
                                 mangled.clone(),
-                                f.params.iter().map(|p| (p.convention, p.ty.clone())).collect(),
+                                f.params
+                                    .iter()
+                                    .map(|p| {
+                                        let ty = if p.variadic {
+                                            Type::List(Box::new(p.ty.clone()))
+                                        } else {
+                                            p.ty.clone()
+                                        };
+                                        (p.convention, ty)
+                                    })
+                                    .collect(),
                             );
                             cx.fn_types.insert(
                                 mangled.clone(),
                                 Type::Fn {
-                                    params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                                    params: f
+                                        .params
+                                        .iter()
+                                        .map(|p| {
+                                            if p.variadic {
+                                                Type::List(Box::new(p.ty.clone()))
+                                            } else {
+                                                p.ty.clone()
+                                            }
+                                        })
+                                        .collect(),
                                     ret: f.return_type.clone().map(Box::new),
-                                    effect_bound: None, return_view_provenance: None,
-                                    param_contract: None,
+                                    effect_bound: None,
+                                    return_view_provenance: f.return_view_provenance.clone(),
+                                    param_contract: (!f.params.is_empty()).then(|| {
+                                        f.params
+                                            .iter()
+                                            .map(|p| (p.call_label().to_string(), p.zone))
+                                            .collect()
+                                    }),
                                 },
                             );
                             cx.fn_param_names.insert(
@@ -3948,7 +3986,14 @@ fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
     f.params
         .iter()
         .filter(|p| p.name != Syntax::KW_SELF)
-        .map(|p| (p.convention, p.ty.clone()))
+        .map(|p| {
+            let ty = if p.variadic {
+                Type::List(Box::new(p.ty.clone()))
+            } else {
+                p.ty.clone()
+            };
+            (p.convention, ty)
+        })
         .collect()
 }
 

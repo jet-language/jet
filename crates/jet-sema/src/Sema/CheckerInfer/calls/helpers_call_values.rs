@@ -145,36 +145,39 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // D-APILABEL1=A: a function type may declare a call contract; a call
-            // through such a value honours its labels and zones.
-            if let Some(contract) = &param_contract {
-                let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
-                    .iter()
-                    
-                    .map(|(label, zone)| crate::Sema::CallBinder::BindParam {
-                        label,
-                        name: label,
-                        zone: *zone,
-                        default: None,
-                        convention: AccessConvention::Read,
-                        variadic: false,
-                        core_default: None,
-                    })
-                    .collect();
-                let mut owned: Vec<crate::AST::CallArg> = args.to_vec();
-                let callee_name = match callee.as_ref() {
-                    Expr::Ident(name, _) => name.clone(),
-                    _ => "this function value".to_string(),
-                };
-                if crate::Sema::CallBinder::bind_call_args(
-                    &callee_name, &bind, &mut owned, span, &mut self.diags,
-                )
-                .is_some()
-                    && owned.len() == args.len()
-                {
-                    args.clone_from_slice(&owned);
+            // D-APILABEL1=A: every function value call goes through the one
+            // binder. An absent contract is an unlabelled function type, so
+            // the empty contract still rejects a written label as E0764 while
+            // leaving bare arguments in their ordinary positional shape.
+            let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = param_contract
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|(label, zone)| crate::Sema::CallBinder::BindParam {
+                    label,
+                    name: label,
+                    zone: *zone,
+                    default: None,
+                    convention: AccessConvention::Read,
+                    variadic: false,
+                    core_default: None,
+                })
+                .collect();
+            let mut owned: Vec<crate::AST::CallArg> = args.to_vec();
+            let callee_name = match callee.as_ref() {
+                Expr::Ident(name, _) => name.clone(),
+                _ => "this function value".to_string(),
+            };
+            let bound = crate::Sema::CallBinder::bind_call_args(
+                &callee_name, &bind, &mut owned, span, &mut self.diags,
+            );
+            if bound.is_none() || owned.len() != args.len() {
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
                 }
+                return ret.map(|r| *r);
             }
+            args.clone_from_slice(&owned);
             if args.len() != params.len() {
                 self.diags.push(Diagnostic::error(
                     "E0104",

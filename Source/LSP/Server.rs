@@ -1104,11 +1104,16 @@ fn signature_help_response(
         SymKind::Function {
             params,
             param_contract,
+            param_variadic,
             ret,
             effects,
             effect_via,
         } => {
-            let parts = jet_semindex::function_parameter_parts(params, param_contract);
+            let parts = jet_semindex::function_parameter_parts(
+                params,
+                param_contract,
+                param_variadic,
+            );
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
             if let Some((param, _)) = effect_via {
                 label.push_str(" =[via ");
