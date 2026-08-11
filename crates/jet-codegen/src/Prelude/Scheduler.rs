@@ -91,6 +91,7 @@ where
             f()
         }));
         flag.set(previous);
+        jet_std::jet_task_deadline_clear_pending();
         result
     })
 }

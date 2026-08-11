@@ -1,6 +1,22 @@
 // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: canonical task-group ownership.
 // This exact Prelude source is compiled for JIT hosts and embedded in AOT
 // programs. Engines supply only representation-specific cancel/join adapters.
+thread_local! {
+    static JET_TASK_DEADLINE_PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn jet_task_deadline_mark_pending() {
+    JET_TASK_DEADLINE_PENDING.with(|pending| pending.set(true));
+}
+
+pub fn jet_task_deadline_pending() -> bool {
+    JET_TASK_DEADLINE_PENDING.with(|pending| pending.get())
+}
+
+pub fn jet_task_deadline_clear_pending() {
+    JET_TASK_DEADLINE_PENDING.with(|pending| pending.set(false));
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JetTaskFailure {
     Cancelled,
@@ -164,8 +180,9 @@ impl<T> JetTaskGroupRuntime<T> {
         true
     }
 
-    pub fn close_with<J>(&self, mut join: J)
+    fn close_with_mode<C, J>(&self, cancel_children: bool, mut cancel: C, mut join: J)
     where
+        C: FnMut(&T),
         J: FnMut(T),
     {
         if !self.begin_close() {
@@ -179,6 +196,11 @@ impl<T> JetTaskGroupRuntime<T> {
             if children.is_empty() {
                 break;
             }
+            if cancel_children {
+                for child in &children {
+                    cancel(child);
+                }
+            }
             for child in children {
                 // D-CONC-FAIL1=A: lexical close joins and discards child outcomes.
                 // A child failure remains observable only through that child's
@@ -187,6 +209,21 @@ impl<T> JetTaskGroupRuntime<T> {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| join(child)));
             }
         }
+    }
+
+    pub fn close_with<J>(&self, join: J)
+    where
+        J: FnMut(T),
+    {
+        self.close_with_mode(false, |_| {}, join);
+    }
+
+    pub fn close_with_cancel<C, J>(&self, cancel: C, join: J)
+    where
+        C: FnMut(&T),
+        J: FnMut(T),
+    {
+        self.close_with_mode(true, cancel, join);
     }
 }
 

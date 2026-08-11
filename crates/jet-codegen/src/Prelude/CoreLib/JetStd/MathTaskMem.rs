@@ -241,10 +241,17 @@
     }
 
     trait JetTaskGroupChild: Send + Sync {
+        fn cancel(&self);
         fn join(&self);
     }
 
     impl<T: Send + 'static> JetTaskGroupChild for JetTaskState<T> {
+        fn cancel(&self) {
+            if self.handle.lock().unwrap().is_some() {
+                self.control.cancel();
+            }
+        }
+
         fn join(&self) {
             if let Some(handle) = self.handle.lock().unwrap().take() {
                 // Group cleanup is not a parent wait point. The shared drain
@@ -309,7 +316,12 @@
         }
 
         pub fn close(&self) {
-            self.children.close_with(|child| child.join());
+            if jet_task_deadline_pending() {
+                self.children
+                    .close_with_cancel(|child| child.cancel(), |child| child.join());
+            } else {
+                self.children.close_with(|child| child.join());
+            }
         }
     }
 

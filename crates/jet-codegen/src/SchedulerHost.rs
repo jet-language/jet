@@ -75,6 +75,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = jet_std::jet_task_deadline(wait_kind).render();
+    jet_std::jet_task_deadline_mark_pending();
     if jet_scheduler_panic_should_unwind()
         || jet_scheduler_wait_boundary_should_unwind()
         || jet_typed_deadline_boundary_should_unwind()

@@ -257,7 +257,8 @@ fn take_rich_panic_reason() -> Option<String> {
 
 extern "C" fn jet_jit_pending_exit_status() -> i64 {
     let pending = PENDING_SHIELD_EXIT.with(|slot| slot.get() != 0);
-    i64::from(pending || with_runtime_mut(|rt| rt.deadline_exceeded.is_some()))
+    let deadline = jet_codegen::task_group::jet_task_deadline_pending();
+    i64::from(pending || deadline)
 }
 
 /// Complete a control transfer after the top-level Cranelift frame returned.
@@ -680,6 +681,7 @@ extern "C" fn jet_jit_shield_enter() {
 extern "C" fn jet_jit_shield_leave() -> i64 {
     let exit = jet_scheduler_shield_leave_status();
     if matches!(exit, JetShieldExit::Deadline) {
+        jet_codegen::task_group::jet_task_deadline_mark_pending();
         with_runtime_mut(|rt| {
             rt.set_deadline(jet_codegen::task_group::jet_task_deadline("shield exit").render())
         });
@@ -748,7 +750,7 @@ fn close_task_group(group: i64) -> i64 {
         return JitWaitStatus::Ready as i64;
     };
     // Keep group slot live through shared drain: joined children may register.
-    children.close_with(|task| {
+    let join = |task: i64| {
         let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
         if let Some(join) = join {
             // A lexical group's close has no result surface. It still waits
@@ -757,7 +759,21 @@ fn close_task_group(group: i64) -> i64 {
             // normal close does not request cancellation from the child.
             join.drain();
         }
-    });
+    };
+    if jet_codegen::task_group::jet_task_deadline_pending() {
+        children.close_with_cancel(
+            |task| {
+                with_runtime_mut(|rt| {
+                    if rt.tasks[*task as usize].is_some() {
+                        rt.task_controls[*task as usize].cancel();
+                    }
+                });
+            },
+            join,
+        );
+    } else {
+        children.close_with(join);
+    }
     with_runtime_mut(|rt| {
         let _ = rt.task_groups[group as usize].take();
     });
