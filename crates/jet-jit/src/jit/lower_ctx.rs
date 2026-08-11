@@ -21716,10 +21716,12 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(merge_block);
         self.b.seal_block(merge_block);
         self.dead = !(then_reaches_merge || else_reaches_merge);
-        Ok(ret_ty.map_or_else(
-            || self.b.ins().iconst(types::I8, 0),
-            |_| self.b.block_params(merge_block)[0],
-        ))
+        let result = if ret_ty.is_some() {
+            self.b.block_params(merge_block)[0]
+        } else {
+            self.b.ins().iconst(types::I8, 0)
+        };
+        Ok(result)
     }
 
     fn lower_datatree_if_let_expr(
@@ -21851,10 +21853,12 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(merge_block);
         self.b.seal_block(merge_block);
         self.dead = !(then_reaches_merge || else_reaches_merge);
-        Ok(ret_ty.map_or_else(
-            || self.b.ins().iconst(types::I8, 0),
-            |_| self.b.block_params(merge_block)[0],
-        ))
+        let result = if ret_ty.is_some() {
+            self.b.block_params(merge_block)[0]
+        } else {
+            self.b.ins().iconst(types::I8, 0)
+        };
+        Ok(result)
     }
 
     fn lower_enum_if_let_expr(
