@@ -127,9 +127,9 @@ $wide :: 2.5
 $label :: "ready"
 
 fn run() {
-    print(narrow)
-    print(wide)
-    print(label)
+    print($narrow)
+    print($wide)
+    print($label)
 }
 "#,
             "run",
@@ -441,9 +441,9 @@ fn mk() {
 
     #[test]
     fn covers_unsafe_fn_with_ptr_ops() {
-        // c109 Phase 18: a `#Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
+        // c109 Phase 18: a `#Unsafe("reason") fn` (S58) is covered — it lowers to `unsafe fn`, and
         // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) => Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+        let src = "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) => Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
         assert!(covers_with_mem(src, "read_reg"));
     }
 
@@ -582,7 +582,7 @@ fn mk() {
 
     #[test]
     fn covers_while_form() {
-        let src = "fn f() {\n x :: 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
+        let src = "fn f() {\n x :: 0\n loop x < 3 {\n x = (x + 1)\n }\n print(x)\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -1736,7 +1736,7 @@ fn mk(k: Kind) => Query {
         let src = "\
 $header :: \"<html>\"
 fn wrap(s: String) => String {
-    return \"{header}: {s}\"
+    return \"{$header}: {s}\"
 }
 ";
         assert!(covers(src, "wrap"));
