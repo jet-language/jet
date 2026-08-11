@@ -122,11 +122,11 @@
         install_comptime_bridge();
         let lowered = lower_after_sema(
             r#"
-$narrow :: F32.{16777217.0}
-$wide :: 2.5
-$label :: "ready"
-
 fn run() {
+    $narrow :: F32.{16777217.0}
+    $wide :: 2.5
+    $label :: "ready"
+
     print($narrow)
     print($wide)
     print($label)
@@ -134,32 +134,31 @@ fn run() {
 "#,
             "run",
         );
-        let printed: Vec<_> = lowered
+        // Marked uses lower as `CtLit`; the exact scalar literal nodes are the
+        // sema-baked initializers of the local comptime bindings.
+        let literals: Vec<_> = lowered
             .body
             .iter()
             .filter_map(|stmt| match stmt {
-                TStmt::ExprStmt(TExpr {
-                    kind: TExprKind::Print(value),
-                    ..
-                }) => Some(value.as_ref()),
+                TStmt::Let { init, .. } => Some(init),
                 _ => None,
             })
             .collect();
 
-        assert_eq!(printed.len(), 3);
-        assert_eq!(printed[0].ty, Type::Float32);
+        assert_eq!(literals.len(), 3);
+        assert_eq!(literals[0].ty, Type::Float32);
         assert!(matches!(
-            printed[0].kind,
+            literals[0].kind,
             TExprKind::FloatLit(value) if value == 16_777_216.0
         ));
-        assert_eq!(printed[1].ty, Type::Float);
+        assert_eq!(literals[1].ty, Type::Float);
         assert!(matches!(
-            printed[1].kind,
+            literals[1].kind,
             TExprKind::FloatLit(value) if value == 2.5
         ));
-        assert_eq!(printed[2].ty, Type::String);
+        assert_eq!(literals[2].ty, Type::String);
         assert!(matches!(
-            &printed[2].kind,
+            &literals[2].kind,
             TExprKind::StrLit(parts)
                 if matches!(parts.as_slice(), [TStrPart::Lit(text)] if text == "ready")
         ));
@@ -1731,15 +1730,15 @@ fn mk(k: Kind) => Query {
 
     #[test]
     fn covers_comptime_const_in_interpolation() {
-        // c109 Phase 24: a comptime const inlines its value at the use site
-        // (`cx.consts`), so a fn interpolating a const routes.
+        // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
+        // value into the interpolation operand, so this needs the full sema pass.
         let src = "\
 $header :: \"<html>\"
 fn wrap(s: String) => String {
     return \"{$header}: {s}\"
 }
 ";
-        assert!(covers(src, "wrap"));
+        assert!(covers_after_sema(src, "wrap"));
     }
 
     #[test]
