@@ -122,7 +122,7 @@ pub const NAME_SEGMENT_SEP: &str = "-";
 pub const NS_ENV: &str = "env";
 pub const NS_SYSTEM: &str = "system";
 pub const NS_IMAGE: &str = "image";
-/// D-JPK-PROFILE1=D: a source-backed package profile declaration.
+/// D-JPK-PROFILE1=D: a source-backed package generation declaration.
 pub const NS_PROFILE: &str = "profile";
 
 /// D-WORKSPACE2 (ratified 2026-06-25, option A): the monorepo index is the
@@ -235,8 +235,9 @@ pub const SYSTEM_FIELD_TARGET: &str = "target";
 pub const SYSTEM_FIELD_PACKAGES: &str = "packages";
 pub const SYSTEM_FIELD_SERVICES: &str = "services";
 pub const SYSTEM_FIELD_OPTIONS: &str = "options";
-/// D-JPK-PROFILE1=D: package-profile fields. Profiles are source-backed
-/// package sets; generation switching belongs to the shared profile engine.
+/// D-JPK-PROFILE1=D: package-generation fields. `profile.<name>` declarations
+/// are source-backed package sets; generation switching belongs to the shared
+/// generation engine.
 pub const PROFILE_FIELD_EXTENDS: &str = "extends";
 pub const PROFILE_FIELD_PACKAGES: &str = "packages";
 pub const PROFILE_FIELD_COLLISIONS: &str = "collisions";
@@ -552,8 +553,12 @@ pub const ENV_FIELD_LANGUAGES: &str = "languages";
 pub const ENV_FIELD_VARIABLES: &str = "variables";
 /// D-ENV-FILES1: managed project-relative file declarations.
 pub const ENV_FIELD_FILES: &str = "files";
-/// D-ENV-FACET1: select one declared environment profile (`env.<name>`).
-pub const ENV_FLAG_ENV_PROFILE: &str = "--env-profile";
+/// D-ENVFLAG1=A/D-ENV-FACET1: select one declared environment module
+/// (`env.<name>`). This is the environment axis; `--preset` selects a
+/// declared composition.
+pub const ENV_FLAG_ENV: &str = "--env";
+/// D-ENVFLAG1=A: retired input only; this spelling is never an alias.
+pub const ENV_FLAG_ENV_RETIRED: &str = "--env-profile";
 pub const ENV_FLAG_PRESET: &str = "--preset";
 /// D-CONF-WORD1=A: the retired spelling, kept only to teach `--preset`.
 pub const ENV_FLAG_PROFILE_RETIRED: &str = "--profile";

@@ -65,9 +65,10 @@ pub(super) struct Flags {
     /// D-ENV-PROFILE1, renamed by D-CONF-WORD1=A: the named environment
     /// composition to enter, declared under `presets:`.
     pub(super) preset: Option<String>,
-    /// D-ENV-FACET1: explicit selector for one `env.<name>` contribution.
-    /// Separate from `--preset`, which selects a declared composition.
-    pub(super) environment_profile: Option<String>,
+    /// D-ENVFLAG1=A: explicit selector for one `env.<name>`
+    /// environment module. Separate from `--preset`, which selects a
+    /// declared composition.
+    pub(super) environment: Option<String>,
     /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
     /// of editing `env.jet` with a plain package ref.
     pub(super) adapt: bool,
@@ -163,7 +164,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         studio_serve: None,
         studio_host: None,
         preset: None,
-        environment_profile: None,
+        environment: None,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -193,10 +194,10 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                     flags.preset = Some(name.clone());
                 }
             }
-            a if a == Syntax::ENV_FLAG_ENV_PROFILE => {
+            a if a == Syntax::ENV_FLAG_ENV => {
                 i += 1;
                 if let Some(name) = args.get(i) {
-                    flags.environment_profile = Some(name.clone());
+                    flags.environment = Some(name.clone());
                 }
             }
             "--adapt" => flags.adapt = true,
@@ -361,6 +362,10 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
     }
 }
 
+pub(super) fn before_argument_separator(args: &[String]) -> &[String] {
+    args.split(|arg| arg == "--").next().unwrap_or(args)
+}
+
 /// Entry point. Returns a process exit code.
 pub fn main(args: Vec<String>) -> i32 {
     let Some((verb, rest)) = args.split_first() else {
@@ -379,9 +384,32 @@ pub fn main(args: Vec<String>) -> i32 {
         theme.error_coded(&diag.code, &diag.what, &diag.why, &diag.fix);
         return 2;
     }
+    let before_separator = before_argument_separator(rest);
+    // D-ENVFLAG1=A: the retired selector teaches `--env`; it is never an alias.
+    if before_separator.iter().any(|a| {
+        a == Syntax::ENV_FLAG_ENV_RETIRED
+            || a.starts_with(&format!("{}=", Syntax::ENV_FLAG_ENV_RETIRED))
+    }) {
+        let theme = Theme::resolve_choice(color);
+        // E1342 is the registered retired-spelling row; these messages supply
+        // the environment-module teaching for this retired flag.
+        theme.error_coded(
+            "E1342",
+            &format!("`{}` is retired", Syntax::ENV_FLAG_ENV_RETIRED),
+            "the environment selector chooses one `env.<name>` module; `--preset` chooses a named composition",
+            &format!(
+                "select the module with `{} <name>`",
+                Syntax::ENV_FLAG_ENV,
+            ),
+        );
+        return 2;
+    }
     // D-CONF-WORD1=A: `profile` names one thing, the optimize bundle. A named
     // environment composition is a preset.
-    if rest.iter().any(|a| a == Syntax::ENV_FLAG_PROFILE_RETIRED) {
+    if before_separator
+        .iter()
+        .any(|a| a == Syntax::ENV_FLAG_PROFILE_RETIRED)
+    {
         let theme = Theme::resolve_choice(color);
         theme.error_coded(
             "E1300",

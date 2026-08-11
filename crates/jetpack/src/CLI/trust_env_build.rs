@@ -299,9 +299,9 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                 (name, value)
             })
             .collect();
-    if let Some(profile) = &plan.environment.selected_preset {
-        theme.detail(&format!("profile: {}", profile.applied.join(" -> ")));
-        composed_vars.extend(profile.variables.clone());
+    if let Some(preset) = &plan.environment.selected_preset {
+        theme.detail(&format!("preset: {}", preset.applied.join(" -> ")));
+        composed_vars.extend(preset.variables.clone());
     }
     for pack in &plan.environment.language_packs {
         composed_vars.extend(pack.variables.clone());
@@ -931,9 +931,9 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
         .filter(|candidate| candidate.is_file())
         .map(|candidate| candidate.to_string_lossy().into_owned())
         .unwrap_or_else(find_jet_binary);
-
     match std::process::Command::new(jet)
         .arg("test")
+        .arg(dir)
         .current_dir(dir)
         .status()
     {

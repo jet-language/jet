@@ -72,6 +72,7 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, Option<String>, Span)> {
         match expr {
             Expr::Ident(name, span) => Some((name.clone(), *span)),
             Expr::Field(base, _, _) | Expr::Index { base, .. } => ownership_root(base),
+            Expr::Paren(inner, _) => ownership_root(inner),
             // S40 slices are inclusive copies lowered by TIR to owned values.
             Expr::Slice { .. } => None,
             _ => None,
@@ -81,6 +82,7 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, Option<String>, Span)> {
     fn spelling(expr: &Expr) -> Option<String> {
         match expr {
             Expr::Ident(name, _) => Some(name.clone()),
+            Expr::Paren(inner, _) => spelling(inner).map(|place| format!("({place})")),
             Expr::Field(base, field, _) => {
                 Some(format!("{}.{}", spelling(base)?, field))
             }

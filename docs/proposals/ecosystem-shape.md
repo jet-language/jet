@@ -13,12 +13,12 @@
 | Lock | `.jet/lock`, the source-adjacent index of exact graph identity, selection reasons, policy, platform facts, and complete merge provenance. |
 | Receipt | An immutable connected record from locked inputs through an action and output digest to verification, activation, and parent generation. |
 | Hangar | The content-addressed store for downloaded bytes, build outputs, toolchains, closures, receipts, and generation artifacts. |
-| Generation | An immutable, named profile or system closure with a parent, proof, activation record, and rollback point. |
+| Generation | An immutable, named package/user or system closure with a parent, proof, activation record, and rollback point. |
 | Plan | A checked prediction made before mutation. It says what Jet intends to fetch, build, replace, start, stop, activate, or remove. |
 | Proof | Recorded evidence about what Jet built and observed, bound to exact inputs, outputs, baseline, readiness checks, and provenance. |
 | Provider | A source of package metadata and bytes. Provider facts enter one graph and never create a second package model. |
 | Adapter | A reviewed recipe that turns fetched bytes without canonical Jet metadata into a Package. It is not a provider. |
-| Profile | A package set and user configuration activated as an atomic generation. `profile.<name>` and `user.<name>` use the same engine. |
+| Package/user generation | A package set and user configuration activated as an atomic generation. `profile.<name>` and `user.<name>` use the same engine. |
 | System | An Output that closes over packages, users, services, files, options, boot facts, and proofs for one machine. |
 | Fleet | An Output containing named hosts, their System outputs, deployment targets, and one staged rollout policy. |
 
@@ -53,7 +53,7 @@ This proposal completes, and does not reopen, these decisions:
 | D-ECO-ENV1=A | Environment is an Output, not a parallel setup language. |
 | D-ECO-RECEIPT2=A | One record connects input, action, output digest, activation proof, and parent generation. |
 | D-JPK-OSVERB1=A | JetOS uses `jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image`. |
-| D-JPK-PROFILE1=D | Package profiles and user profiles share one generation engine. |
+| D-JPK-PROFILE1=D | Package generations and user generations share one generation engine. |
 | D-SHAPE-MERGEPROVENANCE1=A | `.jet/lock` remains the sole primary merge-history authority. |
 | D-JPK-DISPATCH1=B | Users type `jet`; `jetpack` and `jetos` remain versioned engine processes behind it. |
 | U7 / R9 | A single `.jet` file remains a complete program without package state. |
@@ -208,7 +208,7 @@ Per-user Hangar is the default (`NEW: D-ECO-HANGARPATH1`):
 
 `/etc/jet/hangar` is retired as a default. An administrator may install the ratified socket-activated shared-store broker. It starts per request, exits when idle, never evaluates user source, rebuilds only under ephemeral sandbox identities, and re-verifies bytes, signatures, provenance, and writer authority before promotion (`NEW: D-ECO-BROKERBOUNDARY1`). This is a transient verifier, not a resident daemon or default privileged helper.
 
-Packages, profiles, running processes, builds, toolchains, Systems, and Generations create automatic closure roots. Manual roots cover only external consumers:
+Packages, package/user generations, running processes, builds, toolchains, Systems, and Fleets create automatic closure roots. Manual roots cover only external consumers:
 
 ```text
 $ jet hangar register-external-root backup-sdk ripgrep#2.0.17@nixpkgs --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
@@ -1338,7 +1338,7 @@ The S7/S8 shape covers every requirement in the Epoch 4 JetOS research appendix 
 | One-character disable | S7's `system/_nvidia.jet` uses D-ECO-FILEROOT1's proposed discovered-file rule. |
 | File emission | Typed `.{ path, text, mode, replace }` entries projected inside generation (`NEW: D-ECO-JETOS2`). |
 | Stable/unstable sets, overlays, custom derivations | S6 shows `nixos-unstable@nixpkgs`; S7 shows a stable browser Overlay. Custom derivation acceptance uses ordinary Package recipes and is not shown here. |
-| One feature spanning system and user scope | A Config may contribute System facts and referenced user Profile facts in one closed value. |
+| One feature spanning system and user scope | A Config may contribute System facts and referenced user generation facts in one closed value. |
 | KDE, GNOME, Hyprland, Niri and display managers | S7 shows representative KDE selection. GNOME/Hyprland/Niri and display-manager swap acceptance over the same typed field are not shown here. |
 | Theming | S7 shows a representative Theme value. Owner-stack parity across Home Manager/Stylix/NUR-class breadth is acceptance work over the same mechanism, not shown here. |
 | Flatpak, AppImage, native packages | S7 shows one Flatpak app fact and native packages. AppImage acceptance over the same typed app facts is not shown here. |
@@ -1354,7 +1354,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 |---|---|---|
 | Zero-ceremony common path | S0-S3 | `jet run`, `jet add`, `jet env`, and `jet dev` select the sole capable Output without graph vocabulary. |
 | Complete immutable identity | Graph, lock, receipt | `jet inspect output todo.cli` separates action digest from output digest and shows source, toolchain, target, policy, and effects. |
-| Atomic profiles, generations, rollback | Profile/System/Fleet Outputs | `jet os switch` moves one pointer after proof; `jet os rollback` activates the recorded parent. |
+| Atomic generations and rollback | Package/User/System/Fleet outputs | `jet os switch` moves one pointer after proof; `jet os rollback` activates the recorded parent. |
 | Whole-workflow ownership | One `jet` front door | Resolve, lock, build, run, test, publish, environment, image, system, and fleet intents dispatch to versioned engines. |
 | What/why/fix explanations | One graph and diagnostic registry | `jet explain package:tracing` shows introducer, selected and rejected versions, policy source, and removal path. |
 | Shared content store | Hangar | Verified bytes live once; roots and leases retain closures; `jet clean` alone collects and optimizes. |
@@ -1373,7 +1373,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Failure to avoid | Design feature that prevents it |
 |---|---|
 | Users debug evaluator or backend internals | Eager typed graph checks point at user source. rustc and provider internals remain optional debug context under Jet-owned what/why/fix diagnostics. |
-| Global files mutate without a generation | Profiles, users, Systems, and Fleets activate immutable closures by pointer; file projection occurs inside a generation. |
+| Global files mutate without a generation | Package/user generations, users, Systems, and Fleets activate immutable closures by pointer; file projection occurs inside a generation. |
 | Resolution or install executes undeclared code | Metadata probes never execute code. Hooks and adapters are digest-bound, reviewed, effect-declared, and sandboxed. |
 | Merge and override algebra is folklore | One field law, ordinary functions for final ecosystem values, option-only `OptionValue` contributions, and complete locked provenance replace last-file-wins and constructor families. |
 | A distant consumer silently changes package behavior | Direct dependency visibility and closed variant domains prevent additive feature or peer-dependency leakage across unrelated graph members. |
@@ -1398,7 +1398,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Cache miss triggers an unexplained rebuild | `jet explain cache:<output>` names first mismatching identity or trust fact and the exact fallback. |
 | Update fanout is unclear | `jet update <pkg> --check` previews selected/rejected versions, rebuild set, policy, and untouched lock subtrees. |
 | Deployment needs NixOS plus another fleet tool | System and Fleet are Outputs in one graph with plan, proof, staged push, health gates, and per-host rollback. |
-| Cleanup requires learning roots, profiles, and result links | `jet clean --check` lists reclaimable bytes and why retained closures remain live; automatic owners need no manual roots. |
+| Cleanup requires learning roots, generations, and result links | `jet clean --check` lists reclaimable bytes and why retained closures remain live; automatic owners need no manual roots. |
 | Documentation spans language, package set, flakes, modules, and wiki eras | Command, schema, option, and diagnostic registries generate one versioned manual with runnable examples. |
 | Team adoption exposes daemon trust, substituters, builders, and secrets at once | Safe local defaults remain implicit; source requests roles while administrators bind endpoints and credentials separately. |
 
@@ -1562,7 +1562,7 @@ Rejected: `jet fleet push`, `jet os push`, bare push.
 
 **Answers/replaces:** D-JPK-MANUALROOT1.
 
-**Gist:** Record the rare expert operations that retain a closure with no Package, profile, process, build, toolchain, System, or Generation owner.
+**Gist:** Record the rare expert operations that retain a closure with no Package, package/user generation, process, build, toolchain, System, or Generation owner.
 
 **Ratified (2026-07-15): B — `register-external-root` / `unregister-external-root` / `list-external-roots`.** Precise verbs distinguish retention metadata from realization in scripts, CAS errors, and audit records.
 

@@ -2524,13 +2524,40 @@ fn collect_struct_field_types(
             }
         }
     }
+    insert_core_struct_field_types(&mut out);
     out
+}
+
+fn insert_core_struct_field_types(
+    fields: &mut HashMap<String, Vec<(String, crate::AST::Type)>>,
+) {
+    fields.insert(
+        crate::Syntax::TYPE_IO_CONTEXT.to_string(),
+        vec![
+            (
+                "operation".to_string(),
+                Type::Named(crate::Syntax::TYPE_IO_OPERATION.to_string()),
+            ),
+            (
+                "resource".to_string(),
+                Type::Option(Box::new(Type::String)),
+            ),
+            (
+                "os_code".to_string(),
+                Type::Option(Box::new(Type::Int)),
+            ),
+            (
+                "cause".to_string(),
+                Type::Option(Box::new(Type::String)),
+            ),
+        ],
+    );
 }
 
 fn normalize_struct_field_types(
     structs: &HashMap<String, &crate::AST::StructDef>,
 ) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
-    structs
+    let mut out = structs
         .iter()
         .map(|(name, definition)| {
             (
@@ -2542,13 +2569,15 @@ fn normalize_struct_field_types(
                     .collect(),
             )
         })
-        .collect()
+        .collect();
+    insert_core_struct_field_types(&mut out);
+    out
 }
 
 fn program_struct_field_types(
     program: &JitProgram,
 ) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
-    program
+    let mut out = program
         .struct_field_types
         .iter()
         .filter_map(|(type_name, types)| {
@@ -2567,7 +2596,9 @@ fn program_struct_field_types(
                     .collect(),
             ))
         })
-        .collect()
+        .collect();
+    insert_core_struct_field_types(&mut out);
+    out
 }
 
 pub fn run_program(
@@ -2686,6 +2717,7 @@ fn run_program_with_structs_on_stack(
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
+    insert_core_struct_field_types(&mut struct_field_types);
     for (name, fields) in program_struct_field_types(program) {
         struct_field_types.entry(name).or_insert(fields);
     }

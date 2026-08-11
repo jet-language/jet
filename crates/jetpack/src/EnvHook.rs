@@ -20,28 +20,28 @@ use std::path::{Path, PathBuf};
 
 /// Hash every input that can change the checked activation plan. The prompt
 /// hook uses this read-only fingerprint before it emits anything, so changed
-/// imported modules, dotenv files, managed-file sources, locks, and profile
+/// imported modules, dotenv files, managed-file sources, locks, and preset
 /// inputs cannot leave a stale environment active.
-pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> Option<String> {
-    definition_fingerprint_with_selections(root, requested_profile, None)
+pub fn definition_fingerprint(root: &Path, requested_preset: Option<&str>) -> Option<String> {
+    definition_fingerprint_with_selections(root, requested_preset, None)
 }
 
 /// Hash the activation plan for both kinds of explicit selection: a named
-/// workflow profile inside `env.jet`, and one declared `env.<name>`
-/// environment profile.
+/// environment preset inside `env.jet`, and one declared `env.<name>`
+/// environment module.
 pub fn definition_fingerprint_with_selections(
     root: &Path,
-    requested_profile: Option<&str>,
-    requested_environment_profile: Option<&str>,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> Option<String> {
     let env_path = root.join(Syntax::ENV_FILE);
     let source = std::fs::read_to_string(&env_path).ok()?;
     let mut entries = Vec::<(String, Vec<u8>)>::new();
-    if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env_with_profiles(
+    if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env_with_selections(
         &source,
         root,
-        requested_profile,
-        requested_environment_profile,
+        requested_preset,
+        requested_environment,
     ) {
         for relative in &plan.source_files {
             add_input(root, relative, "source", &mut entries);
@@ -68,17 +68,17 @@ pub fn definition_fingerprint_with_selections(
             "lifecycle".to_string(),
             plan.lifecycle.fingerprint().into_bytes(),
         ));
-        for profile in &plan.profiles {
+        for preset in &plan.presets {
             entries.push((
-                format!("profile:{}", profile.name),
+                format!("preset:{}", preset.name),
                 format!(
                     "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
-                    profile.extends,
-                    profile.packages,
-                    profile.variables,
-                    profile.hostname,
-                    profile.user,
-                    requested_profile,
+                    preset.extends,
+                    preset.packages,
+                    preset.variables,
+                    preset.hostname,
+                    preset.user,
+                    requested_preset,
                 )
                 .into_bytes(),
             ));
@@ -104,9 +104,9 @@ pub fn definition_fingerprint_with_selections(
     entries.push((
         "selection".to_string(),
         format!(
-            "profile={};environment_profile={};host={};user={}",
-            requested_profile.unwrap_or_default(),
-            requested_environment_profile.unwrap_or_default(),
+            "preset={};environment={};host={};user={}",
+            requested_preset.unwrap_or_default(),
+            requested_environment.unwrap_or_default(),
             std::env::var("HOSTNAME").unwrap_or_default(),
             std::env::var("USER")
                 .or_else(|_| std::env::var("USERNAME"))
@@ -128,22 +128,22 @@ pub fn definition_fingerprint_with_selections(
 /// Read the typed lifecycle policy without realizing packages or executing
 /// project code. Legacy `pkg.*` env files have the normal prompt policy.
 pub fn reload_policy(root: &Path) -> jet_env_model::ModuleEval::ReloadPolicy {
-    reload_policy_with_environment_profile(root, None)
+    reload_policy_with_environment(root, None)
 }
 
-/// Read reload policy for the selected `env.<name>` environment profile.
-pub fn reload_policy_with_environment_profile(
+/// Read reload policy for the selected `env.<name>` environment module.
+pub fn reload_policy_with_environment(
     root: &Path,
-    requested_environment_profile: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> jet_env_model::ModuleEval::ReloadPolicy {
     let Ok(source) = std::fs::read_to_string(root.join(Syntax::ENV_FILE)) else {
         return jet_env_model::ModuleEval::ReloadPolicy::default();
     };
-    jet_env_model::ModuleEval::evaluate_env_with_profiles(
+    jet_env_model::ModuleEval::evaluate_env_with_selections(
         &source,
         root,
         None,
-        requested_environment_profile,
+        requested_environment,
     )
         .map(|plan| plan.lifecycle.reload)
         .unwrap_or_default()
@@ -660,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn definition_fingerprint_tracks_environment_profile_selection() {
+    fn definition_fingerprint_tracks_environment_module_selection() {
         let root = std::env::temp_dir().join(format!(
             "jpk-envhook-profile-{}-{}",
             std::process::id(),
