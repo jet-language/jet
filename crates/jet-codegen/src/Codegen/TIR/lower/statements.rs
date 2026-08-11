@@ -278,177 +278,183 @@ fn collect_interrupt_callback_names_expr(
 }
 
 fn collect_interrupt_callback_names(stmts: &[Stmt], cx: &Cx, names: &mut HashSet<String>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Expr(expr) => collect_interrupt_callback_names_expr(expr, cx, names),
-            Stmt::Val(binding) => {
-                collect_interrupt_callback_names_expr(&binding.init, cx, names)
-            }
-            Stmt::Assign { value, .. } => collect_interrupt_callback_names_expr(value, cx, names),
-            Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
-                collect_interrupt_callback_names_expr(value, cx, names)
-            }
-            Stmt::While { cond, body, .. } => {
-                collect_interrupt_callback_names_expr(cond, cx, names);
-                collect_interrupt_callback_names(body, cx, names);
-            }
-            Stmt::For { kind, body, .. } => {
-                if let ForKind::In { collection, step } = kind {
-                    collect_interrupt_callback_names_expr(collection, cx, names);
-                    if let Some(step) = step {
-                        collect_interrupt_callback_names_expr(step, cx, names);
+    let mut pending = vec![stmts];
+    while let Some(stmts) = pending.pop() {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Expr(expr) => collect_interrupt_callback_names_expr(expr, cx, names),
+                Stmt::Val(binding) => {
+                    collect_interrupt_callback_names_expr(&binding.init, cx, names)
+                }
+                Stmt::Assign { value, .. } => {
+                    collect_interrupt_callback_names_expr(value, cx, names)
+                }
+                Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
+                    collect_interrupt_callback_names_expr(value, cx, names)
+                }
+                Stmt::While { cond, body, .. } => {
+                    collect_interrupt_callback_names_expr(cond, cx, names);
+                    pending.push(body);
+                }
+                Stmt::For { kind, body, .. } => {
+                    if let ForKind::In { collection, step } = kind {
+                        collect_interrupt_callback_names_expr(collection, cx, names);
+                        if let Some(step) = step {
+                            collect_interrupt_callback_names_expr(step, cx, names);
+                        }
+                    }
+                    pending.push(body);
+                }
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    collect_interrupt_callback_names_expr(subject, cx, names);
+                    for arm in arms {
+                        collect_interrupt_callback_names_expr(&arm.cond, cx, names);
+                        pending.push(&arm.body);
+                    }
+                    if let Some(body) = else_body {
+                        pending.push(body);
                     }
                 }
-                collect_interrupt_callback_names(body, cx, names);
+                Stmt::Loop { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Switched { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Layout { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::ContextBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::AssumeDet { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::ComptimeBlock { body, .. } => pending.push(body),
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    collect_interrupt_callback_names_expr(&init.init, cx, names);
+                    collect_interrupt_callback_names_expr(cond, cx, names);
+                    if let Some(step) = step {
+                        pending.push(std::slice::from_ref(step.as_ref()));
+                    }
+                    pending.push(body);
+                }
+                Stmt::ComptimeIf {
+                    cond,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    collect_interrupt_callback_names_expr(cond, cx, names);
+                    pending.push(then_body);
+                    if let Some(body) = else_body {
+                        pending.push(body);
+                    }
+                }
+                Stmt::ScopeMember { args, body, .. } => {
+                    for arg in args {
+                        collect_interrupt_callback_names_expr(arg, cx, names);
+                    }
+                    pending.push(body);
+                }
+                Stmt::ComptimeSwitch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    collect_interrupt_callback_names_expr(subject, cx, names);
+                    for arm in arms {
+                        pending.push(&arm.body);
+                    }
+                    if let Some(body) = else_body {
+                        pending.push(body);
+                    }
+                }
+                _ => {}
             }
-            Stmt::Switch {
-                subject,
-                arms,
-                else_body,
-                ..
-            } => {
-                collect_interrupt_callback_names_expr(subject, cx, names);
-                for arm in arms {
-                    collect_interrupt_callback_names_expr(&arm.cond, cx, names);
-                    collect_interrupt_callback_names(&arm.body, cx, names);
-                }
-                if let Some(body) = else_body {
-                    collect_interrupt_callback_names(body, cx, names);
-                }
-            }
-            Stmt::Loop { body, .. }
-            | Stmt::Unsafe { body, .. }
-            | Stmt::Impure { body, .. }
-            | Stmt::Reactive { body, .. }
-            | Stmt::Shield { body, .. }
-            | Stmt::Switched { body, .. }
-            | Stmt::Region { body, .. }
-            | Stmt::Policy { body, .. }
-            | Stmt::TaskGroup { body, .. }
-            | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
-            | Stmt::ContextBlock { body, .. }
-            | Stmt::Live { body, .. }
-            | Stmt::AssumeDet { body, .. }
-            | Stmt::Transact { body, .. }
-            | Stmt::ComptimeBlock { body, .. } => collect_interrupt_callback_names(body, cx, names),
-            Stmt::CountedLoop {
-                init,
-                cond,
-                step,
-                body,
-                ..
-            } => {
-                collect_interrupt_callback_names_expr(&init.init, cx, names);
-                collect_interrupt_callback_names_expr(cond, cx, names);
-                if let Some(step) = step {
-                    collect_interrupt_callback_names(
-                        std::slice::from_ref(step.as_ref()),
-                        cx,
-                        names,
-                    );
-                }
-                collect_interrupt_callback_names(body, cx, names);
-            }
-            Stmt::ComptimeIf {
-                cond,
-                then_body,
-                else_body,
-                ..
-            } => {
-                collect_interrupt_callback_names_expr(cond, cx, names);
-                collect_interrupt_callback_names(then_body, cx, names);
-                if let Some(body) = else_body {
-                    collect_interrupt_callback_names(body, cx, names);
-                }
-            }
-            Stmt::ScopeMember { args, body, .. } => {
-                for arg in args {
-                    collect_interrupt_callback_names_expr(arg, cx, names);
-                }
-                collect_interrupt_callback_names(body, cx, names);
-            }
-            Stmt::ComptimeSwitch {
-                subject,
-                arms,
-                else_body,
-                ..
-            } => {
-                collect_interrupt_callback_names_expr(subject, cx, names);
-                for arm in arms {
-                    collect_interrupt_callback_names(&arm.body, cx, names);
-                }
-                if let Some(body) = else_body {
-                    collect_interrupt_callback_names(body, cx, names);
-                }
-            }
-            _ => {}
         }
     }
 }
 
 fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Val(binding) => {
-                if let Some(source) = interrupt_callback_ident(&binding.init) {
-                    aliases.push((binding.name.clone(), source.to_string()));
+    let mut pending = vec![stmts];
+    while let Some(stmts) = pending.pop() {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Val(binding) => {
+                    if let Some(source) = interrupt_callback_ident(&binding.init) {
+                        aliases.push((binding.name.clone(), source.to_string()));
+                    }
                 }
+                Stmt::CountedLoop { init, body, .. } => {
+                    if let Some(source) = interrupt_callback_ident(&init.init) {
+                        aliases.push((init.name.clone(), source.to_string()));
+                    }
+                    pending.push(body);
+                }
+                Stmt::While { body, .. }
+                | Stmt::For { body, .. }
+                | Stmt::Loop { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Switched { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Layout { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::ContextBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::AssumeDet { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::ComptimeBlock { body, .. } => pending.push(body),
+                Stmt::Switch { arms, else_body, .. } => {
+                    for arm in arms {
+                        pending.push(&arm.body);
+                    }
+                    if let Some(body) = else_body {
+                        pending.push(body);
+                    }
+                }
+                Stmt::ComptimeIf {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    pending.push(then_body);
+                    if let Some(body) = else_body {
+                        pending.push(body);
+                    }
+                }
+                Stmt::ScopeMember { body, .. } => pending.push(body),
+                Stmt::ComptimeSwitch {
+                    arms, else_body, ..
+                } => {
+                    for arm in arms {
+                        pending.push(&arm.body);
+                    }
+                    if let Some(body) = else_body {
+                        pending.push(body);
+                    }
+                }
+                _ => {}
             }
-            Stmt::CountedLoop { init, body, .. } => {
-                if let Some(source) = interrupt_callback_ident(&init.init) {
-                    aliases.push((init.name.clone(), source.to_string()));
-                }
-                collect_interrupt_aliases(body, aliases);
-            }
-            Stmt::While { body, .. }
-            | Stmt::For { body, .. }
-            | Stmt::Loop { body, .. }
-            | Stmt::Unsafe { body, .. }
-            | Stmt::Impure { body, .. }
-            | Stmt::Reactive { body, .. }
-            | Stmt::Shield { body, .. }
-            | Stmt::Switched { body, .. }
-            | Stmt::Region { body, .. }
-            | Stmt::Policy { body, .. }
-            | Stmt::TaskGroup { body, .. }
-            | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
-            | Stmt::ContextBlock { body, .. }
-            | Stmt::Live { body, .. }
-            | Stmt::AssumeDet { body, .. }
-            | Stmt::Transact { body, .. }
-            | Stmt::ComptimeBlock { body, .. } => collect_interrupt_aliases(body, aliases),
-            Stmt::Switch { arms, else_body, .. } => {
-                for arm in arms {
-                    collect_interrupt_aliases(&arm.body, aliases);
-                }
-                if let Some(body) = else_body {
-                    collect_interrupt_aliases(body, aliases);
-                }
-            }
-            Stmt::ComptimeIf {
-                then_body,
-                else_body,
-                ..
-            } => {
-                collect_interrupt_aliases(then_body, aliases);
-                if let Some(body) = else_body {
-                    collect_interrupt_aliases(body, aliases);
-                }
-            }
-            Stmt::ScopeMember { body, .. } => collect_interrupt_aliases(body, aliases),
-            Stmt::ComptimeSwitch { arms, else_body, .. } => {
-                for arm in arms {
-                    collect_interrupt_aliases(&arm.body, aliases);
-                }
-                if let Some(body) = else_body {
-                    collect_interrupt_aliases(body, aliases);
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -510,18 +516,168 @@ fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
     init
 }
 
-pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 });
-    let mut split_views = split_view_plan(stmts, cx, env);
-    let mut index = 0;
-    while index < stmts.len() {
-        if let Some(view) = split_views.remove(&index) {
-            out.push(TStmt::SourceSpan(stmts[index].span()));
-            if cx.debug_linemap {
-                out.push(TStmt::LineMarker(view.candidate.line));
+pub(crate) struct LowerBody<'a> {
+    stmts: &'a [Stmt],
+    env: LowerEnv,
+    markers: bool,
+    inherit_env: bool,
+    carry_env: bool,
+    propagate_env: bool,
+    prepare: Option<Box<dyn FnOnce(&Cx, &mut LowerEnv) + 'a>>,
+}
+
+impl<'a> LowerBody<'a> {
+    pub(crate) fn scoped(stmts: &'a [Stmt], env: LowerEnv) -> Self {
+        Self {
+            stmts,
+            env,
+            markers: true,
+            inherit_env: false,
+            carry_env: false,
+            propagate_env: false,
+            prepare: None,
+        }
+    }
+
+    pub(crate) fn direct(stmts: &'a [Stmt], env: LowerEnv) -> Self {
+        Self {
+            stmts,
+            env,
+            markers: false,
+            inherit_env: false,
+            carry_env: false,
+            propagate_env: false,
+            prepare: None,
+        }
+    }
+
+    pub(crate) fn inline(stmts: &'a [Stmt], env: LowerEnv) -> Self {
+        Self {
+            stmts,
+            env,
+            markers: true,
+            inherit_env: false,
+            carry_env: false,
+            propagate_env: true,
+            prepare: None,
+        }
+    }
+
+    pub(crate) fn inherited(stmts: &'a [Stmt], env: LowerEnv) -> Self {
+        Self {
+            stmts,
+            env,
+            markers: true,
+            inherit_env: true,
+            carry_env: false,
+            propagate_env: false,
+            prepare: None,
+        }
+    }
+
+    pub(crate) fn prepare(
+        mut self,
+        prepare: impl FnOnce(&Cx, &mut LowerEnv) + 'a,
+    ) -> Self {
+        self.prepare = Some(Box::new(prepare));
+        self
+    }
+
+    pub(crate) fn carry_env(mut self) -> Self {
+        self.carry_env = true;
+        self
+    }
+}
+
+pub(crate) struct LowerStmtPlan<'a> {
+    bodies: Vec<LowerBody<'a>>,
+    finish: Box<dyn FnOnce(Vec<Vec<TStmt>>) -> TStmt + 'a>,
+}
+
+impl<'a> LowerStmtPlan<'a> {
+    fn ready(stmt: TStmt) -> Self {
+        Self {
+            bodies: Vec::new(),
+            finish: Box::new(move |_| stmt),
+        }
+    }
+}
+
+pub(crate) fn deferred_stmt<'a>(
+    bodies: Vec<LowerBody<'a>>,
+    finish: impl FnOnce(Vec<Vec<TStmt>>) -> TStmt + 'a,
+) -> LowerStmtPlan<'a> {
+    LowerStmtPlan {
+        bodies,
+        finish: Box::new(finish),
+    }
+}
+
+struct LowerBlockResult {
+    body: Vec<TStmt>,
+    env: LowerEnv,
+}
+
+enum LowerTask<'a> {
+    Block(LowerBlock<'a>),
+    Done(LowerBlockResult),
+}
+
+struct LowerBlock<'a> {
+    stmts: &'a [Stmt],
+    cx: &'a Cx,
+    env: LowerEnv,
+    out: Vec<TStmt>,
+    split_views: HashMap<usize, PlannedSplitView>,
+    index: usize,
+    markers: bool,
+    resume: Box<dyn FnOnce(LowerBlockResult) -> LowerTask<'a> + 'a>,
+}
+
+impl<'a> LowerBlock<'a> {
+    fn new(
+        stmts: &'a [Stmt],
+        cx: &'a Cx,
+        env: LowerEnv,
+        markers: bool,
+        resume: Box<dyn FnOnce(LowerBlockResult) -> LowerTask<'a> + 'a>,
+    ) -> Self {
+        let split_views = if markers {
+            split_view_plan(stmts, cx, &env)
+        } else {
+            HashMap::new()
+        };
+        Self {
+            stmts,
+            cx,
+            out: Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 }),
+            env,
+            split_views,
+            index: 0,
+            markers,
+            resume,
+        }
+    }
+
+    fn step(mut self) -> LowerTask<'a> {
+        if self.index == self.stmts.len() {
+            return (self.resume)(LowerBlockResult {
+                body: self.out,
+                env: self.env,
+            });
+        }
+
+        let index = self.index;
+        if let Some(view) = self.split_views.remove(&index) {
+            let stmt = &self.stmts[index];
+            if self.markers {
+                self.out.push(TStmt::SourceSpan(stmt.span()));
+                if self.cx.debug_linemap {
+                    self.out.push(TStmt::LineMarker(view.candidate.line));
+                }
             }
             let candidate = view.candidate;
-            let elem_ty = match tir_recv_jet_ty(&candidate.owner, env) {
+            let elem_ty = match tir_recv_jet_ty(&candidate.owner, &self.env) {
                 Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(*elem),
                 _ => None,
             };
@@ -530,10 +686,10 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             } else {
                 TLocal::user(&candidate.name)
             };
-            env.bind(&candidate.name, slot, candidate.ty.clone());
+            self.env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
-            // Rust reference need the window type when this local crosses into
-            // a taskgroup child. AOT ignores this fact.
+            // Rust reference need the window type when this local crosses into a
+            // taskgroup child. AOT ignores this fact.
             if let Some(elem) = elem_ty.clone() {
                 let handle = if candidate.write {
                     Some(Type::Apply {
@@ -549,13 +705,13 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                     None
                 };
                 if let Some(handle) = handle {
-                    env.mark_split_view(&candidate.name, handle);
+                    self.env.mark_split_view(&candidate.name, handle);
                 }
             }
-            out.push(TStmt::SplitViews {
+            self.out.push(TStmt::SplitViews {
                 owner: view
                     .initialize
-                    .then(|| lower_expr(&candidate.owner, cx, env)),
+                    .then(|| lower_expr(&candidate.owner, self.cx, &mut self.env)),
                 root: view.root,
                 len: view.len,
                 source: view.source,
@@ -572,19 +728,102 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 elem_ty,
                 line: candidate.line,
             });
-            index += 1;
-            continue;
+            self.index += 1;
+            return LowerTask::Block(self);
         }
-        let s = &stmts[index];
-        out.push(TStmt::SourceSpan(s.span()));
-        if cx.debug_linemap {
-            let line = crate::Diagnostics::span_line_col(&cx.src, s.span().start).0;
-            out.push(TStmt::LineMarker(line));
+
+        let stmt = &self.stmts[index];
+        if self.markers {
+            self.out.push(TStmt::SourceSpan(stmt.span()));
+            if self.cx.debug_linemap {
+                let line = crate::Diagnostics::span_line_col(&self.cx.src, stmt.span().start).0;
+                self.out.push(TStmt::LineMarker(line));
+            }
         }
-        out.push(lower_stmt(s, cx, env));
-        index += 1;
+        self.index += 1;
+        let plan = lower_stmt_plan(stmt, self.cx, &mut self.env);
+        if plan.bodies.is_empty() {
+            self.out.push((plan.finish)(Vec::new()));
+            return LowerTask::Block(self);
+        }
+        lower_body_chain(self, plan, Vec::new(), None)
     }
-    out
+}
+
+fn lower_body_chain<'a>(
+    parent: LowerBlock<'a>,
+    plan: LowerStmtPlan<'a>,
+    mut lowered: Vec<Vec<TStmt>>,
+    carried_env: Option<LowerEnv>,
+) -> LowerTask<'a> {
+    let LowerStmtPlan { mut bodies, finish } = plan;
+    let mut body = bodies.remove(0);
+    // An inherited body starts from its own planned env until a preceding body
+    // explicitly carries one (the counted-loop step is the carried case).
+    let mut child_env = match (body.inherit_env, carried_env) {
+        (true, Some(carried_env)) => carried_env,
+        (true, None) | (false, _) => body.env.clone(),
+    };
+    if let Some(prepare) = body.prepare.take() {
+        prepare(parent.cx, &mut child_env);
+    }
+    let next_carried = body.carry_env;
+    let propagate_env = body.propagate_env;
+    LowerTask::Block(LowerBlock::new(
+        body.stmts,
+        parent.cx,
+        child_env,
+        body.markers,
+        Box::new(move |result| {
+            let LowerBlockResult { body, env } = result;
+            lowered.push(body);
+            let carried_env = next_carried.then(|| env.clone());
+            let mut parent = parent;
+            if propagate_env {
+                parent.env = env;
+            }
+            if bodies.is_empty() {
+                let stmt = (finish)(lowered);
+                parent.out.push(stmt);
+                LowerTask::Block(parent)
+            } else {
+                let next_plan = LowerStmtPlan { bodies, finish };
+                lower_body_chain(parent, next_plan, lowered, carried_env)
+            }
+        }),
+    ))
+}
+
+fn lower_stmts_with_markers(
+    stmts: &[Stmt],
+    cx: &Cx,
+    env: &mut LowerEnv,
+    markers: bool,
+) -> Vec<TStmt> {
+    let root_env = clone_env(env);
+    let mut task = LowerTask::Block(LowerBlock::new(
+        stmts,
+        cx,
+        root_env,
+        markers,
+        Box::new(LowerTask::Done),
+    ));
+    loop {
+        task = match task {
+            LowerTask::Block(block) => block.step(),
+            LowerTask::Done(result) => {
+                *env = result.env;
+                return result.body;
+            }
+        };
+    }
+}
+
+pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+    // Child blocks are heap tasks. A nested source block therefore resumes its
+    // parent through `LowerBlock::resume` instead of keeping the parent lowering
+    // frame on the native stack.
+    lower_stmts_with_markers(stmts, cx, env, true)
 }
 
 #[derive(Clone)]
@@ -984,7 +1223,12 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     expr
 }
 
-pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
+fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
+    macro_rules! ready_return {
+        ($stmt:expr) => {
+            return LowerStmtPlan::ready($stmt);
+        };
+    }
     if let Stmt::Assign { target, value, .. } = s {
         let root_name = match target {
             LValue::Local { name, .. } => Some(name.as_str()),
@@ -1036,7 +1280,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 TLocal::generated("__jet_value").through_ref(),
                 saved.as_ref().and_then(|(_, ty)| ty.clone()),
             );
-            let stmt = lower_stmt(&lowered_source, cx, env);
+            let plan = lower_stmt_plan(&lowered_source, cx, env);
+            let LowerStmtPlan { bodies, finish } = plan;
+            debug_assert!(bodies.is_empty(), "GC edit lowering has no nested body");
+            let stmt = finish(Vec::new());
             if let Some((slot, ty)) = saved {
                 env.bind(name, slot, ty);
             }
@@ -1044,17 +1291,17 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             if let Some((temp, _)) = &index_temp {
                 env.locals.remove(temp);
             }
-            return TStmt::GcEdit {
+            ready_return!(TStmt::GcEdit {
                 root,
                 slot,
                 edges,
                 replace_all: matches!(target, LValue::Local { .. }),
                 index_temp,
                 stmt: Box::new(stmt),
-            };
+            });
         }
     }
-    match s {
+    LowerStmtPlan::ready(match s {
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
             // c109: a struct-destructuring binding `Type { x, y } :: <init>`. Lower the
             // init ONCE; its total `.ty` is a `Type::Named`/`Apply` naming a struct
@@ -1092,13 +1339,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     field_tys.get(&f.name).cloned(),
                 );
             }
-            return TStmt::StructDestructure {
+            ready_return!(TStmt::StructDestructure {
                 tmp,
                 init,
                 kw,
                 move_fields,
                 binds,
-            };
+            });
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
             // c109 Phase 23: a tuple-destructuring binding `(a, b) :: <init>`. Lower the
@@ -1147,13 +1394,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 binds.push((elem_rust, field_rust));
                 env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
             }
-            return TStmt::TupleDestructure {
+            ready_return!(TStmt::TupleDestructure {
                 tmp,
                 init,
                 kw,
                 move_fields,
                 binds,
-            };
+            });
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::List { .. })) => {
             // c109 Phase 26: a list-destructuring binding `[a, b, c] :: <init>`. Lower
@@ -1179,7 +1426,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 elem_names.push(mangle(&e.name));
                 env.bind(&e.name, TLocal::user(&e.name), elem_ty.clone());
             }
-            return TStmt::ListDestructure {
+            ready_return!(TStmt::ListDestructure {
                 tmp,
                 init,
                 kw,
@@ -1187,7 +1434,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 file: cx.file.clone(),
                 line,
                 elems: elem_names,
-            };
+            });
         }
         Stmt::Val(b) => {
             // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: lower
@@ -1210,7 +1457,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     TLocal::user(&b.name).as_uninit_scalar()
                 };
                 env.bind(&b.name, slot, b.ty.clone());
-                return TStmt::Let {
+                ready_return!(TStmt::Let {
                     name: b.name.clone(),
                     kw: "let mut",
                     let_ty: crate::Codegen::TIR::let_ty_for_opt(Some(ty), cx, false, false, false),
@@ -1220,7 +1467,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     },
                 gc_promotion: None,
                 gc_transferred: false,
-                };
+                });
             }
             // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
             // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
@@ -1230,14 +1477,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             if b.arena_view {
                 let init = lower_expr(&b.init, cx, env);
                 env.bind(&b.name, TLocal::user(&b.name).through_ref(), b.ty.clone());
-                return TStmt::Let {
+                ready_return!(TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
                     let_ty: TLetTy::Inferred,
                     init,
                 gc_promotion: None,
                 gc_transferred: false,
-                };
+                });
             }
             // D-SHAPE-PLACE1=A: local place windows are references with no
             // written Rust type clause. Range windows already behave as slices;
@@ -1258,14 +1505,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         TLocal::user(&b.name).through_ref()
                     };
                     env.bind(&b.name, slot, b.ty.clone());
-                    return TStmt::Let {
+                    ready_return!(TStmt::Let {
                         name: b.name.clone(),
                         kw: "let",
                         let_ty: TLetTy::Inferred,
                         init,
                         gc_promotion: None,
                         gc_transferred: false,
-                    };
+                    });
                 }
             } else {
                 None
@@ -1282,14 +1529,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let init = lower_string_view_init(&b.init, cx, env);
                 env.bind(&b.name, TLocal::user(&b.name), Some(Type::String));
                 env.mark_string_view(&b.name);
-                return TStmt::Let {
+                ready_return!(TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
                     let_ty: TLetTy::StrView,
                     init,
                 gc_promotion: None,
                 gc_transferred: false,
-                };
+                });
             }
             // c109 (S57/M9.5): a comptime LOCAL `$name :: expr`. The AST `emit_let`
             // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
@@ -1339,14 +1586,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }),
                 };
                 env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
-                return TStmt::Let {
+                ready_return!(TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
                     let_ty,
                     init,
                 gc_promotion: None,
                 gc_transferred: false,
-                };
+                });
             }
             let mut init =
                 moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
@@ -1581,12 +1828,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let index_t = lower_expr(index, cx, env);
                 let value_t = lower_expr(value, cx, env);
                 if let IndexKind::User(type_name) = kind {
-                    return TStmt::IndexHookAssign {
+                    ready_return!(TStmt::IndexHookAssign {
                         type_name: type_name.clone(),
                         base: base_t,
                         index: index_t,
                         value: value_t,
-                    };
+                    });
                 }
                 // D-MEM1 S6: `pool[id] = v` — a genuine mutable place through
                 // `jet_pool_get_mut` (generation-checked, panics on a stale `id`),
@@ -1596,7 +1843,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 if matches!(kind, IndexKind::Pool) {
                     let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
                     let elem_ty = value_t.ty.clone();
-                    return TStmt::Assign {
+                    ready_return!(TStmt::Assign {
                         place: TPlace::Expr(Box::new(TExpr {
                             ty: elem_ty,
                             kind: TExprKind::PoolSlot {
@@ -1611,7 +1858,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         value: value_t,
                         clone_value: false,
                         line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
-                    };
+                    });
                 }
                 TStmt::IndexAssign {
                     uninit: matches!(base.as_ref(), Expr::Ident(name, _) if env.is_uninit_fixed(name)),
@@ -1671,7 +1918,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 index_span.start,
                             )
                             .0;
-                            return TStmt::IndexFieldAssign(Box::new(TIndexFieldAssign {
+                            ready_return!(TStmt::IndexFieldAssign(Box::new(TIndexFieldAssign {
                                 base: collection_t,
                                 index: lower_expr(index, cx, env),
                                 is_map,
@@ -1682,7 +1929,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 value: lower_expr(value, cx, env),
                                 clone_value,
                                 line,
-                            }));
+                            })));
                         }
                     }
                 }
@@ -1708,13 +1955,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     } else {
                         false
                     };
-                    return TStmt::MathSwizzleAssign {
+                    ready_return!(TStmt::MathSwizzleAssign {
                         base: base_t,
                         type_name,
                         lanes: lanes_u8,
                         value: lower_expr(value, cx, env),
                         clone_value,
-                    };
+                    });
                 }
                 // D-MEM1 S6: `pool[id].field = v` — the general fallback below
                 // resolves `place` by re-emitting the FIELD-READ expression (fine
@@ -1752,13 +1999,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     } else {
                         false
                     };
-                    return TStmt::Assign {
+                    ready_return!(TStmt::Assign {
                         place,
                         op: *op,
                         value: lower_expr(value, cx, env),
                         clone_value,
                         line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
-                    };
+                    });
                 }
                 let field_expr = Expr::Field(base.clone(), field.clone(), *span);
                 let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
@@ -1832,22 +2079,30 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // c109 Phase 2: control-flow loops. Loop bodies are their own scope —
         // lower on a cloned env so bindings inside don't leak out.
         Stmt::Loop { body, label, .. } => {
-            let mut branch = clone_env(env);
-            TStmt::Loop {
-                label: label_name(label),
-                body: lower_stmts(body, cx, &mut branch),
-            }
+            let branch = clone_env(env);
+            let label = label_name(label);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, branch)],
+                move |mut lowered| TStmt::Loop {
+                    label,
+                    body: lowered.remove(0),
+                },
+            );
         }
         Stmt::While {
             cond, body, label, ..
         } => {
             let cond = lower_expr(cond, cx, env);
-            let mut branch = clone_env(env);
-            TStmt::While {
-                label: label_name(label),
-                cond,
-                body: lower_stmts(body, cx, &mut branch),
-            }
+            let branch = clone_env(env);
+            let label = label_name(label);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, branch)],
+                move |mut lowered| TStmt::While {
+                    label,
+                    cond,
+                    body: lowered.remove(0),
+                },
+            );
         }
         // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` three-part counted loop.
         Stmt::CountedLoop {
@@ -1873,16 +2128,27 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 gc_transferred: false,
             });
             let cond = lower_expr(cond, cx, &mut scoped);
-            let step = step
-                .as_ref()
-                .map(|step| Box::new(lower_stmt(step.as_ref(), cx, &mut scoped)));
-            TStmt::CountedLoop {
-                label: label_name(label),
-                init: init_stmt,
-                cond,
-                step,
-                body: lower_stmts(body, cx, &mut scoped),
+            let has_step = step.is_some();
+            let mut bodies = Vec::with_capacity(if has_step { 2 } else { 1 });
+            if let Some(step) = step {
+                bodies.push(
+                    LowerBody::direct(std::slice::from_ref(step.as_ref()), scoped.clone())
+                        .carry_env(),
+                );
             }
+            bodies.push(LowerBody::inherited(body, scoped));
+            let label = label_name(label);
+            return deferred_stmt(bodies, move |mut lowered| {
+                let step = has_step.then(|| Box::new(lowered.remove(0).remove(0)));
+                let body = lowered.remove(0);
+                TStmt::CountedLoop {
+                    label,
+                    init: init_stmt,
+                    cond,
+                    step,
+                    body,
+                }
+            });
         }
         Stmt::For {
             var,
@@ -1900,17 +2166,22 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // context inside the body sees it; a panic after the loop does not.
                 let mut branch = clone_env(env);
                 branch.bind(var, TLocal::user(var), Some(Type::Int));
-                let lowered_body = lower_stmts(body, cx, &mut branch);
-                TStmt::Range {
-                    label: label_name(label),
-                    var: var.clone(),
-                    source: None,
-                    start,
-                    end,
-                    step,
-                    exclusive: *exclusive,
-                    body: lowered_body,
-                }
+                let label = label_name(label);
+                let var = var.clone();
+                let exclusive = *exclusive;
+                return deferred_stmt(
+                    vec![LowerBody::scoped(body, branch)],
+                    move |mut lowered| TStmt::Range {
+                        label,
+                        var,
+                        source: None,
+                        start,
+                        end,
+                        step,
+                        exclusive,
+                        body: lowered.remove(0),
+                    },
+                );
             }
             // c109 Phase 5: collection iteration `loop x; coll` / `loop k, v; map`.
             // The collection string is resolved once. The loop var(s) bind in the body
@@ -1934,16 +2205,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     };
                     let mut branch = clone_env(env);
                     branch.bind(var, TLocal::user(var), Some(Type::Int));
-                    return TStmt::Range {
-                        label: label_name(label),
-                        var: var.clone(),
-                        source: Some(lowered_coll),
-                        start: zero(),
-                        end: zero(),
-                        step,
-                        exclusive: false,
-                        body: lower_stmts(body, cx, &mut branch),
-                    };
+                    let label = label_name(label);
+                    let var = var.clone();
+                    return deferred_stmt(
+                        vec![LowerBody::scoped(body, branch)],
+                        move |mut lowered| TStmt::Range {
+                            label,
+                            var,
+                            source: Some(lowered_coll),
+                            start: zero(),
+                            end: zero(),
+                            step,
+                            exclusive: false,
+                            body: lowered.remove(0),
+                        },
+                    );
                 }
                 let mut method_kind = method_kind;
                 let mut coll_elem_ty: Option<Type> = match &lowered_coll.ty {
@@ -2051,18 +2327,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         .as_ref()
                         .map(|t| cx.columnar_list_type(t).is_some())
                         .unwrap_or(false);
-                TStmt::ForIn {
-                    label: label_name(label),
-                    var: var.clone(),
-                    var2: var2.as_ref().map(|(n, _)| n.clone()),
-                    source: iter_source,
-                    collection: lowered_coll,
-                    step: step.as_ref().map(|step| lower_expr(step, cx, env)),
-                    method_kind,
-                    columnar,
-                    by_value,
-                    body: lower_stmts(body, cx, &mut branch),
-                }
+                let step = step.as_ref().map(|step| lower_expr(step, cx, env));
+                let label = label_name(label);
+                let var = var.clone();
+                let var2 = var2.as_ref().map(|(n, _)| n.clone());
+                return deferred_stmt(
+                    vec![LowerBody::scoped(body, branch)],
+                    move |mut lowered| TStmt::ForIn {
+                        label,
+                        var,
+                        var2,
+                        source: iter_source,
+                        collection: lowered_coll,
+                        step,
+                        method_kind,
+                        columnar,
+                        by_value,
+                        body: lowered.remove(0),
+                    },
+                );
             }
         },
         Stmt::Break(_) => TStmt::Break(None),
@@ -2084,7 +2367,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             arms,
             else_body,
             span,
-        } => lower_switch(subject, arms, else_body, *span, cx, env),
+        } => return lower_switch(subject, arms, else_body, *span, cx, env),
         // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
@@ -2093,8 +2376,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // D-CANVASSTATE1=D: `#DebugOnly` is a lexical debug-only region. Lower
         // on a cloned env so declarations cannot be required by release code.
         Stmt::Switched { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::DebugOnly(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::DebugOnly(lowered.remove(0)),
+            );
         }
         // Lexical-scope rule: whenever `emit_tir_stmt` opens a Rust `{ ... }`, lower
         // declarations in a cloned env. Only three statement forms deliberately reuse
@@ -2118,7 +2404,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // Sema didn't resolve (earlier error) — emit nothing (I3), like the AST.
                 None => &[],
             };
-            TStmt::Inline(lower_stmts(chosen, cx, env))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::inline(chosen, scoped)],
+                |mut lowered| TStmt::Inline(lowered.remove(0)),
+            );
         }
         // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
         // adds a Rust lexical block, so lower its declarations in a child env. The `#Audit("…")`
@@ -2126,14 +2416,20 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
         Stmt::Unsafe { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Unsafe(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Unsafe(lowered.remove(0)),
+            );
         }
         // D-CTEFFECT1: preserve the policy gate for canonical comptime evaluation.
         // AOT/JIT still execute its body as a plain lexical block.
         Stmt::Impure { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Impure(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Impure(lowered.remove(0)),
+            );
         }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
@@ -2169,20 +2465,29 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         }
         // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
         Stmt::Shield { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Shield {
-                body: lower_stmts(body, cx, &mut scoped),
-            }
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Shield {
+                    body: lowered.remove(0),
+                },
+            );
         }
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) emits a plain
         // Rust lexical block.
         Stmt::Region { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Region(lowered.remove(0)),
+            );
         }
         Stmt::Policy { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Region(lowered.remove(0)),
+            );
         }
         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
         // internal collector. Helpers borrow this same value.
@@ -2191,11 +2496,15 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
             let group = TLocal::user(name);
             scoped.bind(name, group.clone(), Some(group_ty));
-            TStmt::TaskGroup {
-                group,
-                limit: limit.as_ref().map(|value| lower_expr(value, cx, env)),
-                body: lower_stmts(body, cx, &mut scoped),
-            }
+            let limit = limit.as_ref().map(|value| lower_expr(value, cx, env));
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                move |mut lowered| TStmt::TaskGroup {
+                    group,
+                    limit,
+                    body: lowered.remove(0),
+                },
+            );
         }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a public
         // runtime object (unlike the compiler-private TaskGroup handle) — bind `name`
@@ -2204,31 +2513,41 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // like an ordinary `name :: jet_layout::Handle::new(…)` binding would.
         Stmt::Layout { name, body, .. } => {
             let handle = TLocal::user(name);
-            env.bind(
+            let mut scoped = clone_env(env);
+            scoped.bind(
                 name,
                 handle.clone(),
                 Some(Type::Named(Syntax::LAYOUT_TYPE.to_string())),
             );
-            let lowered_body = lower_stmts(body, cx, env);
-            TStmt::Layout {
-                handle,
-                label: name.clone(),
-                body: lowered_body,
-            }
+            let label = name.clone();
+            return deferred_stmt(
+                vec![LowerBody::inline(body, scoped)],
+                move |mut lowered| TStmt::Layout {
+                    handle,
+                    label,
+                    body: lowered.remove(0),
+                },
+            );
         }
         // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
         Stmt::Caps { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Region(lowered.remove(0)),
+            );
         }
         // D-SCAP1: a `#grant(FS) { caps -> … }` grant region. The capability handle
         // is a compile-time-only fact (authority to perform the granted effects),
         // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
         // No runtime grant/revoke value, no `unsafe`.
         Stmt::Grant { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Region(lowered.remove(0)),
+            );
         }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
         // Resolve each field against the outer env, then lower the guarded Rust block
@@ -2238,18 +2557,24 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 .iter()
                 .map(|(name, v, _)| (name.clone(), lower_expr(v, cx, env)))
                 .collect();
-            let mut scoped = clone_env(env);
-            TStmt::ContextBlock {
-                guards,
-                body: lower_stmts(body, cx, &mut scoped),
-            }
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                move |mut lowered| TStmt::ContextBlock {
+                    guards,
+                    body: lowered.remove(0),
+                },
+            );
         }
         // D-TERM1: `live { … }` emits an enter/guard/leave Rust lexical block.
         Stmt::Live { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Live {
-                body: lower_stmts(body, cx, &mut scoped),
-            }
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Live {
+                    body: lowered.remove(0),
+                },
+            );
         }
         // D-DOTSCOPE1: a `#Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
         // `.skip`). Legality/args were checked in sema; here we pick the lowering
@@ -2261,8 +2586,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             name, args, body, ..
         } => {
             if crate::Syntax::is_stdlib_dsl_block_marker(name) {
-                let mut scoped = clone_env(env);
-                return TStmt::Region(lower_stmts(body, cx, &mut scoped));
+                let scoped = clone_env(env);
+                return deferred_stmt(
+                    vec![LowerBody::scoped(body, scoped)],
+                    |mut lowered| TStmt::Region(lowered.remove(0)),
+                );
             }
             let kind = if name == Syntax::SCOPE_TEST_SETUP {
                 ScopeMemberKind::Setup
@@ -2273,25 +2601,28 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             } else {
                 ScopeMemberKind::Skip
             };
-            let lowered_body = if matches!(&kind, ScopeMemberKind::Setup) {
+            let scoped = clone_env(env);
+            let body_plan = if matches!(&kind, ScopeMemberKind::Setup) {
                 // `.setup` is emitted inline so its declarations intentionally remain
                 // available to later statements in the test.
-                lower_stmts(body, cx, env)
+                LowerBody::inline(body, scoped)
             } else {
-                let mut scoped = clone_env(env);
-                lower_stmts(body, cx, &mut scoped)
+                LowerBody::scoped(body, scoped)
             };
-            TStmt::ScopeMember {
+            return deferred_stmt(vec![body_plan], move |mut lowered| TStmt::ScopeMember {
                 kind,
-                body: lowered_body,
-            }
+                body: lowered.remove(0),
+            });
         }
         // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
         // (byte-for-byte the `Stmt::Region`/`Stmt::Caps` shape). The determinism
         // suspension is a sema-only fact; nothing runtime, no `unsafe` (I3).
         Stmt::AssumeDet { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let scoped = clone_env(env);
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                |mut lowered| TStmt::Region(lowered.remove(0)),
+            );
         }
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
         // handle (typed `Transaction`) in a child env so `name.on_commit(…)` lowers
@@ -2336,23 +2667,27 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // `#Transact` attaches to that inner block's own transaction, not this one.
             let prev_in = cx.in_stm_transact.replace(true);
             let prev_touched = cx.stm_touched.replace(false);
-            let lowered_body = lower_stmts(body, cx, &mut scoped);
-            let uses_stm = cx.stm_touched.get();
-            cx.in_stm_transact.set(prev_in);
-            cx.stm_touched.set(prev_touched);
-            TStmt::Transact {
-                handle,
-                snapshots,
-                uses_stm,
-                body: lowered_body,
-            }
+            return deferred_stmt(
+                vec![LowerBody::scoped(body, scoped)],
+                move |mut lowered| {
+                    let uses_stm = cx.stm_touched.get();
+                    cx.in_stm_transact.set(prev_in);
+                    cx.stm_touched.set(prev_touched);
+                    TStmt::Transact {
+                        handle,
+                        snapshots,
+                        uses_stm,
+                        body: lowered.remove(0),
+                    }
+                },
+            );
         }
         // Forward-safety default: a Stmt variant not in the subset never reaches
         // lowering (`stmt_in_subset` returns false for it). Kept as a guard against a
         // future variant; currently unreachable because every covered variant is matched.
         #[allow(unreachable_patterns)]
         _ => unreachable!("statement not in TIR subset"),
-    }
+    })
 }
 
 /// W4 (durability): proves the sema-to-TIR handoff `debug_assert`s in
@@ -2405,6 +2740,6 @@ mod handoff_assert_tests {
             op_span: Span::new(0, 0),
             value: Expr::Int(1, Span::new(0, 0), None, None),
         };
-        let _ = lower_stmt(&stmt, &cx, &mut env);
+        let _ = lower_stmts(std::slice::from_ref(&stmt), &cx, &mut env);
     }
 }

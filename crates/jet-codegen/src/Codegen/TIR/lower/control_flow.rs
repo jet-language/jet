@@ -16,13 +16,13 @@ use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::lower::bool_and_chain;
 use crate::Codegen::TIR::lower_enum_match;
+use crate::Codegen::TIR::lower::{deferred_stmt, lower_stmts, LowerBody, LowerStmtPlan};
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
 use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
 use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
 use crate::Codegen::TIR::lower_range_switch;
-use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::bin_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
@@ -40,6 +40,8 @@ use crate::Codegen::TIR::BranchClass;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 use crate::Diagnostics::Span;
 use crate::Syntax;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub(crate) fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
@@ -323,11 +325,14 @@ mod borrowed_pattern_tests {
 type IfBinding = (String, TLocal, Option<Type>);
 
 fn flatten_and<'a>(cond: &'a Expr, terms: &mut Vec<&'a Expr>) {
-    if let Expr::Binary(BinOp::And, left, right, _) = cond {
-        flatten_and(left, terms);
-        flatten_and(right, terms);
-    } else {
-        terms.push(cond);
+    let mut pending = vec![cond];
+    while let Some(term) = pending.pop() {
+        if let Expr::Binary(BinOp::And, left, right, _) = term {
+            pending.push(right);
+            pending.push(left);
+        } else {
+            terms.push(term);
+        }
     }
 }
 
@@ -700,14 +705,14 @@ fn lower_if_cond_atom(
 
 /// c109 Phase 4: lower a `when`/match. The gate (`switch_in_subset`) has already
 /// proved one of the two covered shapes; pick the matching lowering.
-pub(crate) fn lower_switch(
-    subject: &Expr,
-    arms: &[SwitchArm],
-    else_body: &Option<Vec<Stmt>>,
+pub(crate) fn lower_switch<'a>(
+    subject: &'a Expr,
+    arms: &'a [SwitchArm],
+    else_body: &'a Option<Vec<Stmt>>,
     span: Span,
-    cx: &Cx,
+    cx: &'a Cx,
     env: &mut LowerEnv,
-) -> TStmt {
+) -> LowerStmtPlan<'a> {
     if crate::AST::is_subjectless_guard(subject, span) {
         return lower_guard_switch(arms, else_body, cx, env);
     }
@@ -881,35 +886,62 @@ pub(crate) fn classify_branch(subject: &Expr, arms: &[SwitchArm], cx: &Cx) -> Br
     }
 }
 
-fn lower_guard_switch(
-    arms: &[SwitchArm],
-    else_body: &Option<Vec<Stmt>>,
-    cx: &Cx,
+fn lower_guard_switch<'a>(
+    arms: &'a [SwitchArm],
+    else_body: &'a Option<Vec<Stmt>>,
+    cx: &'a Cx,
     env: &mut LowerEnv,
-) -> TStmt {
-    let mut chain = else_body.as_ref().map_or_else(Vec::new, |body| {
-        let mut branch = clone_env(env);
-        lower_stmts(body, cx, &mut branch)
-    });
-    // First wrap of the residual is a real `else { … }` (multi-stmt safe).
-    // Later wraps nest a single `If` and must emit as `else if`.
-    let mut else_is_elseif = false;
-    for arm in arms.iter().rev() {
-        let (cond, bindings, mut body) = lower_if_cond(&arm.cond, cx, env);
-        let mut branch = if bindings.is_empty() { clone_env(env) } else { fork_panic(env) };
-        for (name, place, ty) in bindings {
-            branch.bind(&name, place, ty);
-        }
-        body.extend(lower_stmts(&arm.body, cx, &mut branch));
-        chain = vec![TStmt::If {
-            cond,
-            then_body: body,
-            else_body: (!chain.is_empty()).then_some(chain),
-            else_is_elseif,
-        }];
-        else_is_elseif = true;
+) -> LowerStmtPlan<'a> {
+    // The chain is wrapped from the last arm back toward the first, so the deferred
+    // bodies run in reverse source order. Prepare each condition immediately before
+    // its body. This keeps reactive callback-site traversal interleaved as it was
+    // before body lowering became a heap worklist.
+    let mut arm_states = Vec::with_capacity(arms.len());
+    let mut bodies = Vec::with_capacity(arms.len() + if else_body.is_some() { 1 } else { 0 });
+    if let Some(body) = else_body {
+        bodies.push(LowerBody::scoped(body, clone_env(env)));
     }
-    chain.into_iter().next().expect("guard table has at least one arm")
+    for arm in arms.iter().rev() {
+        let state = Rc::new(RefCell::new(None));
+        let state_for_prepare = Rc::clone(&state);
+        let branch = fork_panic(env);
+        bodies.push(
+            LowerBody::scoped(&arm.body, branch).prepare(move |cx, branch| {
+                let (cond, bindings, prefix) = lower_if_cond(&arm.cond, cx, branch);
+                for (name, place, ty) in bindings {
+                    branch.bind(&name, place, ty);
+                }
+                *state_for_prepare.borrow_mut() = Some((cond, prefix));
+            }),
+        );
+        arm_states.push(state);
+    }
+    let has_else = else_body.is_some();
+    deferred_stmt(bodies, move |mut lowered| {
+        let mut chain = if has_else {
+            lowered.remove(0)
+        } else {
+            Vec::new()
+        };
+        // First wrap of the residual is a real `else { … }` (multi-stmt safe).
+        // Later wraps nest a single `If` and must emit as `else if`.
+        let mut else_is_elseif = false;
+        for state in arm_states {
+            let (cond, mut prefix) = state
+                .borrow_mut()
+                .take()
+                .expect("guard condition prepared before body");
+            prefix.extend(lowered.remove(0));
+            chain = vec![TStmt::If {
+                cond,
+                then_body: prefix,
+                else_body: (!chain.is_empty()).then_some(chain),
+                else_is_elseif,
+            }];
+            else_is_elseif = true;
+        }
+        chain.into_iter().next().expect("guard table has at least one arm")
+    })
 }
 
 /// D-IF3: `subject >= lo && subject <= hi` as a lowered bool expression.
@@ -961,17 +993,17 @@ fn range_inclusive_cond(subject_ty: &Type, lo: i64, hi: i64) -> TExpr {
 /// The subject is bound once to `__jet_switch_subject = &(subject)` (emitted for parity);
 /// each arm's PLAIN condition is resolved to a Rust string at lowering (`emit_expr`); the
 /// arm bodies + `else` are lowered in separate lexical environments.
-pub(crate) fn lower_mixed_switch(
-    subject: &Expr,
-    arms: &[SwitchArm],
-    else_body: &Option<Vec<Stmt>>,
+pub(crate) fn lower_mixed_switch<'a>(
+    subject: &'a Expr,
+    arms: &'a [SwitchArm],
+    else_body: &'a Option<Vec<Stmt>>,
     class: BranchClass,
-    cx: &Cx,
+    cx: &'a Cx,
     env: &mut LowerEnv,
-) -> TStmt {
+) -> LowerStmtPlan<'a> {
     let subject_expr = lower_expr(subject, cx, env);
     let subject_ty = subject_expr.ty.clone();
-    let mut tarms = Vec::new();
+    let mut arm_plans = Vec::new();
     for arm in arms {
         let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
         let str_match_pat = arm_str_match_pattern(cx, &arm.cond, subject);
@@ -989,7 +1021,7 @@ pub(crate) fn lower_mixed_switch(
         };
         // Each arm body has its own lexical bindings.
         let mut branch = clone_env(env);
-        let mut body = if let Some(pattern) = struct_pat.as_ref() {
+        let prefix = if let Some(pattern) = struct_pat.as_ref() {
             lower_struct_pattern_bindings(pattern, &subject_ty, cx, &mut branch)
         } else if let Some(pattern) = str_match_pat.as_ref() {
             lower_str_match_pattern_bindings(pattern, cx, &mut branch)
@@ -998,19 +1030,19 @@ pub(crate) fn lower_mixed_switch(
         } else {
             Vec::new()
         };
-        body.extend(lower_stmts(&arm.body, cx, &mut branch));
-        tarms.push((cond_expr, body));
+        prefix.extend(lower_stmts(&arm.body, cx, &mut branch));
+        arm_plans.push((cond_expr, prefix));
     }
-    let else_lowered = else_body.as_ref().map(|body| {
-        let mut branch = clone_env(env);
-        lower_stmts(body, cx, &mut branch)
-    });
-    TStmt::MixedSwitch {
+    let has_else = else_body.is_some();
+    let else_lowered = else_body
+        .as_ref()
+        .map(|body| lower_stmts(body, cx, &mut clone_env(env)));
+    LowerStmtPlan::ready(TStmt::MixedSwitch {
         subject: subject_expr,
         class,
-        arms: tarms,
-        else_body: else_lowered,
-    }
+        arms: arm_plans,
+        else_body: has_else.then_some(else_lowered.expect("else body was present")),
+    })
 }
 
 /// D-DESTRUCT1: value tests in `.{ field: value, ... }` become equality checks

@@ -298,8 +298,8 @@ pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
 /// in a `#Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
-/// auto-snapshotted at block entry and restored on a `?`-failure. Recurses through
-/// nested control flow (if/while/for/switch/loop/region/etc.) but stops at:
+/// auto-snapshotted at block entry and restored on a `?`-failure. Walks nested
+/// control flow (if/while/for/switch/loop/region/etc.) but stops at:
 ///   • nested `#Transact` blocks — they establish their own rollback scope; and
 ///   • lambda bodies — a deferred execution context (the same reason `on_commit`
 ///     lambdas escape the enclosing transaction's effect check).
@@ -322,14 +322,17 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
         }
     }
     fn expr_root(e: &Expr) -> Option<&str> {
-        match e {
-            Expr::Ident(name, _) => Some(name),
-            Expr::Field(base, _, _) => expr_root(base),
-            Expr::Index { base, .. } => expr_root(base),
-            _ => None,
+        let mut e = e;
+        loop {
+            match e {
+                Expr::Ident(name, _) => return Some(name),
+                Expr::Field(base, _, _) | Expr::Index { base, .. } => e = base,
+                _ => return None,
+            }
         }
     }
-    for s in body {
+    let mut pending = body.iter().rev().collect::<Vec<_>>();
+    while let Some(s) = pending.pop() {
         match s {
             Stmt::Assign { target, .. } => {
                 if let Some(root) = lvalue_root(target) {
@@ -354,15 +357,17 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
-            | Stmt::AssumeDet { body, .. } => collect_txn_mut_roots(body, out),
+            | Stmt::AssumeDet { body, .. } => {
+                pending.extend(body.iter().rev());
+            }
             Stmt::Switch {
                 arms, else_body, ..
             } => {
-                for arm in arms {
-                    collect_txn_mut_roots(&arm.body, out);
-                }
                 if let Some(eb) = else_body {
-                    collect_txn_mut_roots(eb, out);
+                    pending.extend(eb.iter().rev());
+                }
+                for arm in arms.iter().rev() {
+                    pending.extend(arm.body.iter().rev());
                 }
             }
             // D-META-STAGE1=B (formerly D-CTMARKER1): build-time block erases; no runtime mutations.
@@ -372,10 +377,10 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                 else_body,
                 ..
             } => {
-                collect_txn_mut_roots(then_body, out);
                 if let Some(eb) = else_body {
-                    collect_txn_mut_roots(eb, out);
+                    pending.extend(eb.iter().rev());
                 }
+                pending.extend(then_body.iter().rev());
             }
             // A nested `#Transact` owns its own rollback scope — don't pull its
             // mutations up into the enclosing block.

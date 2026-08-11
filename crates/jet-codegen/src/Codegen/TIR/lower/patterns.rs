@@ -8,9 +8,9 @@ use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
+use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
-use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower::str_match_scan_closure;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TEnumArg;
@@ -326,13 +326,13 @@ pub(super) fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
 /// params), and each arm's pattern is the Rust `Ok(b)`/`Err(b)`/`Some(b)`/`None`,
 /// mirroring `emit_match_pattern`. Binding payload types come from the subject's
 /// resolved Result/Option type (totality), reproducing `add_pattern_bindings`.
-pub(crate) fn lower_fallible_match(
-    subject: &Expr,
-    arms: &[SwitchArm],
-    else_body: &Option<Vec<Stmt>>,
-    cx: &Cx,
+pub(crate) fn lower_fallible_match<'a>(
+    subject: &'a Expr,
+    arms: &'a [SwitchArm],
+    else_body: &'a Option<Vec<Stmt>>,
+    cx: &'a Cx,
     env: &mut LowerEnv,
-) -> TStmt {
+) -> LowerStmtPlan<'a> {
     // The subject's resolved type carries the ok/err/present payload types. Lower the
     // subject once to get both its emitted string and its total type.
     let subject_t = lower_expr(subject, cx, env);
@@ -356,33 +356,41 @@ pub(crate) fn lower_fallible_match(
         _ => (subject_t, false),
     };
     let mut tarms = Vec::new();
+    let mut bodies = Vec::new();
     for arm in arms {
         let pattern =
             arm_fallible_pattern(cx, &arm.cond, subject).expect("gate proved fallible arm");
         // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
-        let body = lower_stmts(&arm.body, cx, &mut body_env);
-        tarms.push(TMatchArm {
-            pattern: TPattern::binding(pattern),
-            body,
-        });
+        tarms.push(TPattern::binding(pattern));
+        bodies.push(LowerBody::scoped(&arm.body, body_env));
     }
-    // The `else` arm has its own lexical bindings.
-    let else_lowered = else_body.as_ref().map(|body| {
-        let mut branch = clone_env(env);
-        lower_stmts(body, cx, &mut branch)
-    });
-    // No explicit `else` → the AST path (`emit_pattern_match_switch`) appends
-    // `_ => unreachable!(…)` so rustc sees a complete match (sema proved E0307).
-    let fallthrough = else_body.is_none();
-    TStmt::EnumMatch {
-        scrutinee,
-        clone_subject,
-        arms: tarms,
-        else_body: else_lowered,
-        fallthrough,
+    let has_else = else_body.is_some();
+    if let Some(body) = else_body {
+        let branch = clone_env(env);
+        bodies.push(LowerBody::scoped(body, branch));
     }
+    deferred_stmt(bodies, move |mut lowered| {
+        let else_lowered = has_else.then(|| lowered.pop().unwrap());
+        let tarms = tarms
+            .into_iter()
+            .map(|pattern| TMatchArm {
+                pattern,
+                body: lowered.remove(0),
+            })
+            .collect();
+        // No explicit `else` → the AST path (`emit_pattern_match_switch`) appends
+        // `_ => unreachable!(…)` so rustc sees a complete match (sema proved E0307).
+        let fallthrough = !has_else;
+        TStmt::EnumMatch {
+            scrutinee,
+            clone_subject,
+            arms: tarms,
+            else_body: else_lowered,
+            fallthrough,
+        }
+    })
 }
 
 /// c109 Phase 8: bind the ok/err/present payload to its resolved type, read from the
@@ -412,13 +420,13 @@ pub(crate) fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, su
     env.bind(&binding, TLocal::user(&binding), ty);
 }
 
-pub(crate) fn lower_enum_match(
-    subject: &Expr,
-    arms: &[SwitchArm],
-    else_body: &Option<Vec<Stmt>>,
-    cx: &Cx,
+pub(crate) fn lower_enum_match<'a>(
+    subject: &'a Expr,
+    arms: &'a [SwitchArm],
+    else_body: &'a Option<Vec<Stmt>>,
+    cx: &'a Cx,
     env: &mut LowerEnv,
-) -> TStmt {
+) -> LowerStmtPlan<'a> {
     // The match owns the value. Mirror `emit_pattern_match_switch`: a by-reference
     // subject (a deref'd enum param) is cloned — the borrow itself is cloned, NOT
     // the deref'd place, so the scrutinee carries the slot *without* its deref and
@@ -460,63 +468,72 @@ pub(crate) fn lower_enum_match(
             arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
         })
     });
-    let mut tarms = Vec::new();
+    let mut patterns = Vec::new();
+    let mut bodies = Vec::new();
     for arm in arms {
         let pattern = arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
         // The arm body sees the variant's payload bindings, typed from the layout. The
         // arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_pattern_bindings(cx, &pattern, &mut body_env, Some(&subject_ty));
-        let body = lower_stmts(&arm.body, cx, &mut body_env);
-        tarms.push(TMatchArm {
-            pattern: TPattern::arm(pattern, enum_type.clone()),
-            body,
-        });
+        patterns.push(TPattern::arm(pattern, enum_type.clone()));
+        bodies.push(LowerBody::scoped(&arm.body, body_env));
     }
-    // The `else` arm has its own lexical bindings.
-    let else_lowered = else_body.as_ref().map(|body| {
-        let mut branch = clone_env(env);
-        lower_stmts(body, cx, &mut branch)
-    });
-    // No explicit `else` → the AST path appends `_ => unreachable!(…)` so rustc
-    // sees a complete match (sema already proved exhaustiveness — E0307).
-    let fallthrough = else_body.is_none();
-    TStmt::EnumMatch {
-        scrutinee,
-        clone_subject,
-        arms: tarms,
-        else_body: else_lowered,
-        fallthrough,
+    let has_else = else_body.is_some();
+    if let Some(body) = else_body {
+        let branch = clone_env(env);
+        bodies.push(LowerBody::scoped(body, branch));
     }
+    deferred_stmt(bodies, move |mut lowered| {
+        let else_lowered = has_else.then(|| lowered.pop().unwrap());
+        let tarms = patterns
+            .into_iter()
+            .map(|pattern| TMatchArm {
+                pattern,
+                body: lowered.remove(0),
+            })
+            .collect();
+        // No explicit `else` → the AST path appends `_ => unreachable!(…)` so rustc
+        // sees a complete match (sema already proved exhaustiveness — E0307).
+        TStmt::EnumMatch {
+            scrutinee,
+            clone_subject,
+            arms: tarms,
+            else_body: else_lowered,
+            fallthrough: !has_else,
+        }
+    })
 }
 
-pub(crate) fn lower_range_switch(
-    subject: &Expr,
-    arms: &[SwitchArm],
-    else_body: &Option<Vec<Stmt>>,
-    cx: &Cx,
+pub(crate) fn lower_range_switch<'a>(
+    subject: &'a Expr,
+    arms: &'a [SwitchArm],
+    else_body: &'a Option<Vec<Stmt>>,
+    cx: &'a Cx,
     env: &mut LowerEnv,
-) -> TStmt {
+) -> LowerStmtPlan<'a> {
     let subject_expr = lower_expr(subject, cx, env);
-    let mut tarms = Vec::new();
+    let mut ranges = Vec::new();
+    let mut bodies = Vec::new();
     for arm in arms {
         let (lo, hi) = arm_head_range(cx, &arm.cond, subject).expect("gate proved range arm");
-        let mut branch = clone_env(env);
-        let body = lower_stmts(&arm.body, cx, &mut branch);
-        tarms.push((lo, hi, body));
+        ranges.push((lo, hi));
+        bodies.push(LowerBody::scoped(&arm.body, clone_env(env)));
     }
-    let else_lowered = {
-        let body = else_body
-            .as_ref()
-            .expect("range switch requires else (gate)");
-        let mut branch = clone_env(env);
-        lower_stmts(body, cx, &mut branch)
-    };
-    TStmt::RangeSwitch {
-        subject: subject_expr,
-        arms: tarms,
-        else_body: else_lowered,
-    }
+    let else_body = else_body.as_ref().expect("range switch requires else (gate)");
+    bodies.push(LowerBody::scoped(else_body, clone_env(env)));
+    deferred_stmt(bodies, move |mut lowered| {
+        let else_lowered = lowered.pop().unwrap();
+        let arms = ranges
+            .into_iter()
+            .map(|(lo, hi)| (lo, hi, lowered.remove(0)))
+            .collect();
+        TStmt::RangeSwitch {
+            subject: subject_expr,
+            arms,
+            else_body: else_lowered,
+        }
+    })
 }
 
 /// TIR-local reproduction of codegen's `emit_range_guard` (Statement.rs): a payload
