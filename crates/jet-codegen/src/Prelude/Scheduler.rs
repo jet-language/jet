@@ -341,6 +341,12 @@ impl ParkSlot {
     }
 }
 
+impl jet_std::JetTaskGroupWaiter for ParkSlot {
+    fn wake(&self) {
+        ParkSlot::wake(self);
+    }
+}
+
 pub struct JetTaskControl {
     pub paused: Arc<AtomicBool>,
     pub cancelled: Arc<AtomicBool>,
@@ -552,6 +558,27 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
         ctrl.wait_while_paused();
     }
     jet_observe_task_update("running", "", jet_deadline_remaining_ms());
+}
+
+/// Shared bounded-task admission wait. The task-group Prelude owns the
+/// deadline/cancellation ordering; this scheduler function only supplies the
+/// ambient task control and park primitive to every engine.
+pub fn jet_scheduler_task_group_wait(waiter: &Arc<ParkSlot>) {
+    let deadline = jet_std::jet_task_deadline_if_expired(
+        jet_deadline_remaining_ms(),
+        "task admission",
+    );
+    match jet_std::jet_task_wait_policy(
+        deadline,
+        jet_scheduler_task_cancelled(),
+        jet_scheduler_shielded(),
+    ) {
+        Ok(()) => jet_scheduler_yield("task admission", waiter, None),
+        Err(jet_std::JetTaskWaitInterrupt::Deadline(_)) => {
+            jet_deadline_exceeded("task admission")
+        }
+        Err(jet_std::JetTaskWaitInterrupt::Cancelled) => jet_task_deliver_cancel(),
+    }
 }
 
 pub fn jet_scheduler_wake(slot: &ParkSlot) {

@@ -204,7 +204,18 @@ use std::collections::HashSet;
                             _ => None,
                         };
                         match self.admit_scoped_borrow(name, fallback, lam.span) {
-                            Some(true) => continue,
+                            Some(true) => {
+                                if self.is_task_spawn {
+                                    if let Some(binding) = self
+                                        .current_binding_name
+                                        .as_ref()
+                                        .or(self.task_spawn_binding_name.as_ref())
+                                    {
+                                        self.view_borrow_escape_tasks.insert(binding.clone());
+                                    }
+                                }
+                                continue;
+                            }
                             Some(false) => continue,
                             None => {}
                         }

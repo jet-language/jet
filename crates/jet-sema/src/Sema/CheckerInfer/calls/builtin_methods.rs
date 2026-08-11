@@ -569,7 +569,7 @@ impl<'a> Checker<'a> {
                         //          the borrow; fix-it is to pass an owned `copy` or `Shared<T>`.
                         //   E1103: task had a general sendability failure at spawn (E1102 already
                         //          fired); detaching an unsound task is doubly dangerous.
-                        if let Expr::Ident(name, _) = receiver {
+                        let legal = if let Expr::Ident(name, _) = receiver {
                             if self.view_borrow_escape_tasks.contains(name.as_str()) {
                                 self.diags.push(Diagnostic::error(
                                     "E1106",
@@ -581,6 +581,7 @@ impl<'a> Checker<'a> {
                                     "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`".to_string(),
                                     Some(span),
                                 ));
+                                false
                             } else if self.view_capture_tasks.contains(name.as_str()) {
                                 self.diags.push(Diagnostic::error(
                                     "E1103",
@@ -592,9 +593,16 @@ impl<'a> Checker<'a> {
                                     "fix the E1102 error at the spawn site first, then `.detach()` is safe".to_string(),
                                     Some(span),
                                 ));
+                                false
+                            } else {
+                                true
                             }
+                        } else {
+                            true
+                        };
+                        if legal {
+                            self.consume_builtin_receiver(receiver, method);
                         }
-                        self.consume_builtin_receiver(receiver, method);
                         let _ = span;
                         return None; // detach() returns nothing
                     }

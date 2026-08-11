@@ -251,6 +251,27 @@ pub struct Diagnostic {
     pub structured: Option<StructuredDiagnostic>,
 }
 
+/// Control-flow sentinels used by the in-process evaluator and comptime
+/// bridge. This namespace is internal; these values never become product
+/// diagnostics or enter the registered diagnostic-code surface.
+#[doc(hidden)]
+pub mod internal {
+    use super::{Diagnostic, Span};
+
+    pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Diagnostic {
+        Diagnostic::internal_sentinel("SOFT_EXIT", what, why, span)
+    }
+
+    pub fn task_cancelled(span: Option<Span>) -> Diagnostic {
+        Diagnostic::internal_sentinel(
+            "TASK_CANCELLED",
+            "task cancelled".to_string(),
+            "the owning task group stopped this task".to_string(),
+            span,
+        )
+    }
+}
+
 impl Diagnostic {
     /// If `fix` is `replace \`from\` with \`to\`` or `remove \`tok\` …`, attach
     /// a span edit for LSP/CLI autocorrect (M6 phase 4).
@@ -357,21 +378,6 @@ impl Diagnostic {
         };
         d.attach_teaching_edit();
         d
-    }
-
-    #[doc(hidden)]
-    pub fn internal_soft_exit(what: String, why: String, span: Option<Span>) -> Self {
-        Self::internal_sentinel("SOFT_EXIT", what, why, span)
-    }
-
-    #[doc(hidden)]
-    pub fn internal_task_cancelled(span: Option<Span>) -> Self {
-        Self::internal_sentinel(
-            "TASK_CANCELLED",
-            "task cancelled".to_string(),
-            "the owning task group stopped this task".to_string(),
-            span,
-        )
     }
 
     pub fn e0956_unsupported(what: &str, span: Span) -> Self {

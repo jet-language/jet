@@ -8,9 +8,10 @@ use jet_codegen::scheduler::{
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
-    jet_scheduler_yield_now, jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted,
+    jet_scheduler_task_group_wait, jet_scheduler_yield_now, jet_task_delay_ms_defaulted,
+    jet_task_interval_ms_defaulted,
     jet_task_join_deadline_check, jet_task_sleep_ms_defaulted, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
-    JetSchedulerWait, JetShieldExit, JetTaskControl,
+    JetSchedulerWait, JetShieldExit, JetTaskControl, ParkSlot,
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
@@ -719,15 +720,28 @@ extern "C" fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_task_group_acquire(group: i64) {
+extern "C" fn jet_jit_task_group_acquire(group: i64) -> i64 {
+    PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = None);
     let children = with_runtime_mut(|rt| {
         rt.task_groups
             .get(group as usize)
             .and_then(Option::as_ref)
             .map(|group| group.children.clone())
     });
-    let permit = children.and_then(|children| children.acquire());
-    PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = permit);
+    let Some(children) = children else {
+        return JitWaitStatus::Ready as i64;
+    };
+    let waiter = ParkSlot::new();
+    wait_status(|| {
+        let permit = children
+            .acquire_with(waiter, |waiter| {
+                jet_scheduler_task_group_wait(waiter);
+                Ok::<(), ()>(())
+            })
+            .expect("task-group admission wait cannot fail");
+        PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = permit);
+        0
+    })
 }
 
 extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
@@ -1083,7 +1097,7 @@ host_fns! {
     spawn3: "jet_jit_spawn3" => jet_jit_spawn3: sig_spawn3;
     spawn4: "jet_jit_spawn4" => jet_jit_spawn4: sig_spawn4;
     task_group_new: "jet_jit_task_group_new" => jet_jit_task_group_new: sig_i64_i64;
-    task_group_acquire: "jet_jit_task_group_acquire" => jet_jit_task_group_acquire: sig_void_i64;
+    task_group_acquire: "jet_jit_task_group_acquire" => jet_jit_task_group_acquire: sig_i64_i64;
     task_group_register: "jet_jit_task_group_register" => jet_jit_task_group_register: sig_void_i64_i64;
     task_group_close: "jet_jit_task_group_close" => jet_jit_task_group_close: sig_i64;
     task_join: "jet_jit_task_join" => jet_jit_task_join: sig_i64;
@@ -1129,7 +1143,13 @@ mod tests {
                 .map(|group| group.children.clone())
         })
         .expect("bounded task group runtime");
-        let outer_permit = children.acquire().expect("outer task group permit");
+        let outer_permit = children
+            .acquire_with(ParkSlot::new(), |waiter| {
+                jet_scheduler_task_group_wait(waiter);
+                Ok::<(), ()>(())
+            })
+            .unwrap()
+            .expect("outer task group permit");
         let nested_id = std::sync::Arc::new(AtomicI64::new(-1));
         let nested_id_for_child = nested_id.clone();
         let nested_acquired = std::sync::Arc::new(AtomicBool::new(false));

@@ -306,7 +306,14 @@
             let erased: Box<dyn FnOnce() -> T + Send + 'static> =
                 unsafe { std::mem::transmute(boxed) };
             // JET_VETTED_UNSAFE_END: jet_taskgroup_borrowed_spawn
-            let permit = self.children.acquire();
+            let waiter = super::ParkSlot::new();
+            let permit = self
+                .children
+                .acquire_with(waiter, |waiter| {
+                    super::jet_scheduler_task_group_wait(waiter);
+                    Ok::<(), ()>(())
+                })
+                .expect("task-group admission wait cannot fail");
             let task = JetTask::spawn(move || {
                 let _permit = permit;
                 erased()

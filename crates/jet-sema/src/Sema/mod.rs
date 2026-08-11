@@ -1445,8 +1445,9 @@ pub(crate) struct Checker<'a> {
     reactive_upgrades: Vec<String>,
     /// D-DATARACE1=C: binding names that crossed a concurrency boundary this function.
     reactive_upgrade_names: HashSet<String>,
-    /// D-DETACH1: task names whose spawn lambda captured a `view` borrow specifically (E1102/ViewBorrow).
-    /// At `.detach()`, if the task is in this set, E1106 fires instead of E1103.
+    /// D-DETACH1: task names whose spawn lambda captured a `view` or
+    /// task-group-scoped borrow. At `.detach()`, if the task is in this set,
+    /// E1106 fires instead of E1103.
     view_borrow_escape_tasks: HashSet<String>,
     /// D-DETACH1: the binding name currently being elaborated (set at check_binding
     /// entry, cleared after). Used to record view-capturing task names.

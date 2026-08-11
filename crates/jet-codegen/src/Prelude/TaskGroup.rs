@@ -46,7 +46,7 @@ pub fn jet_task_cancellation() -> JetTaskCancellation {
 /// representation.
 pub fn jet_task_failure_from_code(code: &str, reason: String) -> JetTaskFailure {
     match code {
-        "E3004" => JetTaskFailure::Cancelled,
+        "E3004" | "TASK_CANCELLED" => JetTaskFailure::Cancelled,
         "E3003" => JetTaskFailure::DeadlineBlown,
         _ => JetTaskFailure::Panicked(reason),
     }
@@ -73,12 +73,20 @@ pub fn jet_task_group_limit_defaulted(limit: Option<i64>) -> Option<usize> {
     limit.map(|limit| limit.max(1) as usize)
 }
 
+/// A scheduler-owned wake handle for a blocked bounded-group admission. The
+/// wait policy stays in the shared Prelude scheduler; engines only provide the
+/// representation-specific park call.
+pub trait JetTaskGroupWaiter: Send + Sync {
+    fn wake(&self);
+}
+
 #[derive(Debug)]
 struct JetTaskGroupSlots {
     limit: usize,
     active: std::sync::Mutex<usize>,
     closing: std::sync::atomic::AtomicBool,
     wake: std::sync::Condvar,
+    waiters: std::sync::Mutex<Vec<std::sync::Weak<dyn JetTaskGroupWaiter>>>,
 }
 
 impl JetTaskGroupSlots {
@@ -88,35 +96,70 @@ impl JetTaskGroupSlots {
             active: std::sync::Mutex::new(0),
             closing: std::sync::atomic::AtomicBool::new(false),
             wake: std::sync::Condvar::new(),
+            waiters: std::sync::Mutex::new(Vec::new()),
         }
     }
 
     fn close(&self) {
-        let _active = self.active.lock().unwrap();
-        self.closing
-            .store(true, std::sync::atomic::Ordering::Release);
-        self.wake.notify_all();
+        {
+            let _active = self.active.lock().unwrap();
+            self.closing
+                .store(true, std::sync::atomic::Ordering::Release);
+            self.wake.notify_all();
+        }
+        self.wake_waiters();
     }
 
-    fn acquire(self: &std::sync::Arc<Self>) -> Option<JetTaskGroupPermit> {
+    fn register_waiter(&self, waiter: std::sync::Arc<dyn JetTaskGroupWaiter>) {
+        let mut waiters = self.waiters.lock().unwrap();
+        waiters.retain(|waiter| waiter.upgrade().is_some());
+        waiters.push(std::sync::Arc::downgrade(&waiter));
+    }
+
+    fn wake_waiters(&self) {
+        let mut waiters = self.waiters.lock().unwrap();
+        waiters.retain(|waiter| {
+            if let Some(waiter) = waiter.upgrade() {
+                waiter.wake();
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    fn acquire_with<W, E>(
+        self: &std::sync::Arc<Self>,
+        waiter: std::sync::Arc<W>,
+        mut wait: impl FnMut(&std::sync::Arc<W>) -> Result<(), E>,
+    ) -> Result<Option<JetTaskGroupPermit>, E>
+    where
+        W: JetTaskGroupWaiter + 'static,
+    {
+        let wake_waiter: std::sync::Arc<dyn JetTaskGroupWaiter> = waiter.clone();
+        let mut registered = false;
         let mut active = self.active.lock().unwrap();
-        while *active >= self.limit
-            && !self
+        loop {
+            if self
                 .closing
                 .load(std::sync::atomic::Ordering::Acquire)
-        {
-            active = self.wake.wait(active).unwrap();
+            {
+                return Ok(None);
+            }
+            if *active < self.limit {
+                *active += 1;
+                return Ok(Some(JetTaskGroupPermit {
+                    slots: self.clone(),
+                }));
+            }
+            if !registered {
+                self.register_waiter(wake_waiter.clone());
+                registered = true;
+            }
+            drop(active);
+            wait(&waiter)?;
+            active = self.active.lock().unwrap();
         }
-        if self
-            .closing
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
-            return None;
-        }
-        *active += 1;
-        Some(JetTaskGroupPermit {
-            slots: self.clone(),
-        })
     }
 }
 
@@ -127,9 +170,12 @@ pub struct JetTaskGroupPermit {
 
 impl Drop for JetTaskGroupPermit {
     fn drop(&mut self) {
-        let mut active = self.slots.active.lock().unwrap();
-        *active = active.saturating_sub(1);
-        self.slots.wake.notify_one();
+        {
+            let mut active = self.slots.active.lock().unwrap();
+            *active = active.saturating_sub(1);
+            self.slots.wake.notify_one();
+        }
+        self.slots.wake_waiters();
     }
 }
 
@@ -156,8 +202,18 @@ impl<T> JetTaskGroupRuntime<T> {
         }
     }
 
-    pub fn acquire(&self) -> Option<JetTaskGroupPermit> {
-        self.slots.as_ref().and_then(|slots| slots.acquire())
+    pub fn acquire_with<W, E>(
+        &self,
+        waiter: std::sync::Arc<W>,
+        wait: impl FnMut(&std::sync::Arc<W>) -> Result<(), E>,
+    ) -> Result<Option<JetTaskGroupPermit>, E>
+    where
+        W: JetTaskGroupWaiter + 'static,
+    {
+        match &self.slots {
+            Some(slots) => slots.acquire_with(waiter, wait),
+            None => Ok(None),
+        }
     }
 
     pub fn register(&self, child: T) {

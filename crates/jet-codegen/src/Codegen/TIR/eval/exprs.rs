@@ -4047,7 +4047,7 @@ impl<'a> EvalCtx<'a> {
                             let mut sink = sink.lock().expect("evaluator sink poisoned");
                             sink.stderr.push_str(&rendered);
                             sink.exit_code = Some(70);
-                            return Err(Diagnostic::internal_soft_exit(
+                            return Err(crate::Diagnostics::internal::soft_exit(
                                 "70".to_string(),
                                 "or-fallback panic stop".to_string(),
                                 Some(self.span()),
@@ -4948,7 +4948,7 @@ impl<'a> EvalCtx<'a> {
                     let mut sink = sink.lock().expect("evaluator sink poisoned");
                     sink.stderr.push_str(&rendered);
                     sink.exit_code = Some(70);
-                    return Err(Diagnostic::internal_soft_exit(
+                    return Err(crate::Diagnostics::internal::soft_exit(
                         "70".to_string(),
                         "require/panic stop".to_string(),
                         Some(self.span()),
@@ -5875,7 +5875,7 @@ impl<'a> EvalCtx<'a> {
                             .push_str(crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
                         sink.stderr.push('\n');
                         sink.exit_code = Some(70);
-                        return Err(Diagnostic::internal_soft_exit(
+                        return Err(crate::Diagnostics::internal::soft_exit(
                             "70".to_string(),
                             crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP.to_string(),
                             Some(self.span()),

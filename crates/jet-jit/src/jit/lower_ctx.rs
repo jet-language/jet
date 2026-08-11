@@ -12132,7 +12132,8 @@ impl LowerCtx<'_, '_> {
                             self.host.conc.task_group_acquire,
                             self.b.func,
                         );
-                        self.b.ins().call(host, &[group]);
+                        let status = self.b.ins().call(host, &[group]);
+                        let _ = self.finish_wait_call(self.b.inst_results(status)[0]);
                     }
                     let task = self.lower_spawn(*site)?;
                     if let Some(group) = group {

@@ -99,11 +99,7 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
 /// raised by the joining parent remains a control diagnostic and is not
 /// converted here.
 fn task_failure_value(error: &Diagnostic) -> CtValue {
-    let failure = if error.code == "TASK_CANCELLED" {
-        crate::task_group::JetTaskFailure::Cancelled
-    } else {
-        crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone())
-    };
+    let failure = crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone());
     let (variant, args) = match failure {
         crate::task_group::JetTaskFailure::Cancelled => ("Cancelled", Vec::new()),
         crate::task_group::JetTaskFailure::DeadlineBlown => ("DeadlineBlown", Vec::new()),
@@ -1154,7 +1150,7 @@ impl<'a> EvalCtx<'a> {
             Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => {
                 // Child cancellation is converted to TaskFailure at the join
                 // boundary; parent-control cancellation stays registered E3004.
-                Err(Diagnostic::internal_task_cancelled(Some(self.span())))
+                Err(crate::Diagnostics::internal::task_cancelled(Some(self.span())))
             }
         }
     }
@@ -1411,9 +1407,23 @@ impl<'a> EvalCtx<'a> {
             ),
             None => None,
         };
-        let permit = group_runtime
+        let _deadline = group_runtime
             .as_ref()
-            .and_then(|group| group.acquire());
+            .and_then(|_| self.context_deadline.map(crate::scheduler::jet_ctx_push_deadline));
+        let permit = match group_runtime.as_ref() {
+            Some(group) => {
+                let waiter = crate::scheduler::ParkSlot::new();
+                group.acquire_with(waiter, |waiter| {
+                    self.task_wait_check("task admission")?;
+                    self.scheduler_wait("task admission", || {
+                        crate::scheduler::jet_scheduler_yield("task admission", waiter, None)
+                    })?;
+                    Ok(())
+                })?
+            }
+            None => None,
+        };
+        drop(_deadline);
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
         runtime.tasks.push(Some(EvalTask {
@@ -1878,7 +1888,7 @@ impl<'a> EvalCtx<'a> {
             .cloned()
             .ok_or_else(|| unsupported("task group handle", span))?;
         let join_runtime = self.runtime.clone();
-        group.close_with(move |child| {
+        let drain = move |child| {
             let task = join_runtime
                 .lock()
                 .expect("evaluator runtime poisoned")
@@ -1886,9 +1896,27 @@ impl<'a> EvalCtx<'a> {
                 .get_mut(child)
                 .and_then(Option::take);
             let _ = task.and_then(|task| task.completion.recv().ok());
-        });
-        self.task_wait_cancel_check()?;
-        Ok(())
+        };
+        if let Err(interruption) = self.task_wait_cancel_check() {
+            let cancel_runtime = self.runtime.clone();
+            group.close_with_cancel(
+                move |child| {
+                    if let Some(task) = cancel_runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
+                        .tasks
+                        .get(child)
+                        .and_then(Option::as_ref)
+                    {
+                        task.control.cancel();
+                    }
+                },
+                drain,
+            );
+            return Err(interruption);
+        }
+        group.close_with(drain);
+        self.task_wait_cancel_check()
     }
 
     pub(crate) fn span(&self) -> Span {
@@ -1934,7 +1962,7 @@ impl<'a> EvalCtx<'a> {
                     keyword, message, contract.file, contract.line
                 ));
                 sink.exit_code = Some(70);
-                return Err(Diagnostic::internal_soft_exit(
+                return Err(crate::Diagnostics::internal::soft_exit(
                     "70".to_string(),
                     "runtime contract failed".to_string(),
                     Some(contract.span),

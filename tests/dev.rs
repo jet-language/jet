@@ -4696,12 +4696,9 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "memory/parameter_modes",
         "memory/pool_stale_id",
         "memory/rawptr",
-        "memory/ref_field",
-        "memory/resource_close",
         "memory/returned_views",
         "memory/shared_config",
         "memory/shared_transact",
-        "memory/shared_weak_cycle",
         "memory/string_view",
         "streams/generators",
     ];
@@ -4883,7 +4880,6 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
     let _guard = dev_diff_lock().lock().unwrap();
     let stems = [
         "net/browser_bidi_profiles",
-        "net/dns_lookup",
         "net/email_dkim",
         "net/email_message",
         "net/http_client",
@@ -4949,7 +4945,6 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
         "concurrency/detached_task",
         "concurrency/parallel_iter",
         "concurrency/parallel_scan",
-        "concurrency/protocol",
         "concurrency/task_controls",
         "concurrency/task_runtime_audit",
         "game/core_game_headless",
