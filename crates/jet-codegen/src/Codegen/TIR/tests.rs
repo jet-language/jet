@@ -1762,7 +1762,7 @@ fn build() => [Int] {
 }
 fn run() {
     $xs :: build()
-    print(\"{xs}\")
+    print(\"{$xs}\")
 }
 ";
         install_comptime_bridge();
