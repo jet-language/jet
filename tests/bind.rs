@@ -120,7 +120,7 @@ fn assert_generated_project(
     assert_generated_source_parses(&generated);
     let allowed_dynamic_fields = source_markers
         .iter()
-        .copied()
+        .flat_map(|marker| marker.lines().map(str::trim))
         .filter(|marker| marker.contains("DataTree"))
         .collect::<Vec<_>>();
     let dynamic_fields = generated
@@ -400,32 +400,27 @@ fn sql_bind_generated_project_executes_typed_fields() {
         "jet inspect bind sql schema.sql --type User",
         r#"
 use core.encoding.json as json
-use core.time as time
-use core.time.date as date
 
 fn run() {
-    bytes := [U8].{}
-    bytes.push(U8.{65})
-    bytes.push(U8.{66})
-    born := date.new(2024, 1, 2)
-    opened := time.time(3, 4, 5)
-    created := time.datetime(2024, 1, 2, 3, 4, 5)
-    price := Decimal("12.340")
-    user := User.{ id: 7, name: "Ada", active: true, born: born, opened: opened, created: created, price: price, data: bytes }
-    wire := json.to_string(user)
-    roundtrip := json.decode<User>(wire) ?? panic("decode")
-    print(roundtrip.id)
-    print(roundtrip.name)
-    print(roundtrip.active)
-    print(roundtrip.data[0])
-    print(roundtrip.data.len())
-    print(roundtrip.born.to_string())
-    print(roundtrip.opened.to_string())
-    print(roundtrip.created.format_rfc3339())
-    print(roundtrip.price.to_string())
+    canonical := "{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-01-02\",\"opened\":\"03:04:05\",\"created\":\"2024-01-02T03:04:05Z\",\"price\":\"12.34\",\"data\":[65,66]}"
+    wire := json.parse(canonical) ?? panic("parse")
+    user := wire.decode<User>() ?? panic("decode")
+    encoded := user.encode()
+    reencoded := json.to_string(encoded)
+    if reencoded != canonical { panic("re-encode") }
+    print(user.id)
+    print(user.name)
+    print(user.active)
+    print(user.data[0])
+    print(user.data.len())
+    print(user.born.to_string())
+    print(user.opened.to_string())
+    print(user.created.format_rfc3339())
+    print(user.price.to_string())
+    print(reencoded)
 }
 "#,
-        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\n",
+        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\n{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-01-02\",\"opened\":\"03:04:05\",\"created\":\"2024-01-02T03:04:05Z\",\"price\":\"12.34\",\"data\":[65,66]}\n",
         &[
             "id: Int",
             "name: String",
@@ -469,7 +464,10 @@ fn run() {
 "#,
         "7\nJet\ntext\nelement\ntext\n",
         &[
-            "#Rename(\"$content\") content: DataTree",
+            r#"struct Catalog {
+    #Rename("$content") content: DataTree"#,
+            r#"struct CatalogBook {
+    #Rename("$content") content: DataTree"#,
             "book: CatalogBook",
             "#Rename(\"@id\") id: String",
             "title: String",
@@ -644,28 +642,25 @@ fn proto_bind_generated_project_executes_typed_fields() {
         "jet inspect bind proto repo.proto --type Repo",
         r#"
 use core.encoding.json as json
-use core.time as time
 
 fn run() {
-    payload := [U8].{}
-    payload.push(U8.{74})
-    payload.push(U8.{101})
-    payload.push(U8.{116})
-    created := time.datetime(2024, 1, 2, 3, 4, 5)
-    ttl := Duration.seconds(7) ?? panic("duration")
-    repo := Repo.{ name: "jet", stars: 4, active: true, payload: payload, created: created, ttl: ttl }
-    wire := json.to_string(repo)
-    roundtrip := json.decode<Repo>(wire) ?? panic("decode")
-    print(roundtrip.name)
-    print(roundtrip.stars)
-    print(roundtrip.active)
-    print(roundtrip.payload.len())
-    print(roundtrip.payload[0])
-    print(roundtrip.created.format_rfc3339())
-    print(roundtrip.ttl.in(.Seconds) ?? panic("ttl in"))
+    canonical := "{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-01-02T03:04:05Z\",\"ttl\":7000000000}"
+    wire := json.parse(canonical) ?? panic("parse")
+    repo := wire.decode<Repo>() ?? panic("decode")
+    encoded := repo.encode()
+    reencoded := json.to_string(encoded)
+    if reencoded != canonical { panic("re-encode") }
+    print(repo.name)
+    print(repo.stars)
+    print(repo.active)
+    print(repo.payload.len())
+    print(repo.payload[0])
+    print(repo.created.format_rfc3339())
+    print(repo.ttl.in(.Seconds) ?? panic("ttl in"))
+    print(reencoded)
 }
 "#,
-        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\n",
+        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\n{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-01-02T03:04:05Z\",\"ttl\":7000000000}\n",
         &[
             "name: String",
             "// proto field number: 2",
