@@ -5230,7 +5230,7 @@ fn activate_core() => String {
 
 fn fail() => Int ? IOError {
     return .Err(IOError.InvalidInput(IOContext.{
-        operation: .Resolve,
+        operation: .Read,
         resource: None,
         os_code: None,
         cause: Val("debug"),
@@ -5247,22 +5247,36 @@ fn fail_other() => Int ? IOError {
 }
 
 fn run() {
+    print("{42:Debug}")
+    debug :: "debug"
+    print("{debug:Debug}")
+    print("{[1, 2, 3]:Debug}")
     if fail() == {
         .Ok(_) -> panic("failure succeeded")
-        .Err(error) -> print("{error:Debug}")
+        .Err(error) -> {
+            print("{error:Debug}")
+            print("{error}")
+        }
     }
     if fail_other() == {
         .Ok(_) -> panic("other failure succeeded")
-        .Err(error) -> print("{error:Debug}")
+        .Err(error) -> {
+            print("{error:Debug}")
+            print("{error}")
+        }
     }
 }
 "#;
-    let expected_aot = concat!(
-        "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Val(\"debug\") })\n",
+    let expected = concat!(
+        "42\n",
+        "\"debug\"\n",
+        "[1, 2, 3]\n",
+        "InvalidInput(IOContext { operation: Read, resource: None, os_code: None, cause: Val(\"debug\") })\n",
+        "invalid input during read: debug\n",
         "Other(IOContext { operation: Write, resource: Val(\"out.txt\"), os_code: Val(13), cause: Val(\"denied\") })\n",
+        "I/O error during write `out.txt`: denied\n",
     );
-    let expected_dev = expected_aot;
-    let (code, stdout, stderr) = build_and_run(
+    let (code, aot_stdout, stderr) = build_and_run(
         &dir,
         "ioerror_debug",
         source,
@@ -5270,15 +5284,40 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, expected_aot);
+    assert_eq!(aot_stdout, expected);
+    assert!(!aot_stdout.contains("<enum IOOperation>"));
     let file = dir.join("ioerror_debug.jet");
     fs::write(&file, source).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    jet_jit::reset_jit_trace_for_test();
+    let default_jit_stdout = match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
-            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected_dev, ""));
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+            stdout
         }
-        other => panic!("IOError Debug did not run in default dev: {other:?}"),
-    }
+        other => panic!("IOError Show/Debug did not run in default JIT: {other:?}"),
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "IOError Show/Debug must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "IOError Show/Debug must not deopt"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "IOError Show/Debug must not fall back"
+    );
+
+    let forced_interpreter_stdout = match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+            stdout
+        }
+        other => panic!("IOError Show/Debug did not run in forced interpreter: {other:?}"),
+    };
+    assert_eq!(default_jit_stdout, aot_stdout);
+    assert_eq!(forced_interpreter_stdout, aot_stdout);
     let _ = fs::remove_dir_all(&dir);
 }
 

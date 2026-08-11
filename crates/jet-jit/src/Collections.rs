@@ -47,82 +47,21 @@ mod disjoint_semantics {
 // tier 0 (I9).  This small module supplies the Prelude's sibling types that
 // are normally present in the flat emitted program, then exposes Vec-shaped
 // adapters for JIT handles.
-#[allow(dead_code, unused_imports)]
+#[allow(dead_code, non_camel_case_types, unused_imports)]
 mod collection_semantics {
     pub use jet_foundation::Outcome::*;
 
-    trait JetShow {
-        fn jet_show(&self) -> String;
-    }
-    trait JetDisplay {
-        fn jet_display(&self) -> String;
-    }
-    trait JetDebug {
-        fn jet_debug(&self) -> String;
-    }
+    use jet_foundation::StructuralDebug::jet_debug_map;
+    use jet_foundation::StructuralDebug::jet_debug_optional;
+    use jet_foundation::StructuralDebug::jet_debug_range;
 
-    macro_rules! jet_scalar_show {
-        ($($t:ty),+ $(,)?) => {
-            $(
-                impl JetShow for $t {
-                    fn jet_show(&self) -> String { self.to_string() }
-                }
-                impl JetDisplay for $t {
-                    fn jet_display(&self) -> String { self.to_string() }
-                }
-                impl JetDebug for $t {
-                    fn jet_debug(&self) -> String { self.to_string() }
-                }
-            )+
-        };
+    // These are emitted beside the Prelude in an AOT program.  Keep the same
+    // bridge here so Values.rs remains the only scalar/string/list formatter.
+    trait __jet_Display {
+        fn display(&self) -> String;
     }
-    jet_scalar_show!(i64, i8, i16, i32, u8, u16, u32, u64, bool, char);
-
-    impl JetShow for f32 {
-        fn jet_show(&self) -> String { format!("{self:?}") }
-    }
-    impl JetDisplay for f32 {
-        fn jet_display(&self) -> String { format!("{self:?}") }
-    }
-    impl JetDebug for f32 {
-        fn jet_debug(&self) -> String { format!("{self:?}") }
-    }
-    impl JetShow for f64 {
-        fn jet_show(&self) -> String { format!("{self:?}") }
-    }
-    impl JetDisplay for f64 {
-        fn jet_display(&self) -> String { format!("{self:?}") }
-    }
-    impl JetDebug for f64 {
-        fn jet_debug(&self) -> String { format!("{self:?}") }
-    }
-    impl JetShow for String {
-        fn jet_show(&self) -> String { self.clone() }
-    }
-    impl JetDisplay for String {
-        fn jet_display(&self) -> String { self.clone() }
-    }
-    impl JetDebug for String {
-        fn jet_debug(&self) -> String { format!("{self:?}") }
-    }
-
-    impl<T: JetShow> JetShow for Vec<T> {
-        fn jet_show(&self) -> String {
-            let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-            format!("[{}]", parts.join(", "))
-        }
-    }
-    impl<T: JetDisplay> JetDisplay for Vec<T> {
-        fn jet_display(&self) -> String {
-            let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-            format!("[{}]", parts.join(", "))
-        }
-    }
-    impl<T: JetDebug> JetDebug for Vec<T> {
-        fn jet_debug(&self) -> String {
-            let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
-            format!("[{}]", parts.join(", "))
-        }
+    trait __jet_Equatable: Sized {
+        fn equal(&self, rhs: &Self) -> bool;
     }
 
     #[derive(Clone)]
@@ -164,7 +103,40 @@ mod collection_semantics {
         std::process::exit(70)
     }
 
+    include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Values.rs");
+    include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
+
+    fn show<T: JetShow>(value: &T) -> String {
+        value.jet_show()
+    }
+
+    fn debug<T: JetDebug>(value: &T) -> String {
+        value.jet_debug()
+    }
+
+    pub(super) fn debug_i64(value: i64) -> String { debug(&value) }
+    pub(super) fn debug_f64(value: f64) -> String { debug(&value) }
+    pub(super) fn debug_f32(value: f32) -> String { debug(&value) }
+    pub(super) fn debug_bool(value: bool) -> String { debug(&value) }
+    pub(super) fn debug_char(value: char) -> String { debug(&value) }
+    pub(super) fn debug_string(value: String) -> String { debug(&value) }
+
+    pub(super) fn show_i64_list(value: Vec<i64>) -> String { show(&value) }
+    pub(super) fn debug_i64_list(value: Vec<i64>) -> String { debug(&value) }
+    pub(super) fn show_u64_list(value: Vec<u64>) -> String { show(&value) }
+    pub(super) fn debug_u64_list(value: Vec<u64>) -> String { debug(&value) }
+    pub(super) fn show_f64_list(value: Vec<f64>) -> String { show(&value) }
+    pub(super) fn debug_f64_list(value: Vec<f64>) -> String { debug(&value) }
+    pub(super) fn show_f32_list(value: Vec<f32>) -> String { show(&value) }
+    pub(super) fn debug_f32_list(value: Vec<f32>) -> String { debug(&value) }
+    pub(super) fn show_bool_list(value: Vec<bool>) -> String { show(&value) }
+    pub(super) fn debug_bool_list(value: Vec<bool>) -> String { debug(&value) }
+    pub(super) fn show_char_list(value: Vec<char>) -> String { show(&value) }
+    pub(super) fn debug_char_list(value: Vec<char>) -> String { debug(&value) }
+    pub(super) fn show_string_list(value: Vec<String>) -> String { show(&value) }
+    pub(super) fn debug_string_list(value: Vec<String>) -> String { debug(&value) }
 
     pub(super) fn iter_take<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
         jet_iter_take(jet_iter_from_vec(xs), n).to_list()
@@ -1569,7 +1541,8 @@ extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
 }
 
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
-/// `kind`: 0 = raw i64, 1 = string, 2 = signed IntN, 3 = unsigned IntN.
+/// `kind`: 0 = Int, 1 = String, 2 = signed IntN, 3 = unsigned IntN,
+/// 4 = Float, 5 = Bool, 6 = Char, 7 = F32.
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_show_text(rt, list, kind);
@@ -1579,36 +1552,102 @@ extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
 }
 
 fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
-    if kind == 4 {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut parts = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            let v = rt.heap.list_get_float(list, i).unwrap_or(0.0);
-            parts.push(jet_rt::display_f64(v));
+    match kind {
+        1 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| rt.heap.clone_string(id).unwrap_or_default())
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_string_list(values)
+            } else {
+                collection_semantics::show_string_list(values)
+            }
         }
-        return format!("[{}]", parts.join(", "));
+        2 => {
+            let values = rt.heap.clone_int_list(list).unwrap_or_default();
+            if debug {
+                collection_semantics::debug_i64_list(values)
+            } else {
+                collection_semantics::show_i64_list(values)
+            }
+        }
+        3 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| value as u64)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_u64_list(values)
+            } else {
+                collection_semantics::show_u64_list(values)
+            }
+        }
+        4 => {
+            let len = rt.heap.list_len(list).unwrap_or(0);
+            let values = (0..len)
+                .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0))
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_f64_list(values)
+            } else {
+                collection_semantics::show_f64_list(values)
+            }
+        }
+        7 => {
+            let len = rt.heap.list_len(list).unwrap_or(0);
+            let values = (0..len)
+                .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0) as f32)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_f32_list(values)
+            } else {
+                collection_semantics::show_f32_list(values)
+            }
+        }
+        5 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| value != 0)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_bool_list(values)
+            } else {
+                collection_semantics::show_bool_list(values)
+            }
+        }
+        6 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| char::from_u32(value as u32).unwrap_or('?'))
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_char_list(values)
+            } else {
+                collection_semantics::show_char_list(values)
+            }
+        }
+        _ => {
+            let values = rt.heap.clone_int_list(list).unwrap_or_default();
+            if debug {
+                collection_semantics::debug_i64_list(values)
+            } else {
+                collection_semantics::show_i64_list(values)
+            }
+        }
     }
-    let xs = rt
-        .heap
-        .clone_int_list(list)
-        .unwrap_or_default();
-    let mut parts = Vec::with_capacity(xs.len());
-    if kind == 1 {
-        for id in xs {
-            let text = rt.heap.clone_string(id).unwrap_or_default();
-            parts.push(if debug { format!("{text:?}") } else { text });
-        }
-    } else {
-        for v in xs {
-            parts.push(match kind {
-                2 | 3 => jet_codegen::Comptime::MathLayout::integer_show(v, kind == 2),
-                5 if debug => (v != 0).to_string(),
-                6 if debug => char::from_u32(v as u32).unwrap_or('?').to_string(),
-                _ => v.to_string(),
-            });
-        }
-    }
-    format!("[{}]", parts.join(", "))
 }
 
 fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
@@ -1627,48 +1666,110 @@ extern "C" fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
     })
 }
 
-pub(crate) const OPTION_DEBUG_RESULT_ABI: i64 = 100;
-pub(crate) const OPTION_DEBUG_LIST: i64 = 10;
-
-fn option_debug_text(rt: &crate::JitRuntime, packed: i64, kind: i64) -> String {
-    let result_abi = kind >= OPTION_DEBUG_RESULT_ABI;
-    let kind = if result_abi {
-        kind - OPTION_DEBUG_RESULT_ABI
-    } else {
-        kind
-    };
-    let present = if result_abi {
-        crate::runtime_host::jit_result_is_ok(rt, packed).unwrap_or(false)
-    } else {
-        packed != 0
-    };
-    if !present {
-        return jet_foundation::StructuralDebug::jet_debug_optional(None);
-    }
-    let payload = if result_abi {
-        crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
-    } else {
-        packed - 1
-    };
-    let rendered = match kind {
-        0 => payload.to_string(),
-        1 => format!("{:?}", rt.heap.clone_string(payload).unwrap_or_default()),
-        2 => jet_rt::display_f64(f64::from_bits(payload as u64)),
-        3 | 4 => jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
-        5 => (payload != 0).to_string(),
-        6 => char::from_u32(payload as u32).unwrap_or('?').to_string(),
-        list_kind if list_kind >= OPTION_DEBUG_LIST => {
-            list_debug_text(rt, payload, list_kind - OPTION_DEBUG_LIST)
-        }
-        _ => payload.to_string(),
-    };
-    jet_foundation::StructuralDebug::jet_debug_optional(Some(rendered))
+/// Jet Debug list text as a string handle for structural-value marshalling.
+extern "C" fn jet_jit_list_debug(list: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = list_debug_text(rt, list, kind);
+        rt.heap.alloc_string(text)
+    })
 }
 
-/// Append `T?` Debug text through the shared Prelude optional formatter.
-extern "C" fn jet_jit_str_push_opt_debug(buf_id: i64, packed: i64, kind: i64) {
+/// String Debug text as a handle for structural-value marshalling.
+extern "C" fn jet_jit_string_debug(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let text = option_debug_text(rt, packed, kind);
+        let text = rt.heap.clone_string(value).unwrap_or_default();
+        rt.heap.alloc_string(collection_semantics::debug_string(text))
+    })
+}
+
+/// Marshal a resident scalar into the shared Prelude Debug implementation.
+/// `kind`: 0 = Int, 1 = Float, 2 = Bool, 3 = Char, 4 = F32. Floats arrive as bits.
+extern "C" fn jet_jit_scalar_debug(value: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = match kind {
+            0 => collection_semantics::debug_i64(value),
+            1 => collection_semantics::debug_f64(f64::from_bits(value as u64)),
+            2 => collection_semantics::debug_bool(value != 0),
+            3 => collection_semantics::debug_char(char::from_u32(value as u32).unwrap_or('?')),
+            4 => collection_semantics::debug_f32(f32::from_bits(value as u32)),
+            _ => String::new(),
+        };
+        rt.heap.alloc_string(text)
+    })
+}
+
+/// Append `T?` Debug text through the shared StructuralDebug formatter.
+extern "C" fn jet_jit_str_push_debug_optional(
+    buf_id: i64,
+    payload_id: i64,
+    present: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        let payload = (present != 0)
+            .then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+        let text = jet_foundation::StructuralDebug::jet_debug_optional(payload);
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
+}
+
+/// Append a record after the JIT has marshalled rendered values and metadata.
+extern "C" fn jet_jit_str_push_debug_record(
+    buf_id: i64,
+    type_name_id: i64,
+    fields_id: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(type_name) = rt.heap.clone_string(type_name_id) else {
+            return;
+        };
+        let fields = rt.heap.clone_int_list(fields_id).unwrap_or_default();
+        if fields.len() % 4 != 0 {
+            return;
+        }
+        let mut marshalled = Vec::with_capacity(fields.len() / 4);
+        for field in fields.chunks_exact(4) {
+            let Some(name) = rt.heap.clone_string(field[0]) else {
+                return;
+            };
+            let Some(value) = rt.heap.clone_string(field[1]) else {
+                return;
+            };
+            if field[2] < 0 {
+                return;
+            }
+            marshalled.push(jet_foundation::StructuralDebug::JetDebugField {
+                name,
+                value,
+                storage_index: field[2] as usize,
+                redacted: field[3] != 0,
+            });
+        }
+        let text = jet_foundation::StructuralDebug::jet_debug_record_fields(
+            &type_name,
+            marshalled,
+        );
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
+}
+
+/// Append a positional variant through the shared StructuralDebug formatter.
+extern "C" fn jet_jit_str_push_debug_variant(
+    buf_id: i64,
+    variant_id: i64,
+    payload_id: i64,
+    has_payload: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(variant) = rt.heap.clone_string(variant_id) else {
+            return;
+        };
+        let payload = (has_payload != 0)
+            .then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+        let text = jet_foundation::StructuralDebug::jet_debug_variant(&variant, payload);
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&text);
         }
@@ -1692,7 +1793,7 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
         let payload = if result_abi || kind >= 3 {
             crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
         } else {
-            packed - 1
+            packed.wrapping_sub(1)
         };
         match kind {
             1 => {
@@ -3358,48 +3459,73 @@ pub(crate) fn register_packed_enum_show(
 }
 
 fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
-    PACKED_ENUM_SHOW.with(|t| {
-        let table = t.borrow();
-        let Some(def) = table.get(enum_name) else {
-            return format!("<enum {enum_name}>");
-        };
-        let disc = (packed & 0xff) as usize;
-        let Some((vname, kind, nested)) = def.variants.get(disc) else {
-            return format!("<bad disc {disc}>");
-        };
-        match kind {
-            0 => vname.clone(),
-            1 => format!("{vname}({})", packed >> 8),
-            2 => {
-                let inner = show_packed_enum(packed >> 8, nested, heap);
-                format!("{vname}({inner})")
-            }
-            // String handle in high bits — AOT JetShow uses Debug quotes.
-            3 => {
-                let text = heap.clone_string(packed >> 8).unwrap_or_default();
-                format!("{vname}({text:?})")
-            }
-            _ => format!("<{vname}?>"),
+    if enum_name == "IOError" {
+        let context = packed >> 8;
+        let resource = heap
+            .record_get_int(context, 1)
+            .and_then(|encoded| encoded.checked_sub(1))
+            .and_then(|handle| heap.clone_string(handle));
+        let cause = heap
+            .record_get_int(context, 3)
+            .and_then(|encoded| encoded.checked_sub(1))
+            .and_then(|handle| heap.clone_string(handle));
+        return jet_foundation::StructuralDebug::jet_show_io_error(
+            packed & 0xff,
+            heap.record_get_int(context, 0).unwrap_or(0),
+            resource.as_deref(),
+            cause.as_deref(),
+        );
+    }
+    let def = PACKED_ENUM_SHOW.with(|t| t.borrow().get(enum_name).cloned());
+    let Some(def) = def else {
+        return format!("<enum {enum_name}>");
+    };
+    let disc = (packed & 0xff) as usize;
+    let Some((vname, kind, nested)) = def.variants.get(disc).cloned() else {
+        return format!("<bad disc {disc}>");
+    };
+    let payload = match kind {
+        0 => None,
+        1 => Some((packed >> 8).to_string()),
+        2 => Some(show_packed_enum(packed >> 8, &nested, heap)),
+        // String handle in high bits — AOT JetShow uses Debug quotes.
+        3 => {
+            let text = heap.clone_string(packed >> 8).unwrap_or_default();
+            Some(format!("{text:?}"))
         }
-    })
+        _ => return format!("<{vname}?>"),
+    };
+    jet_foundation::StructuralDebug::jet_debug_variant(&vname, payload)
+}
+
+fn packed_enum_name(name_ptr: i64, name_len: i64) -> String {
+    if name_ptr == 0 || name_len <= 0 {
+        return String::new();
+    }
+    let slice = unsafe {
+        std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize)
+    };
+    String::from_utf8_lossy(slice).into_owned()
 }
 
 /// Print a packed i64 enum. `name_ptr`/`name_len` are a UTF-8 view of the Jet
 /// enum name (stable for the process — not a heap string handle).
 extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let name = if name_ptr == 0 || name_len <= 0 {
-            String::new()
-        } else {
-            let slice = unsafe {
-                std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize)
-            };
-            String::from_utf8_lossy(slice).into_owned()
-        };
+        let name = packed_enum_name(name_ptr, name_len);
         let text = show_packed_enum(packed, &name, &rt.heap);
         rt.stdout.push_str(&text);
         rt.stdout.push('\n');
     });
+}
+
+/// Return a packed enum's JetShow text as a string handle for interpolation.
+extern "C" fn jet_jit_enum_show(packed: i64, name_ptr: i64, name_len: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let name = packed_enum_name(name_ptr, name_len);
+        let text = show_packed_enum(packed, &name, &rt.heap);
+        rt.heap.alloc_string(text)
+    })
 }
 
 host_fns! {
@@ -3444,10 +3570,20 @@ host_fns! {
             .push(AbiParam::new(types::I8));
         let mut sig_get_opt = sig_len.clone();
         sig_get_opt.params.push(AbiParam::new(types::I64));
-        let mut sig_push_opt_debug = Signature::new(cc);
-        sig_push_opt_debug
+        let mut sig_debug_optional = Signature::new(cc);
+        sig_debug_optional
             .params
             .extend([AbiParam::new(types::I64); 3]);
+        let sig_debug_record = sig_debug_optional.clone();
+        let mut sig_debug_variant = Signature::new(cc);
+        sig_debug_variant
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        let mut sig_scalar_debug = Signature::new(cc);
+        sig_scalar_debug
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_scalar_debug.returns.push(AbiParam::new(types::I64));
         let mut sig_set_from = sig_len.clone();
         sig_set_from.params.push(AbiParam::new(types::I64));
         let mut sig_list_eq = Signature::new(cc);
@@ -3519,6 +3655,8 @@ host_fns! {
         sig_print_enum.params.push(AbiParam::new(types::I64));
         sig_print_enum.params.push(AbiParam::new(types::I64));
         sig_print_enum.params.push(AbiParam::new(types::I64));
+        let mut sig_enum_show = sig_print_enum.clone();
+        sig_enum_show.returns.push(AbiParam::new(types::I64));
         let mut sig_sort_by_keys = sig_get_opt.clone();
         sig_sort_by_keys.returns.clear();
         let mut sig_bool = Signature::new(cc);
@@ -3630,7 +3768,13 @@ host_fns! {
     print_opt: "jet_jit_print_opt" => jet_jit_print_opt: sig_print_list;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
     list_show: "jet_jit_list_show" => jet_jit_list_show: sig_get_opt;
-    str_push_opt_debug: "jet_jit_str_push_opt_debug" => jet_jit_str_push_opt_debug: sig_push_opt_debug;
+    list_debug: "jet_jit_list_debug" => jet_jit_list_debug: sig_get_opt;
+    string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;
+    scalar_debug: "jet_jit_scalar_debug" => jet_jit_scalar_debug: sig_scalar_debug;
+    enum_show: "jet_jit_enum_show" => jet_jit_enum_show: sig_enum_show;
+    str_push_debug_optional: "jet_jit_str_push_debug_optional" => jet_jit_str_push_debug_optional: sig_debug_optional;
+    str_push_debug_record: "jet_jit_str_push_debug_record" => jet_jit_str_push_debug_record: sig_debug_record;
+    str_push_debug_variant: "jet_jit_str_push_debug_variant" => jet_jit_str_push_debug_variant: sig_debug_variant;
     list_remove: "jet_jit_list_remove" => jet_jit_list_remove: sig_get_opt;
     list_pop: "jet_jit_list_pop" => jet_jit_list_pop: sig_len;
     list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;

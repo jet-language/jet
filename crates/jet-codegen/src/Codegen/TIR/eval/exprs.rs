@@ -6308,6 +6308,96 @@ impl<'a> EvalCtx<'a> {
             }
             _ => {}
         }
+        let io_error_display = || -> Option<String> {
+            let CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } = v
+            else {
+                return None;
+            };
+            let type_name = type_name
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(type_name);
+            if type_name != "IOError" {
+                return None;
+            }
+            let variant = match variant
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(variant.as_str())
+            {
+                "InvalidInput" => 0,
+                "NotFound" => 1,
+                "PermissionDenied" => 2,
+                "TimedOut" => 3,
+                "Cancelled" => 4,
+                "Closed" => 5,
+                "Protocol" => 6,
+                "Other" => 7,
+                _ => return None,
+            };
+            let Some((_, CtValue::Struct { type_name, fields })) = args.first() else {
+                return None;
+            };
+            let type_name = type_name
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(type_name);
+            if type_name != "IOContext" {
+                return None;
+            }
+            let field = |wanted: &str| {
+                fields.iter().find_map(|(name, value)| {
+                    (name == wanted
+                        || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                            == Some(wanted))
+                        .then_some(value)
+                })
+            };
+            let CtValue::Enum {
+                variant: operation_variant,
+                ..
+            } = field("operation")?
+            else {
+                return None;
+            };
+            let operation = match operation_variant
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(operation_variant.as_str())
+            {
+                "Read" => 0,
+                "Write" => 1,
+                "Flush" => 2,
+                "Connect" => 3,
+                "Accept" => 4,
+                "Close" => 5,
+                "Resolve" => 6,
+                "Codec" => 7,
+                _ => return None,
+            };
+            let optional_text = |wanted: &str| {
+                field(wanted).and_then(|value| match value {
+                    CtValue::Present(inner) => match inner.as_ref() {
+                        CtValue::Str(text) => Some(Some(text.as_str())),
+                        _ => None,
+                    },
+                    CtValue::Failed(CtReport::Clean(_)) => Some(None),
+                    CtValue::Str(text) => Some(Some(text.as_str())),
+                    _ => None,
+                })
+            };
+            let resource = optional_text("resource")?;
+            let cause = optional_text("cause")?;
+            Some(jet_foundation::StructuralDebug::jet_show_io_error(
+                variant,
+                operation,
+                resource,
+                cause,
+            ))
+        };
+        if let Some(text) = io_error_display() {
+            return Ok(text);
+        }
         if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
             let key = format!("{type_name}::display");
             if let Some(func) = self.funcs.get(&key).copied() {
@@ -6416,7 +6506,15 @@ impl<'a> EvalCtx<'a> {
                         .map(|(_, field_ty)| self.debug_value_typed(value, field_ty))
                         .unwrap_or_else(|| self.debug_value(value))
                 };
-                let Some(defs) = self.struct_fields.get(ty) else {
+                let defs = self.struct_fields.get(ty).cloned().or_else(|| {
+                    jet_foundation::StructuralDebug::jet_debug_field_metadata(ty).map(|fields| {
+                        fields
+                            .iter()
+                            .map(|(name, redacted)| ((*name).to_string(), *redacted))
+                            .collect()
+                    })
+                });
+                let Some(defs) = defs else {
                     // Builtin struct with no declared fields on hand (Vec3, …).
                     // Adapt its fields to the same record assembler AOT uses.
                     let fields = fields
@@ -6480,7 +6578,7 @@ impl<'a> EvalCtx<'a> {
                         .iter()
                         .map(|(_, val)| self.debug_value(val))
                         .collect();
-                    jet_foundation::StructuralDebug::jet_debug_variant(var, parts.join(", "))
+                    jet_foundation::StructuralDebug::jet_debug_variant(var, Some(parts.join(", ")))
                 }
             }
             CtValue::Map(entries) => jet_foundation::StructuralDebug::jet_debug_map(
