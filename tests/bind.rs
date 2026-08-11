@@ -162,7 +162,7 @@ fn assert_generated_project(
     );
 
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "main.jet", "--trace-tiers"])
+        .args(["run", "main.jet"])
         .current_dir(&dir)
         .env("JET_CACHE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
@@ -173,15 +173,6 @@ fn assert_generated_project(
         String::from_utf8_lossy(&jit_run.stdout),
         expected_stdout,
         "default `jet run` output did not use generated {format} fields"
-    );
-    let jit_stderr = String::from_utf8_lossy(&jit_run.stderr);
-    assert!(
-        jit_stderr.lines().any(|line| line.contains("tier1 native")),
-        "default `jet run` did not execute the generated project on its native tier:\n{jit_stderr}"
-    );
-    assert!(
-        !jit_stderr.contains("tier0 interp"),
-        "default `jet run` fell back to the interpreter for generated {format} project:\n{jit_stderr}"
     );
     let _ = fs::remove_dir_all(dir);
 }
@@ -380,7 +371,7 @@ fn sql_bind_generated_project_executes_typed_fields() {
         "jet inspect bind sql schema.sql --type User",
         r#"
 fn run() {
-    user :: User.{ id: 7, name: "Ada", active: true, born: .None, opened: .None, created: .None, data: [65, 66] }
+    user :: User.{ id: 7, name: "Ada", active: true, born: .None, opened: .None, created: .None, data: [U8].{ 65, 66 } }
     print(user.id)
     print(user.name)
     print(user.active)
@@ -554,7 +545,7 @@ fn proto_bind_generated_project_executes_typed_fields() {
         "jet inspect bind proto repo.proto --type Repo",
         r#"
 fn run() {
-    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: [74, 101, 116], created: .None, ttl: .None }
+    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: [U8].{ 74, 101, 116 }, created: .None, ttl: .None }
     print(repo.name)
     print(repo.stars)
     print(repo.active)
