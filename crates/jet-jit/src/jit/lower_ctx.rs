@@ -12206,6 +12206,9 @@ impl LowerCtx<'_, '_> {
                             self.host.net.email_smtp,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "smtp_from_env" if args.is_empty() => {
+                            (self.host.net.email_smtp_from_env, Vec::new())
+                        }
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
                         }
@@ -13405,7 +13408,8 @@ impl LowerCtx<'_, '_> {
                         ));
                     }
                 }
-                // D-EMAIL1: `email.Limits.safe()` — fixed defaults, no host.
+                // D-EMAIL1: `email.Limits.safe()` calls the shared Prelude
+                // through the same native adapter as the other Email values.
                 let is_email_limits_safe = method.name == "safe"
                     && args.is_empty()
                     && match owner {
@@ -13422,25 +13426,7 @@ impl LowerCtx<'_, '_> {
                         .map(|t| matches!(t, Type::Named(n) if n == "Limits"))
                         .unwrap_or(true);
                 if is_email_limits_safe {
-                    let n = self.b.ins().iconst(types::I64, 6);
-                    let handle = self.call_host(self.host.struct_new, &[n]);
-                    let set_i = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                    let fields = [
-                        512i64,      // max_reply_line_bytes
-                        100,         // max_reply_lines
-                        100,         // max_capabilities
-                        100,         // max_recipients
-                        33_554_432,  // max_message_bytes
-                        4096,        // max_auth_challenge_bytes
-                    ];
-                    for (i, v) in fields.into_iter().enumerate() {
-                        let idx = self.b.ins().iconst(types::I64, i as i64);
-                        let val = self.b.ins().iconst(types::I64, v);
-                        self.b.ins().call(set_i, &[handle, idx, val]);
-                    }
-                    return Ok(handle);
+                    return Ok(self.call_host(self.host.net.email_limits_safe, &[]));
                 }
                 // D-DATAFLOW1: `DataLimits.safe()` — nested EncodingLimits + max_* defaults.
                 let is_data_limits_safe = method.name == "safe"
@@ -13526,11 +13512,6 @@ impl LowerCtx<'_, '_> {
                             ("TextWidthAmbiguous", "Wide") => Some(1),
                             ("TextWidthControls", "Zero") => Some(0),
                             ("TextWidthControls", "Reject") => Some(1),
-                            ("SMTPSecurity", "StartTls") => Some(0),
-                            ("SMTPSecurity", "TLS") => Some(1),
-                            ("RecipientPolicy", "RequireAll") => Some(0),
-                            ("RecipientPolicy", "DeliverAccepted") => Some(1),
-                            ("TLSTrust", "System") => Some(0),
                             ("Overflow", "Block") => Some(0),
                             ("Overflow", "DropNewest") => Some(1),
                             ("Overflow", "DropOldest") => Some(2),
@@ -13582,12 +13563,6 @@ impl LowerCtx<'_, '_> {
                     let disc = self
                         .meta
                         .enum_variant_index(enum_type, variant)
-                        .or_else(|| match (enum_type.as_str(), variant.as_str()) {
-                            ("SMTPAuth", "Password") => Some(1),
-                            ("SMTPAuth", "None") => Some(0),
-                            ("TLSTrust", "SystemPlusCa") => Some(1),
-                            _ => None,
-                        })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     // Heap carrier: [disc, field0, field1, …] in source field order.
                     let n = self.b.ins().iconst(types::I64, (fields.len() + 1) as i64);
@@ -18108,7 +18083,25 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &arg_vals);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::EmailMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::EmailMethod { method } => {
+                let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                    "envelope" if args.is_empty() => {
+                        (self.host.net.email_message_envelope, vec![recv_val])
+                    }
+                    "with_envelope" if args.len() == 1 => (
+                        self.host.net.email_message_with_envelope,
+                        vec![recv_val, self.lower_expr(&args[0])?],
+                    ),
+                    "send" if args.len() == 1 => (
+                        self.host.net.email_mailer_send,
+                        vec![recv_val, self.lower_expr(&args[0])?],
+                    ),
+                    _ => return Err(format!("jit Email method unsupported: {method}")),
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host_ref, &arg_vals);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RegexMethod { method, .. } => {
                 let recv_v = self.lower_expr(recv)?;
                 let method_name = if method == "replace_all_with" {

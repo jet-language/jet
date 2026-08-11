@@ -439,6 +439,9 @@ impl<'a> JitMeta<'a> {
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
         }
+        if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust" | "EmailError") {
+            return Some(email_payload(variant));
+        }
         if enum_name == "Key" {
             return Some(key_payload(variant));
         }
@@ -747,6 +750,52 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        if enum_name == "SMTPSecurity" {
+            return match variant {
+                "StartTls" => Some(0),
+                "TLS" => Some(1),
+                _ => None,
+            };
+        }
+        if enum_name == "RecipientPolicy" {
+            return match variant {
+                "RequireAll" => Some(0),
+                "DeliverAccepted" => Some(1),
+                _ => None,
+            };
+        }
+        if enum_name == "SMTPAuth" {
+            return match variant {
+                "None" => Some(0),
+                "Password" => Some(1),
+                _ => None,
+            };
+        }
+        if enum_name == "TLSTrust" {
+            return match variant {
+                "System" => Some(0),
+                "SystemPlusCa" => Some(1),
+                _ => None,
+            };
+        }
+        if enum_name == "EmailError" {
+            return [
+                "Configuration",
+                "DNS",
+                "Connect",
+                "TLS",
+                "Auth",
+                "Protocol",
+                "Rejected",
+                "Transient",
+                "TimedOut",
+                "Cancelled",
+                "DeliveryUnknown",
+            ]
+            .iter()
+            .position(|candidate| *candidate == variant)
+            .map(|index| index as i64);
+        }
         // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
         if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return match variant {
@@ -818,6 +867,11 @@ impl<'a> JitMeta<'a> {
                 | "EventResult"
                 | "DispatchState"
                 | "ServiceReceipt"
+                | "SMTPSecurity"
+                | "RecipientPolicy"
+                | "SMTPAuth"
+                | "TLSTrust"
+                | "EmailError"
         ) || self.enum_variants.contains_key(name)
     }
 
@@ -885,6 +939,35 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "TerminalSize" => &["cols", "rows"],
         "TerminalPolicy" => &["size", "mode"],
         "ModGrant" => &["read"],
+        "Envelope" => &["from", "recipients"],
+        "RecipientReport" => &["address", "accepted", "code", "message"],
+        "SendReport" => &[
+            "server",
+            "accepted",
+            "rejected",
+            "response_code",
+            "response",
+            "accepted_at",
+        ],
+        "Limits" => &[
+            "max_reply_line_bytes",
+            "max_reply_lines",
+            "max_capabilities",
+            "max_recipients",
+            "max_message_bytes",
+            "max_auth_challenge_bytes",
+        ],
+        "SMTPConfig" => &[
+            "host",
+            "port",
+            "security",
+            "auth",
+            "recipient_policy",
+            "trust",
+            "limits",
+            "dkim",
+        ],
+        "DkimConfig" => &["domain", "selector", "private_key", "signed_headers"],
         // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
         "EncodingLimits" => &[
             "buffer_bytes",
@@ -1018,6 +1101,52 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         },
         "ModGrant" => match field {
             "read" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        },
+        "Envelope" => match field {
+            "from" => Some(Type::Named("Address".into())),
+            "recipients" => Some(Type::List(Box::new(Type::Named("Address".into())))),
+            _ => None,
+        },
+        "RecipientReport" => match field {
+            "address" => Some(Type::Named("Address".into())),
+            "accepted" => Some(Type::Bool),
+            "code" => Some(Type::Int),
+            "message" => Some(Type::String),
+            _ => None,
+        },
+        "SendReport" => match field {
+            "server" | "response" | "accepted_at" => Some(Type::String),
+            "accepted" | "rejected" => {
+                Some(Type::List(Box::new(Type::Named("RecipientReport".into()))))
+            }
+            "response_code" => Some(Type::Int),
+            _ => None,
+        },
+        "Limits" => match field {
+            "max_reply_line_bytes"
+            | "max_reply_lines"
+            | "max_capabilities"
+            | "max_recipients"
+            | "max_message_bytes"
+            | "max_auth_challenge_bytes" => Some(Type::Int),
+            _ => None,
+        },
+        "SMTPConfig" => match field {
+            "host" => Some(Type::String),
+            "port" => Some(Type::Int),
+            "security" => Some(Type::Named("SMTPSecurity".into())),
+            "auth" => Some(Type::Named("SMTPAuth".into())),
+            "recipient_policy" => Some(Type::Named("RecipientPolicy".into())),
+            "trust" => Some(Type::Named("TLSTrust".into())),
+            "limits" => Some(Type::Named("Limits".into())),
+            "dkim" => Some(Type::Option(Box::new(Type::Named("DkimConfig".into())))),
+            _ => None,
+        },
+        "DkimConfig" => match field {
+            "domain" | "selector" => Some(Type::String),
+            "private_key" => Some(Type::Named("Secret".into())),
+            "signed_headers" => Some(Type::List(Box::new(Type::String))),
             _ => None,
         },
         // D-LSDIR1 / D-FSOPS1 — CORE FS records omitted from TIR ProgramBundle.
@@ -1180,6 +1309,41 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
         "Text" => TEXT.as_slice(),
         "Array" => ARRAY.as_slice(),
         "Object" => OBJECT.as_slice(),
+        _ => &[],
+    }
+}
+
+fn email_payload(variant: &str) -> &'static [Type] {
+    static ERROR: LazyLock<Vec<Type>> = LazyLock::new(|| {
+        vec![
+            Type::String,
+            Type::Option(Box::new(Type::String)),
+            Type::Option(Box::new(Type::Int)),
+            Type::String,
+        ]
+    });
+    static PASSWORD: LazyLock<Vec<Type>> =
+        LazyLock::new(|| vec![Type::String, Type::Named("Secret".into())]);
+    static PEM: LazyLock<Vec<Type>> = LazyLock::new(|| {
+        vec![Type::List(Box::new(Type::IntN {
+            signed: false,
+            bits: 8,
+        }))]
+    });
+    match variant {
+        "Password" => PASSWORD.as_slice(),
+        "SystemPlusCa" => PEM.as_slice(),
+        "Configuration"
+        | "DNS"
+        | "Connect"
+        | "TLS"
+        | "Auth"
+        | "Protocol"
+        | "Rejected"
+        | "Transient"
+        | "TimedOut"
+        | "Cancelled"
+        | "DeliveryUnknown" => ERROR.as_slice(),
         _ => &[],
     }
 }

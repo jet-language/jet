@@ -924,7 +924,7 @@ mod net_tls_close_tests {
             out
         }
         #[allow(unused_imports)]
-        pub use jet_foundation::Outcome::*;
+        pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
         include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
     }
 

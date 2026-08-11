@@ -623,6 +623,14 @@ pub fn ambient_core_call(
             )));
         }
     }
+    if module == "core.email" {
+        return jet_codegen::Comptime::EmailAdapter::ambient_core_call(
+            method,
+            &args,
+            span,
+            crate::Net::email_runtime_fns(),
+        );
+    }
     if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
         return Some(result);
     }
@@ -1350,6 +1358,14 @@ pub fn ambient_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = jet_codegen::Comptime::EmailAdapter::ambient_handle(
+        op,
+        recv,
+        args,
+        span,
+    ) {
+        return Some(result);
+    }
     if let Some(result) = crate::enc_stream::ambient_handle(op, recv, args, span) {
         return Some(result);
     }
