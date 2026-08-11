@@ -755,7 +755,7 @@ fn malformed_workspace_never_falls_back_to_an_ordinary_entry() {
     let dir = isolated_cwd("workspace_no_fallback");
     fs::write(dir.join("workspace.jet"), "module workspace { members: [\n").unwrap();
     fs::write(
-        dir.join("main.jet"),
+        dir.join("run.jet"),
         "fn run() { print(\"SHOULD-NOT-RUN\") }\n",
     )
     .unwrap();
@@ -786,7 +786,7 @@ fn stale_workspace_lock_never_becomes_an_empty_member_index() {
         "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
     )
     .unwrap();
-    fs::write(dir.join("main.jet"), "fn run() { print(\"SHOULD-NOT-RUN\") }\n").unwrap();
+    fs::write(dir.join("run.jet"), "fn run() { print(\"SHOULD-NOT-RUN\") }\n").unwrap();
     let output = Command::new(jet())
         .args(["run"])
         .current_dir(&dir)

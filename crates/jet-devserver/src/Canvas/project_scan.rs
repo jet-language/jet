@@ -226,7 +226,7 @@ fn collect_project_files(
         push_existing(&mut paths, &root.join(jet_driver::Syntax::PACKAGE_FILE));
     }
     if let Some(root) = workspace_root {
-        push_existing(&mut paths, &root.join(jet_driver::Syntax::WORKSPACE_FILE));
+        push_existing(&mut paths, &workspace_source_path(root));
         push_existing(&mut paths, &root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE));
         if let Some(Ok(plan)) = jet_env_model::WorkspaceFile::load(root) {
             for member in plan.members {
@@ -252,9 +252,9 @@ fn collect_project_files(
                 "manifest"
             } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::PACKAGE_FILE) {
                 "package"
-            } else if path.file_name().and_then(|n| n.to_str())
-                == Some(jet_driver::Syntax::WORKSPACE_FILE)
-            {
+            } else if workspace_root.is_some_and(|root| {
+                path.as_path() == workspace_source_path(root).as_path()
+            }) {
                 "workspace"
             } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::ENV_FILE) {
                 "env"
@@ -270,6 +270,13 @@ fn collect_project_files(
             })
         })
         .collect()
+}
+
+fn workspace_source_path(root: &Path) -> PathBuf {
+    jet_env_model::WorkspaceFile::resolve_workspace_source(root)
+        .and_then(|result| result.ok())
+        .map(|source| source.path)
+        .unwrap_or_else(|| root.join(jet_driver::Syntax::WORKSPACE_FILE))
 }
 
 fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
@@ -338,7 +345,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
         Some(Err(d)) => {
             return format!(
                 "{{\"path\":{},\"members\":[],\"diagnostics\":[{}]}}",
-                json_str(&rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE))),
+                json_str(&rel_path(project_root, &workspace_source_path(root))),
                 diagnostic_json(&d)
             );
         }
@@ -346,7 +353,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     };
     format!(
         "{{\"path\":{},\"members\":[{}],\"diagnostics\":[]}}",
-        json_str(&rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE))),
+        json_str(&rel_path(project_root, &workspace_source_path(root))),
         members
     )
 }

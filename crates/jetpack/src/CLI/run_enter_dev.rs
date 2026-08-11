@@ -50,7 +50,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         affected_since: parsed.flags.affected_since.clone(),
     };
     // D-JPK-SELECTOR1=C: workspace + selection flags → realize only those members.
-    if project_dir.join(Syntax::WORKSPACE_FILE).exists() && select_req.is_restricting() {
+    if select_req.is_restricting() {
         if let Some(result) = load_workspace(&project_dir) {
             return match result {
                 Err(code) => code,

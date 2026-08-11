@@ -18,29 +18,31 @@ pub(super) fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
 /// below a project directory. Explicit refs and project plans must use the
 /// same source facts from that root.
 pub(super) fn project_root(start: &Path) -> PathBuf {
-    nearest_root_with_file(
-        start,
-        &[
-            Syntax::PACKAGE_FILE,
-            Syntax::ENV_FILE,
-            Syntax::WORKSPACE_FILE,
-        ],
-    )
-    .unwrap_or_else(|| start.to_path_buf())
+    nearest_project_root(start)
+        .unwrap_or_else(|| start.to_path_buf())
 }
 
 /// Workspace member lookup has a wider boundary than a member Package. Keep
 /// it on the nearest workspace declaration so a package inside a monorepo
 /// still sees the monorepo's member index.
 pub(super) fn workspace_root(start: &Path) -> PathBuf {
-    nearest_root_with_file(start, &[Syntax::WORKSPACE_FILE])
+    nearest_workspace_root(start)
         .unwrap_or_else(|| start.to_path_buf())
 }
 
-fn nearest_root_with_file(start: &Path, files: &[&str]) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
+fn workspace_source_present(dir: &Path) -> bool {
+    WorkspaceFile::resolve_workspace_source(dir).is_some()
+}
+
+fn nearest_project_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start
+        .canonicalize()
+        .unwrap_or_else(|_| start.to_path_buf());
     loop {
-        if files.iter().any(|file| dir.join(file).is_file()) {
+        if dir.join(Syntax::PACKAGE_FILE).is_file()
+            || dir.join(Syntax::ENV_FILE).is_file()
+            || workspace_source_present(&dir)
+        {
             return Some(dir);
         }
         let Some(parent) = dir.parent() else {
@@ -54,11 +56,35 @@ fn nearest_root_with_file(start: &Path, files: &[&str]) -> Option<PathBuf> {
     None
 }
 
-/// Load and evaluate `workspace.jet` from `dir`, emit workspace entries into
-/// `.jet/lock`, and return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
-/// the diagnostic to stderr and returns `Err(2)` if the file exists but fails
-/// to evaluate (D-WORKSPACE1=B clean break: workspace.jet is the sole index).
+fn nearest_workspace_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start
+        .canonicalize()
+        .unwrap_or_else(|_| start.to_path_buf());
+    loop {
+        if workspace_source_present(&dir) {
+            return Some(dir);
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        if parent == dir {
+            break;
+        }
+        dir = parent.to_path_buf();
+    }
+    None
+}
+
+/// Load and evaluate the declaration-resolved workspace source from `dir`,
+/// emit workspace entries into `.jet/lock`, and return the `WorkspacePlan`.
+/// Returns `None` when no source declares a workspace. Prints the diagnostic to
+/// stderr and returns `Err(2)` when discovery or evaluation fails.
 pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
+    if let Some(Ok(source)) = WorkspaceFile::resolve_workspace_source(dir) {
+        if source.role != WorkspaceFile::WorkspaceSourceRole::Index {
+            return None;
+        }
+    }
     let result = WorkspaceFile::load(dir)?;
     match result {
         Ok(plan) => {
@@ -149,14 +175,14 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 }
 
 /// The workspace member index for the current directory (Slice B). Evaluated
-/// from `workspace.jet` when present (discovery-by-declaration), else read from
+/// from the declaration-resolved source when present, else read from
 /// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
     let dir = workspace_root(&std::env::current_dir().unwrap_or_default());
     let plan = match WorkspaceFile::load(&dir) {
         Some(Ok(plan)) => Some(plan),
-        // A malformed `workspace.jet` is source failure, never permission to
+        // A malformed workspace source is source failure, never permission to
         // reuse a stale lock mirror.
         Some(Err(diagnostic)) => {
             eprint!(
@@ -173,9 +199,27 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
             let lock = WorkspaceLock::load(&dir);
             if lock.is_none() {
                 let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
-                let looks_like_workspace_lock = std::fs::read_to_string(&path)
-                    .map(|source| crate::Lock::looks_like_workspace_lock(&source))
-                    .unwrap_or(false);
+                let looks_like_workspace_lock = match std::fs::read_to_string(&path) {
+                    Ok(source) => crate::Lock::looks_like_workspace_lock(&source),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => {
+                        let mut diagnostic = crate::Lock::e1202_workspace(
+                            &path.display().to_string(),
+                        );
+                        diagnostic.why = format!(
+                            "the workspace lock could not be read, so its authority is not trusted: {error}"
+                        );
+                        eprint!(
+                            "{}",
+                            crate::Diagnostics::render_all(
+                                Syntax::WORKSPACE_FILE,
+                                "",
+                                std::slice::from_ref(&diagnostic),
+                            )
+                        );
+                        std::process::exit(2);
+                    }
+                };
                 if looks_like_workspace_lock {
                     let diagnostic = crate::Lock::e1202_workspace(&path.display().to_string());
                     eprint!(
@@ -202,7 +246,7 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
 
 #[cfg(test)]
 mod tests {
-    use super::{project_root, workspace_root};
+    use super::{load_workspace, project_root, workspace_root};
     use crate::Syntax;
     use std::fs;
 
@@ -244,10 +288,18 @@ mod tests {
         let nested = package.join("src");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&nested).unwrap();
-        fs::write(root.join(Syntax::WORKSPACE_FILE), "module workspace {}\n").unwrap();
+        fs::write(
+            root.join("authority.jet"),
+            "module workspace { policy: .{ deny: #(Exec) } }\n",
+        )
+        .unwrap();
         fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
         assert_eq!(project_root(&nested), package);
         assert_eq!(workspace_root(&nested), root);
+        assert!(WorkspaceFile::load(&root)
+            .expect("arbitrary authority source should load")
+            .is_ok());
+        assert!(load_workspace(&root).is_none());
         let _ = fs::remove_dir_all(root);
     }
 }

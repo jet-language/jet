@@ -12,6 +12,7 @@
 //! its own `SemanticLock`/patch-application machinery on top.
 
 use crate::Syntax;
+use jet_foundation::BuildEffect;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -404,6 +405,7 @@ pub struct PatchApplication {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverlayError {
     Malformed(String),
+    UnsupportedPolicy(String),
     Conflict {
         package: String,
         field: String,
@@ -420,7 +422,10 @@ pub enum OverlayError {
 impl OverlayError {
     pub fn message(&self) -> String {
         match self {
-            OverlayError::Malformed(s) | OverlayError::IO(s) | OverlayError::Patch(s) => s.clone(),
+            OverlayError::Malformed(s)
+            | OverlayError::UnsupportedPolicy(s)
+            | OverlayError::IO(s)
+            | OverlayError::Patch(s) => s.clone(),
             OverlayError::Conflict {
                 package,
                 field,
@@ -447,6 +452,7 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
     };
     let mut policy = OverlayPolicy::default();
     policy.allow_unfree = parse_allow_unfree(&body)?;
+    reject_unsupported_policy_fields(&body)?;
     policy.build_deny = parse_build_deny(&body)?;
     policy.build_grants = parse_build_grants(&body)?;
     let mut pos = 0;
@@ -961,17 +967,26 @@ fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
     let Some(raw) = exact_field_value(&policy_body, Syntax::EFFECTS_FIELD_DENY)? else {
         return Ok(Vec::new());
     };
-    let inner = raw
-        .trim()
-        .strip_prefix("#(")
-        .and_then(|value| value.strip_suffix(')'))
-        .ok_or_else(|| OverlayError::Malformed(
-            "`policy.deny:` must be an effect tuple like `#(Net, Exec)`".to_string(),
-        ))?;
-    Ok(top_level_commas(inner)
-        .into_iter()
-        .map(|value| unquote(value.trim()))
-        .collect())
+    parse_effect_tuple(raw.trim(), "policy.deny")
+}
+
+fn reject_unsupported_policy_fields(body: &str) -> Result<(), OverlayError> {
+    if find_word_outside(body, "policy.allow", 0).is_some() {
+        return Err(OverlayError::UnsupportedPolicy(
+            "workspace `policy.allow` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"
+                .to_string(),
+        ));
+    }
+    let Some(policy_body) = named_block(body, Syntax::MANIFEST_BLOCK_POLICY)? else {
+        return Ok(());
+    };
+    if exact_field_value(&policy_body, Syntax::EFFECTS_FIELD_ALLOW)?.is_some() {
+        return Err(OverlayError::UnsupportedPolicy(
+            "workspace `policy.allow` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayError> {
@@ -1029,6 +1044,14 @@ fn parse_effect_tuple(raw: &str, field: &str) -> Result<Vec<String>, OverlayErro
     if effects.is_empty() {
         return Err(OverlayError::Malformed(format!(
             "`{field}:` must grant at least one effect"
+        )));
+    }
+    if let Some(effect) = effects
+        .iter()
+        .find(|effect| BuildEffect::parse(effect).is_none())
+    {
+        return Err(OverlayError::Malformed(format!(
+            "`{field}:` names unknown build effect `{effect}`"
         )));
     }
     Ok(effects)
@@ -1340,8 +1363,13 @@ pub fn strip_overlay_policy(src: &str) -> String {
     let Some(body_start) = find_workspace_body_start(src) else {
         return src.to_string();
     };
+    // Keep an empty authority body empty. Role-aware workspace evaluation
+    // distinguishes that policy-only authority from the strict index role;
+    // fabricating `members: []` here would erase that distinction.
     let (body, consumed) = balanced_with_len(&src[body_start + 1..], '{', '}');
-    let stripped_body = strip_overlay_blocks(&strip_policy_allow_unfree_lines(&body));
+    let stripped_body = strip_overlay_blocks(&strip_build_policy_blocks(
+        &strip_policy_allow_unfree_lines(&body),
+    ));
     let mut out = String::new();
     out.push_str(&src[..body_start + 1]);
     out.push_str(&stripped_body);
@@ -1378,6 +1406,77 @@ fn strip_policy_allow_unfree_lines(body: &str) -> String {
             s
         })
         .collect()
+}
+
+/// Remove the source-level build policy before the ordinary module parser
+/// runs. Build policy is parsed above by `parse_workspace_policy`; it is not a
+/// Jet module contribution and must not be handed to `Parser::parse` as one.
+fn strip_build_policy_blocks(body: &str) -> String {
+    let mut out = String::new();
+    let mut pos = 0;
+    while let Some(at) = find_word_outside(body, Syntax::MANIFEST_BLOCK_POLICY, pos) {
+        let after = at + Syntax::MANIFEST_BLOCK_POLICY.len();
+        if code_depth_at(body, at) != Some(0) {
+            pos = after;
+            continue;
+        }
+
+        let mut cursor = after;
+        while body[cursor..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            cursor += body[cursor..]
+                .chars()
+                .next()
+                .expect("peeked whitespace")
+                .len_utf8();
+        }
+        if !body[cursor..].starts_with(':') {
+            pos = after;
+            continue;
+        }
+        cursor += 1;
+        while body[cursor..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            cursor += body[cursor..]
+                .chars()
+                .next()
+                .expect("peeked whitespace")
+                .len_utf8();
+        }
+        if !body[cursor..].starts_with('.') {
+            pos = after;
+            continue;
+        }
+        cursor += 1;
+        while body[cursor..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            cursor += body[cursor..]
+                .chars()
+                .next()
+                .expect("peeked whitespace")
+                .len_utf8();
+        }
+        if !body[cursor..].starts_with('{') {
+            pos = after;
+            continue;
+        }
+
+        let (_, consumed) = balanced_with_len(&body[cursor + 1..], '{', '}');
+        let end = cursor + 1 + consumed;
+        out.push_str(&body[pos..at]);
+        pos = end;
+    }
+    out.push_str(&body[pos..]);
+    out
 }
 
 /// Locate the `{` that opens the `module workspace { … }` body.
@@ -1807,6 +1906,26 @@ module workspace {
         )
         .unwrap_err();
         assert!(error.message().contains("policy.grants"));
+    }
+
+    #[test]
+    fn unsupported_workspace_policy_allow_fails_closed() {
+        for source in [
+            "module workspace { policy: .{ allow: #(Exec) } }",
+            "module workspace { policy.allow: #(Exec) }",
+        ] {
+            let error = parse_workspace_policy(source).unwrap_err();
+            assert!(matches!(error, OverlayError::UnsupportedPolicy(_)));
+        }
+    }
+
+    #[test]
+    fn unknown_build_effects_fail_closed() {
+        let error = parse_workspace_policy(
+            "module workspace { policy: .{ deny: #(Teleport) } }",
+        )
+        .unwrap_err();
+        assert!(error.message().contains("unknown build effect"));
     }
 
     #[test]

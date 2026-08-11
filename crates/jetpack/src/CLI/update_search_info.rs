@@ -436,7 +436,21 @@ pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
         .unwrap_or(reference)
         .to_string();
     let workspace = workspace_root(&std::env::current_dir().unwrap_or_default());
-    let path = workspace.join(Syntax::WORKSPACE_FILE);
+    let path = match WorkspaceFile::resolve_workspace_source(&workspace) {
+        Some(Ok(source)) => source.path,
+        Some(Err(diagnostic)) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    &workspace.display().to_string(),
+                    "",
+                    std::slice::from_ref(&diagnostic),
+                )
+            );
+            return 2;
+        }
+        None => workspace.join(Syntax::WORKSPACE_FILE),
+    };
     let existing = std::fs::read_to_string(&path).ok();
     let next = Overlay::draft_overlay_source(
         existing.as_deref(),

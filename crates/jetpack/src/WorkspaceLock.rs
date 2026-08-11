@@ -38,8 +38,6 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         lock.version = Lock::LOCK_VERSION;
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
-        } else if let Ok(source) = std::fs::read(workspace_root.join(Syntax::WORKSPACE_FILE)) {
-            jet_pkg_model::SHA256::sha256_hex(&source)
         } else {
             "no-workspace-source".to_string()
         };

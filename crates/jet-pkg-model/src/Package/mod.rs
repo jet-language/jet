@@ -655,8 +655,8 @@ impl PackageFacts {
         Ok(output)
     }
 
-    /// Resolve the selected runnable output without allowing the migration
-    /// filename convention to hide a broken typed declaration.
+    /// Resolve the selected runnable output, with canonical `run.jet` as the
+    /// only convention fallback when no typed runnable output exists.
     pub fn resolve_run_entry(
         &self,
         root: &std::path::Path,
@@ -681,17 +681,8 @@ impl PackageFacts {
             };
             return Ok(Some(entry));
         }
-        Ok(self.legacy_run_entry(root))
-    }
-
-    fn legacy_run_entry(&self, root: &std::path::Path) -> Option<std::path::PathBuf> {
-        let matches = self
-            .source_files(root)
-            .into_iter()
-            .filter(|path| path.parent() == Some(root))
-            .filter(|path| file_has_top_level_function(path, "run"))
-            .collect::<Vec<_>>();
-        (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+        let entry = root.join(crate::Syntax::DEFAULT_ENTRY_FILE);
+        Ok(entry.is_file().then_some(entry))
     }
 
     /// Resolve a runnable Output's checked-reference spelling to a source
@@ -3168,7 +3159,7 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
     #[test]
     fn entry_path_only_accepts_declared_top_level_function() {
         let dir = temp_dir("entry");
-        std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
+        std::fs::write(dir.join("run.jet"), "fn run() { print(1) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
 outputs: .{ app: .Executable.{ entry: run } }"#,
@@ -3176,14 +3167,14 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         )
         .unwrap();
         let output = facts.outputs.get("app").unwrap();
-        assert_eq!(facts.entry_path(&dir, output), Some(dir.join("main.jet")));
+        assert_eq!(facts.entry_path(&dir, output), Some(dir.join("run.jet")));
         std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
-    fn typed_output_precedes_a_legacy_run_entry() {
-        let dir = temp_dir("legacy-run");
-        std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
+    fn typed_output_precedes_the_canonical_run_entry() {
+        let dir = temp_dir("canonical-run-with-output");
+        std::fs::write(dir.join("run.jet"), "fn run() { print(1) }\n").unwrap();
         std::fs::write(dir.join("serve.jet"), "fn serve() { print(2) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
@@ -3194,6 +3185,26 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
             Some(dir.join("serve.jet"))
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn convention_entry_resolution_accepts_only_run_jet() {
+        let dir = temp_dir("canonical-run");
+        std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+version: "0.1.0""#,
+            "package.jet",
+        )
+        .unwrap();
+        assert_eq!(facts.resolve_run_entry(&dir).unwrap(), None);
+
+        std::fs::write(dir.join("run.jet"), "fn run() { print(2) }\n").unwrap();
+        assert_eq!(
+            facts.resolve_run_entry(&dir).unwrap(),
+            Some(dir.join("run.jet"))
         );
         std::fs::remove_dir_all(dir).ok();
     }

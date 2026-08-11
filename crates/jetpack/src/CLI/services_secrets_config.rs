@@ -1066,23 +1066,12 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
             return named;
         }
     }
-    for legacy in [
-        project_dir.join("src").join(Syntax::LEGACY_ENTRY_FILE),
-        project_dir.join(Syntax::LEGACY_ENTRY_FILE),
-        project_dir
-            .join(Syntax::SOURCE_ROOT_DIR)
-            .join(Syntax::LEGACY_ENTRY_FILE),
-    ] {
-        if legacy.is_file() {
-            return legacy;
-        }
-    }
     default
 }
 
 /// D-ENV-PACKAGE1 / #1003: a canonical Package output is the first entry
-/// selection rule. Legacy `run.jet` remains the fallback for projects that do
-/// not declare a typed Package output.
+/// selection rule. `run.jet` is the only convention fallback for projects
+/// that do not declare a typed Package output.
 fn package_output_entry(project_dir: &Path) -> Result<Option<PathBuf>, String> {
     let Some(package) = jet_pkg_model::Package::PackageFacts::load(project_dir) else {
         return Ok(None);

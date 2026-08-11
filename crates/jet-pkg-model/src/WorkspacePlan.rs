@@ -1,5 +1,6 @@
-//! `WorkspacePlan` and `WorkspaceMember` — the data types produced by
-//! evaluating `workspace.jet` (D-WORKSPACE1=B, D-WORKSPACE2=A).
+//! `WorkspacePlan`, workspace-source authority, and `WorkspaceMember` — the
+//! data types produced by evaluating a workspace declaration
+//! (D-WORKSPACE1=B, D-WORKSPACE2=A).
 //!
 //! These types live here (L1 data model) so both the evaluator
 //! (`jet-env-model::WorkspaceFile`) and the lock reader
@@ -7,9 +8,30 @@
 //! either depending on the other.
 
 use crate::AST::ComptimeInput;
+use crate::Diagnostics::Diagnostic;
 use crate::Overlay::OverlayPolicy;
+use std::path::{Path, PathBuf};
 
-/// The result of evaluating `workspace.jet`.
+/// The role of a declaration-resolved workspace source.
+///
+/// `workspace.jet` is the D-WORKSPACE2 index. Other top-level declarations
+/// establish an authority boundary, but are not workspace indexes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceSourceRole {
+    Index,
+    Authority,
+}
+
+/// The one declaration-resolved workspace source used by every authority
+/// lookup.
+#[derive(Debug, Clone)]
+pub struct WorkspaceSource {
+    pub path: PathBuf,
+    pub source: String,
+    pub role: WorkspaceSourceRole,
+}
+
+/// The result of evaluating a workspace declaration.
 #[derive(Debug, Clone, Default)]
 pub struct WorkspacePlan {
     /// Member packages in source order (the order `members:` produced them).
@@ -20,9 +42,9 @@ pub struct WorkspacePlan {
     /// input invalidates the lock the same way it does for any other Tier-1
     /// call site.
     pub comptime_inputs: Vec<ComptimeInput>,
-    /// D-JPK-OVERLAY1=A: reviewed package overlay/override policy from
-    /// `workspace.jet`; CLI commands may draft this source but never create
-    /// hidden override state.
+    /// D-JPK-OVERLAY1=A: reviewed package overlay/override policy from the
+    /// workspace declaration; CLI commands may draft this source but never
+    /// create hidden override state.
     pub overlay_policy: OverlayPolicy,
     /// Digest of the workspace source that produced this plan. Locks may be
     /// reused only when the source bytes still have this identity.
@@ -40,4 +62,201 @@ pub struct WorkspaceMember {
     /// lock. Relative identity keeps a committed lock portable after a
     /// checkout moves.
     pub canonical_path: String,
+}
+
+/// Resolve the one top-level `.jet` source that declares `module workspace`.
+///
+/// The filename and declaration jointly select the role. A declared
+/// `workspace.jet` is the strict D-WORKSPACE2 index. A declared workspace
+/// module in any other top-level `.jet` file is an authority boundary and is
+/// evaluated only for policy. A malformed canonical file still fails closed,
+/// even when an arbitrary authority declaration is present beside it.
+///
+/// Every candidate is inspected in deterministic filename order. More than
+/// one usable declaration is E1239. Any source-discovery I/O failure is an
+/// error rather than an absent workspace so callers cannot fall through to an
+/// outer authority or stale lock.
+pub fn resolve_workspace_source(dir: &Path) -> Option<Result<WorkspaceSource, Diagnostic>> {
+    let mut entries: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(entries) => {
+            let mut collected = Vec::new();
+            for entry in entries {
+                match entry {
+                    Ok(entry) => collected.push(entry),
+                    Err(error) => {
+                        return Some(Err(Diagnostic::error(
+                            "E1239",
+                            format!("couldn't inspect workspace sources in `{}`", dir.display()),
+                            format!("workspace declaration discovery failed: {error}"),
+                            "restore read access to the workspace directory before resolving its authority"
+                                .to_string(),
+                            None,
+                        )))
+                    }
+                }
+            }
+            collected
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            return Some(Err(Diagnostic::error(
+                "E1239",
+                format!("couldn't inspect workspace sources in `{}`", dir.display()),
+                format!("workspace declaration discovery failed: {error}"),
+                "restore read access to the workspace directory before resolving its authority"
+                    .to_string(),
+                None,
+            )))
+        }
+    };
+    entries.sort_by_key(|entry| entry.file_name());
+
+    let mut canonical = None;
+    let mut authorities = Vec::new();
+    let mut malformed_canonical = false;
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some(crate::Syntax::FILE_EXT)
+        {
+            continue;
+        }
+        let source = match std::fs::read_to_string(&path) {
+            Ok(source) => source,
+            Err(error) => {
+                return Some(Err(Diagnostic::error(
+                    "E1239",
+                    format!("couldn't read workspace source `{}`", path.display()),
+                    format!("the workspace source is present but unavailable: {error}"),
+                    "restore read access to the workspace source before resolving its authority"
+                        .to_string(),
+                    None,
+                )))
+            }
+        };
+        if declares_workspace_module(&source) {
+            let role = if path.file_name().and_then(|name| name.to_str())
+                == Some(crate::Syntax::WORKSPACE_FILE)
+            {
+                WorkspaceSourceRole::Index
+            } else {
+                WorkspaceSourceRole::Authority
+            };
+            let candidate = WorkspaceSource { path, source, role };
+            if role == WorkspaceSourceRole::Index {
+                canonical = Some(candidate);
+            } else {
+                authorities.push(candidate);
+            }
+        } else if path.file_name().and_then(|name| name.to_str())
+            == Some(crate::Syntax::WORKSPACE_FILE)
+        {
+            // The reserved filename is an index role even when its required
+            // declaration is absent. An arbitrary authority cannot repair or
+            // replace a malformed canonical index.
+            malformed_canonical = true;
+        }
+    }
+
+    if malformed_canonical && canonical.is_none() {
+        return Some(Err(e0995_no_workspace_module()));
+    }
+
+    if let Some(canonical) = canonical {
+        if authorities.is_empty() {
+            return Some(Ok(canonical));
+        }
+        let mut paths = vec![canonical.path.as_path()];
+        paths.extend(authorities.iter().map(|source| source.path.as_path()));
+        return Some(Err(e1239_ambiguous_workspace(&paths)));
+    }
+
+    match authorities.len() {
+        0 => None,
+        1 => Some(Ok(authorities.remove(0))),
+        _ => Some(Err(e1239_ambiguous_workspace(
+            &authorities
+                .iter()
+                .map(|source| source.path.as_path())
+                .collect::<Vec<_>>(),
+        ))),
+    }
+}
+
+/// E0995: the canonical workspace source is present but has no workspace
+/// declaration. Keep this diagnostic in the shared model so discovery and
+/// evaluation cannot drift.
+pub fn e0995_no_workspace_module() -> Diagnostic {
+    Diagnostic::error(
+        "E0995",
+        format!(
+            "`{}` must declare `module {} {{ … }}`",
+            crate::Syntax::WORKSPACE_FILE,
+            crate::Syntax::NS_WORKSPACE
+        ),
+        format!(
+            "`{}` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one `module {} {{ members: … }}` body",
+            crate::Syntax::WORKSPACE_FILE,
+            crate::Syntax::NS_WORKSPACE
+        ),
+        format!(
+            "write `module {} {{ members: find(\"./packages\") }}` in `{}`",
+            crate::Syntax::NS_WORKSPACE,
+            crate::Syntax::WORKSPACE_FILE
+        ),
+        None,
+    )
+}
+
+/// Cheap token probe for a top-level `module workspace` candidate.
+/// Full parsing stays in `jet-env-model::WorkspaceFile::evaluate`.
+fn declares_workspace_module(src: &str) -> bool {
+    let (tokens, _lex_diags) = crate::Lexer::lex(src);
+    let tokens = crate::Lexer::without_comments(&tokens);
+    let mut brace_depth = 0i32;
+    let mut index = 0;
+    while index + 1 < tokens.len() {
+        match &tokens[index].kind {
+            crate::Lexer::TokKind::LBrace => {
+                brace_depth += 1;
+                index += 1;
+            }
+            crate::Lexer::TokKind::RBrace => {
+                brace_depth -= 1;
+                index += 1;
+            }
+            crate::Lexer::TokKind::KwModule if brace_depth == 0 => {
+                match &tokens[index + 1].kind {
+                    crate::Lexer::TokKind::Ident(name)
+                        if name == crate::Syntax::NS_WORKSPACE
+                            && !name.starts_with(crate::Syntax::MODULE_INTERNAL_PREFIX) =>
+                    {
+                        return true;
+                    }
+                    _ => index += 1,
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    false
+}
+
+/// E1239: the workspace authority must have one declaration source.
+fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
+    let list = paths
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("`, `");
+    Diagnostic::error(
+        "E1239",
+        format!("`module workspace` is declared in more than one file: `{list}`"),
+        "the workspace authority is discovered by declaration, so exactly one file may declare `module workspace { … }`".to_string(),
+        "keep one declaration and delete the others".to_string(),
+        None,
+    )
 }

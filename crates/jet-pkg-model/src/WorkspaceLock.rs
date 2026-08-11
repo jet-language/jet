@@ -2,7 +2,9 @@
 //!
 //! External tools (IDEs, CI scripts, Canvas) can call `WorkspaceLock::load`
 //! to get a static workspace index from `.jet/lock` without evaluating Jet
-//! and without depending on `jetpack`'s engine crate.
+//! and without depending on `jetpack`'s engine crate. An arbitrary authority
+//! may contribute persisted overlay policy through the same lock, but never
+//! contributes or validates member-index facts.
 //!
 //! The write path (`WorkspaceLock::write`) needs `jetpack::RuntimePolicy` for
 //! file locking; it lives in `jetpack::WorkspaceLock` and re-exports this
@@ -28,25 +30,37 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     if lock.workspace_source_digest.is_none() {
         return None;
     }
-    let workspace_source = workspace_root.join(Syntax::WORKSPACE_FILE);
-    let source_digest = match std::fs::read(&workspace_source) {
-        Ok(source) => crate::SHA256::sha256_hex(&source),
-        Err(_) if workspace_source.exists() => return None,
-        Err(_) => "no-workspace-source".to_string(),
+    let (workspace_source_role, workspace_source_present, source_digest) = match
+        crate::WorkspacePlan::resolve_workspace_source(workspace_root)
+    {
+        Some(Ok(source)) => (
+            Some(source.role),
+            true,
+            crate::SHA256::sha256_hex(source.source.as_bytes()),
+        ),
+        Some(Err(_)) => return None,
+        None => (None, false, "no-workspace-source".to_string()),
     };
-    if !workspace_source.exists()
+    if !workspace_source_present
         && lock.workspace_source_digest.as_deref().is_some_and(|digest| {
             digest != "no-workspace-source"
         })
     {
         return None;
     }
-    if workspace_source.exists()
+    if workspace_source_present
         && lock.workspace_source_digest.as_deref() != Some(source_digest.as_str())
     {
         return None;
     }
-    if !lock.workspace_members.is_empty() {
+    let is_index = workspace_source_role
+        .is_none_or(|role| role == crate::WorkspacePlan::WorkspaceSourceRole::Index);
+    if !is_index && !lock.workspace_members.is_empty() {
+        // An arbitrary authority may persist overlay facts in this lock, but
+        // its source is never a D-WORKSPACE2 member index.
+        return None;
+    }
+    if is_index && !lock.workspace_members.is_empty() {
         let root = workspace_root.canonicalize().ok()?;
         let mut physical_paths = Vec::new();
         let mut names = Vec::new();
@@ -99,22 +113,27 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             names.push(member.name.clone());
         }
     }
-    Some(WorkspacePlan {
-        comptime_inputs: lock.comptime_inputs.clone(),
-        overlay_policy: lock.workspace_overlay_policy,
-        source_digest: lock
-            .workspace_members
-            .first()
-            .map(|member| member.source_digest.clone())
-            .unwrap_or(source_digest),
-        members: lock
-            .workspace_members
+    let plan_source_digest = lock
+        .workspace_members
+        .first()
+        .map(|member| member.source_digest.clone())
+        .unwrap_or(source_digest);
+    let members = if is_index {
+        lock.workspace_members
             .into_iter()
             .map(|m: LockedWorkspaceMember| WorkspaceMember {
                 name: m.name,
                 path: m.path,
                 canonical_path: m.canonical_path,
             })
-            .collect(),
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Some(WorkspacePlan {
+        comptime_inputs: lock.comptime_inputs.clone(),
+        overlay_policy: lock.workspace_overlay_policy,
+        source_digest: plan_source_digest,
+        members,
     })
 }

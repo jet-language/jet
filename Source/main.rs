@@ -13,7 +13,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
-use jet::Diagnostics::ColorChoice;
+use jet::Diagnostics::{ColorChoice, Diagnostic};
 use jet::ExitCodes;
 use jet_foundation::BuildEffect;
 
@@ -2628,8 +2628,7 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
 
 /// Find the entry `.jet` file for a project rooted at `root` (D-ILE1, owner
 /// amendment 2026-07-17). `run.jet` is the zero-ceremony default, followed by
-/// `src/run.jet` and `<package>.jet`. Old `main.jet` locations remain fallback
-/// inputs, never defaults. Missing-entry errors name `run.jet`.
+/// `src/run.jet` and `<package>.jet`. Missing-entry errors name `run.jet`.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     match package_output_entry(root) {
         Ok(Some(entry)) => return entry,
@@ -2655,16 +2654,6 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         ));
         if named.is_file() {
             return named;
-        }
-    }
-    for legacy in [
-        root.join("src").join(jet::Syntax::LEGACY_ENTRY_FILE),
-        root.join(jet::Syntax::LEGACY_ENTRY_FILE),
-        root.join(jet::Syntax::SOURCE_ROOT_DIR)
-            .join(jet::Syntax::LEGACY_ENTRY_FILE),
-    ] {
-        if legacy.is_file() {
-            return legacy;
         }
     }
     default
@@ -2693,7 +2682,7 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// `check`/`build` inside a package — the one rule all six share instead of
 /// each hand-rolling its own "no file given" fallback.
 ///
-/// A `workspace.jet` member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)
+/// A workspace member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)
 /// with more than one runnable member (a member whose own entry resolves to a
 /// real file, D-ILE1) is an ambiguity naming every member; `-p <member>`
 /// picks one explicitly, or the caller can always name a file directly. A
@@ -2701,7 +2690,8 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// runnable member) resolves exactly like `find_project_entry` always has —
 /// no behavior change for the overwhelmingly common single-package case.
 ///
-/// A `workspace.jet` (D-JPK-WORKSPACE2) is checked at `cwd` directly first —
+/// A declaration-resolved workspace source (D-JPK-WORKSPACE2) is checked at
+/// `cwd` directly first —
 /// `jetpack::WorkspaceFile::load` never walks upward, matching every
 /// other workspace-aware call site — because a monorepo workspace root often
 /// carries no `package.jet` of its own (Package facts live entirely in member
@@ -2714,7 +2704,8 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     // A workspace lock is a checked member index, not an optional cache. If
     // its source identity is stale while the workspace source is absent, do
     // not fall through to an ordinary package entry and run the wrong file.
-    if !cwd.join(jet::Syntax::WORKSPACE_FILE).is_file() {
+    let workspace_source = jetpack::WorkspaceFile::resolve_workspace_source(cwd);
+    if workspace_source.is_none() {
         let lock_path = cwd.join(jet::Syntax::UNIFIED_LOCK_FILE);
         let stale_workspace_lock = jetpack::WorkspaceLock::load(cwd).is_none()
             && std::fs::read_to_string(&lock_path)
@@ -2737,17 +2728,40 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     // authority. Member selection (`-p`) remains an explicit escape to one
     // package and therefore bypasses this root orchestration path.
     if cmd == "build" && member_flag.is_none() {
-        let workspace = cwd.join(jet::Syntax::WORKSPACE_FILE);
-        if let Ok(source) = std::fs::read_to_string(&workspace) {
-            if jetpack::WorkspaceFile::has_build_entry(&source) {
-                return Some(workspace);
+        if let Some(Ok(source)) = workspace_source.as_ref() {
+            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
+                && jetpack::WorkspaceFile::has_build_entry(&source.source)
+            {
+                return Some(source.path.clone());
             }
         }
     }
-    if let Some(workspace) = jetpack::WorkspaceFile::load(cwd) {
+    let workspace = jetpack::WorkspaceFile::load(cwd);
+    if workspace_source.is_some() && workspace.is_none() {
+        let diagnostic = Diagnostic::error(
+            "E3503",
+            format!("workspace source in `{}` disappeared", cwd.display()),
+            "workspace authority changed while the entry was being selected".to_string(),
+            "restore the workspace declaration before running the command".to_string(),
+            None,
+        );
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic])
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Some(workspace) = workspace {
         let plan = match workspace {
             Ok(plan) => plan,
             Err(diagnostic) => {
+                if cmd == "build" && member_flag.is_none() {
+                    if let Some(Ok(source)) = workspace_source.as_ref() {
+                        if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+                            return Some(source.path.clone());
+                        }
+                    }
+                }
                 eprint!(
                     "{}",
                     jet::render_diagnostics(

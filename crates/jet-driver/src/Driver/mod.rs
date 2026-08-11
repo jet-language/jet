@@ -1264,10 +1264,17 @@ fn compile_bundle_path_build_inner(
     let package_manifest_entry = package_manifest_has_build_entry(file, &bundle.project_root);
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
-    let is_workspace_entry = std::path::Path::new(file)
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some(crate::Syntax::WORKSPACE_FILE);
+    let entry_path = std::path::Path::new(file);
+    let entry_dir = entry_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let is_workspace_entry = match jet_pkg_model::WorkspacePlan::resolve_workspace_source(entry_dir)
+    {
+        Some(Ok(source)) => std::fs::canonicalize(&source.path).ok()
+            == std::fs::canonicalize(entry_path).ok(),
+        Some(Err(diagnostic)) => return Err(vec![diagnostic]),
+        None => false,
+    };
     let compile_mode = if options.plugin_target || has_package_entry || is_workspace_entry {
         crate::Sema::CompileMode::Check
     } else {
@@ -1557,7 +1564,7 @@ fn compile_bundle_path_build_inner(
         // owning project root, which is also the root used by generated
         // output, action execution, and lock provenance.
         let base_dir = &bundle.project_root;
-        let package = build_package_name(file);
+        let package = build_package_name(file)?;
         let evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
             crate::BuildPluginHook::run_packaged_build_plugin,
             || crate::Comptime::run_build_entry_with_policy(
@@ -1577,12 +1584,13 @@ fn compile_bundle_path_build_inner(
             return Err(evaluated.diagnostics);
         }
 
+        let dependency_name = dependency_boundary.map(build_package_name).transpose()?;
         validate_build_authority(
             &evaluated.plan,
             &declared_build_effects,
             has_impure_gate,
             &options,
-            dependency_boundary.map(build_package_name),
+            dependency_name,
             build.name_span,
         )?;
         validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build.name_span)?;
@@ -2279,10 +2287,10 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
     })
 }
 
-/// Generated-source ownership follows the nearest package definition. A
-/// manifest-less file keeps its historical stem-based package name so the
-/// single-file build surface remains stable.
-fn build_package_name(file: &str) -> String {
+/// Generated-source ownership follows the nearest package definition inside
+/// the active workspace boundary. A manifest-less workspace entry is anchored
+/// to canonical `run.jet`; only standalone files keep their historical stem.
+fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
     let entry = std::path::Path::new(file);
     let absolute = if entry.is_absolute() {
         entry.to_path_buf()
@@ -2291,24 +2299,42 @@ fn build_package_name(file: &str) -> String {
             .map(|directory| directory.join(entry))
             .unwrap_or_else(|_| entry.to_path_buf())
     };
-    if let Some(root) = crate::Loader::find_manifest_root(
-        absolute.parent().unwrap_or(std::path::Path::new(".")),
-    ) {
+    let parent = absolute.parent().unwrap_or(std::path::Path::new("."));
+    let workspace_root = crate::Loader::find_workspace_root_checked(parent)
+        .map_err(|diagnostic| vec![diagnostic])?;
+    let package_root = crate::Loader::find_manifest_root_checked(parent)
+        .map_err(|diagnostic| vec![diagnostic])?
+        .filter(|root| {
+            workspace_root
+                .as_ref()
+                .is_none_or(|workspace| crate::Loader::is_physically_within(workspace, root))
+        });
+    if let Some(root) = package_root {
         let path = crate::Loader::manifest_path(&root).expect("manifest root has a Package file");
-        if let Ok(source) = std::fs::read_to_string(&path) {
-            if let Ok(manifest) = crate::Package::PackageFacts::parse(&source, "package.jet") {
-                if !manifest.name.is_empty() {
-                    return manifest.name;
-                }
+        let source = std::fs::read_to_string(&path).map_err(|error| {
+            vec![Diagnostic::error(
+                "E3503",
+                format!("build policy in `{}` cannot be read", path.display()),
+                format!("the package build policy is present but unavailable: {error}"),
+                "make the package policy readable before running build code".to_string(),
+                None,
+            )]
+        })?;
+        if let Ok(manifest) = crate::Package::PackageFacts::parse(&source, "package.jet") {
+            if !manifest.name.is_empty() {
+                return Ok(manifest.name);
             }
         }
     }
-    absolute
+    if workspace_root.is_some() {
+        return Ok(crate::Loader::authority_name_for_entry(&absolute));
+    }
+    Ok(absolute
         .file_stem()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .unwrap_or("app")
-        .to_string()
+        .to_string())
 }
 
 fn package_build_entry_source(

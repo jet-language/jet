@@ -1,7 +1,9 @@
-//! `workspace.jet` evaluator (D-WORKSPACE1=B, D-WORKSPACE2=A).
+//! Declaration-resolved workspace evaluator (D-WORKSPACE1=B, D-WORKSPACE2=A).
 //!
-//! Parses and evaluates `module workspace { members: <expr> }` from a
-//! `workspace.jet` at the repo root. The `members:` expression may be:
+//! Parses and evaluates the canonical `workspace.jet` index declaration
+//! `module workspace { members: <expr> }`. Arbitrary top-level authority
+//! declarations are resolved separately for policy and boundary purposes; they
+//! do not supply workspace members. The index `members:` expression may be:
 //!   - `find("./packages")` — discovers package directories under the path
 //!   - A list literal of strings: `["./pkg/a", "./pkg/b"]`
 //!   - Any comptime expression that evaluates to a `[String]`
@@ -11,7 +13,7 @@
 //! as an explicit migration fallback) and relative paths.
 //!
 //! This replaces the `[packages]` table in `jetpack.toml` (D-WORKSPACE1=B
-//! clean break: when `workspace.jet` is present, it is the sole index).
+//! clean break: one canonical declaration is the sole index).
 //!
 //! Diagnostics:
 //!   E0995 — the file has no `module workspace { … }` body
@@ -28,68 +30,28 @@ use crate::AST::{ComptimeInput, Expr, Func, Item, StrPart};
 use jet_pkg_model::Package::PackageFacts;
 
 // Re-export types so callers can use `jet_env_model::WorkspaceFile::WorkspacePlan` etc.
-pub use jet_pkg_model::WorkspacePlan::{WorkspaceMember, WorkspacePlan};
+pub use jet_pkg_model::WorkspacePlan::{
+    resolve_workspace_source, WorkspaceMember, WorkspacePlan, WorkspaceSource,
+    WorkspaceSourceRole,
+};
 
 // ──────────────────────────────────────────────
 // Load / evaluate
 // ──────────────────────────────────────────────
 
-/// Load and evaluate the workspace index from `dir`. Returns `None` when no
-/// file declares one (not an error — a plain project has no workspace).
+/// Load and evaluate the workspace/index authority from `dir`. Returns `None`
+/// when no file declares one (not an error — a plain project has no boundary).
 /// Returns `Err(diagnostic)` when a declaring file exists but is malformed.
 ///
-/// D-JPK-FILENAME2=B (A2): `workspace.jet` is a convention, not a reserved
-/// name — `module workspace { … }` is discovered by declaration and may live
-/// in `pkg.jet` or any top-level `.jet` file. `workspace.jet` is checked
-/// first (the canonical home, cheap fast path); otherwise every top-level
-/// `.jet` file (including `pkg.jet` — the one reserved filename) is scanned
-/// for the declaration. Two files both declaring `module workspace` is E1239.
+/// D-JPK-FILENAME2=B (A2): `module workspace { … }` is discovered by
+/// declaration and may live in any top-level `.jet` file. The shared resolver
+/// owns candidate scanning, ambiguity, and source I/O diagnostics.
 pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
-    let path = dir.join(Syntax::WORKSPACE_FILE);
-    if path.exists() {
-        let src = match std::fs::read_to_string(&path) {
-            Ok(src) => src,
-            Err(error) => {
-                return Some(Err(Diagnostic::error(
-                    "E1239",
-                    format!("couldn't read `{}`", path.display()),
-                    format!("the canonical workspace source is present but unavailable: {error}"),
-                    "restore read access to `workspace.jet`; do not rely on a stale `.jet/lock`".to_string(),
-                    None,
-                )))
-            }
-        };
-        return Some(evaluate(&src, dir));
-    }
-    // Discovery-by-declaration over the other top-level `.jet` files.
-    let mut declaring: Vec<(PathBuf, String)> = Vec::new();
-    let mut entries: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().collect();
-    entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
-        let p = entry.path();
-        if p.extension().and_then(|x| x.to_str()) != Some(Syntax::FILE_EXT) {
-            continue;
-        }
-        let Ok(src) = std::fs::read_to_string(&p) else {
-            continue;
-        };
-        if declares_workspace_module(&src) {
-            declaring.push((p, src));
-        }
-    }
-    match declaring.len() {
-        0 => None,
-        1 => {
-            let (_, src) = declaring.remove(0);
-            Some(evaluate(&src, dir))
-        }
-        _ => Some(Err(e1239_ambiguous_workspace(
-            &declaring
-                .iter()
-                .map(|(p, _)| p.as_path())
-                .collect::<Vec<_>>(),
-        ))),
-    }
+    let source = resolve_workspace_source(dir)?;
+    Some(match source {
+        Ok(source) => evaluate_source(&source.source, dir, source.role),
+        Err(diagnostic) => Err(diagnostic),
+    })
 }
 
 /// Return whether a workspace source declares the optional top-level build
@@ -113,79 +75,48 @@ pub fn has_build_entry(src: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Cheap token probe: does `src` declare a top-level, enabled
-/// `module workspace { … }`? Full parse/eval happens only on the one match.
-///
-/// Must not call `Parser::parse` — discovery walks every ancestor directory
-/// (including `/tmp` in tests) and full-parsing unrelated deep `.jet` files
-/// overflows the default test-thread stack before `MAX_SOURCE_NESTING` fires.
-fn declares_workspace_module(src: &str) -> bool {
-    let (toks, _lex_diags) = crate::Lexer::lex(src);
-    let toks = crate::Lexer::without_comments(&toks);
-    let mut brace_depth = 0i32;
-    let mut i = 0;
-    while i + 1 < toks.len() {
-        match &toks[i].kind {
-            crate::Lexer::TokKind::LBrace => {
-                brace_depth += 1;
-                i += 1;
-            }
-            crate::Lexer::TokKind::RBrace => {
-                brace_depth -= 1;
-                i += 1;
-            }
-            crate::Lexer::TokKind::KwModule if brace_depth == 0 => {
-                match &toks[i + 1].kind {
-                    crate::Lexer::TokKind::Ident(name)
-                        if name == Syntax::NS_WORKSPACE
-                            && !name.starts_with(Syntax::MODULE_INTERNAL_PREFIX) =>
-                    {
-                        return true;
-                    }
-                    _ => i += 1,
-                }
-            }
-            _ => i += 1,
-        }
-    }
-    false
-}
-
-/// E1239: two or more files declare `module workspace` — the index must be
-/// unambiguous.
-fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
-    let list = paths
-        .iter()
-        .map(|p| {
-            p.file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.display().to_string())
-        })
-        .collect::<Vec<_>>()
-        .join("`, `");
-    Diagnostic::error(
-        "E1239",
-        format!("`module workspace` is declared in more than one file: `{list}`"),
-        "the workspace index is discovered by declaration, so exactly one file may declare \
-         `module workspace { … }`"
-            .to_string(),
-        "keep one declaration (conventionally in `workspace.jet`) and delete the others"
-            .to_string(),
-        None,
-    )
-}
-
-/// Evaluate a `workspace.jet` source string to a `WorkspacePlan`.
+/// Evaluate a resolved workspace source string to a `WorkspacePlan`.
 pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic> {
+    evaluate_source(src, base_dir, WorkspaceSourceRole::Index)
+}
+
+/// Evaluate a resolved source according to its classified role. Arbitrary
+/// authority modules contribute policy and a boundary only; they never become
+/// the D-WORKSPACE2 member index.
+pub fn evaluate_source(
+    src: &str,
+    base_dir: &Path,
+    role: WorkspaceSourceRole,
+) -> Result<WorkspacePlan, Diagnostic> {
+    evaluate_with_role(src, base_dir, role)
+}
+
+fn evaluate_with_role(
+    src: &str,
+    base_dir: &Path,
+    role: WorkspaceSourceRole,
+) -> Result<WorkspacePlan, Diagnostic> {
     // `members:` may call comptime helpers; Canvas/tests invoke `load` outside
     // `jet`/`jetpack` mains that normally install this bridge.
     jet_codegen::Codegen::TIR::install_comptime_bridge();
     let overlay_policy = Overlay::parse_workspace_policy(src).map_err(|e| {
+        let unsupported_policy = matches!(
+            &e,
+            Overlay::OverlayError::UnsupportedPolicy(_)
+        );
         Diagnostic::error(
-            "E0998",
-            "workspace overlay policy is malformed".to_string(),
+            if unsupported_policy { "E3503" } else { "E0998" },
+            if unsupported_policy {
+                "workspace build policy contains an unsupported field".to_string()
+            } else {
+                "workspace overlay policy is malformed".to_string()
+            },
             e.message().to_string(),
-            "write `overlay <name> { provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }`".to_string(),
+            if unsupported_policy {
+                "use `policy: .{ deny: #(…) }` or subject-scoped `policy: .{ grants: .{ \"package\": #(…) } }`".to_string()
+            } else {
+                "write `overlay <name> { provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }`".to_string()
+            },
             None,
         )
     })?;
@@ -206,7 +137,10 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
         })
     })?;
 
-    // Find `module workspace { … }`.
+    // Find `module workspace { … }`. An authority-only source has no required
+    // `members:` field, so policy stripping may leave it as an ordinary code
+    // module (`module workspace {}`); that still proves the declaration was
+    // syntactically present without turning it into an index.
     let ws_module = program
         .items
         .iter()
@@ -217,8 +151,44 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
                 }
             }
             None
+        });
+    let code_workspace = program.items.iter().any(|item| {
+        matches!(
+            item,
+            Item::CodeModule(module)
+                if module.name == Syntax::NS_WORKSPACE && module.body.is_some()
+        )
+    });
+    let workspace_declarations = program
+        .items
+        .iter()
+        .filter(|item| match item {
+            Item::Module(module) => {
+                module.name == Syntax::NS_WORKSPACE && module.is_auto_discovered()
+            }
+            Item::CodeModule(module) => module.name == Syntax::NS_WORKSPACE,
+            _ => false,
         })
-        .ok_or_else(|| e0995_no_workspace_module())?;
+        .count();
+
+    if role == WorkspaceSourceRole::Authority {
+        if workspace_declarations != 1 || (ws_module.is_none() && !code_workspace) {
+            return Err(jet_pkg_model::WorkspacePlan::e0995_no_workspace_module());
+        }
+        return Ok(WorkspacePlan {
+            members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            overlay_policy,
+            source_digest: jet_pkg_model::SHA256::sha256_hex(src.as_bytes()),
+        });
+    }
+
+    if workspace_declarations != 1 {
+        return Err(jet_pkg_model::WorkspacePlan::e0995_no_workspace_module());
+    }
+    let ws_module = ws_module
+        .filter(|module| !module.members.is_empty())
+        .ok_or_else(jet_pkg_model::WorkspacePlan::e0995_no_workspace_module)?;
 
     // Build the comptime context a `members:` expression evaluates against:
     // every top-level `fn` (callable) and every top-level `const`/`comptime`
@@ -703,28 +673,6 @@ fn has_package_file(dir: &Path) -> bool {
 // Diagnostics
 // ──────────────────────────────────────────────
 
-/// E0995: workspace.jet has no `module workspace { … }` body.
-fn e0995_no_workspace_module() -> Diagnostic {
-    Diagnostic::error(
-        "E0995",
-        format!(
-            "`{}` must declare `module {} {{ … }}`",
-            Syntax::WORKSPACE_FILE,
-            Syntax::NS_WORKSPACE
-        ),
-        format!(
-            "`{}` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one \
-            `module workspace {{ members: … }}` body",
-            Syntax::WORKSPACE_FILE
-        ),
-        format!(
-            "write `module workspace {{ members: find(\"./packages\") }}` in `{}`",
-            Syntax::WORKSPACE_FILE
-        ),
-        None,
-    )
-}
-
 /// E0997: `find("…")` in `members:` points at a directory that doesn't exist.
 fn e0997_find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -1032,21 +980,41 @@ module workspace {
         assert!(names.contains(&"ranker"));
     }
 
-    // D-JPK-FILENAME2=B (A2): `module workspace` is discovered by declaration
-    // in any top-level `.jet` file — only `pkg.jet` is a reserved filename.
+    // D-JPK-FILENAME2=B (A2): an arbitrary top-level declaration may provide
+    // authority, while only `workspace.jet` provides the member index.
 
     #[test]
     fn workspace_module_discovered_in_arbitrary_filename() {
         let dir = tempdir("ws-arbitrary");
         std::fs::write(
             dir.join("repo-index.jet"),
-            "module workspace { members: [] }\n",
+            "module workspace { policy: .{ deny: #(Exec) } }\n",
         )
         .unwrap();
         let plan = load(&dir)
             .expect("declaration should be discovered")
             .expect("should evaluate clean");
         assert!(plan.members.is_empty());
+
+        // An arbitrary authority cannot repair a malformed reserved index.
+        std::fs::write(dir.join(Syntax::WORKSPACE_FILE), "module env {}\n").unwrap();
+        let diagnostic = load(&dir)
+            .expect("the malformed canonical source must be surfaced")
+            .expect_err("workspace.jet remains the strict index role");
+        assert_eq!(diagnostic.code, "E0995");
+    }
+
+    #[test]
+    fn malformed_arbitrary_workspace_declaration_is_not_absent() {
+        let dir = tempdir("ws-arbitrary-malformed");
+        std::fs::write(
+            dir.join("repo-index.jet"),
+            "module workspace { members: [ }\n",
+        )
+        .unwrap();
+        assert!(load(&dir)
+            .expect("a workspace declaration candidate must be surfaced")
+            .is_err());
     }
 
     #[test]
@@ -1054,7 +1022,7 @@ module workspace {
         let dir = tempdir("ws-in-pkg");
         std::fs::write(
             dir.join(Syntax::PAYLOAD_FILE),
-            "module workspace { members: [] }\n",
+            "module workspace { policy: .{ deny: #(FS) } }\n",
         )
         .unwrap();
         let plan = load(&dir)
@@ -1064,7 +1032,7 @@ module workspace {
     }
 
     #[test]
-    fn workspace_jet_wins_over_discovered_files() {
+    fn workspace_jet_and_discovered_file_are_e1239() {
         let dir = tempdir("ws-canonical-wins");
         let packages = dir.join("packages/hello");
         std::fs::create_dir_all(&packages).unwrap();
@@ -1074,18 +1042,33 @@ module workspace {
             "module workspace { members: find(\"./packages\") }\n",
         )
         .unwrap();
-        // A second declaration elsewhere is shadowed by the canonical file,
-        // never scanned — no E1239.
-        std::fs::write(dir.join("other.jet"), "module workspace { members: [] }\n").unwrap();
-        let plan = load(&dir).unwrap().unwrap();
-        assert_eq!(plan.members.len(), 1);
+        // A canonical filename never shadows another declaration.
+        std::fs::write(
+            dir.join("other.jet"),
+            "module workspace { policy: .{ deny: #(FS) } }\n",
+        )
+        .unwrap();
+        let diagnostic = load(&dir)
+            .expect("declarations should be discovered")
+            .expect_err("two declarations must remain ambiguous");
+        assert_eq!(diagnostic.code, "E1239");
+        assert!(diagnostic.what.contains(Syntax::WORKSPACE_FILE));
+        assert!(diagnostic.what.contains("other.jet"));
     }
 
     #[test]
     fn two_discovered_workspace_declarations_are_e1239() {
         let dir = tempdir("ws-ambiguous");
-        std::fs::write(dir.join("a.jet"), "module workspace { members: [] }\n").unwrap();
-        std::fs::write(dir.join("b.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            dir.join("a.jet"),
+            "module workspace { policy: .{ deny: #(FS) } }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b.jet"),
+            "module workspace { policy: .{ deny: #(FS) } }\n",
+        )
+        .unwrap();
         let d = load(&dir).expect("should be Some").expect_err("ambiguous");
         assert_eq!(d.code, "E1239");
         assert!(d.what.contains("a.jet") && d.what.contains("b.jet"));

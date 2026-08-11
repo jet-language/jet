@@ -291,16 +291,38 @@ fn load_entry_with_overlays_mode_with_sink(
         cwd.join(&entry)
     };
     let entry_abs = normalize_path(&entry_abs);
+    let entry_abs = fs::canonicalize(&entry_abs).unwrap_or(entry_abs);
 
-    // Walk upward from the entry file's directory to find package.jet (or the
-    // explicit migration-era pkg.jet fallback).
-    // If found, use that directory as project_root and validate the manifest.
-    // If none found, fall back to the entry file's directory (R9 — single-file mode).
+    // Walk upward from the entry file's directory to find the nearest package
+    // and workspace roots. A nested workspace is a project boundary: an outer
+    // package must not widen its module search root or make files outside the
+    // nested workspace look importable.
     let entry_dir = entry_abs
         .parent()
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
-    let manifest_root = find_manifest_root(&entry_dir);
+    let workspace_root = match find_workspace_root_checked(&entry_dir) {
+        Ok(root) => root,
+        Err(diagnostic) => {
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(&entry_abs.display().to_string(), "", vec![diagnostic]),
+            ));
+        }
+    };
+    let manifest_root = match find_manifest_root_checked(&entry_dir) {
+        Ok(root) => root.filter(|manifest| {
+            workspace_root
+                .as_ref()
+                .is_none_or(|workspace| is_physically_within(workspace, manifest))
+        }),
+        Err(diagnostic) => {
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(&entry_abs.display().to_string(), "", vec![diagnostic]),
+            ));
+        }
+    };
     if manifest_root.is_none() {
         if let Some((path, diagnostic)) = stale_manifest_name_diagnostic(&entry_dir) {
             let source = fs::read_to_string(&path).unwrap_or_default();
@@ -311,8 +333,9 @@ fn load_entry_with_overlays_mode_with_sink(
         }
     }
     let validates_project_parts = manifest_root.is_some()
+        || workspace_root.is_some()
         || entry_abs.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
-            matches!(name, Syntax::DEFAULT_ENTRY_FILE | Syntax::LEGACY_ENTRY_FILE)
+            name == Syntax::DEFAULT_ENTRY_FILE
         });
     let mut layer_ceiling = None;
     let mut package_edition = Manifest::latest_edition().to_string();
@@ -351,7 +374,25 @@ fn load_entry_with_overlays_mode_with_sink(
         }
         // Found a Package root — validate it and collect dep source paths.
         let pack_path = manifest_path(&manifest_dir).expect("manifest root has a manifest");
-        let raw = fs::read_to_string(&pack_path).unwrap_or_default();
+        let raw = match fs::read_to_string(&pack_path) {
+            Ok(raw) => raw,
+            Err(error) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &pack_path.display().to_string(),
+                        "",
+                        vec![Diagnostic::error(
+                            "E3503",
+                            format!("build policy in `{}` cannot be read", pack_path.display()),
+                            format!("the package build policy is present but unavailable: {error}"),
+                            "make the package policy readable before running build code".to_string(),
+                            None,
+                        )],
+                    ),
+                ));
+            }
+        };
         let package_manifest = match crate::Package::PackageFacts::parse(&raw, pack_path.display().to_string()) {
             Ok(facts) => facts,
             Err(crate::Package::PackageParseError::BadMemoryPolicy { detail }) => {
@@ -517,7 +558,8 @@ fn load_entry_with_overlays_mode_with_sink(
             }
         }
     } else {
-        // R9: no manifest — single-file mode, project root is the entry dir.
+        // R9: no package manifest — single-file mode uses the nearest
+        // workspace root when one exists, otherwise the entry directory.
         //
         // U11 (D-JPK-SCRIPTDEP1=A): a manifest-less entry may open with
         // inline `use pkg#version;` deps. Parse just the entry file to
@@ -526,6 +568,7 @@ fn load_entry_with_overlays_mode_with_sink(
         // self-contained) and resolve each one up front, so the ordinary
         // `Module` import resolution (`resolve_module_import`) finds them in
         // `realized_libs` exactly like a hangar-realized `library` (U17).
+        let project_root = workspace_root.clone().unwrap_or_else(|| entry_dir.clone());
         let mut resolution = PkgResolution::default();
         let raw = fs::read_to_string(&entry_abs).unwrap_or_default();
         let (toks, lex_diags) = crate::Lexer::lex(&raw);
@@ -550,7 +593,7 @@ fn load_entry_with_overlays_mode_with_sink(
             }
         }
         (
-            entry_dir,
+            project_root,
             HashMap::new(),
             resolution,
             organization_policy,
@@ -914,17 +957,72 @@ pub fn manifest_path(root: &Path) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Walk upward from `start` to find the nearest directory containing a Package
-/// root.
-pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
+/// Walk upward from `start` to find the nearest Package root, stopping at the
+/// nearest declaration-resolved workspace boundary. Discovery errors are
+/// returned so an inner malformed or ambiguous workspace cannot expose an
+/// outer package authority.
+pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    let mut dir = fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
     loop {
-        if manifest_path(&dir).is_some() {
-            return Some(dir);
+        match jet_pkg_model::WorkspacePlan::resolve_workspace_source(&dir) {
+            Some(Ok(_)) => {
+                return Ok(manifest_path(&dir).is_some().then_some(dir));
+            }
+            Some(Err(diagnostic)) => return Err(diagnostic),
+            None if manifest_path(&dir).is_some() => return Ok(Some(dir)),
+            None => {}
         }
         match dir.parent() {
             Some(p) => dir = p.to_path_buf(),
-            None => return None,
+            None => return Ok(None),
+        }
+    }
+}
+
+/// Walk upward from `start` to find the nearest directory containing a Package
+/// root, stopping at the active workspace boundary.
+pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
+    find_manifest_root_checked(start).ok().flatten()
+}
+
+/// Name the package/module authority from the canonical `run.jet` entry when
+/// one exists. A retired `main.jet` never becomes the authority fallback.
+pub fn authority_name_for_entry(entry: &Path) -> String {
+    let canonical = entry
+        .parent()
+        .map(|parent| parent.join(Syntax::DEFAULT_ENTRY_FILE));
+    let authority = canonical
+        .as_deref()
+        .filter(|path| path.is_file())
+        .unwrap_or(entry);
+    let legacy_stem = Syntax::LEGACY_ENTRY_FILE
+        .strip_suffix(".jet")
+        .unwrap_or(Syntax::LEGACY_ENTRY_FILE);
+    authority
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty() && *name != legacy_stem)
+        .unwrap_or("app")
+        .to_string()
+}
+
+/// Walk upward from `start` to find the nearest workspace declaration and
+/// preserve malformed or ambiguous declaration diagnostics.
+///
+/// Workspace roots are independent project boundaries. In particular, a
+/// workspace nested below a package root must own file and module imports
+/// inside that workspace instead of inheriting the package's wider tree.
+pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    let mut dir = fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    loop {
+        match jet_pkg_model::WorkspacePlan::resolve_workspace_source(&dir) {
+            Some(Ok(_)) => return Ok(Some(dir)),
+            Some(Err(diagnostic)) => return Err(diagnostic),
+            None => {}
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => return Ok(None),
         }
     }
 }
@@ -936,7 +1034,7 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
 /// "no pkg.jet found" message into the E1226 teaching diagnostic when the
 /// user's project still carries an old filename.
 pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)> {
-    let mut dir = start.to_path_buf();
+    let mut dir = fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
     loop {
         if manifest_path(&dir).is_some() {
             return None;
@@ -945,6 +1043,9 @@ pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)>
             if dir.join(name).is_file() {
                 return Some((dir, name));
             }
+        }
+        if jet_pkg_model::WorkspacePlan::resolve_workspace_source(&dir).is_some() {
+            return None;
         }
         match dir.parent() {
             Some(p) => dir = p.to_path_buf(),
@@ -1632,10 +1733,40 @@ fn resolve_file_import(
     }
     resolved.set_extension(Syntax::FILE_EXT);
     let resolved = normalize_path(&resolved);
-    if !resolved.starts_with(normalize_path(project_root)) {
-        return Err(e0602(span));
-    }
     if !resolved.is_file() {
+        return Err(Diagnostic::error(
+            "E0603",
+            format!("can't find the file `{}`", path_str),
+            "a file import path must point at an existing `.jet` file next to this file's tree"
+                .to_string(),
+            format!(
+                "create `{}.{}`, or fix the path in `{} \"{}\"`",
+                path_str,
+                Syntax::FILE_EXT,
+                Syntax::KW_USE,
+                path_str
+            ),
+            Some(span),
+        ));
+    }
+    let physical_root = fs::canonicalize(project_root).unwrap_or_else(|_| normalize_path(project_root));
+    let physical = resolved.canonicalize().map_err(|_| {
+        Diagnostic::error(
+            "E0603",
+            format!("can't find the file `{}`", path_str),
+            "a file import path must point at an existing `.jet` file next to this file's tree"
+                .to_string(),
+            format!(
+                "create `{}.{}`, or fix the path in `{} \"{}\"`",
+                path_str,
+                Syntax::FILE_EXT,
+                Syntax::KW_USE,
+                path_str
+            ),
+            Some(span),
+        )
+    })?;
+    if !physical.starts_with(&physical_root) {
         return Err(Diagnostic::error(
             "E0603",
             format!("can't find the file `{}`", path_str),
@@ -1700,10 +1831,10 @@ fn resolve_module_import(
             return Ok(dep_matches[0].clone());
         }
         // If the dep root itself has the dep name as the top-level module,
-        // look for main.jet in the dep root.
-        let main_jet = dep_root.join(format!("main.{}", Syntax::FILE_EXT));
-        if main_jet.is_file() && name == first_segment {
-            return Ok(normalize_path(&main_jet));
+        // anchor the package authority on the canonical run entry.
+        let run_jet = dep_root.join(Syntax::DEFAULT_ENTRY_FILE);
+        if run_jet.is_file() && name == first_segment {
+            return Ok(normalize_path(&run_jet));
         }
     }
 
@@ -1741,14 +1872,14 @@ fn resolve_module_import(
             "E0603",
             format!("can't find a module named `{}`", name),
             format!(
-                "search from the project root for `{}.{}`, or `{}/{}/{}.{}` / `main.{}`",
+                "search from the project root for `{}.{}`, or `{}/{}/{}.{}` / `{}`",
                 name,
                 Syntax::FILE_EXT,
                 name,
                 name,
                 name,
                 Syntax::FILE_EXT,
-                Syntax::FILE_EXT
+                Syntax::DEFAULT_ENTRY_FILE
             ),
             format!(
                 "add `{}.{}` under this project, or fix the `{}` name",
@@ -1779,7 +1910,14 @@ fn resolve_module_import(
 fn find_module_files(name: &str, project_root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut seen = HashSet::new();
-    collect_module_files(project_root, name, project_root, &mut found, &mut seen);
+    let physical_root = fs::canonicalize(project_root).unwrap_or_else(|_| normalize_path(project_root));
+    collect_module_files(
+        project_root,
+        name,
+        &physical_root,
+        &mut found,
+        &mut seen,
+    );
     found.sort();
     found
 }
@@ -1787,25 +1925,34 @@ fn find_module_files(name: &str, project_root: &Path) -> Vec<PathBuf> {
 fn collect_module_files(
     dir: &Path,
     name: &str,
-    project_root: &Path,
+    physical_root: &Path,
     found: &mut Vec<PathBuf>,
     seen: &mut HashSet<PathBuf>,
 ) {
+    let Ok(physical_dir) = fs::canonicalize(dir) else {
+        return;
+    };
+    if !physical_dir.starts_with(physical_root) {
+        return;
+    }
     if skip_search_dir(dir) {
         return;
     }
 
     let direct = normalize_path(&dir.join(format!("{}.{}", name, Syntax::FILE_EXT)));
     if direct.is_file() {
-        insert_unique(found, seen, direct);
+        insert_unique(found, seen, direct, physical_root);
     }
 
     let sub = dir.join(name);
     if sub.is_dir() {
-        for leaf in [name, "main"] {
-            let p = normalize_path(&sub.join(format!("{}.{}", leaf, Syntax::FILE_EXT)));
+        for candidate in [
+            sub.join(format!("{}.{}", name, Syntax::FILE_EXT)),
+            sub.join(Syntax::DEFAULT_ENTRY_FILE),
+        ] {
+            let p = normalize_path(&candidate);
             if p.is_file() {
-                insert_unique(found, seen, p);
+                insert_unique(found, seen, p, physical_root);
             }
         }
     }
@@ -1816,14 +1963,22 @@ fn collect_module_files(
     for entry in entries.flatten() {
         let p = entry.path();
         if p.is_dir() {
-            collect_module_files(&p, name, project_root, found, seen);
+            collect_module_files(&p, name, physical_root, found, seen);
         }
     }
 }
 
-fn insert_unique(found: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, p: PathBuf) {
-    if seen.insert(p.clone()) {
-        found.push(p);
+fn insert_unique(
+    found: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    path: PathBuf,
+    physical_root: &Path,
+) {
+    let Ok(physical) = fs::canonicalize(&path) else {
+        return;
+    };
+    if physical.starts_with(physical_root) && seen.insert(physical) {
+        found.push(path);
     }
 }
 
@@ -1978,6 +2133,18 @@ fn relative_display(root: &Path, path: &Path) -> String {
         .to_string()
 }
 
+/// Compare existing paths by physical identity so a symlink cannot widen a
+/// workspace or project boundary.
+pub fn is_physically_within(root: &Path, path: &Path) -> bool {
+    let Ok(root) = fs::canonicalize(root) else {
+        return false;
+    };
+    let Ok(path) = fs::canonicalize(path) else {
+        return false;
+    };
+    path.starts_with(root)
+}
+
 #[cfg(test)]
 mod stale_manifest_name_tests {
     use super::*;
@@ -2043,6 +2210,69 @@ mod stale_manifest_name_tests {
     fn no_manifest_at_all_is_none() {
         let dir = tempdir("empty");
         assert_eq!(find_stale_manifest_name(&dir), None);
+    }
+
+    #[test]
+    fn workspace_boundary_blocks_outer_stale_manifest_lookup() {
+        let outer = tempdir("workspace-boundary");
+        let inner = outer.join("child");
+        let source = inner.join("src");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(outer.join("pack.jet"), "").unwrap();
+        fs::write(
+            inner.join("authority.jet"),
+            "module workspace { policy: .{ deny: #(FS) } }\n",
+        )
+        .unwrap();
+
+        assert_eq!(find_stale_manifest_name(&source), None);
+        assert_eq!(find_manifest_root(&source), None);
+    }
+
+    #[test]
+    fn ambiguous_workspace_boundary_blocks_outer_package_authority() {
+        let outer = tempdir("ambiguous-workspace-authority");
+        let inner = outer.join("child");
+        let source = inner.join("src");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            outer.join(Syntax::PACKAGE_FILE),
+            "name: \"outer\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            inner.join("a.jet"),
+            "module workspace { policy: .{ deny: #(FS) } }\n",
+        )
+        .unwrap();
+        fs::write(
+            inner.join("b.jet"),
+            "module workspace { policy: .{ deny: #(FS) } }\n",
+        )
+        .unwrap();
+
+        let diagnostic = find_manifest_root_checked(&source)
+            .expect_err("ambiguous inner workspace must not expose an outer Package");
+        assert_eq!(diagnostic.code, "E1239");
+        assert_eq!(find_manifest_root(&source), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_import_rejects_physical_symlink_escape_as_e0603() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir("file-import-symlink");
+        let outside = tempdir("file-import-symlink-outside");
+        let entry = root.join("run.jet");
+        fs::write(&entry, "use \"./escape\" as escape\nfn run() {}\n").unwrap();
+        fs::write(outside.join("secret.jet"), "pub fn fixture() {}\n").unwrap();
+        symlink(outside.join("secret.jet"), root.join("escape.jet")).unwrap();
+
+        let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0603" && diagnostic.what.contains("./escape")
+        }));
     }
 
     #[test]
@@ -2156,6 +2386,31 @@ mod stale_manifest_name_tests {
         )
         .unwrap();
         assert!(bundle.modules.iter().any(|module| module.path == part));
+    }
+
+    #[test]
+    fn module_directory_uses_canonical_run_entry_not_main() {
+        let dir = tempdir("module-directory-entry");
+        let module_dir = dir.join("tool");
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(module_dir.join("main.jet"), "pub fn run() {}").unwrap();
+        assert!(find_module_files("tool", &dir).is_empty());
+
+        let run = module_dir.join(Syntax::DEFAULT_ENTRY_FILE);
+        fs::write(&run, "pub fn run() {}\n").unwrap();
+        assert_eq!(find_module_files("tool", &dir), vec![normalize_path(&run)]);
+    }
+
+    #[test]
+    fn authority_name_uses_run_and_rejects_main_fallback() {
+        let dir = tempdir("authority-entry-name");
+        let main = dir.join(Syntax::LEGACY_ENTRY_FILE);
+        fs::write(&main, "fn run() {}\n").unwrap();
+        assert_eq!(authority_name_for_entry(&main), "app");
+
+        let run = dir.join(Syntax::DEFAULT_ENTRY_FILE);
+        fs::write(&run, "fn run() {}\n").unwrap();
+        assert_eq!(authority_name_for_entry(&main), "run");
     }
 
     #[test]

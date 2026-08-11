@@ -5,7 +5,7 @@ use super::realize::{
     report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
-use super::workspace_sources::{cwd_table, load_workspace};
+use super::workspace_sources::{cwd_table, load_workspace, project_root, workspace_root};
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
@@ -743,36 +743,41 @@ fn run_workspace_members(
 pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
+    let workspace_dir = workspace_root(&dir);
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
 
-    // D-WORKSPACE1=B: if workspace.jet is present, build selected workspace
+    // D-WORKSPACE1=B: if a workspace declaration is present, build selected
     // members via the first-party core provider (no Nix required).
-    if dir.join(Syntax::WORKSPACE_FILE).exists() {
-        if let Some(result) = load_workspace(&dir) {
-            return match result {
-                Err(code) => code,
-                Ok(plan) => {
-                    let req = select_request_from_flags(&parsed.flags);
-                    let selected = match MemberSelect::select_members(&dir, &plan, &req) {
-                        Ok(m) => m,
-                        Err(d) => return report_select_error(theme, &d),
-                    };
-                    if selected.is_empty() {
-                        theme.status("no workspace members matched the selection.");
-                        return 0;
-                    }
-                    run_workspace_members(theme, parsed, &dir, &selected, WorkspaceAction::Build)
+    if let Some(result) = load_workspace(&workspace_dir) {
+        return match result {
+            Err(code) => code,
+            Ok(plan) => {
+                let req = select_request_from_flags(&parsed.flags);
+                let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
+                    Ok(m) => m,
+                    Err(d) => return report_select_error(theme, &d),
+                };
+                if selected.is_empty() {
+                    theme.status("no workspace members matched the selection.");
+                    return 0;
                 }
-            };
-        }
+                run_workspace_members(
+                    theme,
+                    parsed,
+                    &workspace_dir,
+                    &selected,
+                    WorkspaceAction::Build,
+                )
+            }
+        };
     }
 
     let mut plan = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
             Ok(s) => RunPlan {
-                project_root: dir.clone(),
+                project_root: project_root(&dir),
                 refs: vec![s],
                 adapters: Vec::new(),
                 table: cwd_table(),
@@ -947,29 +952,34 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
 
 pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
+    let workspace_dir = workspace_root(&dir);
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
-    if dir.join(Syntax::WORKSPACE_FILE).exists() {
-        if let Some(result) = load_workspace(&dir) {
-            return match result {
-                Err(code) => code,
-                Ok(plan) => {
-                    let req = select_request_from_flags(&parsed.flags);
-                    let selected = match MemberSelect::select_members(&dir, &plan, &req) {
-                        Ok(m) => m,
-                        Err(d) => return report_select_error(theme, &d),
-                    };
-                    if selected.is_empty() {
-                        theme.status("no workspace members matched the selection.");
-                        return 0;
-                    }
-                    let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
-                    theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
-                    run_workspace_members(theme, parsed, &dir, &selected, WorkspaceAction::Test)
+    if let Some(result) = load_workspace(&workspace_dir) {
+        return match result {
+            Err(code) => code,
+            Ok(plan) => {
+                let req = select_request_from_flags(&parsed.flags);
+                let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
+                    Ok(m) => m,
+                    Err(d) => return report_select_error(theme, &d),
+                };
+                if selected.is_empty() {
+                    theme.status("no workspace members matched the selection.");
+                    return 0;
                 }
-            };
-        }
+                let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
+                theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
+                run_workspace_members(
+                    theme,
+                    parsed,
+                    &workspace_dir,
+                    &selected,
+                    WorkspaceAction::Test,
+                )
+            }
+        };
     }
     // Non-workspace: identical realize path to build, then run the package's
     // tests with the compiler's canonical test semantics.
