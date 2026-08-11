@@ -944,7 +944,7 @@ fn lower_guard_switch<'a>(
         arm_states.push(state);
     }
     let has_else = else_body.is_some();
-    deferred_stmt(bodies, move |mut lowered| {
+    deferred_stmt(bodies, move |lowered| {
         let mut lowered = lowered.into_iter();
         let mut chain = if has_else {
             lowered.next().expect("guard else body was deferred")
@@ -1034,6 +1034,7 @@ pub(crate) fn lower_mixed_switch<'a>(
     let mut arm_states = Vec::with_capacity(arms.len());
     let mut bodies = Vec::with_capacity(arms.len() + if else_body.is_some() { 1 } else { 0 });
     for arm in arms {
+        let subject_ty = subject_ty.clone();
         let state = Rc::new(RefCell::new(None));
         let state_for_prepare = Rc::clone(&state);
         // Keep the condition and pattern-binding prefix in the same deferred
@@ -1074,7 +1075,7 @@ pub(crate) fn lower_mixed_switch<'a>(
     if let Some(body) = else_body {
         bodies.push(LowerBody::scoped(body, clone_env(env)));
     }
-    deferred_stmt(bodies, move |mut lowered| {
+    deferred_stmt(bodies, move |lowered| {
         let mut lowered = lowered.into_iter();
         let arms = arm_states
             .into_iter()

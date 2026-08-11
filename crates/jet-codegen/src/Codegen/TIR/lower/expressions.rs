@@ -872,12 +872,12 @@ fn lower_if_expr_after_condition<'a>(
         then_env.bind(&name, place, ty);
     }
     let else_base = clone_env(&base_env);
-    let resume_then_body: ExprBodyResume<'a> = Box::new(move |lowered_then, then_env, cx| {
+    let resume_then_body: ExprBodyResume<'a> = Box::new(move |lowered_then, then_env, _cx| {
         then_prefix.extend(lowered_then);
-        let resume_then: ExprIfResume<'a> = Box::new(move |then_value, _, cx| {
+        let resume_then: ExprIfResume<'a> = Box::new(move |then_value, _, _cx| {
             let else_env = clone_env(&else_base);
             let resume_else_body: ExprBodyResume<'a> = Box::new(
-                move |lowered_else, else_env, cx| {
+                move |lowered_else, else_env, _cx| {
                     let resume_else: ExprIfResume<'a> = Box::new(move |else_value, _, cx| {
                         let value = TExpr {
                             ty: then_value.ty.clone(),
