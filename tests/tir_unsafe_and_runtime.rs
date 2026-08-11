@@ -807,6 +807,107 @@ fn run() {
     }
 }
 
+#[test]
+fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.time as time
+
+fn slow(value: Int) => Int {
+    time.sleep(1)
+    return value
+}
+
+fn run() {
+    #Context(deadline: 0) {
+        task.group workers {
+            if (task.all { slow(1), slow(2) }) == {
+                .Ok(results) -> {
+                    print(results[0], results[1])
+                }
+                .Err(error) -> {
+                    panic(\"unexpected child task failure\")
+                }
+            }
+        }
+    }
+    print(\"unreachable\")
+}
+";
+    let (code, stdout, stderr) =
+        build_and_run_full("jet_tir_test", "tir_task_all_deadline", src);
+    assert_eq!(code, 70, "{stderr}");
+    assert_eq!(stdout, "", "{stderr}");
+    assert!(
+        stderr.contains("Error [E3003]: deadline exceeded while waiting in task selection"),
+        "{stderr}"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_task_all_deadline_parity_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("combinator bundle should load");
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                jet::Diagnostics::Severity::Error
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "combinator program must type-check: {errors:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "combinator program must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .expect("combinator program must compile in resident JIT");
+
+    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+        jet_jit::reset_jit_trace_for_test();
+        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_ne!(exit_code, 0, "{tier} ignored the expired deadline");
+                assert_eq!(stdout, "", "{tier} continued after the expired deadline");
+                assert!(stderr.contains("E3003"), "{tier}: {stderr}");
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                assert!(
+                    diagnostics.iter().any(|diagnostic| diagnostic.code == "E3003"),
+                    "{tier} reported the wrong deadline error: {diagnostics:?}"
+                );
+            }
+        }
+        if !force_interpreter {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "combinator program must execute native resident JIT code"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "combinator program resident JIT must not invoke fallback"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "combinator program resident JIT must not deopt"
+            );
+        }
+    }
+}
+
 /// c109 Phase 21: `Task.detach()` (D-DETACH1) — fire-and-forget; drops the handle.
 #[test]
 fn task_detach() {

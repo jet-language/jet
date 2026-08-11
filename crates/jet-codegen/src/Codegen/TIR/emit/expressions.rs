@@ -5057,13 +5057,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             TCoreClosureKind::Spawn {
                 group,
                 spawn_closure,
-                scoped,
                 ..
             } => match group {
                 Some(group) => format!(
                     "({}).{}({})",
                     emit_tir_expr(group, cx),
-                    if *scoped { "spawn_scoped" } else { "spawn" },
+                    "spawn",
                     spawn_closure
                 ),
                 None => format!(

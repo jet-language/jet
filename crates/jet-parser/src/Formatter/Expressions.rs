@@ -1877,7 +1877,7 @@ impl<'a> Fmt<'a> {
     /// D-CONC-SPAWN1=D: restore the one-word task surface from its compiler-
     /// private method-call form.
     fn fmt_task_surface_method(&mut self, method: &str, args: &[CallArg]) -> bool {
-        if method == "spawn" {
+        if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             let [CallArg {
                 expr: Expr::Lambda(lam),
                 ..
@@ -1902,9 +1902,12 @@ impl<'a> Fmt<'a> {
             }
             return true;
         }
-        if !matches!(method, "all" | "race" | "any") {
-            return false;
-        }
+        let selector = match method {
+            Syntax::INTERNAL_TASK_ALL_METHOD => "all",
+            Syntax::INTERNAL_TASK_RACE_METHOD => "race",
+            Syntax::INTERNAL_TASK_ANY_METHOD => "any",
+            _ => return false,
+        };
         let [CallArg {
             expr: Expr::ListLit(branches, _),
             ..
@@ -1912,7 +1915,7 @@ impl<'a> Fmt<'a> {
         else {
             return false;
         };
-        self.write(&format!("{}.{} {{", Syntax::KW_CONC_TASK, method));
+        self.write(&format!("{}.{} {{", Syntax::KW_CONC_TASK, selector));
         for (index, branch) in branches.iter().enumerate() {
             if index > 0 {
                 self.write(", ");
@@ -1925,7 +1928,7 @@ impl<'a> Fmt<'a> {
             } = branch
             {
                 if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
-                    && spawn_method == "spawn"
+                    && spawn_method == Syntax::INTERNAL_TASK_SPAWN_METHOD
                 {
                     if let [CallArg {
                         expr: Expr::Lambda(lam),

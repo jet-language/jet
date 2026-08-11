@@ -204,10 +204,7 @@ use std::collections::HashSet;
                             _ => None,
                         };
                         match self.admit_scoped_borrow(name, fallback, lam.span) {
-                            Some(true) => {
-                                lam.meta.scoped_task_borrow = true;
-                                continue;
-                            }
+                            Some(true) => continue,
                             Some(false) => continue,
                             None => {}
                         }

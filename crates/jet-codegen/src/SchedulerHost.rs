@@ -248,6 +248,7 @@ mod scheduler_host_tests {
                 JetSchedulerJoin {
                     rx: slow_rx,
                     completion_order: slow_order,
+                    completion_wait: ParkSlot::new(),
                 },
                 JetTaskControl::new(),
             ),
@@ -255,6 +256,7 @@ mod scheduler_host_tests {
                 JetSchedulerJoin {
                     rx: fast_rx,
                     completion_order: fast_order,
+                    completion_wait: ParkSlot::new(),
                 },
                 JetTaskControl::new(),
             ),

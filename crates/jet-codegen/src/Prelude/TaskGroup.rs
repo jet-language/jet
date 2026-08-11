@@ -8,6 +8,34 @@ pub enum JetTaskFailure {
     Panicked(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetTaskCancellation {
+    pub code: &'static str,
+    pub what: &'static str,
+    pub why: &'static str,
+    pub fix: &'static str,
+}
+
+pub fn jet_task_cancellation() -> JetTaskCancellation {
+    JetTaskCancellation {
+        code: "E3004",
+        what: "task cancelled at a cooperative wait point",
+        why: "the task control plane requested cancellation before this wait completed",
+        fix: "handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait",
+    }
+}
+
+/// Map an engine's child-completion code onto the canonical failure rail.
+/// The surrounding engine only marshals the resulting enum into its value
+/// representation.
+pub fn jet_task_failure_from_code(code: &str, reason: String) -> JetTaskFailure {
+    match code {
+        "E3004" => JetTaskFailure::Cancelled,
+        "E3003" => JetTaskFailure::DeadlineBlown,
+        _ => JetTaskFailure::Panicked(reason),
+    }
+}
+
 /// One ABI spelling for the typed failure rail. Engines may pack the returned
 /// tag beside their representation-specific reason handle, but the failure
 /// meaning and tag values live here with `JetTaskFailure`.
@@ -25,31 +53,124 @@ pub fn jet_task_failure_abi(
 /// D-CONC-SPAWN1=D: explicit group limits share one clamping rule on every
 /// execution tier. `None` means no admission bound; an explicit value below
 /// one is the smallest bounded group.
-pub fn jet_task_group_limit(limit: i64) -> usize {
-    limit.max(1) as usize
+pub fn jet_task_group_limit_defaulted(limit: Option<i64>) -> Option<usize> {
+    limit.map(|limit| limit.max(1) as usize)
+}
+
+#[derive(Debug)]
+struct JetTaskGroupSlots {
+    limit: usize,
+    active: std::sync::Mutex<usize>,
+    closing: std::sync::atomic::AtomicBool,
+    wake: std::sync::Condvar,
+}
+
+impl JetTaskGroupSlots {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            active: std::sync::Mutex::new(0),
+            closing: std::sync::atomic::AtomicBool::new(false),
+            wake: std::sync::Condvar::new(),
+        }
+    }
+
+    fn close(&self) {
+        let _active = self.active.lock().unwrap();
+        self.closing
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.wake.notify_all();
+    }
+
+    fn acquire(self: &std::sync::Arc<Self>) -> Option<JetTaskGroupPermit> {
+        let mut active = self.active.lock().unwrap();
+        while *active >= self.limit
+            && !self
+                .closing
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            active = self.wake.wait(active).unwrap();
+        }
+        if self
+            .closing
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return None;
+        }
+        *active += 1;
+        Some(JetTaskGroupPermit {
+            slots: self.clone(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct JetTaskGroupPermit {
+    slots: std::sync::Arc<JetTaskGroupSlots>,
+}
+
+impl Drop for JetTaskGroupPermit {
+    fn drop(&mut self) {
+        let mut active = self.slots.active.lock().unwrap();
+        *active = active.saturating_sub(1);
+        self.slots.wake.notify_one();
+    }
 }
 
 #[derive(Debug)]
 pub struct JetTaskGroupRuntime<T> {
     children: std::sync::Mutex<Vec<T>>,
+    slots: Option<std::sync::Arc<JetTaskGroupSlots>>,
+    closing: std::sync::atomic::AtomicBool,
 }
 
 impl<T> JetTaskGroupRuntime<T> {
     pub fn new() -> Self {
+        Self::new_defaulted(None)
+    }
+
+    /// Construct the runtime policy for a canonical `task.group` limit.
+    /// Engines pass the source-level default through this one Prelude symbol.
+    pub fn new_defaulted(limit: Option<i64>) -> Self {
         Self {
             children: std::sync::Mutex::new(Vec::new()),
+            slots: jet_task_group_limit_defaulted(limit)
+                .map(|limit| std::sync::Arc::new(JetTaskGroupSlots::new(limit))),
+            closing: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    pub fn acquire(&self) -> Option<JetTaskGroupPermit> {
+        self.slots.as_ref().and_then(|slots| slots.acquire())
     }
 
     pub fn register(&self, child: T) {
         self.children.lock().unwrap().push(child);
     }
 
-    pub fn close_with<C, J>(&self, mut cancel: C, mut join: J)
+    fn begin_close(&self) -> bool {
+        if self
+            .closing
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return false;
+        }
+        if let Some(slots) = &self.slots {
+            // A child that is already being drained may still reach a nested
+            // spawn. Let it register without waiting for the permit held by
+            // the child being drained; the close loop will consume it.
+            slots.close();
+        }
+        true
+    }
+
+    pub fn close_with<J>(&self, mut join: J)
     where
-        C: FnMut(&T),
         J: FnMut(T),
     {
+        if !self.begin_close() {
+            return;
+        }
         // A child may register another child through the shared lexical group
         // handle while it is being joined. Drain until the shared queue is
         // empty so lexical close covers that nested work too.
@@ -57,9 +178,6 @@ impl<T> JetTaskGroupRuntime<T> {
             let children = std::mem::take(&mut *self.children.lock().unwrap());
             if children.is_empty() {
                 break;
-            }
-            for child in &children {
-                cancel(child);
             }
             for child in children {
                 // D-CONC-FAIL1=A: lexical close joins and discards child outcomes.
@@ -115,6 +233,18 @@ pub fn jet_task_deadline(wait_kind: &str) -> JetTaskDeadline {
     }
 }
 
+/// Return the canonical deadline value only when a wait point has expired.
+/// Hosts provide their remaining-time observation; this Prelude owns the
+/// boundary comparison and the resulting wait kind.
+pub fn jet_task_deadline_if_expired(
+    remaining_ms: Option<i64>,
+    wait_kind: &str,
+) -> Option<JetTaskDeadline> {
+    remaining_ms
+        .filter(|remaining| *remaining <= 0)
+        .map(|_| jet_task_deadline(wait_kind))
+}
+
 /// Canonical parent wait-point policy. A shield defers both interrupts;
 /// otherwise an expired deadline lands before a pending cancellation.
 pub fn jet_task_wait_policy<D>(
@@ -145,7 +275,9 @@ pub struct JetTaskSelectPolicy<T, E> {
 
 impl<T, E> JetTaskSelectPolicy<T, E> {
     pub fn new(mode: JetTaskSelectMode, count: usize) -> Self {
-        assert!(count > 0, "task selection needs at least one task");
+        if count == 0 {
+            unreachable!("sema must reject an empty task group combinator");
+        }
         Self {
             mode,
             pending: count,
@@ -215,7 +347,9 @@ pub fn jet_task_select<Task, T, E>(
     mut cancel: impl FnMut(&Task),
     mut drain: impl FnMut(Task),
 ) -> Result<Vec<T>, E> {
-    assert!(!tasks.is_empty(), "task selection needs at least one task");
+    if tasks.is_empty() {
+        unreachable!("sema must reject an empty task group combinator");
+    }
     let mut tasks = tasks.into_iter().map(Some).collect::<Vec<_>>();
     let mut policy = JetTaskSelectPolicy::new(mode, tasks.len());
     loop {
@@ -267,26 +401,19 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn close_cancels_all_then_joins_all_before_first_panic() {
+    fn close_joins_all_without_cancelling() {
         let group = JetTaskGroupRuntime::new();
         group.register(1);
         group.register(2);
         group.register(3);
         let events = Arc::new(Mutex::new(Vec::new()));
-        let cancel_events = events.clone();
         let join_events = events.clone();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            group.close_with(
-                |child| cancel_events.lock().unwrap().push(format!("cancel {child}")),
-                |child| {
-                    join_events.lock().unwrap().push(format!("join {child}"));
-                },
-            );
-        }));
-        assert!(result.is_ok());
+        group.close_with(|child| {
+            join_events.lock().unwrap().push(format!("join {child}"));
+        });
         assert_eq!(
             *events.lock().unwrap(),
-            ["cancel 1", "cancel 2", "cancel 3", "join 1", "join 2", "join 3"]
+            ["join 1", "join 2", "join 3"]
         );
     }
 

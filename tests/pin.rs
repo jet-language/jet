@@ -48,7 +48,7 @@ fn build_and_run(name: &str, src: &str, allow_authored_unsafe: bool) -> Option<S
     });
     let user = common::strip_vetted_module(
         &common::strip_vetted_prelude_modules(&out.rust),
-        "jet_taskgroup_scoped",
+        "jet_taskgroup_borrowed_spawn",
     );
     if !allow_authored_unsafe {
         let leaked: Vec<&str> = user

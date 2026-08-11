@@ -8,13 +8,14 @@ use jet_codegen::scheduler::{
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
-    jet_scheduler_yield_now, jet_task_join_deadline_check, JetDeadlineGuard, JetSchedulerChannel,
-    JetSchedulerJoin,
+    jet_scheduler_yield_now, jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted,
+    jet_task_join_deadline_check, jet_task_sleep_ms_defaulted, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
     JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
+use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 // Every native host call that reaches the resident runtime crosses this lock.
 // Spawned Cranelift frames share the same arena as their parent, so the raw
@@ -30,7 +31,7 @@ thread_local! {
     static LOCAL_RICH_PANIC: Cell<bool> = const { Cell::new(false) };
     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static PENDING_CHILD_DEADLINE: RefCell<Option<String>> = const { RefCell::new(None) };
-    static PENDING_TASK_GROUP_PERMIT: RefCell<Option<JitTaskGroupPermit>> = const { RefCell::new(None) };
+    static PENDING_TASK_GROUP_PERMIT: RefCell<Option<JetTaskGroupPermit>> = const { RefCell::new(None) };
     static RICH_PANIC_REASON: RefCell<Option<String>> = const { RefCell::new(None) };
     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
 }
@@ -76,77 +77,18 @@ pub(crate) fn local_rich_panic_pending() -> bool {
     LOCAL_RICH_PANIC.with(Cell::get)
 }
 
-pub(crate) struct JitTaskGroupSlots {
-    limit: usize,
-    active: Mutex<usize>,
-    closing: AtomicBool,
-    wake: Condvar,
-}
-
-pub(crate) struct JitTaskGroupPermit {
-    slots: Arc<JitTaskGroupSlots>,
-}
-
-impl JitTaskGroupSlots {
-    fn close(&self) {
-        let _active = self
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.closing.store(true, Ordering::Release);
-        self.wake.notify_all();
-    }
-
-    fn acquire(self: &Arc<Self>) -> Option<JitTaskGroupPermit> {
-        let mut active = self
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        while *active >= self.limit && !self.closing.load(Ordering::Acquire) {
-            active = self
-                .wake
-                .wait(active)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-        }
-        if self.closing.load(Ordering::Acquire) {
-            return None;
-        }
-        *active += 1;
-        Some(JitTaskGroupPermit { slots: self.clone() })
-    }
-}
-
-impl Drop for JitTaskGroupPermit {
-    fn drop(&mut self) {
-        let mut active = self
-            .slots
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *active = active.saturating_sub(1);
-        self.slots.wake.notify_one();
-    }
-}
-
 pub(crate) struct JitTaskGroup {
-    pub(crate) children: Arc<jet_codegen::task_group::JetTaskGroupRuntime<i64>>,
-    pub(crate) slots: Option<Arc<JitTaskGroupSlots>>,
-    closing: AtomicBool,
+    pub(crate) children: Arc<JetTaskGroupRuntime<i64>>,
 }
 
 impl JitTaskGroup {
     fn new(limit: i64, bounded: bool) -> Self {
         Self {
-            children: Arc::new(jet_codegen::task_group::JetTaskGroupRuntime::new()),
-            slots: bounded.then(|| {
-                Arc::new(JitTaskGroupSlots {
-                    limit: jet_codegen::task_group::jet_task_group_limit(limit),
-                    active: Mutex::new(0),
-                    closing: AtomicBool::new(false),
-                    wake: Condvar::new(),
-                })
-            }),
-            closing: AtomicBool::new(false),
+            children: Arc::new(JetTaskGroupRuntime::new_defaulted(if bounded {
+                Some(limit)
+            } else {
+                None
+            })),
         }
     }
 }
@@ -301,7 +243,7 @@ fn take_pending_child_deadline() -> Option<String> {
     PENDING_CHILD_DEADLINE.with(|pending| pending.borrow_mut().take())
 }
 
-fn take_pending_task_group_permit() -> Option<JitTaskGroupPermit> {
+fn take_pending_task_group_permit() -> Option<JetTaskGroupPermit> {
     PENDING_TASK_GROUP_PERMIT.with(|pending| pending.borrow_mut().take())
 }
 
@@ -410,7 +352,7 @@ extern "C" fn jet_jit_channel_bounded(capacity: i64) -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
         rt.channels
-            .push(JetSchedulerChannel::bounded(capacity.max(0) as usize));
+            .push(JetSchedulerChannel::bounded(capacity));
         id
     })
 }
@@ -776,17 +718,14 @@ extern "C" fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_task_group_acquire(group: i64) {
-    let slots = with_runtime_mut(|rt| {
+    let children = with_runtime_mut(|rt| {
         rt.task_groups
             .get(group as usize)
             .and_then(Option::as_ref)
-            .and_then(|group| group.slots.clone())
+            .map(|group| group.children.clone())
     });
-    if let Some(slots) = slots {
-        PENDING_TASK_GROUP_PERMIT.with(|pending| {
-            *pending.borrow_mut() = slots.acquire();
-        });
-    }
+    let permit = children.and_then(|children| children.acquire());
+    PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = permit);
 }
 
 extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
@@ -801,48 +740,24 @@ extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
 
 fn close_task_group(group: i64) -> i64 {
     let children = with_runtime_mut(|rt| {
-        let group = rt.task_groups[group as usize].as_ref();
-        group.and_then(|group| {
-            if group.closing.swap(true, Ordering::AcqRel) {
-                return None;
-            }
-            if let Some(slots) = &group.slots {
-                // A child that is already being drained may still reach a
-                // nested spawn. Let that spawn proceed without a permit so
-                // lexical close can register and drain it instead of waiting
-                // for the permit held by the child being drained.
-                slots.close();
-            }
-            Some(group.children.clone())
-        })
+        rt.task_groups[group as usize]
+            .as_ref()
+            .map(|group| group.children.clone())
     });
     let Some(children) = children else {
         return JitWaitStatus::Ready as i64;
     };
     // Keep group slot live through shared drain: joined children may register.
-    children.close_with(
-        |task| {
-            with_runtime_mut(|rt| {
-                let idx = *task as usize;
-                if rt.tasks.get(idx).is_some_and(Option::is_some) {
-                    rt.task_controls[idx].cancel();
-                }
-            });
-        },
-        |task| {
-            let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
-            if let Some(join) = join {
-                // A lexical group's close has no result surface. It still
-                // waits every child, while D-CONC-FAIL1 keeps child failure
-                // from becoming a process-level panic.
-                // Drain directly: `join()` is a parent wait point and may
-                // unwind when the parent is already cancelled. Lexical close
-                // must still consume the child completion before dropping the
-                // group's runtime slot.
-                join.drain();
-            }
-        },
-    );
+    children.close_with(|task| {
+        let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
+        if let Some(join) = join {
+            // A lexical group's close has no result surface. It still waits
+            // every child, while D-CONC-FAIL1 keeps child failure from
+            // becoming a process-level panic. Drain is the engine adapter;
+            // normal close does not request cancellation from the child.
+            join.drain();
+        }
+    });
     with_runtime_mut(|rt| {
         let _ = rt.task_groups[group as usize].take();
     });
@@ -885,8 +800,11 @@ extern "C" fn jet_jit_task_resume(task: i64) {
     });
 }
 
-extern "C" fn jet_jit_task_yield() {
-    jet_scheduler_yield_now();
+extern "C" fn jet_jit_task_yield() -> i64 {
+    wait_status(|| {
+        jet_scheduler_yield_now();
+        0
+    })
 }
 
 extern "C" fn jet_jit_task_current_trace() -> i64 {
@@ -901,23 +819,35 @@ extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     // event host returns a completed DispatchReport handle (1-based index into
     // `dispatch_reports`), not a scheduler task. Treat missing/already-joined
     // slots as identity so the report handle passes through.
+    let idx = task as usize;
     let join = with_runtime_mut(|rt| {
-        let idx = task as usize;
         if idx >= rt.tasks.len() {
             return None;
         }
         rt.tasks[idx].take()
     });
     match join {
-        Some(j) => wait_task_result(
-            || {
-                jet_task_join_deadline_check();
-                let result = j.join();
-                jet_task_join_deadline_check();
-                result
-            },
-            |_rt, value| value as u64,
-        ),
+        Some(mut j) => {
+            let mut joined = false;
+            let status = wait_task_result(
+                || {
+                    jet_task_join_deadline_check();
+                    let result = j.join();
+                    joined = true;
+                    jet_task_join_deadline_check();
+                    result
+                },
+                |_rt, value| value as u64,
+            );
+            if !joined && status != JitWaitStatus::Ready as i64 {
+                with_runtime_mut(|rt| {
+                    if idx < rt.tasks.len() && rt.tasks[idx].is_none() {
+                        rt.tasks[idx] = Some(j);
+                    }
+                });
+            }
+            status
+        }
         None => {
             WAIT_VALUE.with(|slot| slot.set(task));
             JitWaitStatus::Ready as i64
@@ -975,13 +905,17 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
         let mut timers = Vec::new();
         let mut i = 0;
         while i + 1 < after_flat.len() {
-            timers.push((after_flat[i].max(0) as u64, after_flat[i + 1]));
+            timers.push((
+                jet_task_delay_ms_defaulted(after_flat[i]),
+                after_flat[i + 1],
+            ));
             i += 2;
         }
-        // Legacy: odd trailing ms-only entries (no value) → value 0.
-        if i < after_flat.len() {
-            timers.push((after_flat[i].max(0) as u64, 0));
-        }
+        assert_eq!(
+            i,
+            after_flat.len(),
+            "jit select: canonical timer arms require a value"
+        );
         (channels, timers)
     });
     wait_status(|| jet_scheduler_select_int_channels_timed(&channels, timers))
@@ -1009,7 +943,7 @@ extern "C" fn jet_jit_after_value(ms: i64, value: i64) -> i64 {
         )
     })
     .expect("jit after_value without active runtime");
-    let delay = ms.max(0) as u64;
+    let delay = jet_task_delay_ms_defaulted(ms);
     let inherited_deadline = jet_ctx_deadline_ms();
     let control = JetTaskControl::new();
     let _join = jet_scheduler_spawn_blocking_with_control(
@@ -1049,7 +983,7 @@ extern "C" fn jet_jit_interval(ms: i64) -> i64 {
         )
     })
     .expect("jit interval without active runtime");
-    let delay = ms.max(1) as u64;
+    let delay = jet_task_interval_ms_defaulted(ms);
     // Detached ticker thread — matches prelude `interval` (std::thread::spawn).
     std::thread::spawn(move || {
         let mut tick = 1i64;
@@ -1066,7 +1000,7 @@ extern "C" fn jet_jit_interval(ms: i64) -> i64 {
 
 extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
     wait_status(|| {
-        jet_scheduler_sleep_ms(millis.max(0) as u64);
+        jet_task_sleep_ms_defaulted(millis);
         0
     })
 }
@@ -1141,7 +1075,7 @@ host_fns! {
     task_detach: "jet_jit_task_detach" => jet_jit_task_detach: sig_void_i64;
     task_pause: "jet_jit_task_pause" => jet_jit_task_pause: sig_void_i64;
     task_resume: "jet_jit_task_resume" => jet_jit_task_resume: sig_void_i64;
-    task_yield: "jet_jit_task_yield" => jet_jit_task_yield: sig_void;
+    task_yield: "jet_jit_task_yield" => jet_jit_task_yield: sig_noarg_i64;
     task_current_trace: "jet_jit_task_current_trace" => jet_jit_task_current_trace: sig_noarg_i64;
     task_all: "jet_jit_task_all" => jet_jit_task_all: sig_i64;
     task_race: "jet_jit_task_race" => jet_jit_task_race: sig_i64;
@@ -1173,19 +1107,20 @@ mod tests {
         ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime_ptr));
 
         let group = jet_jit_task_group_new(1, 1);
-        let slots = with_runtime_mut(|rt| {
+        let children = with_runtime_mut(|rt| {
             rt.task_groups[group as usize]
                 .as_ref()
-                .and_then(|group| group.slots.clone())
+                .map(|group| group.children.clone())
         })
-        .expect("bounded task group slots");
-        let outer_permit = slots.acquire().expect("outer task group permit");
+        .expect("bounded task group runtime");
+        let outer_permit = children.acquire().expect("outer task group permit");
         let nested_id = std::sync::Arc::new(AtomicI64::new(-1));
         let nested_id_for_child = nested_id.clone();
         let nested_acquired = std::sync::Arc::new(AtomicBool::new(false));
         let nested_acquired_for_child = nested_acquired.clone();
+        let release = std::sync::Arc::new(AtomicBool::new(false));
+        let release_for_child = release.clone();
         let control = JetTaskControl::new();
-        let child_control = control.clone();
         let child = jet_scheduler_spawn_blocking_with_control(
             move || {
                 let _outer_permit = outer_permit;
@@ -1193,14 +1128,13 @@ mod tests {
                     *slot.borrow_mut() = Some(runtime_addr as *mut super::super::JitRuntime)
                 });
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    while !child_control.cancelled.load(Ordering::Acquire) {
+                    while !release_for_child.load(Ordering::Acquire) {
                         std::thread::yield_now();
                     }
 
-                    // The group close has already claimed the outer child
-                    // and issued cancellation. This nested scheduler handle
-                    // must still register against the live group slot before
-                    // the outer child drains.
+                    // Normal group close does not cancel the outer child. The
+                    // child registers this nested scheduler handle against
+                    // the live group slot before the outer child drains.
                     jet_jit_task_group_acquire(group);
                     nested_acquired_for_child.store(
                         take_pending_task_group_permit().is_some(),
@@ -1228,6 +1162,7 @@ mod tests {
         runtime.task_controls.push(control);
         jet_jit_task_group_register(group, outer);
 
+        release.store(true, Ordering::Release);
         assert_eq!(close_task_group(group), JitWaitStatus::Ready as i64);
         let nested = nested_id.load(Ordering::Acquire);
         assert!(nested >= 0, "nested child was not created");

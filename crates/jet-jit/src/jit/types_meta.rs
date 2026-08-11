@@ -50,7 +50,7 @@ pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool>
 
 use super::safety::{
     jit_concurrency_type, jit_enum_type, jit_list_iter_elem_type, jit_list_native_type,
-    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_int_type,
+    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_type,
     jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
 };
 
@@ -224,7 +224,7 @@ pub(crate) fn clif_ty_with_distinct(
                     Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
                 )
         )
-        || jit_list_task_int_type(&ty)
+        || jit_list_task_type(&ty)
         || jit_list_record_type(&ty)
         || jit_list_iter_elem_type(&ty).is_some()
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))

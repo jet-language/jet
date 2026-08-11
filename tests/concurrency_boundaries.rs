@@ -518,8 +518,8 @@ fn run() {{
     );
     let output = assert_accepted(&source);
     assert!(
-        output.rust.contains("spawn_scoped"),
-        "a borrowed task group child must launch through the scoped path whose loan the group closes at join"
+        output.rust.contains(".spawn("),
+        "a borrowed task group child must use the canonical group spawn path whose loan the group closes at join"
     );
 }
 

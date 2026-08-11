@@ -1411,7 +1411,7 @@ pub(crate) fn lower_method_call(
     // still lower through the existing spawn/select TIR nodes. The receiver is
     // compiler-private and is never emitted or looked up as a Rust value.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE) {
-        if method == "spawn" {
+        if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 let body_ty = lambda_body_ty(lam, cx, env);
                 let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
@@ -1428,7 +1428,6 @@ pub(crate) fn lower_method_call(
                             group: None,
                             site,
                             spawn_closure,
-                            scoped: lam.meta.scoped_task_borrow,
                         },
                     },
                 };
@@ -1438,7 +1437,7 @@ pub(crate) fn lower_method_call(
             let tasks = lower_expr(&args[0].expr, cx, env);
             let elem = taskgroup_result_elem(&tasks);
             let ty = resolved_ret.cloned().unwrap_or_else(|| match method {
-                "all" => Type::Result {
+                Syntax::INTERNAL_TASK_ALL_METHOD => Type::Result {
                     ok: Box::new(Type::List(Box::new(elem.clone()))),
                     err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
                 },
@@ -1448,13 +1447,13 @@ pub(crate) fn lower_method_call(
                 },
             });
             let kind = match method {
-                "all" => TExprKind::TaskGroupAll {
+                Syntax::INTERNAL_TASK_ALL_METHOD => TExprKind::TaskGroupAll {
                     tasks: Box::new(tasks),
                 },
-                "race" => TExprKind::TaskGroupRace {
+                Syntax::INTERNAL_TASK_RACE_METHOD => TExprKind::TaskGroupRace {
                     tasks: Box::new(tasks),
                 },
-                "any" => TExprKind::TaskGroupAny {
+                Syntax::INTERNAL_TASK_ANY_METHOD => TExprKind::TaskGroupAny {
                     tasks: Box::new(tasks),
                 },
                 _ => return TExpr { ty, kind: TExprKind::Unit },
@@ -1468,7 +1467,7 @@ pub(crate) fn lower_method_call(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_SPAWN_METHOD
+        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             let body_ty = lambda_body_ty(lam, cx, env);
@@ -1487,7 +1486,6 @@ pub(crate) fn lower_method_call(
                         group: Some(Box::new(group)),
                         site,
                         spawn_closure,
-                        scoped: lam.meta.scoped_task_borrow,
                     },
                 },
             };
@@ -1497,7 +1495,7 @@ pub(crate) fn lower_method_call(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_ALL_METHOD
+        && method == Syntax::INTERNAL_TASK_ALL_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
@@ -1518,7 +1516,7 @@ pub(crate) fn lower_method_call(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_RACE_METHOD
+        && method == Syntax::INTERNAL_TASK_RACE_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
@@ -1537,7 +1535,7 @@ pub(crate) fn lower_method_call(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_ANY_METHOD
+        && method == Syntax::INTERNAL_TASK_ANY_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);

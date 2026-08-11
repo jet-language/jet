@@ -3,6 +3,7 @@ use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Syntax;
+use crate::Sema::CheckerTaskGroup::TaskGroupOrigin;
 use crate::AST::{
     AccessConvention, DistinctDef, EnumDef, Expr, Func, Item, Stmt, StructDef, Type,
 };
@@ -420,6 +421,7 @@ impl<'a> Checker<'a> {
         // per call site's arity. Reject anything else here (E1314) so codegen
         // never has to guess.
         self.check_variadic_bound_body_shape(f);
+        self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Parameter);
         self.lint_unjoined_tasks_in_current_scope();
         self.taskgroup_stack.truncate(taskgroup_floor);
         // D-LIN1: the function body's own scope (parameters + top-level locals) is

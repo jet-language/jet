@@ -1499,9 +1499,15 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { body } => {
+                if self.task_cancel.is_some() {
+                    crate::scheduler::jet_scheduler_shield_enter();
+                }
                 self.shield_depth += 1;
                 let result = self.exec_stmts(body, scope);
                 self.shield_depth -= 1;
+                if self.task_cancel.is_some() {
+                    let _ = crate::scheduler::jet_scheduler_shield_leave_status();
+                }
                 if self.shield_depth == 0 {
                     self.task_wait_cancel_check()?;
                 }

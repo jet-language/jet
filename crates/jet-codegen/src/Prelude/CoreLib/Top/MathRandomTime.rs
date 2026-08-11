@@ -25,18 +25,7 @@ fn jet_deadline_check(wait_kind: &str) {
 }
 
 fn jet_std_time_sleep(millis: i64) {
-    let want = millis.max(0);
-    if let Some(remaining) = jet_deadline_remaining_ms() {
-        if remaining <= 0 {
-            jet_deadline_exceeded("time sleep");
-        }
-        if want > remaining {
-            jet_scheduler_sleep_ms(remaining as u64);
-            jet_deadline_exceeded("time sleep");
-        }
-    }
-    jet_scheduler_sleep_ms(want as u64);
-    jet_deadline_check("time sleep");
+    jet_task_sleep_ms_defaulted(millis);
 }
 fn jet_std_time_start() -> jet_std::Stopwatch {
     jet_std::Stopwatch {

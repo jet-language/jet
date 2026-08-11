@@ -18,7 +18,7 @@ use super::local_cell::{internal_index, project_mut, project_pair_mut, project_r
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
     progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
-    unsupported, wall_now_ms, EvalCallable, EvalCtx, Flow,
+    unsupported, EvalCallable, EvalCtx, Flow,
 };
 
 fn progress_parts(
@@ -2914,7 +2914,9 @@ impl<'a> EvalCtx<'a> {
                     return Ok(self.new_eval_channel(capacity));
                 }
                 if module == "core.tasks" && method == "yield_now" && args.is_empty() {
-                    std::thread::yield_now();
+                    self.task_wait_check("task yield")?;
+                    self.scheduler_wait("task yield", crate::scheduler::jet_scheduler_yield_now)?;
+                    self.task_wait_check("task yield")?;
                     return Ok(CtValue::Unit);
                 }
                 if module == "core.time" && method == "sleep" && args.len() == 1 {
@@ -2922,19 +2924,20 @@ impl<'a> EvalCtx<'a> {
                         return Err(unsupported("`core.time.sleep` at compile time", *source_span));
                     }
                     let millis = as_int(&self.eval_expr(&args[0], scope)?, *source_span)?;
-                    let end = wall_now_ms().saturating_add(millis.max(0));
-                    while wall_now_ms() < end {
-                        self.task_wait_check("time sleep")?;
-                        let remaining = end.saturating_sub(wall_now_ms());
-                        std::thread::sleep(std::time::Duration::from_millis(remaining.min(1) as u64));
-                    }
+                    let _deadline = self
+                        .context_deadline
+                        .map(crate::scheduler::jet_ctx_push_deadline);
+                    self.task_wait_check("time sleep")?;
+                    self.scheduler_wait("time sleep", || {
+                        crate::scheduler::jet_task_sleep_ms_defaulted(millis)
+                    })?;
+                    drop(_deadline);
                     self.task_wait_check("time sleep")?;
                     return Ok(CtValue::Unit);
                 }
                 if module == "core.tasks" && method == "current_task" && args.is_empty() {
-                    // Outside a spawned evaluator task: idle defaults match Prelude.
                     return Ok(CtValue::Str(
-                        jet_foundation::StructuralDebug::jet_task_control_trace(false, false),
+                        crate::scheduler::jet_scheduler_current_task_trace(),
                     ));
                 }
                 if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
@@ -4044,11 +4047,9 @@ impl<'a> EvalCtx<'a> {
                             let mut sink = sink.lock().expect("evaluator sink poisoned");
                             sink.stderr.push_str(&rendered);
                             sink.exit_code = Some(70);
-                            return Err(Diagnostic::error(
-                                "SOFT_EXIT",
+                            return Err(Diagnostic::internal_soft_exit(
                                 "70".to_string(),
                                 "or-fallback panic stop".to_string(),
-                                String::new(),
                                 Some(self.span()),
                             ));
                         }
@@ -4448,11 +4449,12 @@ impl<'a> EvalCtx<'a> {
                             let lease = shared
                                 .acquire(editable, self.task_cancel.as_ref())
                                 .ok_or_else(|| {
+                                    let cancelled = crate::task_group::jet_task_cancellation();
                                     Diagnostic::error(
-                                        "TASK_CANCELLED",
-                                        "task cancelled".to_string(),
-                                        "the owning task group stopped this task".to_string(),
-                                        String::new(),
+                                        cancelled.code,
+                                        cancelled.what.to_string(),
+                                        cancelled.why.to_string(),
+                                        cancelled.fix.to_string(),
                                         Some(self.span()),
                                     )
                                 })?;
@@ -4507,11 +4509,12 @@ impl<'a> EvalCtx<'a> {
                         let _lease = shared
                             .acquire(editable, self.task_cancel.as_ref())
                             .ok_or_else(|| {
+                                let cancelled = crate::task_group::jet_task_cancellation();
                                 Diagnostic::error(
-                                    "TASK_CANCELLED",
-                                    "task cancelled".to_string(),
-                                        "the owning task group stopped this task".to_string(),
-                                    String::new(),
+                                    cancelled.code,
+                                    cancelled.what.to_string(),
+                                    cancelled.why.to_string(),
+                                    cancelled.fix.to_string(),
                                     Some(self.span()),
                                 )
                             })?;
@@ -4945,11 +4948,9 @@ impl<'a> EvalCtx<'a> {
                     let mut sink = sink.lock().expect("evaluator sink poisoned");
                     sink.stderr.push_str(&rendered);
                     sink.exit_code = Some(70);
-                    return Err(Diagnostic::error(
-                        "SOFT_EXIT",
+                    return Err(Diagnostic::internal_soft_exit(
                         "70".to_string(),
                         "require/panic stop".to_string(),
-                        String::new(),
                         Some(self.span()),
                     ));
                 }
@@ -5874,11 +5875,9 @@ impl<'a> EvalCtx<'a> {
                             .push_str(crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
                         sink.stderr.push('\n');
                         sink.exit_code = Some(70);
-                        return Err(Diagnostic::error(
-                            "SOFT_EXIT",
+                        return Err(Diagnostic::internal_soft_exit(
                             "70".to_string(),
                             crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP.to_string(),
-                            String::new(),
                             Some(self.span()),
                         ));
                     }

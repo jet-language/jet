@@ -284,11 +284,12 @@ fn assert_native_wait_exit(
     name: &str,
     source: &str,
     stderr_text: &str,
+    expected_stdout: &str,
 ) {
     assert_jit_compiles(name, source);
     let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
     assert_ne!(code, 0, "{stderr}");
-    assert_eq!(stdout, "", "{stderr}");
+    assert_eq!(stdout, expected_stdout, "{stderr}");
     assert!(!stdout.contains("caller"), "{stdout:?}\n{stderr}");
     assert!(stderr.contains(stderr_text), "{stderr}");
     assert!(
@@ -385,7 +386,8 @@ fn wait_in_group(sender: Sender<Int>) {
     task.group group {
         child :: task {
             sender.send(1)
-            time.sleep(10000)
+            time.sleep(10)
+            print("settled")
         }
         time.sleep(10000)
         child.join() ?? panic("child failed")
@@ -405,7 +407,7 @@ fn run() {
     print("caller")
 }
 "#;
-    assert_group_close_success("taskgroup_cancel", source, "cancelled\ncaller\n");
+    assert_group_close_success("taskgroup_cancel", source, "settled\ncancelled\ncaller\n");
 }
 
 #[test]
@@ -432,7 +434,7 @@ fn run() {
     print("caller")
 }
 "#;
-    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003");
+    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003", "settled\n");
 }
 
 #[test]

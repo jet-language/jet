@@ -145,16 +145,16 @@ pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
 /// Compiler-private dispatch method for canonical `task` spawn syntax.
-pub const TASKGROUP_SPAWN_METHOD: &str = "spawn";
+pub const INTERNAL_TASK_SPAWN_METHOD: &str = "\0jet.task.spawn";
 
 /// Compiler-private dispatch method for `task.all { … }`.
-pub const TASKGROUP_ALL_METHOD: &str = "all";
+pub const INTERNAL_TASK_ALL_METHOD: &str = "\0jet.task.all";
 
 /// Compiler-private dispatch method for `task.race { … }`.
-pub const TASKGROUP_RACE_METHOD: &str = "race";
+pub const INTERNAL_TASK_RACE_METHOD: &str = "\0jet.task.race";
 
 /// Compiler-private dispatch method for `task.any { … }`.
-pub const TASKGROUP_ANY_METHOD: &str = "any";
+pub const INTERNAL_TASK_ANY_METHOD: &str = "\0jet.task.any";
 
 /// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.
 pub const TASKGROUP_SELECT_METHOD: &str = "select";

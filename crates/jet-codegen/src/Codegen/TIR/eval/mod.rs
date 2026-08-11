@@ -99,12 +99,17 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
 /// raised by the joining parent remains a control diagnostic and is not
 /// converted here.
 fn task_failure_value(error: &Diagnostic) -> CtValue {
-    let (variant, args) = match error.code.as_str() {
-        "TASK_CANCELLED" => ("Cancelled", Vec::new()),
-        "E3003" => ("DeadlineBlown", Vec::new()),
-        _ => (
+    let failure = if error.code == "TASK_CANCELLED" {
+        crate::task_group::JetTaskFailure::Cancelled
+    } else {
+        crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone())
+    };
+    let (variant, args) = match failure {
+        crate::task_group::JetTaskFailure::Cancelled => ("Cancelled", Vec::new()),
+        crate::task_group::JetTaskFailure::DeadlineBlown => ("DeadlineBlown", Vec::new()),
+        crate::task_group::JetTaskFailure::Panicked(reason) => (
             "Panicked",
-            vec![(None, CtValue::Str(error.what.clone()))],
+            vec![(None, CtValue::Str(reason))],
         ),
     };
     CtValue::Enum {
@@ -733,14 +738,6 @@ const DEV_FUEL: u64 = 1_000_000_000;
 #[allow(dead_code)]
 const CT_FUEL: u64 = 10_000_000;
 
-fn wall_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(i64::MAX as u128) as i64
-}
-
 pub(super) struct EvalCtx<'a> {
     pub(super) funcs: HashMap<String, &'a TFunc>,
     #[allow(dead_code)]
@@ -912,50 +909,10 @@ struct EvalRuntime<'a> {
     shared_conditions: Vec<Arc<shared_protocol::JetConditionProtocol>>,
     clocks: Vec<i64>,
     channels: Vec<EvalChannel>,
-    task_groups: Vec<Vec<usize>>,
-    task_group_slots: Vec<Option<Arc<EvalTaskGroupSlots>>>,
+    task_groups: Vec<Arc<crate::task_group::JetTaskGroupRuntime<usize>>>,
     tasks: Vec<Option<EvalTask>>,
     web_apps: Vec<EvalWebApp>,
     completion_order: AtomicU64,
-}
-
-struct EvalTaskGroupSlots {
-    limit: usize,
-    active: Mutex<usize>,
-    wake: Condvar,
-}
-
-struct EvalTaskGroupPermit {
-    slots: Arc<EvalTaskGroupSlots>,
-}
-
-impl EvalTaskGroupSlots {
-    fn acquire(self: &Arc<Self>) -> EvalTaskGroupPermit {
-        let mut active = self
-            .active
-            .lock()
-            .expect("evaluator task-group slots poisoned");
-        while *active >= self.limit {
-            active = self
-                .wake
-                .wait(active)
-                .expect("evaluator task-group slots poisoned");
-        }
-        *active += 1;
-        EvalTaskGroupPermit { slots: self.clone() }
-    }
-}
-
-impl Drop for EvalTaskGroupPermit {
-    fn drop(&mut self) {
-        let mut active = self
-            .slots
-            .active
-            .lock()
-            .expect("evaluator task-group slots poisoned");
-        *active = active.saturating_sub(1);
-        self.slots.wake.notify_one();
-    }
 }
 
 struct EvalSharedState {
@@ -1033,10 +990,8 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
 struct EvalTask {
     completion: mpsc::Receiver<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
-    cancel: Arc<AtomicBool>,
-    /// D-COROUTINE1=A, the evaluator twin of `JetTaskControl::paused`. Honored
-    /// at the same cooperative wait points the cancel flag is.
-    paused: Arc<AtomicBool>,
+    completion_wait: Arc<crate::scheduler::ParkSlot>,
+    control: Arc<crate::scheduler::JetTaskControl>,
 }
 
 struct EvalTaskCompletion {
@@ -1059,9 +1014,9 @@ struct EvalTaskJob<'a> {
     context_deadline: Option<i64>,
     completion: mpsc::SyncSender<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
-    cancel: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
-    permit: Option<EvalTaskGroupPermit>,
+    completion_wait: Arc<crate::scheduler::ParkSlot>,
+    control: Arc<crate::scheduler::JetTaskControl>,
+    permit: Option<crate::task_group::JetTaskGroupPermit>,
 }
 
 fn select_eval_tasks(
@@ -1085,7 +1040,7 @@ fn select_eval_tasks(
                 ))))
             }
         },
-        |task| task.cancel.store(true, Ordering::Release),
+        |task| task.control.cancel(),
         |task| {
             let _ = task.completion.recv();
         },
@@ -1125,7 +1080,6 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             channels: Vec::new(),
             task_groups: Vec::new(),
-            task_group_slots: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
@@ -1140,12 +1094,48 @@ struct YieldConsumer<'a> {
 }
 
 impl<'a> EvalCtx<'a> {
+    fn scheduler_wait<T>(
+        &self,
+        wait_kind: &str,
+        wait: impl FnOnce() -> T,
+    ) -> Result<T, Diagnostic> {
+        match crate::scheduler::jet_scheduler_wait_without_unwind(wait) {
+            crate::scheduler::JetSchedulerWait::Ready(value) => Ok(value),
+            crate::scheduler::JetSchedulerWait::Cancelled => {
+                let cancelled = crate::task_group::jet_task_cancellation();
+                Err(Diagnostic::error(
+                    cancelled.code,
+                    cancelled.what.to_string(),
+                    cancelled.why.to_string(),
+                    cancelled.fix.to_string(),
+                    Some(self.span()),
+                ))
+            }
+            crate::scheduler::JetSchedulerWait::Deadline(_) => {
+                let deadline = crate::task_group::jet_task_deadline(wait_kind);
+                Err(Diagnostic::error(
+                    "E3003",
+                    deadline.what,
+                    deadline.why,
+                    deadline.fix,
+                    Some(self.span()),
+                ))
+            }
+            crate::scheduler::JetSchedulerWait::Panicked(message) => {
+                Err(task_child_panic(message, self.span()))
+            }
+        }
+    }
+
     fn task_wait_check(&self, wait_kind: &str) -> Result<(), Diagnostic> {
-        self.task_wait_while_paused();
-        let deadline = self
-            .context_deadline
-            .filter(|deadline| wall_now_ms() >= *deadline)
-            .map(|_| crate::task_group::jet_task_deadline(wait_kind));
+        self.task_wait_while_paused()?;
+        let deadline = crate::task_group::jet_task_deadline_if_expired(
+            self.context_deadline
+                .map(|deadline| {
+                    deadline.saturating_sub(crate::scheduler::jet_std_time_now())
+                }),
+            wait_kind,
+        );
         let cancelled = self
             .task_cancel
             .as_ref()
@@ -1161,13 +1151,11 @@ impl<'a> EvalCtx<'a> {
                     Some(self.span()),
                 ))
             }
-            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => Err(Diagnostic::error(
-                "TASK_CANCELLED",
-                "task cancelled".to_string(),
-                "the owning task group stopped this task".to_string(),
-                String::new(),
-                Some(self.span()),
-            )),
+            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => {
+                // Child cancellation is converted to TaskFailure at the join
+                // boundary; parent-control cancellation stays registered E3004.
+                Err(Diagnostic::internal_task_cancelled(Some(self.span())))
+            }
         }
     }
 
@@ -1181,17 +1169,16 @@ impl<'a> EvalCtx<'a> {
 
     /// The evaluator twin of `JetTaskControl::wait_while_paused`: a paused task
     /// stops at its next cooperative wait point and stays there until it is
-    /// resumed or cancelled. The scheduler parks; the evaluator has no park
-    /// slot, so it sleeps in short steps instead.
-    fn task_wait_while_paused(&self) {
-        let (Some(paused), cancel) = (self.task_paused.as_ref(), self.task_cancel.as_ref()) else {
-            return;
-        };
-        while paused.load(Ordering::Acquire)
-            && !cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
-        {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+    /// resumed or cancelled. The shared scheduler owns the park, wake, and
+    /// deadline behavior; this method only maps its boundary status.
+    fn task_wait_while_paused(&self) -> Result<(), Diagnostic> {
+        if self.task_paused.is_none() {
+            return Ok(());
         }
+        self.scheduler_wait(
+            "task pause",
+            crate::scheduler::jet_scheduler_wait_while_paused,
+        )
     }
 
     /// D-VERDICT-1323-1 / D-COROUTINE1=A: set or clear one task's pause flag
@@ -1211,7 +1198,11 @@ impl<'a> EvalCtx<'a> {
             .tasks
             .get(index)
         {
-            task.paused.store(paused, Ordering::Release);
+            if paused {
+                task.control.pause();
+            } else {
+                task.control.resume();
+            }
         }
         Ok(())
     }
@@ -1294,6 +1285,10 @@ impl<'a> EvalCtx<'a> {
 
     fn run_task_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
         let _permit = job.permit;
+        crate::scheduler::jet_scheduler_set_task_control(Some(job.control.clone()));
+        let _deadline = job
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
         let mut ctx = EvalCtx {
             funcs: config.funcs,
             base_dir: config.base_dir,
@@ -1328,8 +1323,8 @@ impl<'a> EvalCtx<'a> {
             shared_transactions: Vec::new(),
             spawn_lambdas: config.spawn_lambdas,
             task_sender: Some(job.task_sender),
-            task_cancel: Some(job.cancel),
-            task_paused: Some(job.paused),
+            task_cancel: Some(job.control.cancelled.clone()),
+            task_paused: Some(job.control.paused.clone()),
             context_deadline: job.context_deadline,
             shield_depth: 0,
             yield_consumer: None,
@@ -1354,6 +1349,7 @@ impl<'a> EvalCtx<'a> {
                 Err(error) => Err(error),
             },
         };
+        crate::scheduler::jet_scheduler_set_task_control(None);
         let order = config
             .runtime
             .lock()
@@ -1364,6 +1360,7 @@ impl<'a> EvalCtx<'a> {
             .set(order)
             .expect("task completion recorded twice");
         let _ = job.completion.send(EvalTaskCompletion { result });
+        job.completion_wait.wake();
     }
 
     fn eval_spawn(
@@ -1400,28 +1397,33 @@ impl<'a> EvalCtx<'a> {
             .ok_or_else(|| unsupported("spawn outside a task group", self.span()))?;
         let (completion, receiver) = mpsc::sync_channel(1);
         let completion_order = Arc::new(OnceLock::new());
-        let cancel = Arc::new(AtomicBool::new(false));
-        let paused = Arc::new(AtomicBool::new(false));
-        let permit = group
-            .and_then(|group| {
+        let completion_wait = crate::scheduler::ParkSlot::new();
+        let control = crate::scheduler::JetTaskControl::new();
+        let group_runtime = match group {
+            Some(group) => Some(
                 self.runtime
                     .lock()
                     .expect("evaluator runtime poisoned")
-                    .task_group_slots
+                    .task_groups
                     .get(group)
-                    .and_then(Clone::clone)
-            })
-            .map(|slots| slots.acquire());
+                    .cloned()
+                    .ok_or_else(|| unsupported("task group handle", self.span()))?,
+            ),
+            None => None,
+        };
+        let permit = group_runtime
+            .as_ref()
+            .and_then(|group| group.acquire());
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
         runtime.tasks.push(Some(EvalTask {
             completion: receiver,
             completion_order: completion_order.clone(),
-            cancel: cancel.clone(),
-            paused: paused.clone(),
+            completion_wait: completion_wait.clone(),
+            control: control.clone(),
         }));
-        if let Some(group) = group {
-            runtime.task_groups[group].push(task);
+        if let Some(group) = group_runtime {
+            group.register(task);
         }
         drop(runtime);
         sender
@@ -1432,8 +1434,8 @@ impl<'a> EvalCtx<'a> {
                 context_deadline: self.context_deadline,
                 completion,
                 completion_order,
-                cancel,
-                paused,
+                completion_wait,
+                control,
                 permit,
             })
             .map_err(|_| unsupported("closed task group", self.span()))?;
@@ -1471,24 +1473,18 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let limit = match limit {
             Some(limit) => match self.eval_expr(limit, scope)? {
-                // An omitted limit is unbounded. An explicit non-positive
-                // value is the smallest bounded group; every engine applies
-                // this same runtime rule after sema's static checks.
-                CtValue::Int(value) => Some(crate::task_group::jet_task_group_limit(value)),
+                // The shared Prelude owns defaulting and bound clamping for
+                // every execution tier.
+                CtValue::Int(value) => Some(value),
                 _ => return Err(unsupported("task-group limit", self.span())),
             },
             None => None,
         };
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.task_groups.len();
-        runtime.task_groups.push(Vec::new());
-        runtime.task_group_slots.push(limit.map(|limit| {
-            Arc::new(EvalTaskGroupSlots {
-                limit,
-                active: Mutex::new(0),
-                wake: Condvar::new(),
-            })
-        }));
+        runtime.task_groups.push(Arc::new(
+            crate::task_group::JetTaskGroupRuntime::new_defaulted(limit),
+        ));
         Ok(CtValue::Struct {
             type_name: "__JetTirTaskGroup".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -1580,9 +1576,7 @@ impl<'a> EvalCtx<'a> {
 
     pub(super) fn new_eval_channel(&mut self, capacity: Option<i64>) -> CtValue {
         let channel = match capacity {
-            Some(capacity) => {
-                crate::scheduler::JetSchedulerChannel::bounded(capacity.max(1) as usize)
-            }
+            Some(capacity) => crate::scheduler::JetSchedulerChannel::bounded(capacity),
             None => crate::scheduler::JetSchedulerChannel::new(),
         };
         let sender = channel.sender();
@@ -1611,6 +1605,7 @@ impl<'a> EvalCtx<'a> {
         index: usize,
         value: CtValue,
     ) -> Result<(), Diagnostic> {
+        self.task_wait_cancel_check()?;
         let sender = self
             .runtime
             .lock()
@@ -1619,7 +1614,12 @@ impl<'a> EvalCtx<'a> {
             .get(index)
             .map(|channel| channel.sender.clone())
             .ok_or_else(|| unsupported("channel sender", self.span()))?;
-        sender.send(value);
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        self.scheduler_wait("channel send", || sender.send(value))?;
+        drop(_deadline);
+        self.task_wait_cancel_check()?;
         Ok(())
     }
 
@@ -1636,7 +1636,11 @@ impl<'a> EvalCtx<'a> {
             .get(index)
             .map(|channel| channel.channel.clone())
             .ok_or_else(|| unsupported("channel receiver", self.span()))?;
-        let value = channel.receive();
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let value = self.scheduler_wait("channel receive", || channel.receive())?;
+        drop(_deadline);
         self.task_wait_cancel_check()?;
         Ok(match value {
             Some(value) => CtValue::Present(Box::new(value)),
@@ -1723,9 +1727,20 @@ impl<'a> EvalCtx<'a> {
             .collect();
         let timers = after_values
             .into_iter()
-            .map(|(ms, value)| (ms.max(0) as u64, Some(value)))
+            .map(|(ms, value)| {
+                (
+                    crate::scheduler::jet_task_delay_ms_defaulted(ms),
+                    Some(value),
+                )
+            })
             .collect();
-        let value = crate::scheduler::jet_scheduler_select_values(recvs, timers);
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let value = self.scheduler_wait("select wait", || {
+            crate::scheduler::jet_scheduler_select_values(recvs, timers)
+        })?;
+        drop(_deadline);
         self.task_wait_cancel_check()?;
         Ok(value)
     }
@@ -1742,22 +1757,32 @@ impl<'a> EvalCtx<'a> {
             .tasks
             .get(index)
         {
-            task.cancel.store(true, Ordering::Release);
+            task.control.cancel();
         }
         Ok(())
     }
 
-    fn take_task_entry(&mut self, value: &CtValue) -> Result<EvalTask, Diagnostic> {
+    fn take_task_entry(&mut self, value: &CtValue) -> Result<(usize, EvalTask), Diagnostic> {
         let index = Self::task_index(value)
             .ok_or_else(|| unsupported("task receiver", self.span()))?;
-        self
+        let task = self
             .runtime
             .lock()
             .expect("evaluator runtime poisoned")
             .tasks
             .get_mut(index)
             .and_then(Option::take)
-            .ok_or_else(|| unsupported("task already joined", self.span()))
+            .ok_or_else(|| unsupported("task already joined", self.span()))?;
+        Ok((index, task))
+    }
+
+    fn restore_task_entry(&mut self, index: usize, task: EvalTask) {
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        if let Some(slot) = runtime.tasks.get_mut(index) {
+            if slot.is_none() {
+                *slot = Some(task);
+            }
+        }
     }
 
     pub(super) fn take_task(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
@@ -1777,11 +1802,36 @@ impl<'a> EvalCtx<'a> {
             }
         }
         self.task_join_wait_check()?;
-        let task = self.take_task_entry(value)?;
-        let result = task.completion
-            .recv()
-            .map_err(|_| unsupported("task completion", self.span()))?
-            .result;
+        let (index, task) = self.take_task_entry(value)?;
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let result = loop {
+            if let Err(error) = self.task_join_wait_check() {
+                self.restore_task_entry(index, task);
+                return Err(error);
+            }
+            match task.completion.try_recv() {
+                Ok(completion) => break completion.result,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.restore_task_entry(index, task);
+                    return Err(unsupported("task completion", self.span()));
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    if let Err(error) = self.scheduler_wait("task join", || {
+                        crate::scheduler::jet_scheduler_yield(
+                            "task join",
+                            &task.completion_wait,
+                            None,
+                        )
+                    }) {
+                        self.restore_task_entry(index, task);
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        drop(_deadline);
         self.task_join_wait_check()?;
         match result {
             Ok(value) => Ok(CtValue::Present(Box::new(value))),
@@ -1796,10 +1846,10 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let tasks = values
             .iter()
-            .map(|value| self.take_task_entry(value))
+            .map(|value| self.take_task_entry(value).map(|(_, task)| task))
             .collect::<Result<Vec<_>, _>>()?;
         if tasks.is_empty() {
-            return Err(unsupported("empty task group combinator", self.span()));
+            unreachable!("sema must reject an empty task group combinator");
         }
         match select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()) {
             Ok(mut values) => {
@@ -1819,38 +1869,24 @@ impl<'a> EvalCtx<'a> {
 
     fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
         let span = self.span();
-        let children = {
-            let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            let children = std::mem::take(
-                runtime
-                    .task_groups
-                    .get_mut(index)
-                    .ok_or_else(|| unsupported("task group handle", span))?,
-            );
-            let _ = runtime
-                .task_group_slots
-                .get_mut(index)
-                .and_then(Option::take);
-            children
-        };
-        {
-            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            for child in &children {
-                if let Some(Some(task)) = runtime.tasks.get(*child) {
-                    task.cancel.store(true, Ordering::Release);
-                }
-            }
-        }
-        for child in children {
-            let task = self
-                .runtime
+        let group = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .task_groups
+            .get(index)
+            .cloned()
+            .ok_or_else(|| unsupported("task group handle", span))?;
+        let join_runtime = self.runtime.clone();
+        group.close_with(move |child| {
+            let task = join_runtime
                 .lock()
                 .expect("evaluator runtime poisoned")
                 .tasks
                 .get_mut(child)
                 .and_then(Option::take);
             let _ = task.and_then(|task| task.completion.recv().ok());
-        }
+        });
         self.task_wait_cancel_check()?;
         Ok(())
     }
@@ -1898,11 +1934,9 @@ impl<'a> EvalCtx<'a> {
                     keyword, message, contract.file, contract.line
                 ));
                 sink.exit_code = Some(70);
-                return Err(Diagnostic::error(
-                    "SOFT_EXIT",
+                return Err(Diagnostic::internal_soft_exit(
                     "70".to_string(),
                     "runtime contract failed".to_string(),
-                    String::new(),
                     Some(contract.span),
                 ));
             }
@@ -3098,10 +3132,11 @@ fn eval_block_hook(
 #[cfg(test)]
 mod tests {
     use super::{
-        mpsc, select_eval_tasks, unsupported, Arc, AtomicBool, CtValue, EvalTask,
+        mpsc, select_eval_tasks, unsupported, Arc, CtValue, EvalTask,
         EvalTaskCompletion, OnceLock, Span,
     };
     use crate::task_group::JetTaskSelectMode;
+    use crate::scheduler::JetTaskControl;
 
     fn ready_task(
         order: u64,
@@ -3114,8 +3149,8 @@ mod tests {
         EvalTask {
             completion,
             completion_order,
-            cancel: Arc::new(AtomicBool::new(false)),
-            paused: Arc::new(AtomicBool::new(false)),
+            completion_wait: crate::scheduler::ParkSlot::new(),
+            control: JetTaskControl::new(),
         }
     }
 

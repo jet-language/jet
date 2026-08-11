@@ -8,7 +8,7 @@
 //! parity: guard tests/dev.rs::interpreter_matches_compiled_binary
 //!
 //! Also tested:
-//!   - the E2201 honest-boundary note (tasks/FFI/`#Unsafe`/native std),
+//!   - the E2201 honest-boundary note (FFI/`#Unsafe`/native std),
 //!   - the per-iteration `dev_iteration` function the watch loop is built on,
 //!   - the save-to-diagnostic latency budget (D-DEV3, <200ms check-only).
 
@@ -1375,7 +1375,7 @@ fn fluent_method_chain_preserves_fuel_order_and_spans() {
 }
 
 #[test]
-fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
+fn task_programs_run_in_the_canonical_tir_interpreter() {
     let file = "examples/features/concurrency/tasks.jet";
     match dev_iteration(file, false, true) {
         RunOutcome::Ran {
@@ -1383,39 +1383,13 @@ fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
             stderr,
             exit_code,
         } => {
-            assert_eq!(stdout, "5050\n");
+            assert_eq!(stdout, "5050\npaused=false,cancel=false\n");
             assert!(stderr.is_empty());
             assert_eq!(exit_code, 0);
         }
         RunOutcome::Problems(diags) => {
             panic!("supported spawn/join must run in the TIR interpreter: {diags:?}")
         }
-    }
-
-    let unsupported_path = std::env::temp_dir().join(format!(
-        "jet_task_tir_boundary_{}.jet",
-        std::process::id()
-    ));
-    fs::write(
-        &unsupported_path,
-        "fn run() {\n    handle :: task 1\n    handle.cancel()\n}\n",
-    )
-    .unwrap();
-    let unsupported_file = unsupported_path.to_string_lossy().into_owned();
-    let unsupported = jet::Loader::load_entry(&unsupported_file)
-        .expect("unsupported task example should load");
-    assert!(
-        jet_driver::InterpreterBoundary::dev_boundary_scan(&unsupported).is_none(),
-        "the AST boundary must not intercept core.tasks"
-    );
-    match dev_iteration(&unsupported_file, false, true) {
-        RunOutcome::Problems(diags) => assert!(
-            diags
-                .iter()
-                .any(|diag| diag.code == "E2201" && diag.what.contains("TaskCancel")),
-            "unsupported task operation must stop at canonical TIR: {diags:?}"
-        ),
-        outcome => panic!("unsupported task operation unexpectedly ran: {outcome:?}"),
     }
 }
 
@@ -1451,12 +1425,94 @@ fn task_program_runs_via_jit() {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("tasks must run via default dev/JIT, got: {ds:?}"),
     };
-    assert_eq!(got.trim(), "5050", "tasks expected sum");
+    assert_eq!(got, "5050\npaused=false,cancel=false\n", "tasks expected output");
     assert_eq!(
-        jit.trim(),
-        got.trim(),
+        jit,
+        got,
         "JIT output drifted from dev_iteration"
     );
+}
+
+/// #1685: the canonical task surface stays resident when its result is a
+/// non-`Int` handle, and child failures remain typed at the JIT boundary.
+#[test]
+fn task_surface_runs_resident_with_string_results_and_typed_failures() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let source = r#"
+use core.time as time
+
+fn slow_text() => String {
+    time.sleep(25)
+    return "slow"
+}
+
+fn failure_label(error: TaskFailure) => String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+
+fn run() {
+    task.group workers {
+        child :: task { return "child" }
+        print(child.join() ?? "child-fallback")
+
+        all_result :: task.all { "left", "right" } ?? []
+        print(all_result[0], all_result[1])
+        print((task.race { slow_text(), "race" }) ?? "race-fallback")
+        print((task.any { slow_text(), "any" }) ?? "any-fallback")
+
+        cancelled :: task {
+            time.sleep(1000)
+            return "late"
+        }
+        cancelled.cancel()
+        cancelled_result :: cancelled.join()
+        if cancelled_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong cancellation") }
+        }
+
+        failed :: task { panic("child") }
+        failed_result :: failed.join()
+        if failed_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong panic") }
+        }
+    }
+}
+"#;
+    let path = std::env::temp_dir().join(format!(
+        "jet_dev_task_surface_{}.jet",
+        std::process::id()
+    ));
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let bundle = checked_bundle_from_path(&shown);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "task surface must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::reset_jit_trace_for_test();
+    let RunOutcome::Ran {
+        stdout,
+        stderr,
+        exit_code,
+    } = run_cranelift_outcome_without_fallback(source, "task_surface_string")
+    else {
+        panic!("resident task surface must run through Cranelift")
+    };
+    assert_eq!(stdout, "child\nleft right\nrace\nany\ncancelled\npanicked\n");
+    assert!(stderr.is_empty());
+    assert_eq!(exit_code, 0);
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
 }
 
 /// Scheduler workers catch user-task panics. Parallel tasks must never race by
@@ -2443,7 +2499,6 @@ fn dev_default_io_log_reports_jit_gap() {
 #[test]
 fn dev_default_resident_boundaries_report_jit_gap() {
     for stem in [
-        "concurrency/task_controls",
         "memory/entity_tree",
         "memory/expiring_secret",
     ] {
@@ -2597,12 +2652,21 @@ fn dev_packed_enum_print_is_safe_across_run_processes() {
 /// past the boundary before hitting trouble.
 #[test]
 fn try_anyway_skips_the_boundary_scan() {
-    let file = "examples/features/concurrency/tasks.jet";
-    let RunOutcome::Problems(blocked) = dev_iteration(file, false, true) else {
+    let path = std::env::temp_dir().join(format!(
+        "jet_try_anyway_boundary_{}.jet",
+        std::process::id()
+    ));
+    fs::write(
+        &path,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let file = path.to_string_lossy().into_owned();
+    let RunOutcome::Problems(blocked) = dev_iteration(&file, false, true) else {
         panic!("expected the E2201 pre-scan to block this program up front");
     };
     assert_eq!(blocked[0].code, "E2201", "pre-scan should report E2201");
-    match dev_iteration(file, true, true) {
+    match dev_iteration(&file, true, true) {
         RunOutcome::Problems(diags) => {
             assert_ne!(
                 diags.first().and_then(|d| d.span),
@@ -2614,6 +2678,7 @@ fn try_anyway_skips_the_boundary_scan() {
         // pre-scan was skipped.
         RunOutcome::Ran { .. } => {}
     }
+    let _ = fs::remove_file(path);
 }
 
 /// c139 M1: the Cranelift tier-1 backend runs `basics/hello.jet` with byte-identical
@@ -4631,9 +4696,12 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "memory/parameter_modes",
         "memory/pool_stale_id",
         "memory/rawptr",
+        "memory/ref_field",
+        "memory/resource_close",
         "memory/returned_views",
         "memory/shared_config",
         "memory/shared_transact",
+        "memory/shared_weak_cycle",
         "memory/string_view",
         "streams/generators",
     ];
@@ -4815,6 +4883,7 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
     let _guard = dev_diff_lock().lock().unwrap();
     let stems = [
         "net/browser_bidi_profiles",
+        "net/dns_lookup",
         "net/email_dkim",
         "net/email_message",
         "net/http_client",
@@ -4880,6 +4949,7 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
         "concurrency/detached_task",
         "concurrency/parallel_iter",
         "concurrency/parallel_scan",
+        "concurrency/protocol",
         "concurrency/task_controls",
         "concurrency/task_runtime_audit",
         "game/core_game_headless",
@@ -8322,15 +8392,19 @@ fn run() {
 fn cranelift_unshielded_select_cancel_does_not_unwind_native_frame() {
     let out = run_cranelift_without_fallback(
         r#"use core.tasks as tasks
+fn select_cancel_worker(ready_sender: Sender<Int>) {
+    task.group worker {
+        (_sender, ch) :: tasks.channel<Int>()
+        ready_sender.send(1)
+        worker.select().recv(ch).wait()
+        print(99)
+    }
+}
+
 fn run() {
     task.group g {
         (ready_sender, ready) :: tasks.channel<Int>()
-        (_sender, ch) :: tasks.channel<Int>()
-        slow :: task {
-            ready_sender.send(1)
-            g.select().recv(ch).wait()
-            print(99)
-        }
+        slow :: task select_cancel_worker(ready_sender)
         ready.receive() ?? panic("closed")
         slow.cancel()
     }
@@ -8342,23 +8416,38 @@ fn run() {
 }
 
 #[test]
-fn cranelift_wait_failures_return_compiler_diagnostics_not_process_exit() {
+fn cranelift_wait_failures_recover_as_typed_task_failures() {
     let join_cancelled = r#"use core.time as time
-use core.time as time
+fn failure_label(error: TaskFailure) => String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
 fn run() {
     child :: task {
         time.sleep(200)
     }
     child.cancel()
-    child.join() ?? 0
+    result :: child.join()
+    if result == {
+        .Err(error) -> { print(failure_label(error)) }
+        .Ok(_) -> { print("wrong cancellation") }
+    }
 }
 "#;
-    let RunOutcome::Problems(join_diags) =
-        run_cranelift_outcome_without_fallback(join_cancelled, "join_cancelled")
+    let RunOutcome::Ran {
+        stdout,
+        stderr,
+        exit_code,
+    } = run_cranelift_outcome_without_fallback(join_cancelled, "join_cancelled")
     else {
-        panic!("joining a cancelled task must report a compiler-owned diagnostic")
+        panic!("joining a cancelled task must recover as TaskFailure.Cancelled")
     };
-    assert!(join_diags.iter().any(|d| d.code == "E0953"));
+    assert_eq!(stdout, "cancelled\n");
+    assert!(stderr.is_empty());
+    assert_eq!(exit_code, 0);
 }
 
 /// #1486 / I9: task-group rich panic under default jet run must match AOT golden

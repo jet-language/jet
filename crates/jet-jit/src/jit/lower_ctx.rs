@@ -11341,10 +11341,8 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.call_host(self.host.conc.interval, &[ms]));
                 }
                 if module == "core.tasks" && method == "yield_now" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.task_yield, self.b.func);
-                    self.b.ins().call(host_ref, &[]);
+                    let status = self.call_host(self.host.conc.task_yield, &[]);
+                    let _ = self.finish_wait_call(status);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
                 if module == "core.tasks" && method == "current_task" && args.is_empty() {

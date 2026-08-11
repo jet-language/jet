@@ -2846,11 +2846,9 @@ pub fn apply_impure_core_call(
             // jet dev). Soft-exit via the sink; bare comptime keeps hard exit.
             if let Some(s) = sink {
                 s.exit_code = Some(code as i32);
-                return Err(Diagnostic::error(
-                    "SOFT_EXIT",
+                return Err(Diagnostic::internal_soft_exit(
                     code.to_string(),
                     "process.exit requested".to_string(),
-                    String::new(),
                     Some(span),
                 ));
             }
