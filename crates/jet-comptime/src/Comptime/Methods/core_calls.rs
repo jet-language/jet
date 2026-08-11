@@ -732,147 +732,75 @@ pub(super) fn io_error_value(path: &str, e: std::io::Error) -> CtValue {
     }
 }
 
-fn splitmix64(state: &mut u64) -> u64 {
-    let mut x = *state;
-    x ^= x << 7;
-    x ^= x >> 9;
-    x = x.wrapping_mul(0x9e3779b97f4a7c15);
-    *state = x;
-    x
-}
-
-pub(in super::super) fn random_int(state: &mut u64, low: i64, high: i64) -> i64 {
-    if high <= low {
-        return low;
-    }
-    low + (splitmix64(state) % ((high - low + 1) as u64)) as i64
-}
-
-pub(in super::super) fn random_float(state: &mut u64) -> f64 {
-    (splitmix64(state) as f64) / (u64::MAX as f64)
-}
-
-/// D-DET1 widened ambient draws. Mirrors AOT's `jet_std_random_*` (Process.rs)
-/// byte-for-byte — same `jet_rng_next`-equivalent `splitmix64` stream, same
-/// formulas — so an ambient `core.random.*` call at comptime and the same
-/// call at AOT runtime draw the identical sequence from the identical seed
-/// (R12 parity).
-/// parity: guard tests/comptime_diff.rs::comptime_module_calls_match_runtime
-fn random_float_open(state: &mut u64) -> f64 {
-    let x = random_float(state);
-    if x <= 0.0 {
-        f64::MIN_POSITIVE
-    } else {
-        x
-    }
-}
-
-fn random_float_range(state: &mut u64, low: f64, high: f64) -> f64 {
-    if !(high > low) {
-        return low;
-    }
-    low + (high - low) * random_float(state)
-}
-
-fn random_bool_p(state: &mut u64, p: f64) -> bool {
-    if p <= 0.0 || p.is_nan() {
-        false
-    } else if p >= 1.0 {
-        true
-    } else {
-        random_float(state) < p
-    }
-}
-
-fn random_normal(state: &mut u64, mean: f64, stddev: f64) -> f64 {
-    let u1 = random_float_open(state);
-    let u2 = random_float(state);
-    let z0 = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
-    mean + z0 * stddev.max(0.0)
-}
-
-fn random_exponential(state: &mut u64, lambda: f64) -> f64 {
-    if lambda <= 0.0 || lambda.is_nan() {
-        return 0.0;
-    }
-    -random_float_open(state).ln() / lambda
-}
-
-fn random_bytes(state: &mut u64, n: i64) -> Vec<u8> {
-    let n = n.max(0) as usize;
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        out.push(splitmix64(state) as u8);
-    }
-    out
-}
-
-fn random_pick_ct(state: &mut u64, xs: &[CtValue]) -> Option<CtValue> {
-    if xs.is_empty() {
-        None
-    } else {
-        Some(xs[random_int(state, 0, xs.len() as i64 - 1) as usize].clone())
-    }
-}
-
-fn random_weighted_pick_ct(
-    state: &mut u64,
-    xs: &[CtValue],
-    weights: &[f64],
-) -> Option<CtValue> {
-    if xs.is_empty() || xs.len() != weights.len() {
-        return None;
-    }
-    let mut total = 0.0;
-    for &w in weights {
-        if w.is_finite() && w > 0.0 {
-            total += w;
+// D-DET1 / I9: ambient random behavior is the runtime Prelude kernel. These
+// wrappers only marshal CtValue containers around that kernel.
+mod ambient_random_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone)]
+        pub(crate) struct Rng {
+            pub(crate) state: u64,
         }
     }
-    if total <= 0.0 {
-        return None;
+
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs");
+
+    pub(crate) fn seed(seed: i64) {
+        jet_std_random_seed(seed);
     }
-    let mut needle = random_float_range(state, 0.0, total);
-    for (item, &weight) in xs.iter().zip(weights.iter()) {
-        let w = if weight.is_finite() && weight > 0.0 { weight } else { 0.0 };
-        if needle < w {
-            return Some(item.clone());
-        }
-        needle -= w;
+
+    pub(crate) fn int(low: i64, high: i64) -> i64 {
+        jet_std_random_int(low, high)
     }
-    xs.last().cloned()
+
+    pub(crate) fn float() -> f64 {
+        jet_std_random_float()
+    }
+
+    pub(crate) fn split(seed: i64) -> u64 {
+        jet_std_random_split(seed).state
+    }
+
+    pub(crate) fn float_range(low: f64, high: f64) -> f64 {
+        jet_std_random_float_range(low, high)
+    }
+
+    pub(crate) fn bool_p(p: f64) -> bool {
+        jet_std_random_bool(p)
+    }
+
+    pub(crate) fn normal(mean: f64, stddev: f64) -> f64 {
+        jet_std_random_normal(mean, stddev)
+    }
+
+    pub(crate) fn exponential(lambda: f64) -> f64 {
+        jet_std_random_exponential(lambda)
+    }
+
+    pub(crate) fn bytes(count: i64) -> Vec<u8> {
+        jet_std_random_bytes(count)
+    }
+
+    pub(crate) fn pick<T: Clone>(items: &Vec<T>) -> Option<T> {
+        jet_std_random_pick(items)
+    }
+
+    pub(crate) fn weighted_pick<T: Clone>(items: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
+        jet_std_random_weighted_pick(items, weights)
+    }
+
+    pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
+        jet_std_random_sample(items, count)
+    }
+
+    pub(crate) fn shuffle<T>(items: &mut Vec<T>) {
+        jet_std_random_shuffle(items);
+    }
 }
 
-fn random_sample_ct(state: &mut u64, xs: &[CtValue], k: i64) -> Vec<CtValue> {
-    let want = (k.max(0) as usize).min(xs.len());
-    let mut pool = xs.to_vec();
-    for i in 0..want {
-        let j = random_int(state, i as i64, pool.len() as i64 - 1) as usize;
-        pool.swap(i, j);
-    }
-    pool.truncate(want);
-    pool
-}
-
-pub(super) fn shuffle_ct_list(state: &mut u64, xs: &mut [CtValue]) {
-    let len = xs.len();
-    for i in (1..len).rev() {
-        let j = random_int(state, 0, i as i64) as usize;
-        xs.swap(i, j);
-    }
-}
-
-thread_local! {
-    static JET_AMBIENT_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173);
-}
-
-pub(super) fn with_ambient_rng<R>(f: impl FnOnce(&mut u64) -> R) -> R {
-    JET_AMBIENT_RNG.with(|cell| {
-        let mut state = cell.get();
-        let out = f(&mut state);
-        cell.set(state);
-        out
-    })
+pub(super) fn shuffle_ct_list(xs: &mut [CtValue]) {
+    let mut items = xs.to_vec();
+    ambient_random_kernel::shuffle(&mut items);
+    xs.clone_from_slice(&items);
 }
 
 /// D-TEXTWIDTH1=B: pull the two policy flags back out of a `TextWidth`
@@ -1922,7 +1850,7 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n as u64,
                 _ => return Err(unsupported("random.seed expects an Int", span)),
             };
-            with_ambient_rng(|st| *st = seed);
+            ambient_random_kernel::seed(seed as i64);
             Ok(CtValue::Unit)
         }
         ("core.random", "int") => {
@@ -1934,13 +1862,11 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.int expects Int bounds", span)),
             };
-            Ok(CtValue::Int(with_ambient_rng(|st| {
-                random_int(st, low, high)
-            })))
+            Ok(CtValue::Int(ambient_random_kernel::int(low, high)))
         }
-        ("core.random", "float") => Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-            random_float(st)
-        })))),
+        ("core.random", "float") => {
+            Ok(CtValue::Float(CtFloat::f64(ambient_random_kernel::float())))
+        }
         // D-DET1: testing.fake_rng is the test-facing spelling of the same
         // caller-seeded deterministic Rng capability as random.rng.
         ("core.random", "rng") | ("core.testing", "fake_rng") => {
@@ -1965,7 +1891,7 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n as u64,
                 _ => return Err(unsupported("random.split expects an Int seed", span)),
             };
-            let mixed = with_ambient_rng(|st| seed ^ splitmix64(st).rotate_left(17));
+            let mixed = ambient_random_kernel::split(seed as i64);
             Ok(CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
@@ -1974,48 +1900,48 @@ pub fn apply_core_call(
         ("core.random", "float_range") => {
             let low = as_float(one(0)?, span)?;
             let high = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-                random_float_range(st, low, high)
-            }))))
+            Ok(CtValue::Float(CtFloat::f64(
+                ambient_random_kernel::float_range(low, high),
+            )))
         }
         ("core.random", "bool") => {
             let p = as_float(one(0)?, span)?;
-            Ok(CtValue::Bool(with_ambient_rng(|st| random_bool_p(st, p))))
+            Ok(CtValue::Bool(ambient_random_kernel::bool_p(p)))
         }
         ("core.random", "normal") => {
             let mean = as_float(one(0)?, span)?;
             let stddev = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-                random_normal(st, mean, stddev)
-            }))))
+            Ok(CtValue::Float(CtFloat::f64(
+                ambient_random_kernel::normal(mean, stddev),
+            )))
         }
         ("core.random", "exponential") => {
             let lambda = as_float(one(0)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-                random_exponential(st, lambda)
-            }))))
+            Ok(CtValue::Float(CtFloat::f64(
+                ambient_random_kernel::exponential(lambda),
+            )))
         }
         ("core.random", "bytes") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.bytes expects an Int count", span)),
             };
-            Ok(CtValue::Bytes(with_ambient_rng(|st| random_bytes(st, n))))
+            Ok(CtValue::Bytes(ambient_random_kernel::bytes(n)))
         }
         ("core.random", "pick") => {
-            let CtValue::List(xs) = one(0)? else {
+            let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.pick needs a list", span));
             };
-            Ok(match with_ambient_rng(|st| random_pick_ct(st, xs)) {
+            Ok(match ambient_random_kernel::pick(&xs) {
                 Some(v) => CtValue::Present(Box::new(v)),
                 None => CtValue::absent(Type::Int),
             })
         }
         ("core.random", "weighted_pick") => {
-            let CtValue::List(xs) = one(0)? else {
+            let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.weighted_pick needs a list", span));
             };
-            let CtValue::List(ws) = one(1)? else {
+            let CtValue::List(ws) = one(1)?.clone() else {
                 return Err(unsupported(
                     "random.weighted_pick needs a [Float] weights list",
                     span,
@@ -2025,24 +1951,20 @@ pub fn apply_core_call(
                 .iter()
                 .map(|w| as_float(w, span))
                 .collect::<Result<_, _>>()?;
-            Ok(
-                match with_ambient_rng(|st| random_weighted_pick_ct(st, xs, &weights)) {
-                    Some(v) => CtValue::Present(Box::new(v)),
-                    None => CtValue::absent(Type::Int),
-                },
-            )
+            Ok(match ambient_random_kernel::weighted_pick(&xs, &weights) {
+                Some(v) => CtValue::Present(Box::new(v)),
+                None => CtValue::absent(Type::Int),
+            })
         }
         ("core.random", "sample") => {
-            let CtValue::List(xs) = one(0)? else {
+            let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.sample needs a list", span));
             };
             let k = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.sample count must be Int", span)),
             };
-            Ok(CtValue::List(with_ambient_rng(|st| {
-                random_sample_ct(st, xs, k)
-            })))
+            Ok(CtValue::List(ambient_random_kernel::sample(&xs, k)))
         }
         // --- core.fmt: CtValue adapters over the shared Prelude kernel ---
         ("core.fmt", "number") => {

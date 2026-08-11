@@ -13,6 +13,7 @@ use crate::Comptime::{
     DevSink,
 };
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_foundation::Effects::is_nondeterministic_core;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
@@ -845,25 +846,32 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
-    // #1799: these calls read or mutate runtime-owned clock/global state. A
-    // build-time fold uses a throwaway evaluator, so materializing any of them
-    // would freeze state that the running program cannot resync. Runtime and
-    // REPL evaluation are the live execution paths and remain allowed. Keep
-    // argument-only time constructors/conversions and the constant
-    // `core.perf.default_fidelity` out of this list. The current parity leaks
-    // are `date.today`'s SystemTime read and `time.instant`'s placeholder
-    // monotonic sample. E3403 remains the determinism gate, while this
-    // predicate only backs off D-VERDICT-1308-1.
+    // #1799: a build-time fold uses a throwaway evaluator, so materializing an
+    // ambient clock/PRNG result would freeze state that the running program
+    // cannot resync. Runtime and REPL evaluation are the live execution paths
+    // and remain allowed. The nondeterministic call set is shared with sema;
+    // perf fidelity is a separate runtime-global signal.
     fn should_decline_ambient_fold(&self, module: &str, method: &str) -> bool {
         !self.runtime_execution
             && !self.repl_mode
-            && matches!(
-                (module, method),
-                ("core.time", "now" | "now_utc" | "today" | "instant" | "start")
-                    | ("core.time.date", "today")
-                    | ("core.time.datetime", "now")
-                    | ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
-            )
+            && (is_nondeterministic_core(module, method)
+                || matches!(
+                    (module, method),
+                    ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
+                ))
+    }
+
+    fn runtime_time_now(
+        &self,
+        module: &str,
+        method: &str,
+        argv: &[CtValue],
+    ) -> Option<CtValue> {
+        (self.runtime_execution
+            && module == "core.time"
+            && method == "now"
+            && argv.is_empty())
+            .then(|| CtValue::Int(crate::scheduler::jet_std_time_now()))
     }
 
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
@@ -3256,33 +3264,22 @@ impl<'a> EvalCtx<'a> {
                         *source_span,
                     ));
                 }
-                // #1788: `core.random` (besides `.rng`, a pure function of its
-                // explicit seed argument) reads/writes ambient PRNG state — the
-                // real runtime `Rand` when this evaluator is truly running the
-                // program (`runtime_execution`) or a live REPL session
-                // (`repl_mode`, which *is* the one execution), but a throwaway
-                // interpreter-only stream otherwise. That "otherwise" is a
-                // sema-time D-VERDICT-1308-1 implicit `::` fold or an explicit
-                // `$`/#Known demand (same call path as the `mem.address_of`
-                // guard above): baking its draw as a literal would freeze a
-                // value that never resyncs with whatever `random.seed()` the
-                // compiled program's Prelude RNG sees at real runtime. Decline
-                // plainly so the fold backs off to ordinary runtime codegen
-                // (D-VERDICT-1308-1: failure is silent); an explicit demand
-                // surfaces this as a normal "not available at compile time"
-                // error. Do not route through the Tier-2 `#Impure` gate below —
-                // random stays outside that gate (D-META-EFFECT1).
-                if !self.runtime_execution
-                    && !self.repl_mode
-                    && module == "core.random"
-                    && method != "rng"
-                {
-                    return Err(unsupported(
-                        &format!("`{module}.{method}()` at compile time"),
-                        *source_span,
-                    ));
+                // Runtime-tier TIR is an adapter: wall-clock semantics stay in
+                // the Prelude, just as they do for AOT and the JIT host.
+                if let Some(value) = self.runtime_time_now(module, method, &argv) {
+                    return Ok(value);
                 }
                 if self.should_decline_ambient_fold(module, method) {
+                    if is_nondeterministic_core(module, method) {
+                        let api = format!(
+                            "{}.{method}",
+                            module.rsplit('.').next().unwrap_or(module)
+                        );
+                        return Err(Diagnostic::e3403(
+                            &api,
+                            Some(*source_span),
+                        ));
+                    }
                     return Err(unsupported(
                         &format!("`{module}.{method}()` at compile time"),
                         *source_span,
@@ -5315,7 +5312,23 @@ impl<'a> EvalCtx<'a> {
                         // Core-import alias may still lower as StaticCall when
                         // function bodies were typed before imports propagated.
                         if let Some(module) = self.core_imports.get(type_name) {
+                            if let Some(value) =
+                                self.runtime_time_now(module, &method.name, &argv)
+                            {
+                                return Ok(value);
+                            }
                             if self.should_decline_ambient_fold(module, &method.name) {
+                                if is_nondeterministic_core(module, &method.name) {
+                                    let api = format!(
+                                        "{}.{}",
+                                        module.rsplit('.').next().unwrap_or(module),
+                                        method.name
+                                    );
+                                    return Err(Diagnostic::e3403(
+                                        &api,
+                                        Some(self.span()),
+                                    ));
+                                }
                                 return Err(unsupported(
                                     &format!("`{module}.{}()` at compile time", method.name),
                                     self.span(),

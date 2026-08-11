@@ -146,6 +146,40 @@ impl Effect {
 /// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
 /// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
 pub type EffectSet = BTreeSet<String>;
+
+/// D-DET1: Core calls whose result depends on ambient wall-clock or PRNG
+/// state. This is the one classification used by purity checking and
+/// compile-time folding; deterministic constructors such as `random.rng`
+/// remain outside it.
+pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
+    matches!(
+        (module, method),
+        (
+            "core.time",
+            "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
+        )
+            | ("core.time.date", "today")
+            | ("core.time.datetime", "now")
+            | (
+                "core.random",
+                "int"
+                    | "float"
+                    | "float_range"
+                    | "bool"
+                    | "normal"
+                    | "exponential"
+                    | "pick"
+                    | "weighted_pick"
+                    | "sample"
+                    | "shuffle"
+                    | "seed"
+                    | "split"
+                    | "bytes"
+            )
+            | ("core.crypto.random", "bytes")
+    )
+}
+
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
 /// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring

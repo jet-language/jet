@@ -408,7 +408,7 @@ impl<'a> Interp<'a> {
                         };
                         authorizer.authorize(&request, span)?;
                     }
-                    with_ambient_rng(|st| shuffle_ct_list(st, &mut items));
+                    shuffle_ct_list(&mut items);
                     self.write_back(&arg.expr, CtValue::List(items), scope)?;
                     return Ok(CtValue::Unit);
                 }

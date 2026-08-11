@@ -7868,6 +7868,43 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// #1488: immutable ambient normal draws must stay runtime reads, while the
+/// seed still controls the shared Prelude stream.
+#[test]
+fn immutable_binding_of_random_normal_reads_the_seeded_stream() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping immutable-random-normal-binding test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_random_normal_immutable_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "random_normal_immutable",
+        r#"
+use core.random as random
+
+fn run() {
+    random.seed(11)
+    a :: random.normal(0.0, 1.0)
+    random.seed(11)
+    b :: random.normal(0.0, 1.0)
+    print(a == b)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #1799: an immutable `::` binding of `date.today()` must read the runtime
 /// clock. Before the fix, D-VERDICT-1308-1 folded the ambient wall-clock read
 /// into the generated literal, so the artifact kept the build date forever.
@@ -7904,6 +7941,55 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let (code, stdout, stderr) = build_and_run(&dir, "date_today_immutable", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #1488: immutable ambient `time.now()` calls must remain separate runtime
+/// reads. The generated body is the tier-neutral proof; the run also checks
+/// the call is live under the pinned test clock.
+#[test]
+fn immutable_binding_of_time_now_reads_the_runtime_clock() {
+    let src = r#"
+use core.time as time
+
+fn run() {
+    a :: time.now()
+    b :: time.now()
+    print(a == b)
+}
+"#;
+    let compiled = compile_temp("time_now_immutable", src);
+    let user_run = compiled
+        .rust
+        .split_once("pub fn __jet_run() {")
+        .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
+        .expect("generated Rust must contain the __jet_run body");
+    assert_eq!(
+        user_run.matches("jet_std_time_now()").count(),
+        2,
+        "both immutable time.now() calls must remain runtime reads:\n{user_run}"
+    );
+
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping immutable-time-now-binding test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_time_now_immutable_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "time_now_immutable",
+        src,
+        &[("LEX_TEST_EPOCH", "1700000000000")],
+        None,
+    );
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(stdout, "true\n");
     let _ = fs::remove_dir_all(&dir);

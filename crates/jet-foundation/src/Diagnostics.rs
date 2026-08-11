@@ -198,6 +198,20 @@ impl Diagnostic {
 }
 
 impl Diagnostic {
+    /// E3403: ambient randomness or wall-clock state in pure evaluation.
+    pub fn e3403(what: &str, span: Option<Span>) -> Self {
+        Self::error(
+            "E3403",
+            format!(
+                "`{what}` is non-deterministic and cannot appear in a pure evaluation"
+            ),
+            "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
+            "remove this call, or remove the enclosing function's explicit `=[]=>` bound"
+                .to_string(),
+            span,
+        )
+    }
+
     /// Build a report from the one typed row. The supplied strings are the
     /// row's holes after sema has filled them; code, severity, and moment never
     /// come from a second call-site policy.

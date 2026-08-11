@@ -1,6 +1,6 @@
 //! `core.random` ambient + `Rng` handle host shims (#729).
-//! Ambient mirrors `jet_std_random_*` in Process.rs; `Rng` mirrors SplitMix64
-//! `jet_rng_*` / `jet_det_rng_next` in MathRandomTime.rs — no third algorithm.
+//! Ambient and seeded draws call the shared Prelude kernels; this module only
+//! marshals Cranelift ABI values and runtime-heap handles.
 
 use super::Concurrency;
 
@@ -8,86 +8,76 @@ mod seeded_random_kernel {
     include!("../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
-// ── ambient PRNG (Process.rs jet_rng_next / jet_std_random_*) ────────────────
-
-thread_local! {
-    static JIT_AMBIENT_RNG: std::cell::Cell<u64> =
-        const { std::cell::Cell::new(0x4d595df4d0f33173) };
-}
-
-fn ambient_next() -> u64 {
-    JIT_AMBIENT_RNG.with(|cell| {
-        let mut x = cell.get();
-        x ^= x << 7;
-        x ^= x >> 9;
-        x = x.wrapping_mul(0x9e3779b97f4a7c15);
-        cell.set(x);
-        x
-    })
-}
-
-fn ambient_float() -> f64 {
-    (ambient_next() as f64) / (u64::MAX as f64)
-}
-
-fn ambient_float_open() -> f64 {
-    let x = ambient_float();
-    if x <= 0.0 {
-        f64::MIN_POSITIVE
-    } else {
-        x
+#[allow(dead_code)]
+mod ambient_random_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone)]
+        pub(crate) struct Rng {
+            pub(crate) state: u64,
+        }
     }
-}
 
-fn ambient_int(low: i64, high: i64) -> i64 {
-    if high <= low {
-        return low;
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs");
+
+    pub(crate) fn seed(seed: i64) {
+        jet_std_random_seed(seed);
     }
-    low + (ambient_next() % ((high - low + 1) as u64)) as i64
+
+    pub(crate) fn bool_p(p: f64) -> bool {
+        jet_std_random_bool(p)
+    }
+
+    pub(crate) fn float_range(low: f64, high: f64) -> f64 {
+        jet_std_random_float_range(low, high)
+    }
+
+    pub(crate) fn normal(mean: f64, stddev: f64) -> f64 {
+        jet_std_random_normal(mean, stddev)
+    }
+
+    pub(crate) fn exponential(lambda: f64) -> f64 {
+        jet_std_random_exponential(lambda)
+    }
+
+    pub(crate) fn bytes(count: i64) -> Vec<u8> {
+        jet_std_random_bytes(count)
+    }
+
+    pub(crate) fn weighted_pick<T: Clone>(items: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
+        jet_std_random_weighted_pick(items, weights)
+    }
+
+    pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
+        jet_std_random_sample(items, count)
+    }
 }
 
 extern "C" fn jet_jit_random_seed(n: i64) {
-    JIT_AMBIENT_RNG.with(|cell| cell.set(n as u64));
+    ambient_random_kernel::seed(n);
 }
 
 extern "C" fn jet_jit_random_bool(p: f64) -> i8 {
-    let ok = if p <= 0.0 || p.is_nan() {
-        false
-    } else if p >= 1.0 {
-        true
-    } else {
-        ambient_float() < p
-    };
-    i8::from(ok)
+    i8::from(ambient_random_kernel::bool_p(p))
 }
 
 extern "C" fn jet_jit_random_float_range(low: f64, high: f64) -> f64 {
-    if !(high > low) {
-        return low;
-    }
-    low + (high - low) * ambient_float()
+    ambient_random_kernel::float_range(low, high)
 }
 
 extern "C" fn jet_jit_random_normal(mean: f64, stddev: f64) -> f64 {
-    let u1 = ambient_float_open();
-    let u2 = ambient_float();
-    let z0 = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
-    mean + z0 * stddev.max(0.0)
+    ambient_random_kernel::normal(mean, stddev)
 }
 
 extern "C" fn jet_jit_random_exponential(lambda: f64) -> f64 {
-    if lambda <= 0.0 || lambda.is_nan() {
-        return 0.0;
-    }
-    -ambient_float_open().ln() / lambda
+    ambient_random_kernel::exponential(lambda)
 }
 
 extern "C" fn jet_jit_random_bytes(n: i64) -> i64 {
-    let n = n.max(0) as usize;
+    let bytes = ambient_random_kernel::bytes(n);
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
-        for _ in 0..n {
-            let _ = rt.heap.list_push_int(list, (ambient_next() as u8) as i64);
+        for byte in bytes {
+            let _ = rt.heap.list_push_int(list, byte as i64);
         }
         list
     })
@@ -101,58 +91,35 @@ fn pack_option_string(opt: Option<i64>) -> i64 {
 }
 
 extern "C" fn jet_jit_random_weighted_pick(items: i64, weights: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    let Some((values, ws)) = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(items).unwrap_or(0);
         if len == 0 || rt.heap.list_len(weights) != Some(len) {
-            return pack_option_string(None);
+            return None;
         }
-        let mut total = 0.0;
-        let mut ws = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            let w = rt.heap.list_get_float(weights, i).unwrap_or(0.0);
-            let w = if w.is_finite() && w > 0.0 { w } else { 0.0 };
-            total += w;
-            ws.push(w);
-        }
-        if total <= 0.0 {
-            return pack_option_string(None);
-        }
-        let mut needle = {
-            let low = 0.0;
-            let high = total;
-            if !(high > low) {
-                low
-            } else {
-                low + (high - low) * ambient_float()
-            }
-        };
-        for i in 0..len {
-            let w = ws[i as usize];
-            if needle < w {
-                let sid = rt.heap.list_get_int(items, i).unwrap_or(0);
-                return pack_option_string(Some(sid));
-            }
-            needle -= w;
-        }
-        let sid = rt.heap.list_get_int(items, len - 1).unwrap_or(0);
-        pack_option_string(Some(sid))
-    })
+        let values = (0..len)
+            .map(|i| rt.heap.list_get_int(items, i).unwrap_or(0))
+            .collect();
+        let ws = (0..len)
+            .map(|i| rt.heap.list_get_float(weights, i).unwrap_or(0.0))
+            .collect();
+        Some((values, ws))
+    }) else {
+        return pack_option_string(None);
+    };
+    pack_option_string(ambient_random_kernel::weighted_pick(&values, &ws))
 }
 
 extern "C" fn jet_jit_random_sample(items: i64, k: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(items).unwrap_or(0) as usize;
-        let want = (k.max(0) as usize).min(len);
-        let mut pool: Vec<i64> = (0..len as i64)
+    let values = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(items).unwrap_or(0);
+        (0..len)
             .map(|i| rt.heap.list_get_int(items, i).unwrap_or(0))
-            .collect();
-        for i in 0..want {
-            let j = ambient_int(i as i64, pool.len() as i64 - 1) as usize;
-            pool.swap(i, j);
-        }
-        pool.truncate(want);
+            .collect::<Vec<_>>()
+    });
+    let sample = ambient_random_kernel::sample(&values, k);
+    Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
-        for sid in pool {
+        for sid in sample {
             let _ = rt.heap.list_push_int(out, sid);
         }
         out
@@ -427,7 +394,4 @@ host_fns! {
     rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
     rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
 }
-
-
-
 

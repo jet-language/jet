@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::Effects::{core_effect, Effect};
+use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use crate::AST::{
     AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp,
 };
@@ -27,7 +27,6 @@ use jet_foundation::Names::{mangle, user_type_rust};
 use super::core_calls::{
     apply_core_call, apply_data_line_call, apply_impure_core_call, as_float, display_core_pure_value,
     eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
-    with_ambient_rng,
 };
 use super::repl_process::apply_repl_authorized_core_call;
 
@@ -108,7 +107,7 @@ pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
     }
     // The REPL re-reads ambient randomness between lines, so a folded draw
     // would go stale; the seeded constructor stays deterministic.
-    repl_mode && module == "core.random" && method != "rng"
+    repl_mode && module == "core.random" && is_nondeterministic_core(module, method)
 }
 
 pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnostic {
