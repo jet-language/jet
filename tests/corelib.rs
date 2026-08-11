@@ -12436,7 +12436,7 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let name = "float_binding_origin";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 
@@ -12445,7 +12445,8 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
     assert_eq!(
         stdout,
         format!(
-            "tracked `speed` at {}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n",
+            "tracked `speed` at {}:2:12: #Track speed :: 3.5\ntracked `speed` at {}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n",
+            source_path.display(),
             source_path.display()
         )
     );

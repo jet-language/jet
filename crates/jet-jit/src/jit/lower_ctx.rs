@@ -16295,10 +16295,11 @@ impl LowerCtx<'_, '_> {
             TNumericOp::FloatNarrow { .. } => {
                 Ok(self.call_host(self.host.numeric_float_narrow, &[value]))
             }
-            TNumericOp::Origin(origin) => {
-                let _ = value; // AOT: let _ = recv
-                let text = origin.as_deref().unwrap_or("untracked");
-                let h = self.runtime.heap.alloc_string(text.to_string());
+            TNumericOp::Origin { origin } => {
+                // TIR already materialized the payload; evaluate the receiver
+                // for side effects, matching AOT's `let _ = recv`.
+                let _ = value;
+                let h = self.runtime.heap.alloc_string(origin.clone());
                 Ok(self.b.ins().iconst(types::I64, h))
             },
         }

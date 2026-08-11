@@ -1026,7 +1026,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     TNumericOp::CheckedIntToFloat { .. } => recv.ty.is_integer(),
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
-                    TNumericOp::Origin(_) => true,
+                    TNumericOp::Origin { .. } => true,
                 }
         }
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
