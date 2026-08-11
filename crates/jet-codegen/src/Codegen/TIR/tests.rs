@@ -1765,6 +1765,7 @@ fn run() {
     print(\"{xs}\")
 }
 ";
+        install_comptime_bridge();
         assert!(covers_after_sema(src, "run"));
     }
 
