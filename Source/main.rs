@@ -126,10 +126,6 @@ fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
             "Jet needs valid command input before it can run this command",
             "correct the named argument or input, then run the command again",
         ),
-        "E2105" => (
-            "Jet could not complete the named file, tool, or operating-system operation",
-            "correct the named problem, then run the command again",
-        ),
         "E2941" => (
             "jet prove accepts only its registered proof lenses",
             "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`",
@@ -158,8 +154,11 @@ pub(crate) fn emit_cli_report(
     fix: String,
     json: bool,
 ) {
-    let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None)
-        .at_moment(jet::Diagnostics::ReportMoment::Tool);
+    let diagnostic = jet::Diagnostics::Diagnostic::registered_with_problem(code, &what, None)
+        .unwrap_or_else(|| {
+            jet::Diagnostics::Diagnostic::error(code, what, why, fix, None)
+                .at_moment(jet::Diagnostics::ReportMoment::Tool)
+        });
     if json {
         print!("{}", jet::render_all_json("", "", &[diagnostic]));
     } else {

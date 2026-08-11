@@ -123,6 +123,19 @@ fn registry_has_metadata_chain(repo: &Path) -> bool {
     }
 }
 
+fn fail_publish_checkout(checkout: &jet::Publish::PublishCheckout, report: impl FnOnce()) -> ! {
+    if let Err(error) = checkout.cleanup() {
+        crate::cli_error!(
+            "E2105",
+            "couldn't remove registry checkout `{}`: {}",
+            checkout.path().display(),
+            error
+        );
+    }
+    report();
+    exit(ExitCodes::USER_ERROR);
+}
+
 /// `jet registry publish [--force]` — pre-publish gate + SemVer API diff.
 ///
 /// D-PKGS4 (amended): must run `jet build` + `jet test` locally first.
@@ -452,24 +465,6 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     };
     let repo = checkout.path();
 
-    // The source artifact and its index line are one registry transaction.
-    // Stage and hash the artifact before touching metadata so a fresh machine
-    // can consume the same source bytes rather than an index-only promise.
-    if let Err(error) = jet::Publish::publish_artifact(
-        repo,
-        &root,
-        name,
-        version,
-        &content_hash,
-    ) {
-        let diagnostic = jet::Publish::e2607("registry source artifact", &error.to_string());
-        eprint!(
-            "{}",
-            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
-        );
-        exit(ExitCodes::USER_ERROR);
-    }
-
     // c146 (D-PKGSIGN1): tier-A author signing. Auto-keygen silently on first
     // publish, then sign the content hash; `--no-sign` opts out (tier-B checksum
     // still applies unconditionally). The public key is TOFU-pinned into the
@@ -490,25 +485,23 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
         let sig = match jet::Publish::Sign::sign(&seed_path, &content_hash) {
             Ok(s) => s,
-            Err(d) => {
+            Err(d) => fail_publish_checkout(&checkout, || {
                 eprint!(
                     "{}",
                     jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
                 );
-                exit(ExitCodes::USER_ERROR);
-            }
+            }),
         };
         // TOFU: record the public key only if this package has none pinned yet.
         let entries = match jet::Publish::Index::read_entries(repo, name) {
             Ok(entries) => entries,
-            Err(error) => {
+            Err(error) => fail_publish_checkout(&checkout, || {
                 let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
                 eprint!(
                     "{}",
                     jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
                 );
-                exit(ExitCodes::USER_ERROR);
-            }
+            }),
         };
         let already_pinned = jet::Publish::Index::pinned_public_key(&entries).is_some();
         let pub_field = if already_pinned {
@@ -520,6 +513,35 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         (pub_field, sig)
     };
 
+    let artifact = jet::Publish::artifact_path(repo, name, version)
+        .unwrap_or_else(|error| fail_publish_checkout(&checkout, || {
+            crate::cli_error!("E2105", "invalid registry artifact path: {error}");
+        }));
+    let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
+        fail_publish_checkout(&checkout, || {
+            crate::cli_error!("E2105", "invalid registry index path: {error}");
+        })
+    });
+    let mut publish_paths = vec![artifact, index];
+
+    // Complete source validation before moving content_hash into the entry.
+    // All post-checkout fatal paths remove the checkout before process exit.
+    if let Err(error) = jet::Publish::publish_artifact(
+        repo,
+        &root,
+        name,
+        version,
+        &content_hash,
+    ) {
+        fail_publish_checkout(&checkout, || {
+            let diagnostic = jet::Publish::e2607("registry source artifact", &error.to_string());
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+            );
+        });
+    }
+
     let entry = jet::Publish::IndexEntry {
         name: name.clone(),
         version: version.clone(),
@@ -530,35 +552,27 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         signature,
     };
     if let Err(e) = jet::Publish::Index::write_index_entry(repo, &entry) {
-        crate::cli_error!("E2105", "couldn't write the registry index entry: {}", e);
-        exit(ExitCodes::USER_ERROR);
-    }
-    let artifact = jet::Publish::artifact_path(repo, name, version)
-        .unwrap_or_else(|error| {
-            crate::cli_error!("E2105", "invalid registry artifact path: {error}");
-            exit(ExitCodes::USER_ERROR);
+        fail_publish_checkout(&checkout, || {
+            crate::cli_error!("E2105", "couldn't write the registry index entry: {}", e);
         });
-    let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
-        crate::cli_error!("E2105", "invalid registry index path: {error}");
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mut publish_paths = vec![artifact, index];
+    }
+
     // D-PKGSIGN-NOSIGN1=A: a keyless first publish has no metadata chain to
     // refresh. Any checkpoint or sparse metadata makes the registry
     // established, so refresh still fails closed without its root key.
     if !no_sign || registry_has_metadata_chain(repo) {
         let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
             Ok(metadata) => metadata,
-            Err(diagnostic) => {
+            Err(diagnostic) => fail_publish_checkout(&checkout, || {
                 eprint!(
                     "{}",
                     jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
                 );
-                exit(ExitCodes::USER_ERROR);
-            }
+            }),
         };
         publish_paths.extend(metadata.paths);
     }
+
     if let Err(d) = jet::Publish::push_index(
         &registry,
         repo,
@@ -566,13 +580,23 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         &publish_paths,
         Some(&entry),
     ) {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
+        fail_publish_checkout(&checkout, || {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
+            );
+        });
+    }
+
+    if let Err(error) = checkout.cleanup() {
+        crate::cli_error!(
+            "E2105",
+            "couldn't remove registry checkout `{}`: {}",
+            checkout.path().display(),
+            error
         );
         exit(ExitCodes::USER_ERROR);
     }
-
     status!("ok: published `{}` v{} to {}", name, version, registry.url);
 }
 
@@ -944,40 +968,36 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let repo = checkout.path();
     match jet::Publish::Index::mark_yanked(repo, name, version) {
         Ok(true) => {}
-        Ok(false) => {
+        Ok(false) => fail_publish_checkout(&checkout, || {
             crate::cli_error!(@fix "E2105", format!("`{}` v{} is not published in the registry index — nothing to yank", name, version), "run `jet registry publish` for the version first, or check the version number");
-            exit(ExitCodes::USER_ERROR);
-        }
-        Err(e) => {
+        }),
+        Err(e) => fail_publish_checkout(&checkout, || {
             crate::cli_error!("E1235", "couldn't update the registry index: {}", e);
-            exit(ExitCodes::USER_ERROR);
-        }
+        }),
     }
 
     let entry = match jet::Publish::Index::find_entry(repo, name, version) {
         Ok(Some(entry)) => entry,
-        Ok(None) => {
+        Ok(None) => fail_publish_checkout(&checkout, || {
             crate::cli_error!("E2105", "yanked registry entry disappeared during publication");
-            exit(ExitCodes::USER_ERROR);
-        }
-        Err(error) => {
+        }),
+        Err(error) => fail_publish_checkout(&checkout, || {
             crate::cli_error!("E2105", "couldn't read the yanked registry entry: {error}");
-            exit(ExitCodes::USER_ERROR);
-        }
+        }),
     };
     let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
-        crate::cli_error!("E2105", "invalid registry index path: {error}");
-        exit(ExitCodes::USER_ERROR);
+        fail_publish_checkout(&checkout, || {
+            crate::cli_error!("E2105", "invalid registry index path: {error}");
+        })
     });
     let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
         Ok(metadata) => metadata,
-        Err(diagnostic) => {
+        Err(diagnostic) => fail_publish_checkout(&checkout, || {
             eprint!(
                 "{}",
                 jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
             );
-            exit(ExitCodes::USER_ERROR);
-        }
+        }),
     };
     let mut yank_paths = vec![index];
     yank_paths.extend(metadata.paths);
@@ -988,13 +1008,23 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         &yank_paths,
         Some(&entry),
     ) {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
+        fail_publish_checkout(&checkout, || {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[d])
+            );
+        });
+    }
+
+    if let Err(error) = checkout.cleanup() {
+        crate::cli_error!(
+            "E2105",
+            "couldn't remove registry checkout `{}`: {}",
+            checkout.path().display(),
+            error
         );
         exit(ExitCodes::USER_ERROR);
     }
-
     println!("ok: yanked `{}` v{} in {}", name, version, registry.url);
     if let Some(msg) = message {
         println!("  reason: {}", msg);

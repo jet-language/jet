@@ -191,7 +191,9 @@ fn jet_crypto_entropy_fill_loop(
             JetCryptoEntropyStep::Filled(n) if n > 0 && n <= out.len() - filled => {
                 filled += n;
             }
-            JetCryptoEntropyStep::Interrupted => {}
+            JetCryptoEntropyStep::Interrupted => {
+                jet_crypto_entropy_zeroize(&mut out[filled..]);
+            }
             JetCryptoEntropyStep::Filled(_) | JetCryptoEntropyStep::Failed => {
                 jet_crypto_entropy_zeroize(out);
                 return Err(JetCryptoEntropyError::EntropyUnavailable);
@@ -413,7 +415,13 @@ pub fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, JetCryptoEntropyE
 }
 
 pub fn jet_crypto_entropy_fill(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
-    let mut fresh = jet_crypto_entropy_bytes(out.len() as i64)?;
+    let mut fresh = match jet_crypto_entropy_bytes(out.len() as i64) {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            jet_crypto_entropy_zeroize(out);
+            return Err(error);
+        }
+    };
     out.copy_from_slice(&fresh);
     jet_crypto_entropy_zeroize(&mut fresh);
     Ok(())
@@ -445,14 +453,83 @@ pub use jet_crypto_entropy::{
 // core.process, so a crypto-only program called a symbol that was absent.
 
 // D-CRYPTO-RNG1=A: cryptographic bytes use the shared fail-closed OS provider.
-// Edition 2026 keeps this infallible Rust shim; failure takes the ratified
-// E3001/exit-70 compatibility path and never returns weak or partial bytes.
-fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
+// Edition 2026 keeps this infallible Rust shim; failure takes the registered
+// E3001 path and never returns weak or partial bytes.
+pub(crate) fn jet_crypto_entropy_fail_closed(
+    operation: &str,
+    error: JetCryptoEntropyError,
+) -> ! {
+    let internal = matches!(&error, JetCryptoEntropyError::Internal { .. });
+    jet_abort_diagnostic(jet_render_e3001_crypto(
+        &format!("{operation}: {error}"),
+        internal,
+    ))
+}
+
+pub(crate) fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
     match jet_crypto_entropy_bytes(n) {
         Ok(bytes) => bytes,
-        Err(error) => {
-            eprintln!("Error [E3001]: panic: core.crypto.random.bytes: {error}");
-            std::process::exit(70);
-        }
+        Err(error) => jet_crypto_entropy_fail_closed("core.crypto.random.bytes", error),
+    }
+}
+
+fn jet_crypto_uuid_format(bytes: &[u8; 16]) -> String {
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    )
+}
+
+pub(crate) fn jet_crypto_uuid_v4_result() -> Result<String, JetCryptoEntropyError> {
+    let mut bytes = [0u8; 16];
+    jet_crypto_entropy_fill(&mut bytes)?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(jet_crypto_uuid_format(&bytes))
+}
+
+pub(crate) fn jet_crypto_uuid_v7_result(
+    timestamp_ms: i64,
+) -> Result<String, JetCryptoEntropyError> {
+    let mut bytes = [0u8; 16];
+    let timestamp = timestamp_ms as u64;
+    bytes[0] = (timestamp >> 40) as u8;
+    bytes[1] = (timestamp >> 32) as u8;
+    bytes[2] = (timestamp >> 24) as u8;
+    bytes[3] = (timestamp >> 16) as u8;
+    bytes[4] = (timestamp >> 8) as u8;
+    bytes[5] = timestamp as u8;
+    jet_crypto_entropy_fill(&mut bytes[6..])?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(jet_crypto_uuid_format(&bytes))
+}
+
+pub(crate) fn jet_crypto_uuid_v4() -> String {
+    match jet_crypto_uuid_v4_result() {
+        Ok(uuid) => uuid,
+        Err(error) => jet_crypto_entropy_fail_closed("core.uuid.v4", error),
+    }
+}
+
+pub(crate) fn jet_crypto_uuid_v7(timestamp_ms: i64) -> String {
+    match jet_crypto_uuid_v7_result(timestamp_ms) {
+        Ok(uuid) => uuid,
+        Err(error) => jet_crypto_entropy_fail_closed("core.uuid.v7", error),
     }
 }

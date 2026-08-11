@@ -74,15 +74,10 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
 }
 fn jet_crypto_entropy_fill(buf: &mut [u8]) -> Result<(), String> {
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(buf))
-        .map_err(|e| e.to_string())
+    crate::Crypto::runtime::jet_crypto_entropy_fill(buf).map_err(|error| error.to_string())
 }
 fn jet_crypto_entropy_zeroize(buf: &mut [u8]) {
-    for b in buf {
-        *b = 0;
-    }
+    crate::Crypto::runtime::jet_crypto_entropy_zeroize(buf)
 }
 fn jet_scheduler_io_wait(
     _stream: &std::net::TcpStream,

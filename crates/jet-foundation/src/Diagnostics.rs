@@ -227,6 +227,36 @@ impl Diagnostic {
         d
     }
 
+    /// Resolve a spanless driver problem through the registered row when that
+    /// row publishes a `{problem}` hole. The driver supplies only the problem;
+    /// What, Why, Fix, severity, and moment stay owned by the registry.
+    pub fn registered_with_problem(
+        code: &str,
+        problem: &str,
+        span: Option<Span>,
+    ) -> Option<Self> {
+        let row = crate::Registry::diagnostic(code)?;
+        if !row.what.contains("{problem}") {
+            return None;
+        }
+        let fill = |template: &'static str| template.replace("{problem}", problem);
+        let report = crate::Outcome::jet_render_registered_diagnostic(
+            row.code,
+            row.stage,
+            fill(row.what),
+            fill(row.why),
+            fill(row.fix),
+            crate::ExitCodes::USER_ERROR,
+        );
+        Some(Self::error(
+            report.code,
+            report.what,
+            report.why,
+            report.fix,
+            span,
+        ))
+    }
+
     /// The TIR interpreter's internal control-flow sentinels: each unwinds a
     /// `Result<_, Diagnostic>` cleanly out of `eval_expr`/a task worker without
     /// ever meaning to reach a renderer (`SOFT_EXIT`: a `panic`/`require`/

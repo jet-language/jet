@@ -616,29 +616,6 @@ fn jet_enc_cbor_decode<T: __jet_Decode>(bytes: &Vec<u8>, options: jet_std::CBORO
     T::jet_decode_traced(&tree).map(|(value,_)|value)
 }
 
-// UUID helpers — pure std, zero deps. CSPRNG via /dev/urandom (POSIX); the
-// fallback SplitMix64 engages only when /dev/urandom is unavailable.
-fn jet_uuid_fill_random(out: &mut [u8]) {
-    use std::io::Read;
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if f.read_exact(out).is_ok() {
-            return;
-        }
-    }
-    // Fallback: SplitMix64 seeded from wall-clock nanoseconds.
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64;
-    let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
-    for b in out.iter_mut() {
-        state = state.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = (state ^ (state >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        *b = (z ^ (z >> 31)) as u8;
-    }
-}
-
 fn jet_uuid_format(b: &[u8; 16]) -> String {
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-\
@@ -762,25 +739,9 @@ fn jet_std_uuid_v5(namespace: &String, name: &String) -> Result<String, String> 
 }
 
 fn jet_std_uuid_v4() -> String {
-    let mut bytes = [0u8; 16];
-    jet_uuid_fill_random(&mut bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
-    jet_uuid_format(&bytes)
+    jet_crypto_uuid_v4()
 }
 
 fn jet_std_uuid_v7(clock: &jet_std::Clock) -> String {
-    let ts_ms = clock.now() as u64;
-    let mut bytes = [0u8; 16];
-    // 48-bit timestamp in the high bytes
-    bytes[0] = (ts_ms >> 40) as u8;
-    bytes[1] = (ts_ms >> 32) as u8;
-    bytes[2] = (ts_ms >> 24) as u8;
-    bytes[3] = (ts_ms >> 16) as u8;
-    bytes[4] = (ts_ms >> 8) as u8;
-    bytes[5] = ts_ms as u8;
-    jet_uuid_fill_random(&mut bytes[6..]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x70; // version 7
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
-    jet_uuid_format(&bytes)
+    jet_crypto_uuid_v7(clock.now())
 }

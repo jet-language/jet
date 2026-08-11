@@ -235,55 +235,12 @@ fn supported_public_name(name: &str) -> bool {
     crate::Syntax::classify_identifier(name) == crate::Syntax::IdentifierClass::Ordinary
 }
 
-fn format_type(
-    ty: &crate::AST::Type,
-    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
-) -> String {
-    crate::Sema::ApiFreeze::canonical_api_type_name(ty, dimensions)
-}
-
 fn format_fn_sig(
     f: &crate::AST::Func,
     inferred: Option<&crate::Sema::EffectSet>,
     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
 ) -> String {
-    let type_params = crate::Sema::ApiFreeze::canonical_type_params(&f.type_params);
-    let params: Vec<String> = f
-        .params
-        .iter()
-        .map(|p| {
-            // c129: freeze the resolved capability sigil (D-CAP7) onto the
-            // published type. By the time API metadata is emitted, sema
-            // (D-CAP8) has resolved every `Infer` to a concrete convention, so
-            // the published surface carries the sigil the caller must honor.
-            // Plain read is the unmarked default and emits no sigil.
-            format!(
-                "{}: {}{}",
-                p.name,
-                p.convention.sigil(),
-                format_type(&p.ty, dimensions)
-            )
-        })
-        .collect();
-    let ret = match inferred {
-        Some(row) => {
-            let row = crate::Sema::ApiFreeze::normalized_public_effect_row(f, row);
-            format!(
-                " =[{}]=>{}",
-                row.iter().cloned().collect::<Vec<_>>().join(", "),
-                f.return_type
-                    .as_ref()
-                    .map(|t| format!(" {}", format_type(t, dimensions)))
-                    .unwrap_or_default()
-            )
-        }
-        None => f
-            .return_type
-            .as_ref()
-            .map(|t| format!(" => {}", format_type(t, dimensions)))
-            .unwrap_or_default(),
-    };
-    format!("fn {}{}({}){}", f.name, type_params, params.join(", "), ret)
+    crate::Sema::ApiFreeze::canonical_fn_signature_with_effects(f, inferred, dimensions)
 }
 
 fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions) -> String {

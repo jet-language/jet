@@ -108,6 +108,22 @@ fn crypto_err(msg: impl Into<String>) -> CtValue {
     }
 }
 
+fn clock_now(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+    match value {
+        CtValue::Struct {
+            type_name,
+            fields,
+        } if type_name == "__JetTirClock" || type_name == "Clock" => fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("now", CtValue::Int(now)) => Some(*now),
+                _ => None,
+            })
+            .ok_or_else(|| unsupported("core.uuid.v7 clock state", span)),
+        _ => Err(unsupported("core.uuid.v7 clock", span)),
+    }
+}
+
 fn db_err(msg: impl Into<String>) -> CtValue {
     CtValue::Struct {
         type_name: "DBError".to_string(),
@@ -771,6 +787,26 @@ pub fn ambient_core_call(
                 Ok(handle) => CtValue::Present(Box::new(mod_value(handle))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
+        }
+        ("core.crypto.random", "bytes") => {
+            let Some(CtValue::Int(count)) = args.first() else {
+                return Some(Err(unsupported("core.crypto.random.bytes count", span)));
+            };
+            Some(Ok(CtValue::Bytes(
+                Crypto::runtime::jet_std_crypto_random_bytes(*count),
+            )))
+        }
+        ("core.uuid", "v4") => Some(Ok(CtValue::Str(
+            Crypto::runtime::jet_crypto_uuid_v4(),
+        ))),
+        ("core.uuid", "v7") => {
+            let timestamp = match clock_now(args.first()?, span) {
+                Ok(timestamp) => timestamp,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(CtValue::Str(
+                Crypto::runtime::jet_crypto_uuid_v7(timestamp),
+            )))
         }
         ("core.crypto", "sha512_bytes") => {
             let data = match as_bytes(args.first()?, span) {

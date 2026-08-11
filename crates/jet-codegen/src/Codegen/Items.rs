@@ -656,13 +656,11 @@ pub(crate) fn emit_cli_entry_if_needed(
     } else {
         return;
     };
-    let crypto_error_type = cx.rust_type(&Type::Named("CryptoError".to_string()));
     if params.is_empty() {
         let invoke = emit_entry_invocation(
             &callable,
             None,
             entry_error,
-            &crypto_error_type,
             "    ",
         );
         out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{invoke}}}\n\n"));
@@ -712,7 +710,6 @@ pub(crate) fn emit_cli_entry_if_needed(
                 &callable,
                 Some(&call_arg),
                 entry_error,
-                &crypto_error_type,
                 "                ",
             );
             out.push_str(&format!(
@@ -739,7 +736,6 @@ pub(crate) fn emit_cli_entry_if_needed(
             &callable,
             &arg_expr,
             entry_error,
-            &crypto_error_type,
             out,
         );
     }
@@ -749,7 +745,6 @@ fn emit_entry_invocation(
     callable: &str,
     argument: Option<&str>,
     entry_error: Option<EntryError>,
-    crypto_error_type: &str,
     indent: &str,
 ) -> String {
     let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
@@ -758,7 +753,7 @@ fn emit_entry_invocation(
             "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    eprintln!(\"{{}}\", __jet_err);\n{indent}    std::process::exit(1);\n{indent}}}\n"
         ),
         Some(EntryError::Crypto) => format!(
-            "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    let __jet_internal = matches!(&__jet_err, {crypto_error_type}::Internal {{ .. }});\n{indent}    eprintln!(\"Error [E3001]: unhandled cryptographic error\");\n{indent}    eprintln!(\" Why: {{}}\", __jet_err);\n{indent}    eprintln!(\" Fix: handle the CryptoError in fn run\");\n{indent}    std::process::exit(if __jet_internal {{ 101 }} else {{ 70 }});\n{indent}}}\n"
+            "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    let __jet_internal = matches!(&__jet_err, JetCryptoError::Internal {{ .. }});\n{indent}    jet_abort_diagnostic(jet_render_e3001_crypto(&__jet_err.to_string(), __jet_internal));\n{indent}}}\n"
         ),
         None => format!("{indent}jet_runtime_boundary(|| {call});\n"),
     }
@@ -808,7 +803,6 @@ fn emit_cli_subcommand_entry(
     callable: &str,
     arg_expr: &dyn Fn(&str) -> String,
     entry_error: Option<EntryError>,
-    crypto_error_type: &str,
     out: &mut String,
 ) {
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
@@ -831,7 +825,6 @@ fn emit_cli_subcommand_entry(
             callable,
             Some(&call_arg),
             entry_error,
-            crypto_error_type,
             "                        ",
         );
         let spec_name = cli_helper_name("spec", payload_name);
