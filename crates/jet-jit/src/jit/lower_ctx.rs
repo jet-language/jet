@@ -1126,6 +1126,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.block_params(merge)[0])
             }
             Type::Named(_) | Type::Apply { .. } => {
+                if let Some(kind) = Self::serde_builtin_codec_kind(&ty) {
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    let result = self
+                        .call_host(self.host.encoding.codec_encode, &[kind, val]);
+                    self.emit_trap_check()?;
+                    return Ok(result);
+                }
                 let key = self
                     .serde_codec_key(&ty, "encode")
                     .ok_or_else(|| format!("jit SerdeEncode unsupported: {ty:?}"))?;
@@ -1144,6 +1151,21 @@ impl LowerCtx<'_, '_> {
 
     /// Monomorphized Codable methods are named `Wrap<Int>::encode`; fall back to
     /// `Wrap::encode` when only the base owner was lowered.
+    fn serde_builtin_codec_kind(ty: &Type) -> Option<i64> {
+        let Type::Named(name) = ty else {
+            return None;
+        };
+        match name.as_str() {
+            "Date" => Some(crate::Encoding::CODEC_KIND_DATE),
+            "LocalDate" => Some(crate::Encoding::CODEC_KIND_LOCAL_DATE),
+            "LocalTime" => Some(crate::Encoding::CODEC_KIND_LOCAL_TIME),
+            "DateTime" => Some(crate::Encoding::CODEC_KIND_DATETIME),
+            "Duration" => Some(crate::Encoding::CODEC_KIND_DURATION),
+            "Decimal" => Some(crate::Encoding::CODEC_KIND_DECIMAL),
+            _ => None,
+        }
+    }
+
     fn serde_codec_key(&self, ty: &Type, method: &str) -> Option<String> {
         let base = user_type_name(ty)?;
         if matches!(ty, Type::Apply { .. }) {
@@ -1351,6 +1373,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.block_params(merge)[0])
             }
             Type::Named(_) | Type::Apply { .. } => {
+                if let Some(kind) = Self::serde_builtin_codec_kind(&target) {
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    let result = self
+                        .call_host(self.host.encoding.codec_decode, &[kind, tree]);
+                    self.emit_trap_check()?;
+                    return Ok(result);
+                }
                 let key = self
                     .serde_codec_key(&target, "decode")
                     .ok_or_else(|| format!("jit DataTreeDecode unsupported: {target:?}"))?;

@@ -162,7 +162,7 @@ fn assert_generated_project(
     );
 
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "main.jet"])
+        .args(["run", "--trace-tiers", "main.jet"])
         .current_dir(&dir)
         .env("JET_CACHE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
@@ -173,6 +173,30 @@ fn assert_generated_project(
         String::from_utf8_lossy(&jit_run.stdout),
         expected_stdout,
         "default `jet run` output did not use generated {format} fields"
+    );
+    assert!(
+        String::from_utf8_lossy(&jit_run.stderr).contains("tier1 native"),
+        "default `jet run` did not exercise resident JIT:\n{}",
+        String::from_utf8_lossy(&jit_run.stderr)
+    );
+
+    let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--trace-tiers", "--interpret", "main.jet"])
+        .current_dir(&dir)
+        .env("JET_CACHE_DIR", dir.join("interpreter-cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_success(&interpreter_run);
+    assert_eq!(
+        String::from_utf8_lossy(&interpreter_run.stdout),
+        expected_stdout,
+        "forced interpreter output did not use generated {format} fields"
+    );
+    assert!(
+        !String::from_utf8_lossy(&interpreter_run.stderr).contains("tier1 native"),
+        "forced interpreter unexpectedly used resident JIT:\n{}",
+        String::from_utf8_lossy(&interpreter_run.stderr)
     );
     let _ = fs::remove_dir_all(dir);
 }
@@ -366,26 +390,38 @@ fn sql_bind_generated_project_executes_typed_fields() {
         "sql",
         "sql",
         "schema.sql",
-        "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(32) NOT NULL, active BOOLEAN NOT NULL, born DATE, opened TIME, created TIMESTAMP, data BLOB NOT NULL);",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(32) NOT NULL, active BOOLEAN NOT NULL, born DATE, opened TIME, created TIMESTAMP, price DECIMAL, data BLOB NOT NULL);",
         "User",
         "jet inspect bind sql schema.sql --type User",
         r#"
+use core.encoding.json as json
+use core.time as time
+use core.time.date as date
+
 fn run() {
     bytes := [U8].{}
     bytes.push(U8.{65})
     bytes.push(U8.{66})
-    user :: User.{ id: 7, name: "Ada", active: true, born: .None, opened: .None, created: .None, data: bytes }
-    print(user.id)
-    print(user.name)
-    print(user.active)
-    print(user.data[0])
-    print(user.data.len())
-    if user.born == .None { print("born-none") }
-    if user.opened == .None { print("opened-none") }
-    if user.created == .None { print("created-none") }
+    user :: User.{ id: 7, name: "Ada", active: true, born: Val(date.new(2024, 1, 2)), opened: Val(time.time(3, 4, 5)), created: Val(time.datetime(2024, 1, 2, 3, 4, 5)), price: Val(Decimal("12.340")), data: bytes }
+    wire :: json.to_string(user)
+    roundtrip :: json.decode<User>(wire) ?? panic("decode")
+    print(roundtrip.id)
+    print(roundtrip.name)
+    print(roundtrip.active)
+    print(roundtrip.data[0])
+    print(roundtrip.data.len())
+    print((roundtrip.born ?? panic("born")).to_string())
+    print((roundtrip.opened ?? panic("opened")).to_string())
+    print((roundtrip.created ?? panic("created")).format_rfc3339())
+    print((roundtrip.price ?? panic("price")).to_string())
+    empty :: User.{ id: 0, name: "", active: false, born: .None, opened: .None, created: .None, price: .None, data: bytes }
+    if empty.born == .None { print("born-none") }
+    if empty.opened == .None { print("opened-none") }
+    if empty.created == .None { print("created-none") }
+    if empty.price == .None { print("price-none") }
 }
 "#,
-        "7\nAda\ntrue\n65\n2\nborn-none\nopened-none\ncreated-none\n",
+        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\nborn-none\nopened-none\ncreated-none\nprice-none\n",
         &[
             "id: Int",
             "name: String",
@@ -393,6 +429,7 @@ fn run() {
             "born: LocalDate?",
             "opened: LocalTime?",
             "created: DateTime?",
+            "price: Decimal?",
             "data: [U8]",
         ],
     );
@@ -538,6 +575,45 @@ fn xml_bind_resolves_namespaces_omits_declarations_and_keeps_collisions() {
 }
 
 #[test]
+fn xml_bind_keeps_empty_whitespace_and_mixed_content_projection() {
+    let empty = generated(
+        "xml",
+        "empty.xml",
+        "<root attr=\"x\"/>",
+        Some("Root"),
+        "jet inspect bind xml empty.xml --type Root",
+    );
+    assert!(
+        empty.contains(r#"#Rename("$text")"#),
+        "empty XML content lost $text:\n{empty}"
+    );
+
+    let whitespace = generated(
+        "xml",
+        "whitespace.xml",
+        "<root> \t </root>",
+        Some("Root"),
+        "jet inspect bind xml whitespace.xml --type Root",
+    );
+    assert!(
+        whitespace.contains(r#"#Rename("$text")"#),
+        "whitespace XML content lost $text:\n{whitespace}"
+    );
+
+    let mixed = generated(
+        "xml",
+        "mixed.xml",
+        "<root>before<child>inside</child>after</root>",
+        Some("Root"),
+        "jet inspect bind xml mixed.xml --type Root",
+    );
+    assert!(
+        mixed.contains(r#"#Rename("$content")"#) && mixed.contains("DataTree"),
+        "mixed XML content lost ordered $content: DataTree:\n{mixed}"
+    );
+}
+
+#[test]
 fn proto_bind_generated_project_executes_typed_fields() {
     assert_generated_project(
         "proto",
@@ -547,22 +623,30 @@ fn proto_bind_generated_project_executes_typed_fields() {
         "Repo",
         "jet inspect bind proto repo.proto --type Repo",
         r#"
+use core.encoding.json as json
+use core.time as time
+
 fn run() {
     payload := [U8].{}
     payload.push(U8.{74})
     payload.push(U8.{101})
     payload.push(U8.{116})
-    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: payload, created: .None, ttl: .None }
-    print(repo.name)
-    print(repo.stars)
-    print(repo.active)
-    print(repo.payload.len())
-    print(repo.payload[0])
-    if repo.created == .None { print("created-none") }
-    if repo.ttl == .None { print("ttl-none") }
+    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: payload, created: Val(time.datetime(2024, 1, 2, 3, 4, 5)), ttl: Val(Duration.seconds(7) ?? panic("duration")) }
+    wire :: json.to_string(repo)
+    roundtrip :: json.decode<Repo>(wire) ?? panic("decode")
+    print(roundtrip.name)
+    print(roundtrip.stars)
+    print(roundtrip.active)
+    print(roundtrip.payload.len())
+    print(roundtrip.payload[0])
+    print((roundtrip.created ?? panic("created")).format_rfc3339())
+    print((roundtrip.ttl ?? panic("ttl")).in(.Seconds) ?? panic("ttl in"))
+    empty :: Repo.{ name: "", stars: 0, active: false, payload: payload, created: .None, ttl: .None }
+    if empty.created == .None { print("created-none") }
+    if empty.ttl == .None { print("ttl-none") }
 }
 "#,
-        "jet\n4\ntrue\n3\n74\ncreated-none\nttl-none\n",
+        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\ncreated-none\nttl-none\n",
         &[
             "name: String",
             "// proto field number: 2",

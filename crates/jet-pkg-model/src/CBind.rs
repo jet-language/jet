@@ -2096,11 +2096,19 @@ fn bind_sql(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Strin
 }
 
 #[derive(Clone, Debug)]
+enum XmlContent {
+    Text(String),
+    CData(String),
+    Element(XmlNode),
+    Comment(String),
+    ProcessingInstruction { target: String, data: String },
+}
+
+#[derive(Clone, Debug)]
 struct XmlNode {
     name: String,
     attrs: Vec<(String, String)>,
-    text: String,
-    children: Vec<XmlNode>,
+    content: Vec<XmlContent>,
     namespaces: BTreeMap<String, String>,
 }
 
@@ -2242,7 +2250,7 @@ impl XmlParser {
         node: XmlNode,
     ) -> Result<(), String> {
         if let Some(parent) = stack.last_mut() {
-            parent.children.push(node);
+            parent.content.push(XmlContent::Element(node));
         } else if root.is_some() {
             return Err("XML has more than one root element".to_string());
         } else {
@@ -2284,7 +2292,7 @@ impl XmlParser {
         self.read_quoted_value("declaration value")
     }
 
-    fn consume_processing_instruction(&mut self) -> Result<(), String> {
+    fn consume_processing_instruction(&mut self) -> Result<(String, String), String> {
         self.pos += 2;
         let target = self.read_name()?;
         if target.eq_ignore_ascii_case("xml") {
@@ -2292,7 +2300,7 @@ impl XmlParser {
         }
         if self.starts_with("?>") {
             self.pos += 2;
-            return Ok(());
+            return Ok((target, String::new()));
         }
         if !self
             .peek()
@@ -2310,7 +2318,7 @@ impl XmlParser {
         let data: String = self.chars[start..self.pos].iter().collect();
         validate_xml_characters(&data)?;
         self.pos += 2;
-        Ok(())
+        Ok((target, data))
     }
 
     fn consume_xml_declaration(&mut self) -> Result<(), String> {
@@ -2392,7 +2400,7 @@ impl XmlParser {
                 }
                 validate_xml_entities(&text)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.text.push_str(&text);
+                    parent.content.push(XmlContent::Text(text));
                 } else if text.chars().any(|ch| !matches!(ch, ' ' | '\t' | '\r' | '\n')) {
                     return Err("XML has text outside its root element".to_string());
                 }
@@ -2412,6 +2420,9 @@ impl XmlParser {
                     return Err("XML comment contains an invalid double hyphen".to_string());
                 }
                 validate_xml_characters(&body)?;
+                if let Some(parent) = stack.last_mut() {
+                    parent.content.push(XmlContent::Comment(body));
+                }
                 self.pos += 3;
                 continue;
             }
@@ -2427,7 +2438,7 @@ impl XmlParser {
                 let body: String = self.chars[start..self.pos].iter().collect();
                 validate_xml_characters(&body)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.text.push_str(&body);
+                    parent.content.push(XmlContent::CData(body));
                 } else {
                     return Err("XML CDATA appears outside its root element".to_string());
                 }
@@ -2435,7 +2446,12 @@ impl XmlParser {
                 continue;
             }
             if self.starts_with("<?") {
-                self.consume_processing_instruction()?;
+                let (target, data) = self.consume_processing_instruction()?;
+                if let Some(parent) = stack.last_mut() {
+                    parent
+                        .content
+                        .push(XmlContent::ProcessingInstruction { target, data });
+                }
                 continue;
             }
             if self.starts_with("</") {
@@ -2517,8 +2533,7 @@ impl XmlParser {
             let node = XmlNode {
                 name,
                 attrs,
-                text: String::new(),
-                children: Vec::new(),
+                content: Vec::new(),
                 namespaces,
             };
             if self_closing {
@@ -2532,6 +2547,21 @@ impl XmlParser {
         }
         root.ok_or_else(|| "XML has no root element".to_string())
     }
+}
+
+fn xml_child_elements(node: &XmlNode) -> impl Iterator<Item = &XmlNode> {
+    node.content.iter().filter_map(|content| match content {
+        XmlContent::Element(child) => Some(child),
+        _ => None,
+    })
+}
+
+fn xml_is_text_like(content: &XmlContent) -> bool {
+    matches!(content, XmlContent::Text(_) | XmlContent::CData(_))
+}
+
+fn xml_is_simple(node: &XmlNode) -> bool {
+    node.content.iter().all(xml_is_text_like)
 }
 
 fn validate_xml_characters(text: &str) -> Result<(), String> {
@@ -2608,7 +2638,7 @@ fn add_xml_record(
     let mut child_names = BTreeSet::new();
     for node in nodes {
         attr_names.extend(node.attrs.iter().map(|(attr, _)| attr.clone()));
-        child_names.extend(node.children.iter().map(|child| child.name.clone()));
+        child_names.extend(xml_child_elements(node).map(|child| child.name.clone()));
     }
     let mut fields = Vec::new();
     for attr in attr_names {
@@ -2623,12 +2653,21 @@ fn add_xml_record(
             note: None,
         });
     }
-    let text_present = nodes.iter().any(|node| !node.text.trim().is_empty());
-    if text_present {
+    let simple_count = nodes.iter().filter(|node| xml_is_simple(node)).count();
+    let mixed_count = nodes.len() - simple_count;
+    if simple_count > 0 {
         fields.push(FieldSeed {
             wire_name: "$text".to_string(),
             ty: BoundType::Scalar("String"),
-            optional: nodes.iter().any(|node| node.text.trim().is_empty()),
+            optional: mixed_count > 0,
+            note: None,
+        });
+    }
+    if mixed_count > 0 {
+        fields.push(FieldSeed {
+            wire_name: "$content".to_string(),
+            ty: BoundType::Scalar("DataTree"),
+            optional: simple_count > 0,
             note: None,
         });
     }
@@ -2637,9 +2676,7 @@ fn add_xml_record(
         let mut present_count = 0usize;
         let mut repeated = false;
         for node in nodes {
-            let matching: Vec<&XmlNode> = node
-                .children
-                .iter()
+            let matching: Vec<&XmlNode> = xml_child_elements(node)
                 .filter(|child| child.name == child_name)
                 .collect();
             if !matching.is_empty() {
@@ -2653,7 +2690,7 @@ fn add_xml_record(
         let child_hint = format!("{}{}", name, pascal_name(&child_name));
         let ty = if children
             .iter()
-            .all(|child| child.attrs.is_empty() && child.children.is_empty())
+            .all(|child| child.attrs.is_empty() && xml_is_simple(child))
         {
             let scalar = BoundType::Scalar("String");
             if repeated {
@@ -3811,7 +3848,7 @@ fn inference_rules(format: &str) -> &'static [&'static str] {
             "NOT NULL and PRIMARY KEY columns stay required; supported constraints are validated.",
         ],
         "xml" => &[
-            "XML attributes use @ wire keys; leaf element text becomes String and mixed text uses $text.",
+            "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as DataTree.",
             "Nested elements become records; repeated child elements become arrays.",
         ],
         "proto" => &[

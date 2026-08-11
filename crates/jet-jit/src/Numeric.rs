@@ -29,7 +29,7 @@ fn trap_fraction(msg: &str) {
     });
 }
 
-fn push_decimal(d: CtDecimal) -> i64 {
+pub(crate) fn push_decimal(d: CtDecimal) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.decimal_values.push(Some(d));
         rt.decimal_values.len() as i64
@@ -322,7 +322,6 @@ host_fns! {
     fraction_to_float: "jet_jit_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     fraction_is_zero: "jet_jit_fraction_is_zero" => jet_jit_fraction_is_zero: sig_unary_bool;
 }
-
 
 
 

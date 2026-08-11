@@ -52,22 +52,22 @@ impl __jet_Encode for char {
 }
 impl __jet_Encode for JetDate {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(self.to_string_fmt())
+        jet_std::DataTree::Text(jet_codec_date_encode(self))
     }
 }
 impl __jet_Encode for JetLocalTime {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(self.to_string_fmt())
+        jet_std::DataTree::Text(jet_codec_local_time_encode(self))
     }
 }
 impl __jet_Encode for JetDateTime {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(self.format_rfc3339())
+        jet_std::DataTree::Text(jet_codec_datetime_encode(self))
     }
 }
 impl __jet_Encode for jet_std::Duration {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Int(self.ns)
+        jet_std::DataTree::Int(jet_codec_duration_encode(self.ns))
     }
 }
 impl __jet_Encode for u8 {
@@ -91,7 +91,7 @@ impl __jet_Encode for f32 {
 impl __jet_Encode for jet_std::JetDecimal {
     fn jet_encode(&self) -> jet_std::DataTree {
         // Decimal stays exact through the shared tree; text preserves scale.
-        jet_std::DataTree::Text(self.to_string_rep())
+        jet_std::DataTree::Text(jet_codec_decimal_encode(self))
     }
 }
 impl<T: __jet_Encode> __jet_Encode for Vec<T> {
@@ -191,27 +191,30 @@ impl __jet_Decode for char {
 impl __jet_Decode for JetDate {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
-        JetDate::parse(&value).map_err(|error| jet_std::FieldError::one(format!("expected Date: {error}")))
+        jet_codec_date_decode(&value)
+            .map_err(|error| jet_std::FieldError::one(format!("expected Date: {error}")))
     }
 }
 impl __jet_Decode for JetLocalTime {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
-        JetLocalTime::parse(&value)
+        jet_codec_local_time_decode(&value)
             .map_err(|error| jet_std::FieldError::one(format!("expected LocalTime: {error}")))
     }
 }
 impl __jet_Decode for JetDateTime {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
-        JetDateTime::parse_rfc3339(&value)
+        jet_codec_datetime_decode(&value)
             .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
     }
 }
 impl __jet_Decode for jet_std::Duration {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Int(ns) => Ok(jet_std::Duration { ns: *ns }),
+            jet_std::DataTree::Int(ns) => Ok(jet_std::Duration {
+                ns: jet_codec_duration_decode(*ns),
+            }),
             other => Err(jet_std::FieldError::one(format!(
                 "expected Duration, found {}",
                 jet_std::datatree_kind(other)
@@ -263,9 +266,9 @@ impl __jet_Decode for f32 {
 impl __jet_Decode for jet_std::JetDecimal {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Text(s) => jet_std::JetDecimal::from_str(s)
+            jet_std::DataTree::Text(s) => jet_codec_decimal_decode_text(s)
                 .map_err(|e| jet_std::FieldError::one(format!("expected Decimal: {e}"))),
-            jet_std::DataTree::Int(n) => jet_std::JetDecimal::from_str(&n.to_string())
+            jet_std::DataTree::Int(n) => jet_codec_decimal_decode_int(*n)
                 .map_err(jet_std::FieldError::one),
             other => Err(jet_std::FieldError::one(format!(
                 "expected Decimal, found {}", jet_std::datatree_kind(other)
