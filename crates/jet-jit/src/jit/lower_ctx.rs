@@ -14239,7 +14239,13 @@ impl LowerCtx<'_, '_> {
                 Err("jit precise numeric builtin unsupported".to_string())
             }
             TExprKind::Drop(inner) => {
-                self.lower_expr(inner)?;
+                let value = self.lower_expr(inner)?;
+                if inner.ty.is_compute_tensor_family() {
+                    let _ = self.call_host(self.host.compute.drop_tensor, &[value]);
+                } else if inner.ty.is_compute_view_mut() {
+                    let (list, _, _) = self.unpack_view_mut(value)?;
+                    let _ = self.call_host(self.host.compute.drop_window, &[list]);
+                }
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TExprKind::AmbientInput { prompt } => {
@@ -15376,9 +15382,21 @@ impl LowerCtx<'_, '_> {
             // the full set; the tier-0 interpreter covers it too since it re-runs the
             // AST directly. JIT falls through to that fallback ladder for all of these.
             TBuiltinOp::IsEmpty => {
+                if recv_ty.is_compute_view_mut() {
+                    // Compute windows store their materialized window list in
+                    // record field 0. Ordinary ViewMut stores the owner list
+                    // there, so its emptiness comes from the inclusive bounds.
+                    let (window_list, _, _) = self.unpack_view_mut(recv_val)?;
+                    let len = self
+                        .call_host(self.host.coll.list_len, &[window_list]);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    return Ok(self.bool_from_icmp(IntCC::Equal, len, zero));
+                }
                 if Self::is_view_mut_ty(&recv_ty) {
-                    let (list, _, _) = self.unpack_view_mut(recv_val)?;
-                    let len = self.call_host(self.host.coll.list_len, &[list]);
+                    let (_, start, end) = self.unpack_view_mut(recv_val)?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    let span = self.b.ins().isub(end, start);
+                    let len = self.b.ins().iadd(span, one);
                     let zero = self.b.ins().iconst(types::I64, 0);
                     return Ok(self.bool_from_icmp(IntCC::Equal, len, zero));
                 }

@@ -1227,19 +1227,29 @@ pub fn apply(
             Err(e) => err_compute(e),
         }),
         "set" => {
-            let mut tensor = ct_to_tensor(one(0)?, span)?;
+            let handle = tensor_handle(one(0)?, span)?;
+            let mut tensor = handle
+                .lock()
+                .map_err(|_| unsupported("Tensor handle", span))?;
             match jet_compute_set(
                 &mut tensor,
                 &as_i64_list(one(1)?, span)?,
                 as_float(one(2)?, span)?,
             ) {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Struct {
-                    type_name: "__JetComputeSet".to_string(),
-                    fields: vec![
-                        ("tensor".to_string(), tensor_to_ct(&tensor)),
-                        ("unit".to_string(), CtValue::Unit),
-                    ],
-                }))),
+                Ok(()) => {
+                    let snapshot = (*tensor).clone();
+                    drop(tensor);
+                    Ok(CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "__JetComputeSet".to_string(),
+                        fields: vec![
+                            (
+                                "tensor".to_string(),
+                                tensor_to_ct_with_handle(&snapshot, handle, true),
+                            ),
+                            ("unit".to_string(), CtValue::Unit),
+                        ],
+                    })))
+                }
                 Err(e) => Ok(err_compute(e)),
             }
         }

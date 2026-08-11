@@ -47,6 +47,15 @@ fn assert_resident_trace() {
     );
 }
 
+fn run_forced_interpreter(name: &str, src: &str) -> (i32, String, String) {
+    jet_jit::reset_jit_trace_for_test();
+    let result = run_direct(name, src, true);
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
+    result
+}
+
 #[test]
 fn tensor_mutable_window_write_uses_shared_prelude_policy() {
     let src = r#"
@@ -80,14 +89,10 @@ fn run() {
     );
     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
 
-    jet_jit::reset_jit_trace_for_test();
-    let (code, stdout, stderr) = run_direct("mutable_window_interpreter", src, true);
+    let (code, stdout, stderr) = run_forced_interpreter("mutable_window_interpreter", src);
     assert_eq!(code, 0, "forced interpreter failed: {stderr}");
     assert_eq!(stderr, "");
     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
-    assert!(!jet_jit::jit_executed_for_test());
-    assert!(!jet_jit::deopt_invoked_for_test());
-    assert!(!jet_jit::fallback_invoked_for_test());
 }
 
 #[test]
@@ -150,6 +155,15 @@ fn run() {
         "resident JIT used the wrong Tensor clone policy:\n{stderr}"
     );
     assert_resident_trace();
+
+    let (code, stdout, stderr) =
+        run_forced_interpreter("compute_tensor_copy_clone_interpreter", src);
+    assert_ne!(code, 0, "an implicit Tensor clone must retain shared storage");
+    assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
+    assert!(
+        stderr.contains("Tensor mutable view requires exclusive backing storage"),
+        "forced interpreter used the wrong Tensor clone policy:\n{stderr}"
+    );
 }
 
 #[test]
@@ -205,6 +219,12 @@ fn run() {
         "stored compute views unexpectedly fell back to the interpreter:\n{stderr}"
     );
     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n");
+
+    let (code, stdout, stderr) =
+        run_forced_interpreter("compute_tensor_stored_range_interpreter", src);
+    assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n");
 }
 
 #[test]
@@ -240,6 +260,12 @@ fn run() {
         "borrowed compute read view unexpectedly fell back to the interpreter:\n{stderr}"
     );
     assert_eq!(stdout, "2.0\n3.0\n");
+
+    let (code, stdout, stderr) =
+        run_forced_interpreter("compute_tensor_borrowed_read_view_interpreter", src);
+    assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "2.0\n3.0\n");
 }
 
 #[test]
@@ -252,6 +278,7 @@ use core.compute as compute
 fn run() {
     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
     empty :: &tensor[0..<0]
+    print(empty.is_empty())
     print(empty.len())
     print(empty[0])
 }
@@ -264,6 +291,7 @@ use core.compute as compute
 fn run() {
     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
     empty :: &tensor[0..<0]
+    print(empty.is_empty())
     print(empty.len())
     empty[0] = 9.0
 }
@@ -281,7 +309,7 @@ fn run() {
             src,
         );
         assert_ne!(code, 0, "an empty Tensor element operation must fail");
-        assert_eq!(stdout, "0\n");
+        assert_eq!(stdout, "true\n0\n");
         assert!(
             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
             "AOT used a non-canonical empty-window element error:\n{stderr}"
@@ -293,7 +321,7 @@ fn run() {
             &[("main.jet", src)],
         );
         assert_ne!(code, 0, "an empty Tensor element operation must fail");
-        assert_eq!(stdout, "0\n");
+        assert_eq!(stdout, "true\n0\n");
         assert!(
             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
@@ -308,11 +336,22 @@ fn run() {
             false,
         );
         assert_ne!(code, 0, "an empty Tensor element operation must fail");
-        assert_eq!(stdout, "0\n");
+        assert_eq!(stdout, "true\n0\n");
         assert!(
             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
         );
         assert_resident_trace();
+
+        let (code, stdout, stderr) = run_forced_interpreter(
+            &format!("compute_tensor_empty_window_interpreter_{name}"),
+            src,
+        );
+        assert_ne!(code, 0, "an empty Tensor element operation must fail");
+        assert_eq!(stdout, "true\n0\n");
+        assert!(
+            stderr.contains("the list has 0 items, so position 0 doesn't exist"),
+            "forced interpreter used a non-canonical empty-window element error:\n{stderr}"
+        );
     }
 }

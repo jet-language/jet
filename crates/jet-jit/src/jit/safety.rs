@@ -2502,6 +2502,7 @@ fn resident_safe_builtin_op(
         TBuiltinOp::IsEmpty => {
             (jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
+                || jit_float_view_type(recv_ty)
                 || jit_list_record_type(recv_ty)
                 || jit_map_resident_type(recv_ty)
                 || matches!(recv_ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))

@@ -104,14 +104,14 @@ mod semantics {
 
 #[derive(Default)]
 pub(crate) struct ComputeState {
-    slots: Vec<TensorSlot>,
+    slots: Vec<Option<TensorSlot>>,
     windows: Vec<TensorWindowSlot>,
 }
 
 impl ComputeState {
     pub(crate) fn clear(&mut self) {
-        self.slots.clear();
         self.windows.clear();
+        self.slots.clear();
     }
 }
 
@@ -137,11 +137,15 @@ fn tensor_index(handle: i64) -> Option<usize> {
 }
 
 fn slot<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a TensorSlot> {
-    tensor_index(handle).and_then(|index| runtime.compute.slots.get(index))
+    tensor_index(handle)
+        .and_then(|index| runtime.compute.slots.get(index))
+        .and_then(Option::as_ref)
 }
 
 fn slot_mut<'a>(runtime: &'a mut JitRuntime, handle: i64) -> Option<&'a mut TensorSlot> {
-    tensor_index(handle).and_then(|index| runtime.compute.slots.get_mut(index))
+    tensor_index(handle)
+        .and_then(|index| runtime.compute.slots.get_mut(index))
+        .and_then(Option::as_mut)
 }
 
 fn trap(runtime: &mut JitRuntime, message: &str) -> i64 {
@@ -187,8 +191,36 @@ fn alloc_tensor(runtime: &mut JitRuntime, tensor: semantics::Tensor) -> i64 {
         return 0;
     };
     let list = alloc_float_list(runtime, &values);
-    runtime.compute.slots.push(TensorSlot { tensor, list });
+    runtime.compute.slots.push(Some(TensorSlot { tensor, list }));
     runtime.compute.slots.len() as i64
+}
+
+extern "C" fn jet_jit_compute_drop_tensor(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(index) = tensor_index(tensor) else {
+            return 0;
+        };
+        let released = runtime
+            .compute
+            .slots
+            .get_mut(index)
+            .and_then(Option::take)
+            .is_some();
+        if released {
+            runtime
+                .compute
+                .windows
+                .retain(|window| window.tensor != tensor);
+        }
+        0
+    })
+}
+
+extern "C" fn jet_jit_compute_drop_window(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        runtime.compute.windows.retain(|window| window.list != list);
+        0
+    })
 }
 
 extern "C" fn jet_jit_compute_from_list(values: i64) -> i64 {
@@ -454,6 +486,8 @@ host_fns! {
     from_list: "jet_compute_from_list" => jet_jit_compute_from_list: sig_one;
     copy: "jet_compute_copy" => jet_jit_compute_copy: sig_one;
     clone: "jet_compute_clone" => jet_jit_compute_clone: sig_one;
+    drop_tensor: "jet_jit_compute_drop_tensor" => jet_jit_compute_drop_tensor: sig_one;
+    drop_window: "jet_jit_compute_drop_window" => jet_jit_compute_drop_window: sig_one;
     tensor_to_list: "jet_compute_tensor_to_list" => jet_jit_compute_tensor_to_list: sig_one;
     slice: "jet_jit_compute_slice" => jet_jit_compute_slice: sig_window;
     view: "jet_jit_compute_view" => jet_jit_compute_view: sig_window;
