@@ -2,10 +2,11 @@
 //!
 //! Resolves the import graph from an entry `.jet` file, detects cycles and
 //! ambiguous module names, and returns a `ProgramBundle` for sema/codegen.
-//! When a `pkg.jet` is found in the project root (walked upward from entry),
+//! When a `package.jet` is found in the project root (walked upward from entry),
 //! validates the manifest and wires package dep paths into module search (M12.1).
 
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_pkg_model::Authority::AuthorityResolver;
 use crate::Lexer;
 use crate::Manifest;
 use crate::Parser;
@@ -355,26 +356,35 @@ fn load_entry_with_overlays_mode_with_sink(
         package_auto_derive,
     ) = if let Some(manifest_dir) = manifest_root
     {
-        if Manifest::has_both_manifests(&manifest_dir) {
-            return Err(vec![Diagnostic::error(
-                "E1206",
-                "the package has two manifest roots".to_string(),
-                format!(
-                    "`{}` and `{}` both exist; choosing one would make package identity ambiguous",
-                    Syntax::PACKAGE_FILE,
-                    Syntax::PAYLOAD_FILE,
-                ),
-                format!(
-                    "remove `{}` or migrate it into `{}`",
-                    Syntax::PAYLOAD_FILE,
-                    Syntax::PACKAGE_FILE,
-                ),
-                None,
-            )]);
-        }
         // Found a Package root — validate it and collect dep source paths.
-        let pack_path = manifest_path(&manifest_dir).expect("manifest root has a manifest");
-        let raw = match fs::read_to_string(&pack_path) {
+        let resolver = match AuthorityResolver::open(&manifest_dir) {
+            Ok(resolver) => resolver,
+            Err(error) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &manifest_dir.display().to_string(),
+                        "",
+                        vec![error.diagnostic()],
+                    ),
+                ));
+            }
+        };
+        let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
+            Ok(checked) => checked,
+            Err(error) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &manifest_dir.display().to_string(),
+                        "",
+                        vec![error.diagnostic()],
+                    ),
+                ));
+            }
+        };
+        let pack_path = checked.file.path.clone();
+        let raw = match checked.file.text() {
             Ok(raw) => raw,
             Err(error) => {
                 return Err(record_loader_error(
@@ -382,13 +392,7 @@ fn load_entry_with_overlays_mode_with_sink(
                     LoaderError::at(
                         &pack_path.display().to_string(),
                         "",
-                        vec![Diagnostic::error(
-                            "E3503",
-                            format!("build policy in `{}` cannot be read", pack_path.display()),
-                            format!("the package build policy is present but unavailable: {error}"),
-                            "make the package policy readable before running build code".to_string(),
-                            None,
-                        )],
+                        vec![error.diagnostic()],
                     ),
                 ));
             }
@@ -427,7 +431,22 @@ fn load_entry_with_overlays_mode_with_sink(
                     ),
                 ));
             }
-            Err(_) => crate::Package::PackageFacts::default(),
+            Err(error) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &pack_path.display().to_string(),
+                        &raw,
+                        vec![Diagnostic::error(
+                            "E1206",
+                            "invalid package manifest".to_string(),
+                            error.to_string(),
+                            "fix the fields in package.jet before loading the project".to_string(),
+                            None,
+                        )],
+                    ),
+                ));
+            }
         };
         match Manifest::parse(&pack_path, &raw) {
             Err(d) => {
@@ -953,8 +972,26 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
 /// Return the manifest path owned by `root`, preferring canonical
 /// `package.jet` over migration-era `pkg.jet`.
 pub fn manifest_path(root: &Path) -> Option<PathBuf> {
-    let path = Manifest::manifest_path_in(root);
-    path.is_file().then_some(path)
+    manifest_path_checked(root).ok().flatten()
+}
+
+/// Return the checked canonical manifest path without hiding authority errors.
+pub fn manifest_path_checked(root: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    let resolver = match AuthorityResolver::open(root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    match resolver.checked_manifest(Path::new(".")) {
+        Ok(manifest) => {
+            resolver
+                .revalidate_file(&manifest.file)
+                .map_err(|error| error.diagnostic())?;
+            Ok(Some(manifest.file.path))
+        }
+        Err(error) if error.is_missing() => Ok(None),
+        Err(error) => Err(error.diagnostic()),
+    }
 }
 
 /// Walk upward from `start` to find the nearest Package root, stopping at the
@@ -962,15 +999,37 @@ pub fn manifest_path(root: &Path) -> Option<PathBuf> {
 /// returned so an inner malformed or ambiguous workspace cannot expose an
 /// outer package authority.
 pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    let mut dir = fs::canonicalize(start).map_err(|error| {
+        Diagnostic::error(
+            "E1334",
+            format!("couldn't resolve project boundary `{}`", start.display()),
+            error.to_string(),
+            "use an existing project directory".to_string(),
+            None,
+        )
+    })?;
     loop {
-        match jet_pkg_model::WorkspacePlan::resolve_workspace_source(&dir) {
-            Some(Ok(_)) => {
-                return Ok(manifest_path(&dir).is_some().then_some(dir));
+        let resolver = AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
+        match resolver.resolve_workspace_source() {
+            Ok(Some(_)) => {
+                return resolver
+                    .checked_manifest(Path::new("."))
+                    .map(|_| Some(dir.clone()))
+                    .or_else(|error| {
+                        if error.is_missing() {
+                            Ok(None)
+                        } else {
+                            Err(error.diagnostic())
+                        }
+                    });
             }
-            Some(Err(diagnostic)) => return Err(diagnostic),
-            None if manifest_path(&dir).is_some() => return Ok(Some(dir)),
-            None => {}
+            Ok(None) => {}
+            Err(error) => return Err(error.workspace_diagnostic()),
+        }
+        match resolver.checked_manifest(Path::new(".")) {
+            Ok(_) => return Ok(Some(dir)),
+            Err(error) if error.is_missing() => {}
+            Err(error) => return Err(error.diagnostic()),
         }
         match dir.parent() {
             Some(p) => dir = p.to_path_buf(),
@@ -1013,12 +1072,21 @@ pub fn authority_name_for_entry(entry: &Path) -> String {
 /// workspace nested below a package root must own file and module imports
 /// inside that workspace instead of inheriting the package's wider tree.
 pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    let mut dir = fs::canonicalize(start).map_err(|error| {
+        Diagnostic::error(
+            "E1334",
+            format!("couldn't resolve project boundary `{}`", start.display()),
+            error.to_string(),
+            "use an existing project directory".to_string(),
+            None,
+        )
+    })?;
     loop {
-        match jet_pkg_model::WorkspacePlan::resolve_workspace_source(&dir) {
-            Some(Ok(_)) => return Ok(Some(dir)),
-            Some(Err(diagnostic)) => return Err(diagnostic),
-            None => {}
+        let resolver = AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
+        match resolver.resolve_workspace_source() {
+            Ok(Some(_)) => return Ok(Some(dir)),
+            Ok(None) => {}
+            Err(error) => return Err(error.workspace_diagnostic()),
         }
         match dir.parent() {
             Some(p) => dir = p.to_path_buf(),
@@ -1198,19 +1266,29 @@ fn collect_dep_dirs(
 }
 
 /// Rebuild a project's dependency source dirs (M12.1) and U17 package
-/// resolution from its `pkg.jet`, for callers that only have the project
+/// resolution from its `package.jet`, for callers that only have the project
 /// root (e.g. `resolve_import_target`, run after the bundle is loaded). Returns
-/// empty maps when there is no manifest (R9 single-file mode).
-fn project_resolution(project_root: &Path) -> (HashMap<String, DependencyDir>, PkgResolution) {
-    let Some(pack_path) = manifest_path(project_root) else {
-        return (HashMap::new(), PkgResolution::default());
+/// empty maps when there is no manifest (R9 single-file mode); malformed
+/// authority is returned to the import caller.
+fn project_resolution(
+    project_root: &Path,
+) -> Result<(HashMap<String, DependencyDir>, PkgResolution), Diagnostic> {
+    let resolver = AuthorityResolver::open(project_root).map_err(|error| error.diagnostic())?;
+    let checked = match resolver.checked_manifest(Path::new(".")) {
+        Ok(checked) => checked,
+        Err(error) if error.is_missing() => {
+            return Ok((HashMap::new(), PkgResolution::default()));
+        }
+        Err(error) => return Err(error.diagnostic()),
     };
-    let Some(Ok(mf)) = Manifest::load(project_root) else {
-        return (HashMap::new(), PkgResolution::default());
-    };
+    let pack_path = checked.file.path.clone();
+    let raw = checked.file.text().map_err(|error| error.diagnostic())?;
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| error.diagnostic())?;
+    let mf = Manifest::parse(&pack_path, &raw)?;
     let dep_dirs = collect_dep_dirs(&mf, project_root);
-    let raw = fs::read_to_string(&pack_path).unwrap_or_default();
-    (dep_dirs, collect_pkg_resolution(&raw))
+    Ok((dep_dirs, collect_pkg_resolution(&raw)))
 }
 
 fn auto_derive_default_for_file(
@@ -1218,21 +1296,40 @@ fn auto_derive_default_for_file(
     project_root: &Path,
     project_default: bool,
     dependency_roots: &HashMap<String, DependencyDir>,
-) -> bool {
+) -> Result<bool, Diagnostic> {
     let dependency = dependency_roots
         .values()
         .filter(|dependency| path.starts_with(&dependency.source_root))
         .max_by_key(|dependency| dependency.source_root.components().count());
     if let Some(dependency) = dependency {
-        return crate::Package::PackageFacts::load(&dependency.manifest_root)
-            .and_then(Result::ok)
-            .and_then(|facts| facts.policy.auto_derive)
-            .unwrap_or(true);
+        let package = crate::Package::PackageFacts::load(&dependency.manifest_root)
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "E1334",
+                    format!(
+                        "package manifest `{}` is missing",
+                        dependency.manifest_root.display()
+                    ),
+                    "a dependency source root must have one checked package manifest".to_string(),
+                    "restore `package.jet` in the dependency root".to_string(),
+                    None,
+                )
+            })?
+            .map_err(|error| {
+                Diagnostic::error(
+                    "E1206",
+                    "invalid package manifest".to_string(),
+                    error.to_string(),
+                    "fix the fields in package.jet before loading the project".to_string(),
+                    None,
+                )
+            })?;
+        return Ok(package.policy.auto_derive.unwrap_or(true));
     }
     if path.starts_with(project_root) {
-        project_default
+        Ok(project_default)
     } else {
-        true
+        Ok(true)
     }
 }
 
@@ -1329,7 +1426,8 @@ fn load_file(
         project_root,
         package_auto_derive,
         pkg_dep_dirs,
-    );
+    )
+    .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;
     apply_auto_derive_default(&mut prog.items, auto_derive_default);
 
     let alias = default_module_alias(path);
@@ -2034,7 +2132,7 @@ pub fn resolve_import_target(
     // Rebuild the same dep-source dirs (M12.1) and U17 package resolution
     // (realized library staging dirs) the loader used, so a `use <pkg>`
     // re-resolves to the exact file already pulled into the bundle.
-    let (pkg_dep_dirs, pkg_resolution) = project_resolution(&bundle.project_root);
+    let (pkg_dep_dirs, pkg_resolution) = project_resolution(&bundle.project_root)?;
     let (project_parts, project_part_failures) =
         crate::ProjectParts::scan_with_diagnostics(&bundle.project_root, &[]);
     let target_path = match resolve_import(

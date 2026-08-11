@@ -6,6 +6,7 @@ use crate::RefSpec::{self, ProviderKind};
 use crate::Syntax;
 use crate::WorkspaceFile;
 use crate::WorkspaceLock;
+use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::{Path, PathBuf};
 
 /// Resolve the fixtures dir (explicit flag, env, or none). `--offline` only
@@ -31,7 +32,23 @@ pub(super) fn workspace_root(start: &Path) -> PathBuf {
 }
 
 fn workspace_source_present(dir: &Path) -> bool {
-    WorkspaceFile::resolve_workspace_source(dir).is_some()
+    match AuthorityResolver::open(dir) {
+        Ok(resolver) => match resolver.resolve_workspace_source() {
+            Ok(Some(_)) | Err(_) => true,
+            Ok(None) => false,
+        },
+        Err(error) => !error.is_missing(),
+    }
+}
+
+fn package_manifest_present(dir: &Path) -> bool {
+    match AuthorityResolver::open(dir) {
+        Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
+            Ok(_) | Err(jet_pkg_model::Authority::AuthorityError::AmbiguousManifest(_)) => true,
+            Err(error) => !error.is_missing(),
+        },
+        Err(error) => !error.is_missing(),
+    }
 }
 
 fn nearest_project_root(start: &Path) -> Option<PathBuf> {
@@ -39,7 +56,7 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .canonicalize()
         .unwrap_or_else(|_| start.to_path_buf());
     loop {
-        if dir.join(Syntax::PACKAGE_FILE).is_file()
+        if package_manifest_present(&dir)
             || dir.join(Syntax::ENV_FILE).is_file()
             || workspace_source_present(&dir)
         {
@@ -80,12 +97,7 @@ fn nearest_workspace_root(start: &Path) -> Option<PathBuf> {
 /// Returns `None` when no source declares a workspace. Prints the diagnostic to
 /// stderr and returns `Err(2)` when discovery or evaluation fails.
 pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
-    if let Some(Ok(source)) = WorkspaceFile::resolve_workspace_source(dir) {
-        if source.role != WorkspaceFile::WorkspaceSourceRole::Index {
-            return None;
-        }
-    }
-    let result = WorkspaceFile::load(dir)?;
+    let result = WorkspaceFile::load_checked(dir)?.map(|snapshot| snapshot.plan);
     match result {
         Ok(plan) => {
             match WorkspaceLock::write(dir, &plan) {
@@ -180,8 +192,8 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
     let dir = workspace_root(&std::env::current_dir().unwrap_or_default());
-    let plan = match WorkspaceFile::load(&dir) {
-        Some(Ok(plan)) => Some(plan),
+    let plan = match WorkspaceFile::load_checked(&dir) {
+        Some(Ok(snapshot)) => Some(snapshot.plan),
         // A malformed workspace source is source failure, never permission to
         // reuse a stale lock mirror.
         Some(Err(diagnostic)) => {

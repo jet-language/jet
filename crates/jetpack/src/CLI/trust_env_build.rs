@@ -17,6 +17,7 @@ use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
 use crate::WorkspaceFile::WorkspaceMember;
+use jet_pkg_model::Authority::AuthorityResolver;
 
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
 /// store; top-level `jet trust` dispatches here.
@@ -679,13 +680,65 @@ fn run_workspace_members(
     let roots = Store::resolve();
     let mut ok = true;
     let mut built: Vec<WorkspaceMember> = Vec::new();
+    let resolver = match AuthorityResolver::open(dir) {
+        Ok(resolver) => resolver,
+        Err(error) => return report_select_error(theme, &error.diagnostic()),
+    };
+    let source = match resolver.resolve_workspace_source() {
+        Ok(Some(source))
+            if source.role == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index =>
+        {
+            source
+        }
+        Ok(Some(_)) => {
+            let diagnostic = crate::Diagnostics::Diagnostic::error(
+                "E1239",
+                "workspace build needs workspace.jet as the index".to_string(),
+                "an authority declaration is not a member index".to_string(),
+                "move members into workspace.jet and keep one workspace index".to_string(),
+                None,
+            );
+            return report_select_error(theme, &diagnostic);
+        }
+        Ok(None) => {
+            let diagnostic = crate::Diagnostics::Diagnostic::error(
+                "E0995",
+                "workspace authority is missing".to_string(),
+                "workspace member realization requires a checked workspace.jet source".to_string(),
+                "restore workspace.jet before building workspace members".to_string(),
+                None,
+            );
+            return report_select_error(theme, &diagnostic);
+        }
+        Err(error) => return report_select_error(theme, &error.workspace_diagnostic()),
+    };
+    if let Err(error) = resolver.revalidate_source(&source) {
+        return report_select_error(theme, &error.diagnostic());
+    }
     let ordered_members = MemberSelect::dependency_order(dir, plan_members);
     for (idx, member) in ordered_members.iter().enumerate() {
-        let abs = if std::path::Path::new(&member.path).is_absolute() {
-            std::path::PathBuf::from(&member.path)
-        } else {
-            dir.join(&member.path)
+        let checked = match resolver.checked_member(std::path::Path::new(&member.path)) {
+            Ok(checked) => checked,
+            Err(error) => {
+                ok = false;
+                let diagnostic = error.diagnostic();
+                let _ = report_select_error(theme, &diagnostic);
+                continue;
+            }
         };
+        if let Err(error) = resolver.revalidate_member(&checked) {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+            continue;
+        }
+        let abs = checked.directory.path.clone();
+        if let Err(error) = resolver.revalidate_source(&source) {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+            continue;
+        }
         theme.status(&format!("{} workspace member: {}", action.present(), member.name));
         let table = RefSpec::SourceTable::from_decls([(
             member.name.clone(),
@@ -710,15 +763,22 @@ fn run_workspace_members(
                 continue;
             }
         };
-        if realize_ref(
+        let realized = realize_ref(
             theme,
             &roots,
             &parsed.flags,
             &table,
             &spec,
             member.name.len().max(8),
-        )
-        .is_none() {
+        );
+        let authority_valid = resolver
+            .revalidate_source(&source)
+            .and_then(|_| resolver.revalidate_member(&checked));
+        if let Err(error) = authority_valid {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+        } else if realized.is_none() {
             ok = false;
         } else if action == WorkspaceAction::Test && !run_jet_tests(&abs) {
             ok = false;
@@ -727,6 +787,9 @@ fn run_workspace_members(
         }
     }
     if ok {
+        if let Err(error) = resolver.revalidate_source(&source) {
+            return report_select_error(theme, &error.diagnostic());
+        }
         MemberSelect::record_member_input_hashes(dir, &built);
         theme.status(&format!(
             "{} {} workspace member(s).",

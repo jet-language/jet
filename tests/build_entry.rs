@@ -1389,9 +1389,14 @@ fn run() {}
     assert!(!root.join("stamp").exists());
 
     write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
-    write(&root.join("workspace.jet"), "module workspace { policy: .{ trust: .{ note: \"nested } text\" }, deny: Exec }\n");
+    write(&root.join("workspace.jet"), "module workspace { policy: .{ deny: Exec } }\n");
     let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
-    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503" && diagnostic.what.contains("malformed")), "{errors:#?}");
+    assert!(errors.iter().any(|diagnostic| {
+        diagnostic.code == "E3503"
+            && diagnostic.what == "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
+            && diagnostic.why == "Build authority must pass all three independent checks before any probe or action executes."
+            && diagnostic.fix == "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy."
+    }), "{errors:#?}");
     assert!(!root.join("stamp").exists());
 
     fs::remove_file(root.join("workspace.jet")).unwrap();
@@ -1472,6 +1477,29 @@ fn nested_workspace_is_the_module_import_root() {
             .any(|diagnostic| diagnostic.code == "E0603" && diagnostic.what.contains("_outside")),
         "{errors:#?}"
     );
+}
+
+#[test]
+fn module_directory_entry_requires_run_jet_not_main_jet() {
+    let root = project("module-run-entry");
+    let module = root.join("tool");
+    fs::create_dir_all(&module).unwrap();
+    write(&module.join("main.jet"), "pub fn run() {}\n");
+    let entry = root.join("run.jet");
+    write(&entry, "use tool\nfn run() {}\n");
+
+    let errors = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0603")
+        .expect("retired main.jet must not resolve a module directory");
+    assert_eq!(diagnostic.what, "can't find a module named `tool`");
+    assert_eq!(
+        diagnostic.why,
+        "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`"
+    );
+    assert_eq!(diagnostic.fix, "add `tool.jet` under this project, or fix the `use` name");
+    assert!(!diagnostic.why.contains("main.jet"));
 }
 
 #[test]

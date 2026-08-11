@@ -11,8 +11,8 @@
 //! read path for callers that only need to read.
 
 use crate::{
+    Authority::AuthorityResolver,
     Lock::{self, LockedWorkspaceMember},
-    Package::PackageFacts,
     Syntax,
     WorkspacePlan::{WorkspaceMember, WorkspacePlan},
 };
@@ -30,17 +30,20 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     if lock.workspace_source_digest.is_none() {
         return None;
     }
-    let (workspace_source_role, workspace_source_present, source_digest) = match
-        crate::WorkspacePlan::resolve_workspace_source(workspace_root)
-    {
-        Some(Ok(source)) => (
-            Some(source.role),
-            true,
-            crate::SHA256::sha256_hex(source.source.as_bytes()),
-        ),
-        Some(Err(_)) => return None,
-        None => (None, false, "no-workspace-source".to_string()),
+    let resolver = AuthorityResolver::open(workspace_root).ok()?;
+    let source = match resolver.resolve_workspace_source() {
+        Ok(source) => source,
+        Err(_) => return None,
     };
+    if let Some(source) = &source {
+        resolver.revalidate_source(source).ok()?;
+    }
+    let workspace_source_role = source.as_ref().map(|source| source.role);
+    let workspace_source_present = source.is_some();
+    let source_digest = source
+        .as_ref()
+        .map(|source| crate::SHA256::sha256_hex(source.source.as_bytes()))
+        .unwrap_or_else(|| "no-workspace-source".to_string());
     if !workspace_source_present
         && lock.workspace_source_digest.as_deref().is_some_and(|digest| {
             digest != "no-workspace-source"
@@ -61,7 +64,6 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
         return None;
     }
     if is_index && !lock.workspace_members.is_empty() {
-        let root = workspace_root.canonicalize().ok()?;
         let mut physical_paths = Vec::new();
         let mut names = Vec::new();
         for member in &lock.workspace_members {
@@ -78,24 +80,17 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             if member.source_digest != source_digest {
                 return None;
             }
-            let physical = workspace_root.join(relative).canonicalize().ok()?;
-            if !physical.starts_with(&root) {
-                return None;
+            if let Some(source) = &source {
+                resolver.revalidate_source(source).ok()?;
             }
-            let canonical_relative = physical
-                .strip_prefix(&root)
-                .ok()?
-                .to_string_lossy()
-                .into_owned();
-            let canonical_relative = if canonical_relative.is_empty() {
-                ".".to_string()
-            } else {
-                canonical_relative
-            };
+            let checked = resolver.checked_package(relative).ok()?;
+            resolver.revalidate_member(&checked.member).ok()?;
+            let physical_path = checked.member.directory.path.clone();
+            let canonical_relative = resolver.relative_identity(&checked.member.directory.path).ok()?;
             if canonical_relative != member.canonical_path {
                 return None;
             }
-            let package = PackageFacts::load(&physical)?.ok()?;
+            let package = checked.facts;
             if package.name != member.name || !package.members.is_empty() {
                 return None;
             }
@@ -104,13 +99,16 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             {
                 return None;
             }
-            if physical_paths.iter().any(|existing| existing == &physical)
+            if physical_paths.iter().any(|existing| existing == &physical_path)
                 || names.iter().any(|existing| existing == &member.name)
             {
                 return None;
             }
-            physical_paths.push(physical);
+            physical_paths.push(physical_path);
             names.push(member.name.clone());
+            if let Some(source) = &source {
+                resolver.revalidate_source(source).ok()?;
+            }
         }
     }
     let plan_source_digest = lock

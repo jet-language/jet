@@ -4,6 +4,7 @@
 //! `check_file` directly for document checking.
 
 use crate::Diagnostics::{Diagnostic, Severity};
+use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::Path;
 
 fn package_lints_deny(bundle: &crate::AST::ProgramBundle) -> Vec<String> {
@@ -1239,7 +1240,7 @@ fn compile_bundle_path_build_inner(
     dependency_boundary: Option<&str>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     let direct_package_overlay = if overlay.is_none() {
-        package_manifest_build_overlay(file)
+        package_manifest_build_overlay(file)?
     } else {
         None
     };
@@ -1260,20 +1261,37 @@ fn compile_bundle_path_build_inner(
         .iter()
         .map(|module| module.path.clone())
         .collect::<Vec<_>>();
-    let package_entry = package_build_entry_source(file, &bundle.project_root);
-    let package_manifest_entry = package_manifest_has_build_entry(file, &bundle.project_root);
+    let package_entry = package_build_entry_source(file, &bundle.project_root)?;
+    let package_manifest_entry = package_manifest_has_build_entry(file, &bundle.project_root)?;
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
     let entry_path = std::path::Path::new(file);
     let entry_dir = entry_path
         .parent()
         .unwrap_or(std::path::Path::new("."));
-    let is_workspace_entry = match jet_pkg_model::WorkspacePlan::resolve_workspace_source(entry_dir)
-    {
-        Some(Ok(source)) => std::fs::canonicalize(&source.path).ok()
-            == std::fs::canonicalize(entry_path).ok(),
-        Some(Err(diagnostic)) => return Err(vec![diagnostic]),
-        None => false,
+    let is_workspace_entry = match AuthorityResolver::open(entry_dir) {
+        Ok(resolver) => match resolver.resolve_workspace_source() {
+            Ok(Some(source))
+                if source.role == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index =>
+            {
+                let entry_identity = std::fs::canonicalize(entry_path)
+                    .map_err(|error| vec![Diagnostic::error(
+                        "E1334",
+                        "workspace entry cannot be resolved".to_string(),
+                        error.to_string(),
+                        "use an existing regular run.jet entry".to_string(),
+                        None,
+                    )])?;
+                resolver
+                    .revalidate_source(&source)
+                    .map_err(|error| vec![error.diagnostic()])?;
+                source.checked.path == entry_identity
+            }
+            Ok(Some(_)) | Ok(None) => false,
+            Err(error) => return Err(vec![error.workspace_diagnostic()]),
+        },
+        Err(error) if error.is_missing() => false,
+        Err(error) => return Err(vec![error.diagnostic()]),
     };
     let compile_mode = if options.plugin_target || has_package_entry || is_workspace_entry {
         crate::Sema::CompileMode::Check
@@ -2310,20 +2328,33 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
                 .is_none_or(|workspace| crate::Loader::is_physically_within(workspace, root))
         });
     if let Some(root) = package_root {
-        let path = crate::Loader::manifest_path(&root).expect("manifest root has a Package file");
-        let source = std::fs::read_to_string(&path).map_err(|error| {
+        let resolver = AuthorityResolver::open(&root)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let checked = resolver
+            .checked_manifest(std::path::Path::new("."))
+            .map_err(|error| vec![error.diagnostic()])?;
+        let source = checked
+            .file
+            .text()
+            .map_err(|error| vec![error.diagnostic()])?;
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let manifest = crate::Package::PackageFacts::parse(
+            &source,
+            checked.file.path.display().to_string(),
+        )
+        .map_err(|error| {
             vec![Diagnostic::error(
-                "E3503",
-                format!("build policy in `{}` cannot be read", path.display()),
-                format!("the package build policy is present but unavailable: {error}"),
-                "make the package policy readable before running build code".to_string(),
+                "E1206",
+                "invalid package manifest".to_string(),
+                error.to_string(),
+                "fix the fields in package.jet before loading the project".to_string(),
                 None,
             )]
         })?;
-        if let Ok(manifest) = crate::Package::PackageFacts::parse(&source, "package.jet") {
-            if !manifest.name.is_empty() {
-                return Ok(manifest.name);
-            }
+        if !manifest.name.is_empty() {
+            return Ok(manifest.name);
         }
     }
     if workspace_root.is_some() {
@@ -2340,8 +2371,15 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
 fn package_build_entry_source(
     file: &str,
     project_root: &std::path::Path,
-) -> Option<(std::path::PathBuf, String)> {
-    let package_path = crate::Manifest::manifest_path_in(project_root);
+) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
+    let resolver = AuthorityResolver::open(project_root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
+        Ok(checked) => checked,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
+    let package_path = checked.file.path.clone();
     let entry_path = std::path::Path::new(file);
     let entry_path = if entry_path.is_absolute() {
         entry_path.to_path_buf()
@@ -2353,34 +2391,71 @@ fn package_build_entry_source(
     if normalize_project_path(project_root, &entry_path)
         == normalize_project_path(project_root, &package_path)
     {
-        return None;
+        return Ok(None);
     }
-    let source = std::fs::read_to_string(&package_path).ok()?;
-    let build_source = crate::Package::build_entry_source(&source)?;
-    Some((package_path, build_source))
+    let source = checked
+        .file
+        .text()
+        .map_err(|error| vec![error.diagnostic()])?;
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(crate::Package::build_entry_source(&source)
+        .map(|source| (package_path, source)))
 }
 
-fn package_manifest_build_overlay(file: &str) -> Option<(std::path::PathBuf, String)> {
+fn package_manifest_build_overlay(
+    file: &str,
+) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
     let path = std::path::Path::new(file);
-    if !matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(crate::Syntax::PACKAGE_FILE) | Some(crate::Syntax::PAYLOAD_FILE)
-    ) {
-        return None;
+    if path.file_name().and_then(|name| name.to_str()) != Some(crate::Syntax::PACKAGE_FILE) {
+        return Ok(None);
     }
-    let path = if path.is_absolute() {
+    let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join(path)
+            .map(|directory| directory.join(path))
+            .map_err(|error| vec![Diagnostic::error(
+                "E1334",
+                "package manifest path cannot be resolved".to_string(),
+                error.to_string(),
+                "use an existing package.jet path".to_string(),
+                None,
+            )])?
     };
-    let source = std::fs::read_to_string(&path).ok()?;
-    let build_source = crate::Package::build_entry_source(&source)?;
-    Some((path, build_source))
+    let root = absolute.parent().unwrap_or(std::path::Path::new("."));
+    let resolver = AuthorityResolver::open(root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let checked = resolver
+        .checked_manifest(std::path::Path::new("."))
+        .map_err(|error| vec![error.diagnostic()])?;
+    if normalize_project_path(root, &absolute)
+        != normalize_project_path(root, &checked.file.path)
+    {
+        return Err(vec![Diagnostic::error(
+            "E1334",
+            "package manifest path changed during resolution".to_string(),
+            "the requested manifest path is not the checked package.jet object".to_string(),
+            "use the canonical package.jet path".to_string(),
+            None,
+        )]);
+    }
+    let source = checked
+        .file
+        .text()
+        .map_err(|error| vec![error.diagnostic()])?;
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(crate::Package::build_entry_source(&source)
+        .map(|source| (checked.file.path, source)))
 }
 
-fn package_manifest_has_build_entry(file: &str, project_root: &std::path::Path) -> bool {
+fn package_manifest_has_build_entry(
+    file: &str,
+    project_root: &std::path::Path,
+) -> Result<bool, Vec<Diagnostic>> {
     let entry_path = std::path::Path::new(file);
     let entry_path = if entry_path.is_absolute() {
         entry_path.to_path_buf()
@@ -2389,13 +2464,26 @@ fn package_manifest_has_build_entry(file: &str, project_root: &std::path::Path) 
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join(entry_path)
     };
-    let package_path = crate::Manifest::manifest_path_in(project_root);
-    normalize_project_path(project_root, &entry_path)
-        == normalize_project_path(project_root, &package_path)
-        && std::fs::read_to_string(package_path)
-            .ok()
-            .and_then(|source| crate::Package::build_entry_source(&source))
-            .is_some()
+    let resolver = AuthorityResolver::open(project_root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
+        Ok(checked) => checked,
+        Err(error) if error.is_missing() => return Ok(false),
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
+    if normalize_project_path(project_root, &entry_path)
+        != normalize_project_path(project_root, &checked.file.path)
+    {
+        return Ok(false);
+    }
+    let source = checked
+        .file
+        .text()
+        .map_err(|error| vec![error.diagnostic()])?;
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(crate::Package::build_entry_source(&source).is_some())
 }
 
 fn validate_build_authority(

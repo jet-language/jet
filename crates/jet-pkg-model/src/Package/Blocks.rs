@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashSet};
 // ── small structural helpers (std-only, comment-stripped input) ────────────
 
 /// Split a `{ … }` body into `key: value` entries at top-level commas.
-pub(super) fn key_value_entries(body: &str) -> Vec<(String, String)> {
+pub(super) fn key_value_entries(body: &str) -> Result<Vec<(String, String)>, PackageParseError> {
     let mut entries = Vec::new();
     for entry in top_level_commas(body) {
         let entry = entry.trim();
@@ -24,9 +24,11 @@ pub(super) fn key_value_entries(body: &str) -> Vec<(String, String)> {
         }
         if let Some((k, v)) = entry.split_once(':') {
             entries.push((k.trim().to_string(), v.trim().to_string()));
+        } else {
+            return Err(err(format!("malformed metadata field `{entry}`")));
         }
     }
-    entries
+    Ok(entries)
 }
 
 /// Split on commas that are not nested inside `()`/`[]`/`{}`.
@@ -202,7 +204,7 @@ fn ref_error(name: &str, error: &RefSpec::RefError) -> PackageParseError {
 
 pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, PackageParseError> {
     let mut deps = BTreeMap::new();
-    for (name, value) in key_value_entries(body) {
+    for (name, value) in key_value_entries(body)? {
         let trimmed = value.trim();
         let source = if let Some(inner) = trimmed.strip_prefix('{') {
             let inner = inner.strip_suffix('}').unwrap_or(inner);
@@ -261,7 +263,11 @@ fn parse_git_dep(name: &str, body: &str) -> Result<DepSource, PackageParseError>
     let mut tag = None;
     let mut branch = None;
     let mut rev = None;
-    for (key, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body)? {
+        if !seen.insert(key.clone()) {
+            return Err(err(format!("git dependency `{name}.{key}` is declared more than once")));
+        }
         let v = unquote(&value);
         match key.as_str() {
             "git" => url = Some(v),
@@ -385,7 +391,14 @@ fn parse_target(name: &str, value: &str) -> Result<Target, PackageParseError> {
 }
 
 fn validate_target_block(name: &str, body: &str) -> Result<(), PackageParseError> {
-    for (key, _value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, _value) in key_value_entries(body)? {
+        if !seen.insert(key.clone()) {
+            return Err(PackageParseError::BadTargetField {
+                name: name.to_string(),
+                detail: format!("target field `{key}` is declared more than once"),
+            });
+        }
         if key != Syntax::TARGET_FIELD_ENTRY && key != Syntax::TARGET_FIELD_NAME {
             return Err(PackageParseError::BadTargetField {
                 name: name.to_string(),
@@ -402,7 +415,14 @@ fn validate_target_block(name: &str, body: &str) -> Result<(), PackageParseError
 
 fn validate_plugin_block(name: &str, body: &str) -> Result<Option<String>, PackageParseError> {
     let mut export = None;
-    for (key, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body)? {
+        if !seen.insert(key.clone()) {
+            return Err(PackageParseError::BadTargetField {
+                name: name.to_string(),
+                detail: format!("plugin field `{key}` is declared more than once"),
+            });
+        }
         if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
             // free-form, consumed by the build pipeline.
         } else if key == Syntax::TARGET_FIELD_EXPORT {
@@ -423,13 +443,24 @@ fn validate_plugin_block(name: &str, body: &str) -> Result<Option<String>, Packa
 }
 
 fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, PackageParseError> {
-    for (key, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body)? {
+        if !seen.insert(key.clone()) {
+            return Err(PackageParseError::BadTargetField {
+                name: name.to_string(),
+                detail: format!("package field `{key}` is declared more than once"),
+            });
+        }
         if key == Syntax::PACKAGE_FIELD_KIND_REMOVED {
             return Err(PackageParseError::KindFieldRemoved { name: name.to_string() });
         }
         if key == Syntax::PACKAGE_FIELD_TARGETS {
             return parse_targets_list(name, value.trim());
         }
+        return Err(PackageParseError::BadTargetField {
+            name: name.to_string(),
+            detail: format!("unknown package field `{key}`"),
+        });
     }
     Ok(Vec::new())
 }
@@ -496,12 +527,12 @@ pub struct BuildProfileDef {
 pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackageParseError> {
     let mut profiles = Vec::new();
     let mut seen = HashSet::new();
-    for (name, value) in key_value_entries(body) {
+    for (name, value) in key_value_entries(body)? {
+        if !seen.insert(name.clone()) {
+            return Err(err(format!("build field `{name}` is declared more than once")));
+        }
         if name == Syntax::BUILD_FIELD_ALLOW {
             continue;
-        }
-        if !seen.insert(name.clone()) {
-            return Err(err(format!("build profile `{name}` is declared more than once")));
         }
         let value = value.trim();
         let inner_block = if let Some(rest) = value.strip_prefix(Syntax::BUILD_CTOR) {
@@ -521,7 +552,11 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
         let mut panic = None;
         let mut features = Vec::new();
         let mut env = Vec::new();
-        for (key, val) in key_value_entries(inner) {
+        let mut seen_fields = HashSet::new();
+        for (key, val) in key_value_entries(inner)? {
+            if !seen_fields.insert(key.clone()) {
+                return Err(err(format!("build profile `{name}.{key}` is declared more than once")));
+            }
             if key == Syntax::BUILD_FIELD_OPTIMIZE {
                 optimize_val = Some(unquote(&val));
             } else if key == Syntax::BUILD_FIELD_DEBUG_INFO {
@@ -544,7 +579,11 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                     .and_then(|s| s.strip_suffix('}'))
                     .map(|s| s.trim())
                     .ok_or_else(|| err(format!("build profile `{name}` needs `env: {{ KEY: \"value\", … }}`")))?;
-                for (k, v) in key_value_entries(inner) {
+                let mut seen_env = HashSet::new();
+                for (k, v) in key_value_entries(inner)? {
+                    if !seen_env.insert(k.clone()) {
+                        return Err(err(format!("build profile `{name}.env.{k}` is declared more than once")));
+                    }
                     env.push((k, unquote(&v)));
                 }
             } else {
@@ -571,10 +610,17 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
 /// D-CTEFFECT1: `build: .{ allow: #(FS, Exec) }`.
 pub(super) fn parse_build_allow(body: &str) -> Result<Vec<String>, PackageParseError> {
     let mut allow = Vec::new();
-    for (name, value) in key_value_entries(body) {
+    let mut seen_allow = false;
+    for (name, value) in key_value_entries(body)? {
         if name != Syntax::BUILD_FIELD_ALLOW {
             continue;
         }
+        if seen_allow {
+            return Err(PackageParseError::BadEffectsBlock(
+                "`build.allow:` is declared more than once".to_string(),
+            ));
+        }
+        seen_allow = true;
         let value = value.trim();
         let inner = value
             .strip_prefix("#(")
@@ -625,7 +671,13 @@ pub(super) fn parse_effects(
 ) -> Result<(Option<Vec<String>>, Option<Vec<String>>), PackageParseError> {
     let mut allow = None;
     let mut deny = None;
-    for (key, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body)? {
+        if !seen.insert(key.clone()) {
+            return Err(PackageParseError::BadEffectsBlock(format!(
+                "`effects.{key}` is declared more than once"
+            )));
+        }
         if key == Syntax::EFFECTS_FIELD_ALLOW {
             allow = Some(parse_effect_list(Syntax::EFFECTS_FIELD_ALLOW, value.trim())?);
         } else if key == Syntax::EFFECTS_FIELD_DENY {
@@ -644,8 +696,12 @@ pub(super) fn parse_effects(
 
 pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, PackageParseError> {
     let mut out = Vec::new();
-    for (key, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body)? {
         let dep = unquote(&key);
+        if !seen.insert(dep.clone()) {
+            return Err(err(format!("grant `{dep}` is declared more than once")));
+        }
         let effects = parse_effect_list(&dep, value.trim())?;
         out.push((dep, effects));
     }
@@ -695,7 +751,11 @@ pub(super) fn parse_trust_policy(body: &str) -> Result<Option<TrustPolicy>, Pack
         return Ok(None);
     };
     let mut policy = TrustPolicy::default();
-    for (key, value) in key_value_entries(&trust_body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(&trust_body)? {
+        if !seen.insert(key.clone()) {
+            return Err(err(format!("policy.trust.{key} is declared more than once")));
+        }
         if key == Syntax::POLICY_TRUST_FIELD_DEFAULT {
             policy.default = Some(parse_trust_decision(&value)?);
         } else if key == Syntax::POLICY_TRUST_FIELD_CI {
@@ -720,7 +780,7 @@ pub(super) fn parse_provider_policy(body: &str) -> Result<Vec<ProviderAuthority>
     };
     let mut out = Vec::new();
     let mut seen_providers = HashSet::new();
-    for (provider, value) in key_value_entries(&providers) {
+    for (provider, value) in key_value_entries(&providers)? {
         if !seen_providers.insert(provider.clone()) {
             return Err(err(format!("policy.providers.{provider} is declared more than once")));
         }
@@ -733,7 +793,7 @@ pub(super) fn parse_provider_policy(body: &str) -> Result<Vec<ProviderAuthority>
         let mut allow = Vec::new();
         let mut deny = Vec::new();
         let mut seen_fields = HashSet::new();
-        for (field, value) in key_value_entries(authority) {
+        for (field, value) in key_value_entries(authority)? {
             if !seen_fields.insert(field.clone()) {
                 return Err(err(format!("policy.providers.{provider}.{field} is declared more than once")));
             }
@@ -767,7 +827,11 @@ fn parse_ci_trust_prompt(value: &str) -> Result<TrustDecision, PackageParseError
         .and_then(|s| s.strip_suffix('}'))
         .ok_or_else(|| err("`policy.trust.ci` must be `{ prompt: allow|prompt|deny }`"))?;
     let mut prompt = None;
-    for (key, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body)? {
+        if !seen.insert(key.clone()) {
+            return Err(err(format!("policy.trust.ci.{key} is declared more than once")));
+        }
         if key != Syntax::POLICY_TRUST_FIELD_PROMPT {
             return Err(err(format!("unknown `policy.trust.ci` field `{key}` — allowed: `prompt`")));
         }
@@ -784,7 +848,11 @@ fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, Pack
         .and_then(|s| s.strip_suffix('}'))
         .ok_or_else(|| err("`policy.trust.services` must be `{ name: allow|prompt|deny }`"))?;
     let mut services = Vec::new();
-    for (name, value) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (name, value) in key_value_entries(body)? {
+        if !seen.insert(name.clone()) {
+            return Err(err(format!("policy.trust.services.{name} is declared more than once")));
+        }
         services.push((name, parse_trust_decision(&value)?));
     }
     Ok(services)
@@ -805,13 +873,17 @@ pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, Pack
 
 pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {
     let mut out = Vec::new();
-    for (name, raw) in key_value_entries(body) {
+    let mut seen = HashSet::new();
+    for (name, raw) in key_value_entries(body)? {
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
             if matches!(name.as_str(), "trust" | "lints" | "providers") || name == Syntax::MANIFEST_POLICY_AUTO_DERIVE {
                 continue;
             }
             return Err(bad_mem(format!("`{name}` is not a registered package policy")));
         };
+        if !seen.insert(key) {
+            return Err(bad_mem(format!("package policy `{name}` is declared more than once")));
+        }
         let value = match key {
             crate::Policy::PolicyKey::NoAlloc
             | crate::Policy::PolicyKey::ZeroRc
@@ -890,7 +962,7 @@ pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDecl
 }
 
 pub(super) fn parse_auto_derive_policy(body: &str) -> Result<Option<bool>, PackageParseError> {
-    let values = key_value_entries(body)
+    let values = key_value_entries(body)?
         .into_iter()
         .filter(|(name, _)| name == Syntax::MANIFEST_POLICY_AUTO_DERIVE)
         .map(|(_, raw)| match raw.trim() {

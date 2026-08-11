@@ -9,8 +9,8 @@
 //!   - Any comptime expression that evaluates to a `[String]`
 //!
 //! The result is a `WorkspacePlan` listing the member packages with their
-//! names (read from each member's `package.jet`, with `pkg.jet` retained only
-//! as an explicit migration fallback) and relative paths.
+//! names read from checked canonical `package.jet` manifests and relative
+//! paths.
 //!
 //! This replaces the `[packages]` table in `jetpack.toml` (D-WORKSPACE1=B
 //! clean break: one canonical declaration is the sole index).
@@ -27,13 +27,20 @@ use crate::Overlay;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{ComptimeInput, Expr, Func, Item, StrPart};
-use jet_pkg_model::Package::PackageFacts;
 
 // Re-export types so callers can use `jet_env_model::WorkspaceFile::WorkspacePlan` etc.
 pub use jet_pkg_model::WorkspacePlan::{
-    resolve_workspace_source, WorkspaceMember, WorkspacePlan, WorkspaceSource,
-    WorkspaceSourceRole,
+    resolve_workspace_source, AuthorityError, AuthorityKind, AuthorityResolver,
+    CheckedDirectory, CheckedFile, CheckedManifest, CheckedMember, FileIdentity, WorkspaceMember,
+    WorkspacePlan, WorkspaceSource, WorkspaceSourceRole,
 };
+
+/// A workspace source and the plan evaluated from its still-open snapshot.
+#[derive(Debug, Clone)]
+pub struct WorkspaceSnapshot {
+    pub source: WorkspaceSource,
+    pub plan: WorkspacePlan,
+}
 
 // ──────────────────────────────────────────────
 // Load / evaluate
@@ -47,15 +54,37 @@ pub use jet_pkg_model::WorkspacePlan::{
 /// declaration and may live in any top-level `.jet` file. The shared resolver
 /// owns candidate scanning, ambiguity, and source I/O diagnostics.
 pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
-    let source = resolve_workspace_source(dir)?;
-    Some(match source {
-        Ok(source) => match evaluate_source(&source.source, dir, source.role) {
-            Ok(plan) if source.role == WorkspaceSourceRole::Index => Ok(plan),
-            Ok(_) => return None,
-            Err(diagnostic) => Err(diagnostic),
-        },
-        Err(diagnostic) => Err(diagnostic),
-    })
+    let snapshot = load_checked(dir)?;
+    Some(snapshot.map(|snapshot| snapshot.plan))
+}
+
+/// Load the source and retain the checked authority snapshot through
+/// evaluation. This is the only workspace read path that may produce a plan.
+pub fn load_checked(dir: &Path) -> Option<Result<WorkspaceSnapshot, Diagnostic>> {
+    let resolver = match AuthorityResolver::open(dir) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return None,
+        Err(error) => return Some(Err(error.workspace_diagnostic())),
+    };
+    let source = match resolver.resolve_workspace_source() {
+        Ok(Some(source)) => source,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error.workspace_diagnostic())),
+    };
+    if let Err(error) = resolver.revalidate_source(&source) {
+        return Some(Err(error.diagnostic()));
+    }
+    let plan = match evaluate_with_resolver(&source.source, dir, source.role, &resolver) {
+        Ok(plan) => plan,
+        Err(diagnostic) => return Some(Err(diagnostic)),
+    };
+    if let Err(error) = resolver.revalidate_source(&source) {
+        return Some(Err(error.diagnostic()));
+    }
+    if source.role != WorkspaceSourceRole::Index {
+        return None;
+    }
+    Some(Ok(WorkspaceSnapshot { source, plan }))
 }
 
 /// Return whether a workspace source declares the optional top-level build
@@ -92,13 +121,23 @@ pub fn evaluate_source(
     base_dir: &Path,
     role: WorkspaceSourceRole,
 ) -> Result<WorkspacePlan, Diagnostic> {
-    evaluate_with_role(src, base_dir, role)
+    let resolver = AuthorityResolver::open(base_dir).map_err(|error| error.diagnostic())?;
+    evaluate_with_resolver(src, base_dir, role, &resolver)
 }
 
-fn evaluate_with_role(
+/// Evaluate an already-resolved source without reopening it by pathname.
+pub fn evaluate_checked_source(
+    source: &WorkspaceSource,
+    resolver: &AuthorityResolver,
+) -> Result<WorkspacePlan, Diagnostic> {
+    evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)
+}
+
+fn evaluate_with_resolver(
     src: &str,
     base_dir: &Path,
     role: WorkspaceSourceRole,
+    resolver: &AuthorityResolver,
 ) -> Result<WorkspacePlan, Diagnostic> {
     // `members:` may call comptime helpers; Canvas/tests invoke `load` outside
     // `jet`/`jetpack` mains that normally install this bridge.
@@ -108,15 +147,32 @@ fn evaluate_with_role(
             &e,
             Overlay::OverlayError::UnsupportedPolicy(_)
         );
+        let malformed_build_policy = matches!(
+            &e,
+            Overlay::OverlayError::Malformed(detail)
+                if detail.contains("policy.deny")
+        );
         Diagnostic::error(
-            if unsupported_policy { "E3503" } else { "E0998" },
-            if unsupported_policy {
+            if unsupported_policy || malformed_build_policy {
+                "E3503"
+            } else {
+                "E0998"
+            },
+            if malformed_build_policy {
+                "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy.".to_string()
+            } else if unsupported_policy {
                 "workspace build policy contains an unsupported field".to_string()
             } else {
                 "workspace overlay policy is malformed".to_string()
             },
-            e.message().to_string(),
-            if unsupported_policy {
+            if malformed_build_policy {
+                "Build authority must pass all three independent checks before any probe or action executes.".to_string()
+            } else {
+                e.message().to_string()
+            },
+            if malformed_build_policy {
+                "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy.".to_string()
+            } else if unsupported_policy {
                 "use `policy: .{ deny: #(…) }` or subject-scoped `policy: .{ grants: .{ \"package\": #(…) } }`".to_string()
             } else {
                 "write `overlay <name> { provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }`".to_string()
@@ -221,12 +277,19 @@ fn evaluate_with_role(
     let mut members = Vec::new();
     let mut comptime_inputs = Vec::new();
     for expr in &ws_module.members {
-        let (paths, inputs) =
-            eval_members_expr(expr, src, base_dir, &funcs, &extern_names, &globals)?;
+        let (paths, inputs) = eval_members_expr(
+            expr,
+            src,
+            base_dir,
+            resolver,
+            &funcs,
+            &extern_names,
+            &globals,
+        )?;
         comptime_inputs.extend(inputs);
         for (rel_path, span) in paths {
             let (name, canonical_path) =
-                validate_member_path(&rel_path, base_dir, &members, Some(span))?;
+                validate_member_path(&rel_path, resolver, &members, Some(span))?;
             let member = resolve_member(&rel_path, name, canonical_path);
             members.push(member);
         }
@@ -244,7 +307,7 @@ fn evaluate_with_role(
 /// root, names are unique, and a member cannot introduce another member list.
 fn validate_member_path(
     rel_path: &str,
-    base_dir: &Path,
+    resolver: &AuthorityResolver,
     members: &[WorkspaceMember],
     span: Option<Span>,
 ) -> Result<(String, String), Diagnostic> {
@@ -262,149 +325,27 @@ fn validate_member_path(
             span,
         ));
     }
-    let abs = base_dir.join(raw);
-    if !abs.is_dir() || package_file(&abs).is_none() {
+    let member = resolver
+        .checked_member(raw)
+        .map_err(|error| authority_diagnostic(error, span))?;
+    resolver
+        .revalidate_member(&member)
+        .map_err(|error| authority_diagnostic(error, span))?;
+    let path = &member.manifest.file.path;
+    let has_members = !member.manifest.facts.members.is_empty();
+    let name = member.manifest.facts.name.clone();
+    let canonical_path = resolver
+        .relative_identity(&member.directory.path)
+        .map_err(|error| authority_diagnostic(error, span))?;
+    if members.iter().any(|member| member.canonical_path == canonical_path) {
         return Err(Diagnostic::error(
-            "E1334",
-            format!("workspace member `{rel_path}` is not a Package directory"),
-            "an explicit workspace member must exist and contain `package.jet` or the migration-era `pkg.jet`".to_string(),
-            "create the Package file, correct the member path, or use `find(\"./packages\")` for discovery".to_string(),
+            "E1324",
+            format!("workspace member `{rel_path}` has the same physical identity as another member"),
+            "a workspace member is identified by its real directory, not by two spelling variants".to_string(),
+            "keep one member path for this directory".to_string(),
             span,
         ));
     }
-    let root = std::fs::canonicalize(base_dir).map_err(|error| {
-        Diagnostic::error(
-            "E1322",
-            format!("couldn't resolve the workspace root: {error}"),
-            "workspace membership uses real directory identity, so the workspace root must be canonicalizable".to_string(),
-            "fix the workspace root permissions or path before declaring members".to_string(),
-            span,
-        )
-    })?;
-    let real = std::fs::canonicalize(&abs).map_err(|error| {
-        Diagnostic::error(
-            "E1334",
-            format!("couldn't resolve workspace member `{rel_path}`: {error}"),
-            "a member's physical identity must be known before the workspace accepts it".to_string(),
-            "fix the member path or its symlink and try again".to_string(),
-            span,
-        )
-    })?;
-    if !real.starts_with(&root) {
-        return Err(Diagnostic::error(
-            "E1322",
-            format!("workspace member `{rel_path}` resolves outside the workspace root"),
-            "member identity follows the real path, including symlinks; an escaping target is not a workspace member".to_string(),
-            "move the member under the workspace root or remove the escaping symlink".to_string(),
-            span,
-        ));
-    }
-    for member in members {
-        let existing = std::fs::canonicalize(base_dir.join(&member.path)).map_err(|error| {
-            Diagnostic::error(
-                "E1324",
-                format!("couldn't resolve existing workspace member `{}`: {error}", member.path),
-                "duplicate detection uses physical member identity and cannot ignore an unresolved existing path".to_string(),
-                "fix the earlier member path before adding another member".to_string(),
-                span,
-            )
-        })?;
-        if existing == real {
-            return Err(Diagnostic::error(
-                "E1324",
-                format!("workspace member `{rel_path}` has the same physical identity as another member"),
-                "a workspace member is identified by its real directory, not by two spelling variants".to_string(),
-                "keep one member path for this directory".to_string(),
-                span,
-            ));
-        }
-    }
-    let path = package_file(&abs).ok_or_else(|| {
-        Diagnostic::error(
-            "E1334",
-            format!("workspace member `{rel_path}` Package metadata disappeared"),
-            "workspace membership must validate the complete member manifest before accepting it".to_string(),
-            "restore the member manifest and try again".to_string(),
-            span,
-        )
-    })?;
-    let is_package_file = path.file_name().and_then(|name| name.to_str())
-        == Some(Syntax::PACKAGE_FILE);
-    // Diagnostics use the same physical identity as membership validation.
-    // This removes harmless `./` spelling from the reported manifest path.
-    let path = path.canonicalize().map_err(|error| {
-        Diagnostic::error(
-            "E1334",
-            format!("couldn't resolve workspace member `{rel_path}` Package file: {error}"),
-            "workspace membership must know the real Package file before accepting it".to_string(),
-            "fix the member manifest path or its symlink and try again".to_string(),
-            span,
-        )
-    })?;
-    if !path.starts_with(&root) {
-        return Err(Diagnostic::error(
-            "E1322",
-            format!("workspace member `{rel_path}` Package file resolves outside the workspace root"),
-            "member metadata follows the real path, including symlinks; an escaping target is not a workspace member".to_string(),
-            "move the Package file under the workspace root or remove the escaping symlink".to_string(),
-            span,
-        ));
-    }
-    let metadata = std::fs::metadata(&path).map_err(|error| {
-        Diagnostic::error(
-            "E1334",
-            format!("couldn't inspect workspace member `{rel_path}` Package file: {error}"),
-            "workspace membership must validate a regular Package file before accepting it".to_string(),
-            "restore the member manifest and try again".to_string(),
-            span,
-        )
-    })?;
-    if !metadata.is_file() {
-        return Err(Diagnostic::error(
-            "E1334",
-            format!("workspace member `{rel_path}` Package metadata is not a regular file"),
-            "workspace membership cannot read a directory or special file as Package metadata".to_string(),
-            "replace the member metadata with a regular `package.jet` or `pkg.jet` file".to_string(),
-            span,
-        ));
-    }
-    let text = std::fs::read_to_string(&path).map_err(|error| {
-        Diagnostic::error(
-            "E1334",
-            format!("couldn't read workspace member `{rel_path}` Package file: {error}"),
-            "workspace membership must validate the complete member manifest before accepting it".to_string(),
-            "fix the member manifest permissions or contents and try again".to_string(),
-            span,
-        )
-    })?;
-    let (has_members, name) = if is_package_file {
-        match PackageFacts::parse_uncomposed(&text, path.display().to_string()) {
-            Ok(facts) => (!facts.members.is_empty(), facts.name),
-            Err(error) => {
-                return Err(Diagnostic::error(
-                    "E1334",
-                    format!("workspace member `{rel_path}` has an invalid Package file"),
-                    error.to_string(),
-                    "fix the member's `package.jet` fields before adding it to the workspace".to_string(),
-                    span,
-                ));
-            }
-        }
-    } else {
-        let name = legacy_package_name(&text).ok_or_else(|| {
-            Diagnostic::error(
-                "E1334",
-                format!("workspace member `{rel_path}` has an invalid Package file"),
-                "the migration-era `pkg.jet` must contain a non-empty `name:` field".to_string(),
-                "fix the member's `pkg.jet` fields before adding it to the workspace".to_string(),
-                span,
-            )
-        })?;
-        (
-            text.lines().any(|line| line.trim_start().starts_with("members:")),
-            name,
-        )
-    };
     if has_members {
         return Err(Diagnostic::error(
             "E1323",
@@ -432,25 +373,13 @@ fn validate_member_path(
             span,
         ));
     }
-    let canonical_path = real
-        .strip_prefix(&root)
-        .map_err(|_| {
-            Diagnostic::error(
-                "E1322",
-                format!("workspace member `{rel_path}` has no relative identity"),
-                "workspace membership must keep the member's physical identity below the workspace root".to_string(),
-                "move the member under the workspace root or remove the escaping symlink".to_string(),
-                span,
-            )
-        })?
-        .to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/");
-    let canonical_path = if canonical_path.is_empty() {
-        ".".to_string()
-    } else {
-        canonical_path
-    };
     Ok((name, canonical_path))
+}
+
+fn authority_diagnostic(error: AuthorityError, span: Option<Span>) -> Diagnostic {
+    let mut diagnostic = error.diagnostic();
+    diagnostic.span = span;
+    diagnostic
 }
 
 // ──────────────────────────────────────────────
@@ -465,6 +394,7 @@ fn eval_members_expr(
     expr: &Expr,
     _src: &str,
     base_dir: &Path,
+    resolver: &AuthorityResolver,
     funcs: &HashMap<String, &Func>,
     extern_names: &HashSet<String>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
@@ -486,8 +416,8 @@ fn eval_members_expr(
                 )
             })?;
             if let Some(dir_str) = extract_literal_string(&arg.expr) {
-                let scan_dir = validate_find_scan_dir(&dir_str, base_dir, span)?;
-                let paths = find_package_dirs(&scan_dir, base_dir, span)?
+                let scan_dir = validate_find_scan_dir(&dir_str, resolver, span)?;
+                let paths = find_package_dirs(&scan_dir, resolver, span)?
                     .into_iter()
                     .map(|path| (path, arg.expr.span()))
                     .collect();
@@ -575,7 +505,7 @@ fn extract_string_list(v: crate::Comptime::CtValue, span: Span) -> Result<Vec<St
 
 fn validate_find_scan_dir(
     raw: &str,
-    workspace_root: &Path,
+    resolver: &AuthorityResolver,
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
     let path = Path::new(raw);
@@ -593,77 +523,48 @@ fn validate_find_scan_dir(
             Some(span),
         ));
     }
-    let root = workspace_root.canonicalize().map_err(|error| {
-        Diagnostic::error(
-            "E0997",
-            format!("couldn't resolve the workspace root `{}`: {error}", workspace_root.display()),
-            "workspace discovery uses real paths and cannot safely scan an unresolved root".to_string(),
-            "fix the workspace root permissions or path before using `find`".to_string(),
-            Some(span),
-        )
-    })?;
-    let candidate = workspace_root.join(path.strip_prefix("./").unwrap_or(path));
-    let canonical = candidate
-        .canonicalize()
-        .map_err(|_| e0997_find_dir_missing(&candidate, span))?;
-    if !canonical.starts_with(&root) {
-        return Err(Diagnostic::error(
-            "E1322",
-            format!("`find` path `{raw}` resolves outside the workspace root"),
-            "workspace discovery follows real paths, including symlinks, and cannot scan outside the workspace".to_string(),
-            "move the target below the workspace root or remove the escaping symlink".to_string(),
-            Some(span),
-        ));
-    }
-    Ok(canonical)
+    let relative = path.strip_prefix("./").unwrap_or(path);
+    resolver
+        .checked_directory(relative)
+        .map(|directory| directory.path)
+        .map_err(|error| {
+            if error.is_missing() {
+                e0997_find_dir_missing(&resolver.root().join(relative), span)
+            } else {
+                let mut diagnostic = authority_diagnostic(error, Some(span));
+                diagnostic.span = Some(span);
+                diagnostic
+            }
+        })
 }
 
-/// Scan `scan_dir` for immediate subdirectories containing `package.jet` or
-/// the migration-era `pkg.jet`.
+/// Scan `scan_dir` for immediate subdirectories containing canonical
+/// `package.jet`.
 /// Returns paths relative to `workspace_root`, sorted for determinism.
 fn find_package_dirs(
     scan_dir: &Path,
-    workspace_root: &Path,
+    resolver: &AuthorityResolver,
     span: Span,
 ) -> Result<Vec<String>, Diagnostic> {
-    let workspace_root = workspace_root.canonicalize().map_err(|error| {
-        Diagnostic::error(
-            "E0997",
-            format!("couldn't resolve the workspace root `{}`: {error}", workspace_root.display()),
-            "workspace discovery uses real paths and cannot safely report member paths from an unresolved root".to_string(),
-            "fix the workspace root permissions or path before using `find`".to_string(),
-            Some(span),
-        )
-    })?;
-    let entries =
-        std::fs::read_dir(scan_dir).map_err(|_| e0997_find_dir_missing(scan_dir, span))?;
-    let mut found = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|_| e0997_find_dir_missing(scan_dir, span))?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        if !has_package_file(&path) {
-            continue;
-        }
-        found.push(path);
-    }
-    found.sort();
-    // Make each path relative to the workspace root.
-    let mut out = Vec::with_capacity(found.len());
-    for abs in found {
-        let rel = abs.strip_prefix(&workspace_root).map(|p| {
-            // Normalise to forward-slash form even on Windows; `.jet/lock`
-            // stores POSIX paths and platform joins handle them on read.
-            p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/")
-        });
-        match rel {
-            Ok(r) => out.push(r),
-            Err(_) => out.push(abs.to_string_lossy().into_owned()),
-        }
-    }
-    Ok(out)
+    resolver
+        .discover_members(scan_dir)
+        .map_err(|error| {
+            let mut diagnostic = authority_diagnostic(error, Some(span));
+            diagnostic.span = Some(span);
+            diagnostic
+        })
+        .map(|members| {
+            members
+                .into_iter()
+                .map(|member| {
+                    member
+                        .directory
+                        .relative
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/")
+                })
+                .collect()
+        })
 }
 
 // ──────────────────────────────────────────────
@@ -677,38 +578,6 @@ fn resolve_member(rel_path: &str, name: String, canonical_path: String) -> Works
         path: rel_path.to_string(),
         canonical_path,
     }
-}
-
-/// Read a package name from the migration-era `pkg.jet` text shape.
-fn legacy_package_name(src: &str) -> Option<String> {
-    // Fast heuristic: find `package: { name: "…" }` or `name: "…"`.
-    // This avoids a full parse for the common case.
-    for line in src.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("name:") {
-            let val = rest.trim().trim_end_matches(',').trim().trim_matches('"');
-            if !val.is_empty() && !val.contains('{') {
-                return Some(val.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn package_file(dir: &Path) -> Option<PathBuf> {
-    for name in [Syntax::PACKAGE_FILE, Syntax::PAYLOAD_FILE] {
-        let path = dir.join(name);
-        match std::fs::symlink_metadata(&path) {
-            Ok(_) => return Some(path),
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Some(path),
-            Err(_) => {}
-        }
-    }
-    None
-}
-
-fn has_package_file(dir: &Path) -> bool {
-    package_file(dir).is_some()
 }
 
 // ──────────────────────────────────────────────

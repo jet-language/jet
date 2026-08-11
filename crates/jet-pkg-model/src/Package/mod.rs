@@ -24,9 +24,11 @@ pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
 pub use Edit::{add_dep, remove_dep};
 
+use crate::Authority::{AuthorityError, AuthorityResolver};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageOutputKind {
@@ -355,6 +357,10 @@ impl fmt::Display for PackageParseError {
 impl std::error::Error for ComposeError {}
 impl std::error::Error for PackageParseError {}
 
+fn authority_package_error(error: AuthorityError) -> PackageParseError {
+    PackageParseError::Composition(error.to_string())
+}
+
 impl PackageFacts {
     /// Stable, checkout-portable digest of the fully composed typed facts
     /// used by workspace locks. Source origins and provenance are audit
@@ -442,42 +448,46 @@ impl PackageFacts {
     /// rejected as an ambiguous migration input; it is never parsed as a
     /// fallback Package root.
     pub fn load(dir: &std::path::Path) -> Option<Result<Self, PackageParseError>> {
-        let canonical = dir.join(crate::Syntax::PACKAGE_FILE);
-        let legacy = dir.join(crate::Syntax::PAYLOAD_FILE);
-        if canonical.is_file() && legacy.is_file() {
-            return Some(Err(PackageParseError::Composition(format!(
-                "both `{}` and migration-era `{}` exist; keep one Package root",
-                crate::Syntax::PACKAGE_FILE,
-                crate::Syntax::PAYLOAD_FILE,
-            ))));
-        }
-        let path = canonical;
-        if !path.is_file() {
-            return None;
-        }
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) => {
-                return Some(Err(PackageParseError::Composition(format!(
-                    "couldn't read Package `{}`: {error}",
-                    path.display()
-                ))))
-            }
+        let resolver = match AuthorityResolver::open(dir) {
+            Ok(resolver) => resolver,
+            Err(error) if error.is_missing() => return None,
+            Err(error) => return Some(Err(authority_package_error(error))),
         };
-        let parsed = Self::parse_uncomposed(&text, path.display().to_string());
-        Some(parsed.and_then(|mut facts| {
-            facts.compose_configs(dir)?;
-            facts
-                .validate_defaults()
-                .map_err(|error| PackageParseError::Composition(error.to_string()))?;
-            facts.validate_members_in(dir)?;
-            Ok(facts)
-        }))
+        let checked = match resolver.checked_manifest(Path::new(".")) {
+            Ok(checked) => checked,
+            Err(error) if error.is_missing() => return None,
+            Err(error) => return Some(Err(authority_package_error(error))),
+        };
+        if let Err(error) = resolver.revalidate_file(&checked.file) {
+            return Some(Err(authority_package_error(error)));
+        }
+        let manifest_file = checked.file.clone();
+        let mut facts = checked.facts;
+        let result = facts
+            .compose_configs_checked(&resolver)
+            .and_then(|_| {
+                facts
+                    .validate_defaults()
+                    .map_err(|error| PackageParseError::Composition(error.to_string()))
+            })
+            .and_then(|_| facts.validate_members_in_checked(&resolver));
+        if let Err(error) = resolver.revalidate_file(&manifest_file) {
+            return Some(Err(authority_package_error(error)));
+        }
+        Some(result.map(|_| facts))
     }
 
     /// Load and merge the root's declared Config files. Config paths are
     /// project-relative and are resolved before any facts are changed.
     pub fn compose_configs(&mut self, dir: &std::path::Path) -> Result<(), PackageParseError> {
+        let resolver = AuthorityResolver::open(dir).map_err(authority_package_error)?;
+        self.compose_configs_checked(&resolver)
+    }
+
+    pub(crate) fn compose_configs_checked(
+        &mut self,
+        resolver: &AuthorityResolver,
+    ) -> Result<(), PackageParseError> {
         let configs = self.configs.clone();
         let mut parsed = Vec::with_capacity(configs.len());
         let mut resolved_config_paths = self.resolved_config_paths.clone();
@@ -496,46 +506,44 @@ impl PackageFacts {
                     value: relative,
                 });
             }
-            let path = dir.join(path);
-            let path = if path.is_file() {
-                path
-            } else if path.extension().is_none() && path.with_extension("jet").is_file() {
-                path.with_extension("jet")
-            } else {
-                discover_config_path(dir, &relative)?
+            let requested = Path::new(&relative);
+            let checked = match resolver.checked_file(requested) {
+                Ok(file) => file,
+                Err(error) if error.is_missing() && requested.extension().is_none() => {
+                    let with_extension = requested.with_extension("jet");
+                    match resolver.checked_file(&with_extension) {
+                        Ok(file) => file,
+                        Err(error) if error.is_missing() => {
+                            let discovered = discover_config_path(resolver.root(), &relative)?;
+                            resolver
+                                .checked_file(&discovered)
+                                .map_err(authority_package_error)?
+                        }
+                        Err(error) => return Err(authority_package_error(error)),
+                    }
+                }
+                Err(error) if error.is_missing() => {
+                    let discovered = discover_config_path(resolver.root(), &relative)?;
+                    resolver
+                        .checked_file(&discovered)
+                        .map_err(authority_package_error)?
+                }
+                Err(error) => return Err(authority_package_error(error)),
             };
-            let root = dir.canonicalize().map_err(|error| {
-                PackageParseError::Composition(format!(
-                    "couldn't resolve Package root `{}`: {error}",
-                    dir.display()
-                ))
-            })?;
-            let path = path.canonicalize().map_err(|error| {
-                PackageParseError::Composition(format!(
-                    "couldn't resolve Config `{}`: {error}",
-                    path.display()
-                ))
-            })?;
-            if !path.starts_with(&root) {
-                return Err(PackageParseError::InvalidValue {
-                    field: "configs".to_string(),
-                    value: path.display().to_string(),
-                });
-            }
-            let relative_path = path
-                .strip_prefix(&root)
-                .expect("validated Config path must stay below Package root")
+            let path = checked.path.clone();
+            let relative_path = checked
+                .relative
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");
             if !resolved_config_paths.contains(&relative_path) {
                 resolved_config_paths.push(relative_path);
             }
-            let text = std::fs::read_to_string(&path).map_err(|error| {
-                PackageParseError::Composition(format!(
-                    "couldn't read Config `{}`: {error}",
-                    path.display()
-                ))
-            })?;
+            let text = checked
+                .text()
+                .map_err(authority_package_error)?;
+            resolver
+                .revalidate_file(&checked)
+                .map_err(authority_package_error)?;
             parsed.push(ConfigFacts::parse(&text, path.display().to_string())?);
         }
         self.compose(parsed)
@@ -655,14 +663,54 @@ impl PackageFacts {
         Ok(output)
     }
 
-    /// Resolve the selected runnable output, with canonical `run.jet` as the
-    /// only convention fallback when no typed runnable output exists.
+    /// Resolve the selected runnable output. A canonical checked `run.jet`
+    /// wins before typed output selection; retired `main.jet` is never a
+    /// fallback.
     pub fn resolve_run_entry(
         &self,
         root: &std::path::Path,
     ) -> Result<Option<std::path::PathBuf>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
+        let resolver = AuthorityResolver::open(root).map_err(|error| {
+            format!("{}: {error}", self.origin)
+        })?;
+        let run = match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
+            Ok(file) => Some(file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(format!("{}: {error}", self.origin)),
+        };
+        let main = match resolver.checked_file(Path::new(crate::Syntax::LEGACY_ENTRY_FILE)) {
+            Ok(file) => Some(file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(format!("{}: {error}", self.origin)),
+        };
+        if let Some(main) = main {
+            if run.is_some() {
+                return Err(format!(
+                    "{}: both canonical `{}` and retired `{}` exist; remove `{}`",
+                    self.origin,
+                    crate::Syntax::DEFAULT_ENTRY_FILE,
+                    crate::Syntax::LEGACY_ENTRY_FILE,
+                    crate::Syntax::LEGACY_ENTRY_FILE
+                ));
+            }
+            return Err(format!(
+                "{}: package entry requires canonical `{}`; retired `{}` is not accepted",
+                self.origin,
+                crate::Syntax::DEFAULT_ENTRY_FILE,
+                main.path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(crate::Syntax::LEGACY_ENTRY_FILE)
+            ));
+        }
+        if let Some(run) = run {
+            resolver
+                .revalidate_file(&run)
+                .map_err(|error| format!("{}: {error}", self.origin))?;
+            return Ok(Some(run.path));
+        }
         if self
             .outputs
             .values()
@@ -681,8 +729,7 @@ impl PackageFacts {
             };
             return Ok(Some(entry));
         }
-        let entry = root.join(crate::Syntax::DEFAULT_ENTRY_FILE);
-        Ok(entry.is_file().then_some(entry))
+        Ok(None)
     }
 
     /// Resolve a runnable Output's checked-reference spelling to a source
@@ -790,6 +837,13 @@ impl PackageFacts {
         self.member_names_in(dir).map(|_| ())
     }
 
+    pub(crate) fn validate_members_in_checked(
+        &self,
+        resolver: &AuthorityResolver,
+    ) -> Result<(), PackageParseError> {
+        self.member_names_in_checked(resolver).map(|_| ())
+    }
+
     /// Validate member paths and return the canonical names discovered in the
     /// physical Package root. Transition planners use the same checked
     /// discovery result when they preview a new member, so name collisions do
@@ -798,99 +852,49 @@ impl PackageFacts {
         &self,
         dir: &std::path::Path,
     ) -> Result<Vec<String>, PackageParseError> {
+        let resolver = AuthorityResolver::open(dir).map_err(authority_package_error)?;
+        self.member_names_in_checked(&resolver)
+    }
+
+    fn member_names_in_checked(
+        &self,
+        resolver: &AuthorityResolver,
+    ) -> Result<Vec<String>, PackageParseError> {
         self.validate_members()
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
-        let root = dir.canonicalize().map_err(|error| {
-            PackageParseError::Composition(format!(
-                "couldn't resolve Package root `{}`: {error}",
-                dir.display()
-            ))
-        })?;
         let mut physical = Vec::new();
         let mut names = Vec::new();
         for member in &self.members {
             let relative = match member {
                 MemberRef::Path(relative) | MemberRef::Find(relative) => relative,
             };
-            let path = dir.join(relative).canonicalize().map_err(|error| {
-                PackageParseError::Composition(format!(
-                    "couldn't resolve member reference `{relative}`: {error}"
-                ))
-            })?;
-            if !path.starts_with(&root) {
-                return Err(PackageParseError::Composition(format!(
-                    "member reference `{relative}` resolves outside Package root `{}`",
-                    dir.display()
-                )));
-            }
-            if path == root {
-                return Err(PackageParseError::Composition(format!(
-                    "member reference `{relative}` resolves to its Package root"
-                )));
-            }
             let candidates = if matches!(member, MemberRef::Find(_)) {
-                let entries = std::fs::read_dir(&path).map_err(|error| {
-                    PackageParseError::Composition(format!(
-                        "couldn't scan member discovery directory `{relative}`: {error}"
-                    ))
-                })?;
-                let mut children = Vec::new();
-                for entry in entries {
-                    let entry = entry.map_err(|error| {
-                        PackageParseError::Composition(format!(
-                            "couldn't read member discovery directory `{relative}`: {error}"
-                        ))
-                    })?;
-                    let child = entry.path();
-                    let file_type = entry.file_type().map_err(|error| {
-                        PackageParseError::Composition(format!(
-                            "couldn't inspect discovered member `{}`: {error}",
-                            child.display()
-                        ))
-                    })?;
-                    if !(file_type.is_dir() || (file_type.is_symlink() && child.is_dir())) {
-                        continue;
-                    }
-                    if package_manifest_path(&child).is_some() {
-                        children.push(child);
-                    }
-                }
-                children.sort();
-                children
+                resolver
+                    .discover_members(Path::new(relative))
+                    .map_err(authority_package_error)?
             } else {
-                vec![path]
+                vec![resolver
+                    .checked_member(Path::new(relative))
+                    .map_err(authority_package_error)?]
             };
             for candidate in candidates {
-                let candidate = candidate.canonicalize().map_err(|error| {
-                    PackageParseError::Composition(format!(
-                        "couldn't resolve member Package `{}`: {error}",
-                        candidate.display()
-                    ))
-                })?;
-                if !candidate.starts_with(&root) || candidate == root {
+                let candidate_path = candidate.directory.path.clone();
+                let canonical = resolver
+                    .relative_identity(&candidate_path)
+                    .map_err(authority_package_error)?;
+                if canonical == "`.`" {
                     return Err(PackageParseError::Composition(format!(
-                        "member reference `{relative}` resolves outside its Package root"
+                        "member reference `{relative}` resolves to its Package root"
                     )));
                 }
-                if candidate.join(crate::Syntax::PACKAGE_FILE).is_file()
-                    && candidate.join(crate::Syntax::PAYLOAD_FILE).is_file()
-                {
-                    return Err(PackageParseError::Composition(format!(
-                        "member Package `{relative}` contains both `{}` and migration-era `{}`",
-                        crate::Syntax::PACKAGE_FILE,
-                        crate::Syntax::PAYLOAD_FILE,
-                    )));
-                }
-                if physical.iter().any(|existing| existing == &candidate) {
+                if physical.iter().any(|existing| existing == &canonical) {
                     return Err(PackageParseError::Composition(format!(
                         "member reference `{relative}` has the same physical identity as another member"
                     )));
                 }
-                let (name, nested) = package_member_identity(&candidate)?;
-                if nested {
-                    let manifest = package_manifest_path(&candidate)
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| candidate.display().to_string());
+                let name = candidate.manifest.facts.name.clone();
+                if !candidate.manifest.facts.members.is_empty() {
+                    let manifest = candidate.manifest.file.path.display().to_string();
                     return Err(PackageParseError::Composition(format!(
                         "member Package `{relative}` at `{manifest}` declares members"
                     )));
@@ -900,7 +904,7 @@ impl PackageFacts {
                         "member Package name `{name}` is declared more than once"
                     )));
                 }
-                physical.push(candidate);
+                physical.push(canonical);
                 names.push(name);
             }
         }
@@ -1203,30 +1207,6 @@ fn package_record_bounds(value: &str) -> Option<(usize, usize)> {
     None
 }
 
-fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let canonical = dir.join(crate::Syntax::PACKAGE_FILE);
-    canonical.is_file().then_some(canonical)
-}
-
-fn package_member_identity(
-    dir: &std::path::Path,
-) -> Result<(String, bool), PackageParseError> {
-    let Some(manifest) = package_manifest_path(dir) else {
-        return Err(PackageParseError::Composition(format!(
-            "member directory `{}` is not a Package directory",
-            dir.display()
-        )));
-    };
-    let text = std::fs::read_to_string(&manifest).map_err(|error| {
-        PackageParseError::Composition(format!(
-            "couldn't read member Package `{}`: {error}",
-            manifest.display()
-        ))
-    })?;
-    let facts = PackageFacts::parse_uncomposed(&text, manifest.display().to_string())?;
-    Ok((facts.name, !facts.members.is_empty()))
-}
-
 fn parse_common(
     text: &str,
     origin: String,
@@ -1237,10 +1217,16 @@ fn parse_common(
         ..PackageFacts::default()
     };
     let mut inline = Vec::new();
+    let mut inline_names = BTreeMap::<String, ()>::new();
     let mut seen = BTreeMap::<String, String>::new();
     for entry in top_level_entries(&strip_comments(text)) {
         if !config {
             if let Some((name, _)) = config_wrapper(&entry)? {
+                if inline_names.insert(name.clone(), ()).is_some() {
+                    return Err(PackageParseError::Composition(format!(
+                        "inline Config `{name}` is declared more than once"
+                    )));
+                }
                 let contribution_origin = format!("{}::{name}", facts.origin);
                 let contribution = ConfigFacts::parse(&entry, contribution_origin)?;
                 inline.push((name, contribution));
@@ -1258,13 +1244,10 @@ fn parse_common(
             }
             return Err(PackageParseError::MalformedField(entry));
         };
-        if let Some(previous) = seen.get(&field) {
-            if previous.trim() != value.trim() {
-                return Err(PackageParseError::Composition(format!(
-                    "`{field}` is declared with conflicting values"
-                )));
-            }
-            continue;
+        if seen.contains_key(&field) {
+            return Err(PackageParseError::Composition(format!(
+                "`{field}` is declared more than once"
+            )));
         };
         seen.insert(field.clone(), value.clone());
         if let Some(output_value) = value.strip_prefix("Output ::") {
@@ -1377,7 +1360,7 @@ fn parse_common(
                     "patch" => "patch",
                     _ => "workspace",
                 };
-                if !record_entries(&value, reserved).unwrap_or_default().is_empty() {
+                if !record_entries(&value, reserved)?.is_empty() {
                     return Err(PackageParseError::ReservedSection(reserved));
                 }
             }
@@ -2369,13 +2352,10 @@ fn named_entries_checked(
         let Some((field, value)) = split_field(&entry) else {
             return Err(PackageParseError::MalformedField(format!("{scope}: {entry}")));
         };
-        if let Some(previous) = seen.get(&field) {
-            if previous.trim() != value.trim() {
-                return Err(PackageParseError::Composition(format!(
-                    "`{scope}.{field}` is declared with conflicting values"
-                )));
-            }
-            continue;
+        if seen.contains_key(&field) {
+            return Err(PackageParseError::Composition(format!(
+                "`{scope}.{field}` is declared more than once"
+            )));
         }
         seen.insert(field.clone(), value.clone());
         entries.push((field, value));
@@ -3172,7 +3152,7 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
     }
 
     #[test]
-    fn typed_output_precedes_the_canonical_run_entry() {
+    fn canonical_run_entry_precedes_typed_output() {
         let dir = temp_dir("canonical-run-with-output");
         std::fs::write(dir.join("run.jet"), "fn run() { print(1) }\n").unwrap();
         std::fs::write(dir.join("serve.jet"), "fn serve() { print(2) }\n").unwrap();
@@ -3184,7 +3164,7 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
         .unwrap();
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
-            Some(dir.join("serve.jet"))
+            Some(dir.join("run.jet"))
         );
         std::fs::remove_dir_all(dir).ok();
     }
@@ -3199,9 +3179,15 @@ version: "0.1.0""#,
             "package.jet",
         )
         .unwrap();
-        assert_eq!(facts.resolve_run_entry(&dir).unwrap(), None);
+        let error = facts.resolve_run_entry(&dir).unwrap_err();
+        assert!(error.contains("requires canonical `run.jet`"));
+        assert!(error.contains("retired `main.jet`"));
 
         std::fs::write(dir.join("run.jet"), "fn run() { print(2) }\n").unwrap();
+        let error = facts.resolve_run_entry(&dir).unwrap_err();
+        assert!(error.contains("both canonical `run.jet` and retired `main.jet`"));
+
+        std::fs::remove_file(dir.join("main.jet")).unwrap();
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
             Some(dir.join("run.jet"))

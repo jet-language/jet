@@ -10,6 +10,10 @@
 use crate::AST::ComptimeInput;
 use crate::Diagnostics::Diagnostic;
 use crate::Overlay::OverlayPolicy;
+pub use crate::Authority::{
+    AuthorityError, AuthorityKind, AuthorityResolver, CheckedDirectory, CheckedFile,
+    CheckedManifest, CheckedMember, CheckedPackage, FileIdentity,
+};
 use std::path::{Path, PathBuf};
 
 /// The role of a declaration-resolved workspace source.
@@ -29,6 +33,9 @@ pub struct WorkspaceSource {
     pub path: PathBuf,
     pub source: String,
     pub role: WorkspaceSourceRole,
+    /// The opened source and its identity. Consumers must revalidate this
+    /// snapshot before using the source for authority-sensitive work.
+    pub checked: CheckedFile,
 }
 
 /// The result of evaluating a workspace declaration.
@@ -77,130 +84,15 @@ pub struct WorkspaceMember {
 /// error rather than an absent workspace so callers cannot fall through to an
 /// outer authority or stale lock.
 pub fn resolve_workspace_source(dir: &Path) -> Option<Result<WorkspaceSource, Diagnostic>> {
-    let mut entries: Vec<_> = match std::fs::read_dir(dir) {
-        Ok(entries) => {
-            let mut collected = Vec::new();
-            for entry in entries {
-                match entry {
-                    Ok(entry) => collected.push(entry),
-                    Err(error) => {
-                        return Some(Err(Diagnostic::error(
-                            "E1239",
-                            format!("couldn't inspect workspace sources in `{}`", dir.display()),
-                            format!("workspace declaration discovery failed: {error}"),
-                            "restore read access to the workspace directory before resolving its authority"
-                                .to_string(),
-                            None,
-                        )))
-                    }
-                }
-            }
-            collected
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(error) => {
-            return Some(Err(Diagnostic::error(
-                "E1239",
-                format!("couldn't inspect workspace sources in `{}`", dir.display()),
-                format!("workspace declaration discovery failed: {error}"),
-                "restore read access to the workspace directory before resolving its authority"
-                    .to_string(),
-                None,
-            )))
-        }
+    let resolver = match AuthorityResolver::open(dir) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return None,
+        Err(error) => return Some(Err(error.workspace_diagnostic())),
     };
-    entries.sort_by_key(|entry| entry.file_name());
-
-    let mut canonical = None;
-    let mut authorities = Vec::new();
-    let mut malformed_canonical = false;
-    for entry in entries {
-        let path = entry.path();
-        if path.extension().and_then(|extension| extension.to_str()) != Some(crate::Syntax::FILE_EXT)
-        {
-            continue;
-        }
-        let metadata = match std::fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                return Some(Err(Diagnostic::error(
-                    "E1239",
-                    format!("couldn't inspect workspace source `{}`", path.display()),
-                    format!("the workspace metadata is present but unavailable: {error}"),
-                    "restore read access to the workspace metadata before resolving its authority"
-                        .to_string(),
-                    None,
-                )))
-            }
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Some(Err(Diagnostic::error(
-                "E1239",
-                format!("workspace source `{}` is not a regular file", path.display()),
-                "workspace metadata cannot be read through a symlink or from a non-regular file".to_string(),
-                "replace the workspace metadata with a regular file in the workspace root".to_string(),
-                None,
-            )));
-        }
-        let source = match std::fs::read_to_string(&path) {
-            Ok(source) => source,
-            Err(error) => {
-                return Some(Err(Diagnostic::error(
-                    "E1239",
-                    format!("couldn't read workspace source `{}`", path.display()),
-                    format!("the workspace source is present but unavailable: {error}"),
-                    "restore read access to the workspace source before resolving its authority"
-                        .to_string(),
-                    None,
-                )))
-            }
-        };
-        if declares_workspace_module(&source) {
-            let role = if path.file_name().and_then(|name| name.to_str())
-                == Some(crate::Syntax::WORKSPACE_FILE)
-            {
-                WorkspaceSourceRole::Index
-            } else {
-                WorkspaceSourceRole::Authority
-            };
-            let candidate = WorkspaceSource { path, source, role };
-            if role == WorkspaceSourceRole::Index {
-                canonical = Some(candidate);
-            } else {
-                authorities.push(candidate);
-            }
-        } else if path.file_name().and_then(|name| name.to_str())
-            == Some(crate::Syntax::WORKSPACE_FILE)
-        {
-            // The reserved filename is an index role even when its required
-            // declaration is absent. An arbitrary authority cannot repair or
-            // replace a malformed canonical index.
-            malformed_canonical = true;
-        }
-    }
-
-    if malformed_canonical && canonical.is_none() {
-        return Some(Err(e0995_no_workspace_module()));
-    }
-
-    if let Some(canonical) = canonical {
-        if authorities.is_empty() {
-            return Some(Ok(canonical));
-        }
-        let mut paths = vec![canonical.path.as_path()];
-        paths.extend(authorities.iter().map(|source| source.path.as_path()));
-        return Some(Err(e1239_ambiguous_workspace(&paths)));
-    }
-
-    match authorities.len() {
-        0 => None,
-        1 => Some(Ok(authorities.remove(0))),
-        _ => Some(Err(e1239_ambiguous_workspace(
-            &authorities
-                .iter()
-                .map(|source| source.path.as_path())
-                .collect::<Vec<_>>(),
-        ))),
+    match resolver.resolve_workspace_source() {
+        Ok(Some(source)) => Some(Ok(source)),
+        Ok(None) => None,
+        Err(error) => Some(Err(error.workspace_diagnostic())),
     }
 }
 
@@ -231,7 +123,7 @@ pub fn e0995_no_workspace_module() -> Diagnostic {
 
 /// Cheap token probe for a top-level `module workspace` candidate.
 /// Full parsing stays in `jet-env-model::WorkspaceFile::evaluate`.
-fn declares_workspace_module(src: &str) -> bool {
+pub(crate) fn declares_workspace_module(src: &str) -> bool {
     let (tokens, _lex_diags) = crate::Lexer::lex(src);
     let tokens = crate::Lexer::without_comments(&tokens);
     let mut brace_depth = 0i32;
@@ -264,7 +156,7 @@ fn declares_workspace_module(src: &str) -> bool {
 }
 
 /// E1239: the workspace authority must have one declaration source.
-fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
+pub(crate) fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
     let list = paths
         .iter()
         .map(|path| {

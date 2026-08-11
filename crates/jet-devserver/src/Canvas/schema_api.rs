@@ -35,7 +35,7 @@ use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
     apply_project_add_workspace_member, apply_project_create_package, apply_project_edit_pkg_field,
     apply_project_remove_dependency, clean_project_rel_path, rel_path,
-    required_project_touched_files, validate_touched_project_files,
+    diagnostic_json, required_project_touched_files, validate_touched_project_files,
 };
 use super::query_actions::{
     canvas_actions, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
@@ -282,8 +282,9 @@ fn resolve_entry_source_path(entry: &Path, source_id: Option<&str>) -> Result<Pa
 
 fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
     if let Some(workspace_root) = &ctx.workspace_root {
-        if let Some(Ok(plan)) = jet_env_model::WorkspaceFile::load(workspace_root) {
-            return plan
+        if let Some(Ok(snapshot)) = jet_env_model::WorkspaceFile::load_checked(workspace_root) {
+            return snapshot
+                .plan
                 .members
                 .into_iter()
                 .map(|member| workspace_root.join(member.path))
@@ -371,6 +372,17 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         .join(",");
     let locks_json = lock_project_json(&ctx.project_root);
     let env_projection = env_project_json(&ctx.project_root);
+    let diagnostics = [
+        ctx.authority_diagnostic
+            .as_ref()
+            .map(diagnostic_json)
+            .unwrap_or_default(),
+        env_projection.diagnostics.clone(),
+    ]
+    .into_iter()
+    .filter(|diagnostic| !diagnostic.is_empty())
+    .collect::<Vec<_>>()
+    .join(",");
     format!(
         "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"parts\":[{}],\"part_conflicts\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
         PROJECT_SCHEMA_VERSION,
@@ -393,7 +405,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         parts_json,
         part_conflicts_json,
         locks_json,
-        env_projection.diagnostics
+        diagnostics
     )
 }
 

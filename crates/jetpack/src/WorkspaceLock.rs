@@ -5,7 +5,8 @@
 //! The write path stays here because it needs `RuntimePolicy` for file locking.
 
 pub use jet_pkg_model::WorkspaceLock::{load, WORKSPACE_LOCK};
-use jet_pkg_model::WorkspacePlan::{WorkspacePlan};
+use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::WorkspacePlan::{WorkspacePlan, WorkspaceSourceRole};
 
 use crate::{
     Lock::{self, LockFile, LockedWorkspaceMember},
@@ -36,6 +37,41 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
             Err(error) => return Err(error),
         };
         lock.version = Lock::LOCK_VERSION;
+        let resolver = AuthorityResolver::open(workspace_root).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("workspace authority cannot be opened: {error}"),
+            )
+        })?;
+        let source = resolver
+            .resolve_workspace_source()
+            .map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace authority cannot be resolved: {error}"),
+                )
+            })?;
+        if let Some(source) = &source {
+            if source.role != WorkspaceSourceRole::Index {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "workspace lock members require workspace.jet as the index",
+                ));
+            }
+            let digest = jet_pkg_model::SHA256::sha256_hex(source.source.as_bytes());
+            if !plan.source_digest.is_empty() && plan.source_digest != digest {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "workspace plan authority changed before lock write",
+                ));
+            }
+            resolver.revalidate_source(source).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace authority changed before lock write: {error}"),
+                )
+            })?;
+        }
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
         } else {
@@ -56,52 +92,27 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                         format!("workspace member {} has an unsafe relative path", m.name),
                     ));
                 }
-                let canonical_path = workspace_root.join(relative).canonicalize().map_err(|error| {
+                let checked = resolver.checked_package(relative).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("workspace member {} cannot be canonicalized: {error}", m.name),
+                        format!("workspace member `{}` is not a checked Package: {error}", m.name),
                     )
                 })?;
-                let root = workspace_root.canonicalize().map_err(|error| {
+                resolver.revalidate_member(&checked.member).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("workspace root cannot be canonicalized: {error}"),
+                        format!("workspace member `{}` changed before lock write: {error}", m.name),
                     )
                 })?;
-                if !canonical_path.starts_with(&root) {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("workspace member {} escapes the workspace root", m.name),
-                    ));
-                }
-                let canonical_relative = canonical_path
-                    .strip_prefix(&root)
+                let canonical_relative = resolver
+                    .relative_identity(&checked.member.directory.path)
                     .map_err(|error| {
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             format!("workspace member {} has no relative identity: {error}", m.name),
                         )
-                    })?
-                    .to_string_lossy()
-                    .into_owned();
-                let canonical_relative = if canonical_relative.is_empty() {
-                    ".".to_string()
-                } else {
-                    canonical_relative
-                };
-                let package = jet_pkg_model::Package::PackageFacts::load(&canonical_path)
-                    .ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("workspace member `{}` has no valid Package facts", m.name),
-                        )
-                    })?
-                    .map_err(|error| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("workspace member `{}` Package facts are invalid: {error}", m.name),
-                        )
                     })?;
+                let package = checked.facts;
                 Ok(LockedWorkspaceMember {
                     name: m.name.clone(),
                     path: m.path.clone(),
@@ -111,6 +122,14 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                 })
             })
             .collect::<std::io::Result<Vec<_>>>()?;
+        if let Some(source) = &source {
+            resolver.revalidate_source(source).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace authority changed during lock write: {error}"),
+                )
+            })?;
+        }
         lock.workspace_source_digest = Some(source_digest);
         lock.workspace_overlay_policy = plan.overlay_policy.clone();
         // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
