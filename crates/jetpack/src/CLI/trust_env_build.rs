@@ -4,7 +4,7 @@ use super::realize::{
     apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
     report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
 };
-use super::services_secrets_config::{find_jet_binary, find_project_entry};
+use super::services_secrets_config::find_jet_binary;
 use super::workspace_sources::{cwd_table, load_workspace};
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
@@ -931,11 +931,9 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
         .filter(|candidate| candidate.is_file())
         .map(|candidate| candidate.to_string_lossy().into_owned())
         .unwrap_or_else(find_jet_binary);
-    let entry = find_project_entry(dir);
-
     match std::process::Command::new(jet)
         .arg("test")
-        .arg(entry)
+        .arg(dir)
         .current_dir(dir)
         .status()
     {

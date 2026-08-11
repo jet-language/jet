@@ -2296,17 +2296,10 @@ fn main() {
             // test at a time (matches `--update-snapshots`/`-u`'s existing style
             // of a plain boolean flag).
             let serial = jet_argv.iter().any(|a| a == "--serial");
-            // A directory target is a project root ONLY when it has a
-            // Package root — resolve to that project's single entry
-            // file, same as before (D-CLI1's existing project convenience).
-            // A plain directory of loose `.jet` files (no manifest) is a
-            // test folder instead: pass it straight through so
-            // `run_test_opts` walks it — recursively, D-TESTKIT1=A gap #2 —
-            // rather than erroring "no project entry".
+            // Keep directory targets intact so package tests/checks are
+            // collected together instead of resolving to one run entry.
             let target_path = Path::new(target);
-            let is_project_dir =
-                target_path.is_dir() && jet::Loader::manifest_path(target_path).is_some();
-            let resolved = if target_path.is_dir() && !is_project_dir {
+            let resolved = if target_path.is_dir() {
                 target.to_string()
             } else {
                 resolve_source_path(target)
