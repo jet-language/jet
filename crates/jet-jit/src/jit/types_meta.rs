@@ -17,6 +17,33 @@ static EMPTY_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(Vec::new);
 // two-field variant; every other variant carries a single String id.
 static SERVICE_RECEIPT_RETAINED_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::String, Type::Int]);
+static IO_CONTEXT_PAYLOAD: LazyLock<Vec<Type>> =
+    LazyLock::new(|| vec![Type::Named("IOContext".into())]);
+static IO_OPERATION_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    [
+        "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+});
+static IO_ERROR_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    [
+        "InvalidInput",
+        "NotFound",
+        "PermissionDenied",
+        "TimedOut",
+        "Cancelled",
+        "Closed",
+        "Protocol",
+        "Other",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+});
+static IO_OPERATION_NAME: LazyLock<String> = LazyLock::new(|| "IOOperation".to_string());
+static IO_ERROR_NAME: LazyLock<String> = LazyLock::new(|| "IOError".to_string());
 
 /// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
 /// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
@@ -40,12 +67,16 @@ pub(crate) fn install_struct_redact(bundle: &ProgramBundle) {
     STRUCT_REDACT.with(|slot| *slot.borrow_mut() = map);
 }
 
-/// Whether field `idx` of `type_name` is `#[Redact]`. `None` = no metadata installed.
+/// Whether field `idx` of `type_name` is redacted. `None` = no metadata available.
 pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool> {
-    STRUCT_REDACT.with(|slot| {
+    let user_metadata = STRUCT_REDACT.with(|slot| {
         slot.borrow()
             .get(type_name)
             .and_then(|flags| flags.get(idx).copied())
+    });
+    user_metadata.or_else(|| {
+        jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name)
+            .and_then(|fields| fields.get(idx).map(|(_, redacted)| *redacted))
     })
 }
 
@@ -186,6 +217,9 @@ pub(crate) fn clif_ty_with_distinct(
             "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant"
         ))
     {
+        return Some(types::I64);
+    }
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "IOContext" | "IOOperation" | "IOError")) {
         return Some(types::I64);
     }
     if matches!(&ty, Type::Shared(_))
@@ -442,6 +476,16 @@ impl<'a> JitMeta<'a> {
         if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust" | "EmailError") {
             return Some(email_payload(variant));
         }
+        if enum_name == "IOError" {
+            return Some(match variant {
+                "InvalidInput" | "NotFound" | "PermissionDenied" | "TimedOut" | "Cancelled"
+                | "Closed" | "Protocol" | "Other" => IO_CONTEXT_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
+        if enum_name == "IOOperation" {
+            return Some(EMPTY_PAYLOAD.as_slice());
+        }
         if enum_name == "Key" {
             return Some(key_payload(variant));
         }
@@ -552,12 +596,14 @@ impl<'a> JitMeta<'a> {
 
     /// Mangled field names + parallel types for `__jet_Type { __jet_f: … }` Debug show.
     pub(crate) fn struct_layout(&self, type_name: &str) -> Option<(&[String], &[Type])> {
-        let names = self.struct_fields.get(type_name)?;
-        let tys = self.struct_field_types.get(type_name)?;
-        if names.len() != tys.len() {
-            return None;
+        if let Some(names) = self.struct_fields.get(type_name) {
+            let tys = self.struct_field_types.get(type_name)?;
+            if names.len() != tys.len() {
+                return None;
+            }
+            return Some((names.as_slice(), tys.as_slice()));
         }
-        Some((names.as_slice(), tys.as_slice()))
+        core_struct_layout(type_name)
     }
 
     pub(crate) fn struct_type_params(&self, type_name: &str) -> Option<&[String]> {
@@ -594,6 +640,19 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        if enum_name == "IOOperation" {
+            return match variant {
+                "Read" => Some(0),
+                "Write" => Some(1),
+                "Flush" => Some(2),
+                "Connect" => Some(3),
+                "Accept" => Some(4),
+                "Close" => Some(5),
+                "Resolve" => Some(6),
+                "Codec" => Some(7),
+                _ => None,
+            };
+        }
         if enum_name == jet_foundation::Syntax::TYPE_TERMINAL_MODE {
             return match variant {
                 "Raw" => Some(0),
@@ -601,7 +660,8 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
-        // Prelude `IOError` order (Open.rs) — not always registered on JitProgram.
+        // Prelude `IOError` order (Open.rs); enum_names supplies fallback
+        // metadata when the core enum is absent from JitProgram.
         if enum_name == "IOError" {
             return match variant {
                 "InvalidInput" => Some(0),
@@ -872,6 +932,8 @@ impl<'a> JitMeta<'a> {
                 | "SMTPAuth"
                 | "TLSTrust"
                 | "EmailError"
+                | "IOOperation"
+                | "IOError"
         ) || self.enum_variants.contains_key(name)
     }
 
@@ -879,7 +941,7 @@ impl<'a> JitMeta<'a> {
     /// unit, `Int`, `String` handle, or another packed enum. Excludes F64-heap /
     /// multi-payload.
     pub(crate) fn enum_packed_showable(&self, name: &str) -> bool {
-        let Some(variants) = self.enum_variants.get(name) else {
+        let Some(variants) = self.enum_variant_names(name) else {
             return false;
         };
         for variant in variants {
@@ -891,7 +953,10 @@ impl<'a> JitMeta<'a> {
                 [] => {}
                 [Type::Int] => {}
                 [Type::String] => {}
-                [Type::Named(inner)] if self.is_enum(inner) => {}
+                [Type::Named(inner)]
+                    if self.is_enum(inner)
+                        || jet_foundation::StructuralDebug::jet_debug_field_metadata(inner)
+                            .is_some() => {}
                 _ => return false,
             }
         }
@@ -899,17 +964,29 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn enum_variant_names(&self, name: &str) -> Option<&[String]> {
-        self.enum_variants.get(name).map(|v| v.as_slice())
+        self.enum_variants.get(name).map(|v| v.as_slice()).or_else(|| {
+            match name {
+                "IOOperation" => Some(IO_OPERATION_VARIANTS.as_slice()),
+                "IOError" => Some(IO_ERROR_VARIANTS.as_slice()),
+                _ => None,
+            }
+        })
     }
 
     pub(crate) fn enum_names(&self) -> impl Iterator<Item = &String> {
-        self.enum_variants.keys()
+        self.enum_variants
+            .keys()
+            .chain((!self.enum_variants.contains_key("IOOperation")).then_some(&*IO_OPERATION_NAME))
+            .chain((!self.enum_variants.contains_key("IOError")).then_some(&*IO_ERROR_NAME))
     }
 
 }
 
 /// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
+    if let Some(fields) = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name) {
+        return fields.iter().position(|(name, _)| *name == field);
+    }
     let fields: &[&str] = match type_name {
         "Err" => &["message", "code", "cause"],
         // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
@@ -1048,11 +1125,31 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
     fields.iter().position(|f| *f == field)
 }
 
+fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [Type])> {
+    let layout: &(Vec<String>, Vec<Type>) = match type_name {
+        "Envelope" => &*EMAIL_ENVELOPE_LAYOUT,
+        "RecipientReport" => &*EMAIL_RECIPIENT_REPORT_LAYOUT,
+        "SendReport" => &*EMAIL_SEND_REPORT_LAYOUT,
+        "Limits" => &*EMAIL_LIMITS_LAYOUT,
+        "SMTPConfig" => &*EMAIL_SMTP_CONFIG_LAYOUT,
+        "DkimConfig" => &*EMAIL_DKIM_CONFIG_LAYOUT,
+        _ => return None,
+    };
+    Some((layout.0.as_slice(), layout.1.as_slice()))
+}
+
 /// Sema-known CORE struct field types. TIR `struct_field_type` falls back to
 /// `Int` when `cx.struct_fields` lacks CORE entries (ProcessResult is not a
 /// user struct); recover the real type so JIT field/print/ABI stay total.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
     match type_name {
+        "IOContext" => match field {
+            "operation" => Some(Type::Named("IOOperation".into())),
+            "resource" => Some(Type::Option(Box::new(Type::String))),
+            "os_code" => Some(Type::Option(Box::new(Type::Int))),
+            "cause" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        },
         // No `Point` — collides with user Int Point examples (library, etc.).
         "Size" => match field {
             "width" | "height" => Some(Type::Float),
@@ -1312,6 +1409,77 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
         _ => &[],
     }
 }
+
+fn email_layout(fields: &[(&str, Type)]) -> (Vec<String>, Vec<Type>) {
+    fields
+        .iter()
+        .map(|(name, ty)| ((*name).to_string(), ty.clone()))
+        .unzip()
+}
+
+static EMAIL_ENVELOPE_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("from", Type::Named("Address".into())),
+        ("recipients", Type::List(Box::new(Type::Named("Address".into())))),
+    ])
+});
+static EMAIL_RECIPIENT_REPORT_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("address", Type::Named("Address".into())),
+        ("accepted", Type::Bool),
+        ("code", Type::Int),
+        ("message", Type::String),
+    ])
+});
+static EMAIL_SEND_REPORT_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("server", Type::String),
+        (
+            "accepted",
+            Type::List(Box::new(Type::Named("RecipientReport".into()))),
+        ),
+        (
+            "rejected",
+            Type::List(Box::new(Type::Named("RecipientReport".into()))),
+        ),
+        ("response_code", Type::Int),
+        ("response", Type::String),
+        ("accepted_at", Type::String),
+    ])
+});
+static EMAIL_LIMITS_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("max_reply_line_bytes", Type::Int),
+        ("max_reply_lines", Type::Int),
+        ("max_capabilities", Type::Int),
+        ("max_recipients", Type::Int),
+        ("max_message_bytes", Type::Int),
+        ("max_auth_challenge_bytes", Type::Int),
+    ])
+});
+static EMAIL_SMTP_CONFIG_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("host", Type::String),
+        ("port", Type::Int),
+        ("security", Type::Named("SMTPSecurity".into())),
+        ("auth", Type::Named("SMTPAuth".into())),
+        ("recipient_policy", Type::Named("RecipientPolicy".into())),
+        ("trust", Type::Named("TLSTrust".into())),
+        ("limits", Type::Named("Limits".into())),
+        (
+            "dkim",
+            Type::Option(Box::new(Type::Named("DkimConfig".into()))),
+        ),
+    ])
+});
+static EMAIL_DKIM_CONFIG_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("domain", Type::String),
+        ("selector", Type::String),
+        ("private_key", Type::Named("Secret".into())),
+        ("signed_headers", Type::List(Box::new(Type::String))),
+    ])
+});
 
 fn email_payload(variant: &str) -> &'static [Type] {
     static ERROR: LazyLock<Vec<Type>> = LazyLock::new(|| {

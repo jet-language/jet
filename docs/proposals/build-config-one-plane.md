@@ -25,7 +25,7 @@ that are configuration in all but name. Four ratified features share the word
 
 The one idea: **configuration is the program's knowledge about itself — one
 plane of typed compile-time facts with one contribution law.** The manifest
-declares facts. Profiles, the command line, and system config contribute
+declares facts. Optimization bundles, the command line, and system config contribute
 values to facts. Programs read facts with the `$` sigil — the
 metaprogramming rethink's one splice, "read a compile-time value here" — so
 `$build.settings.tls` folds to a constant and `build` never becomes a
@@ -68,7 +68,7 @@ exist. The failure slate keeps ownership of how `fn build` errors report.
 - **Scope** — where a written value applies in source: item, block,
   function, module, file, package.
 - **Layer** — where a contribution comes from above the package
-  declaration: profile, workspace, environment, system, fleet, command
+  declaration: optimization bundle, workspace, environment, system, fleet, command
   line.
 - **Contribution** — one written value for a fact at one scope or layer.
 - **Contribution law** — the rule that turns many contributions into one
@@ -96,7 +96,7 @@ built artifact.
 The beginner never writes any of this: `jet run` works with zero files, and
 the first fact a beginner meets is `$build.package.version`, which is just
 there. The expert gets the full ledger: declare typed settings, contribute
-per profile or per fleet, compute contributions in `fn build`, and audit any
+per optimization bundle or per fleet, compute contributions in `fn build`, and audit any
 effective value with `jet explain`.
 
 ## Evidence: the shadow systems
@@ -109,7 +109,7 @@ effective value with `jet explain`.
 | 4 | `policy:` governance namespace | both parsers (D-POLICY-WORD1=A) | The namespace is ratified; the defect is two spellings across two parsers for its keys. |
 | 5 | Build profiles (`Build.{ optimize: full }`) | `PackageManifest/mod.rs:55-108` (D-BUILDPROFILE1) | Sound — but "profile" also names rows 6, 7. |
 | 6 | `TargetProfile` (board/triple identity) | `crates/jet-foundation/src/TargetProfile.rs:12` | Internal; user surface deliberately unbuilt. Third meaning of "profile". |
-| 7 | Environment profiles (`profiles:` per D-ENV-PROFILE1; `--env-profile` and an env-namespace `--profile` per D-ENV-FACET1); package/user profiles (D-JPK-PROFILE1) | `crates/jet-foundation/src/Syntax/jetpack_config.rs:540-548`; `docs/proposals/ecosystem-shape.md:55` | Meanings three and four, across three flags. |
+| 7 | Environment presets (`presets:` per D-ENV-PROFILE1); `--env <name>` selects an environment module and `--preset` selects its composition; package/user prose uses generation (D-JPK-PROFILE1) | `crates/jet-foundation/src/Syntax/jetpack_config.rs:540-548`; `docs/proposals/ecosystem-shape.md:55` | The axes are distinct: environment selection, preset composition, target selection, and generation. |
 | 8 | `Build.{ features: [...] }` | `package_files.rs:508` → `Source/main.rs:267-269` | Reaches rustc as `--cfg`; zero Jet-side readers. Write-only config. |
 | 9 | `Build.{ env: {...} }` | `Source/main.rs:272-275` | Raw string table onto rustc's process env. Security finding (`security-deep-scan-2026-08-03-full.md:69724`). |
 | 10 | Effect budget (`effects: { allow: [...] }`) | `crates/jet-pkg-model/src/EffectBudget.rs` (D-EFFBUDGET1) | Authority fact with its own schema; D-AUTHORITY-MANIFEST1 targets it. |
@@ -127,7 +127,7 @@ effective value with `jet explain`.
 
 ### Axes
 
-- **Fact** — what is known. Identity, machine, profile, settings, policy
+- **Fact** — what is known. Identity, machine, optimization bundle, settings, policy
   keys, authority rights, provenance.
 - **Scope** — where a written value applies in source. The full ladder:
   item → block → function → module → file → package. D-MARK-SCOPE1 ratified
@@ -135,10 +135,10 @@ effective value with `jet explain`.
   (one declaration, the marker placement unit) and **file** (the `#PubFile`
   precedent) as a named extension in D-CONF-MERGE1.
 - **Layer** — where a contribution comes from, above the package
-  declaration: profile → workspace → environment → system → fleet → command
+  declaration: optimization bundle → workspace → environment → system → fleet → command
   line.
 - **Moment** — when the value is fixed. Fixed by the compiler (`$build.os`),
-  declared (manifest), contributed (profile, CLI, system), or computed
+  declared (manifest), contributed (optimization bundle, CLI, system), or computed
   (`fn build`, computed module fields). Runtime data is off the plane by
   type: `core.env.get` behind the `Env` effect; comptime denies it (E0951,
   E1265).
@@ -150,8 +150,8 @@ effective value with `jet explain`.
 - **In source scopes, the nearest scope wins.** An item beats its block, a
   block its function, a function its module, a module its file, a file its
   package. D-MARK-SCOPE1's rule, extended to all facts and all six rungs.
-- **Across layers, the most explicit writer wins.** A profile beats the
-  declared default; the environment beats the profile; a flag typed today
+- **Across layers, the most explicit writer wins.** An optimization bundle beats the
+  declared default; the environment beats that bundle; a flag typed today
   beats every standing file. Two writers at the same layer with different
   values are an error naming both sources — the ratified Config composition
   rule ("unequal scalar facts conflict", ecosystem-shape, D-ECO-COMPOSE2
@@ -198,7 +198,7 @@ contributions to declared facts.
 
 - A setting and `$build.os` are the same thing: a fact. Conditional
   compilation needs no new construct — `#Known if` folds on closed values.
-- A build profile and a `#Policy` scope are the same thing: a named bundle
+- An optimization bundle and a `#Policy` scope are the same thing: a named bundle
   of contributions.
 - A package is a configured module: value parameters and settings are one
   Tier-0 substrate.
@@ -304,7 +304,7 @@ stays an ordinary identifier. This rides D-META-ONE1/S4.
 
 ### 4. Declared settings replace the string tables (D-CONF-KEY1=A; amends D-BUILDPROFILE1)
 
-The package declares each setting with a type and a default. Profiles and the
+The package declares each setting with a type and a default. Optimization bundles and the
 command line contribute values by the contribution law. Code branches with
 `#Known if`, or reads the value as a constant. Undeclared settings are compile
 errors. `features:` and `env:` are deleted from `Build.{}`.
@@ -329,7 +329,7 @@ fn base_url() => String { return $build.settings.api_base }
 
 ```sh
 jet build --set tls=false
-jet explain build.settings.tls     # chain: CLI > profile > default
+jet explain build.settings.tls     # chain: CLI > optimization bundle > default
 ```
 
 `Build.{ features }` and `Build.{ env }` are deleted. The audited injection
@@ -339,7 +339,7 @@ path closes. CLI spelling is `--set key=value`.
 
 One law has two halves and one audited exception. In source scopes, the
 nearest scope wins: item, block, function, module, file, package. Across
-contribution layers, the most explicit writer wins: declaration, profile,
+contribution layers, the most explicit writer wins: declaration, optimization bundle,
 workspace, environment, system, fleet, CLI. Same-layer writers with different
 values remain hard errors that name both sources. `.Force` at system and fleet
 layers pins a value against later layers, including the CLI. `jet explain`
@@ -428,10 +428,10 @@ input under D-CTEFFECT1. The timestamp describes lock history, not source.
 `profile` names the optimize bundle selected by `--profile` and `--release`.
 The board identity uses the machine vocabulary and is selected with
 `--target=<triple|board>`. `targets:` and build-graph targets keep their own
-words. Environment `profiles:` becomes `presets:` under D-ENV-PROFILE1;
-`--env-profile` and the environment `--profile` become `--preset` under
-D-ENV-FACET1. Package and user profiles use `generation` in D-JPK-PROFILE1
-prose. These renames do not change behavior.
+words. The retired environment `profiles:` spelling becomes `presets:` under
+D-ENV-PROFILE1; `--env <name>` selects the declared environment module and `--preset` selects
+the named composition under D-ENV-FACET1. Package and user concepts use
+`generation` in D-JPK-PROFILE1 prose. These renames do not change behavior.
 
 ## Beginner magic, expert control — the rungs
 
@@ -443,7 +443,7 @@ a fact is written.
 | Script | one `.jet` file, no manifest | `jet run` works; `$build.package.name` reads the file name |
 | First fact | `{$build.package.version}` in a print | the version, folded, no manifest required (fallback `0.0.0`) |
 | Package | `name:`, `version:` in `package.jet` | real identity; `jet build <name>` finds it |
-| Settings | `settings: .{ tls: Bool = true }` | typed switches; `--set`, profiles, `jet explain` |
+| Settings | `settings: .{ tls: Bool = true }` | typed switches; `--set`, optimization bundles, `jet explain` |
 | Actions | `fn build(b) => BuildPlan ?` | probes, steps, generated code, computed contributions |
 | Fleet | option contributions with `.Force` | pinned facts across machines, one audit chain |
 

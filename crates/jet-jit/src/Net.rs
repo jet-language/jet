@@ -69,9 +69,7 @@ mod runtime {
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Browser.rs");
 
-    fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
-        crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
-    }
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
@@ -584,81 +582,8 @@ fn list_bytes(list: i64) -> Option<Vec<u8>> {
     })
 }
 
-fn email_error_parts(
-    error: runtime::jet_email::Error,
-) -> (i64, String, Option<String>, Option<i64>, String) {
-    match error {
-        runtime::jet_email::Error::Configuration {
-            operation,
-            server,
-            code,
-            reason,
-        } => (0, operation, server, code, reason),
-        runtime::jet_email::Error::DNS {
-            operation,
-            server,
-            code,
-            reason,
-        } => (1, operation, server, code, reason),
-        runtime::jet_email::Error::Connect {
-            operation,
-            server,
-            code,
-            reason,
-        } => (2, operation, server, code, reason),
-        runtime::jet_email::Error::TLS {
-            operation,
-            server,
-            code,
-            reason,
-        } => (3, operation, server, code, reason),
-        runtime::jet_email::Error::Auth {
-            operation,
-            server,
-            code,
-            reason,
-        } => (4, operation, server, code, reason),
-        runtime::jet_email::Error::Protocol {
-            operation,
-            server,
-            code,
-            reason,
-        } => (5, operation, server, code, reason),
-        runtime::jet_email::Error::Rejected {
-            operation,
-            server,
-            code,
-            reason,
-        } => (6, operation, server, code, reason),
-        runtime::jet_email::Error::Transient {
-            operation,
-            server,
-            code,
-            reason,
-        } => (7, operation, server, code, reason),
-        runtime::jet_email::Error::TimedOut {
-            operation,
-            server,
-            code,
-            reason,
-        } => (8, operation, server, code, reason),
-        runtime::jet_email::Error::Cancelled {
-            operation,
-            server,
-            code,
-            reason,
-        } => (9, operation, server, code, reason),
-        runtime::jet_email::Error::DeliveryUnknown {
-            operation,
-            server,
-            code,
-            reason,
-        } => (10, operation, server, code, reason),
-    }
-}
-
 fn email_err(err: runtime::jet_email::Error) -> i64 {
-    let (disc, operation, server, code, reason) = email_error_parts(err);
+    let (_variant, disc, operation, server, code, reason) = runtime::jet_email::error_parts(err);
     Concurrency::with_runtime_mut(|rt| {
         let payload = rt.heap.alloc_record(5);
         let _ = rt.heap.record_set_int(payload, 0, disc);
@@ -675,12 +600,7 @@ fn email_err(err: runtime::jet_email::Error) -> i64 {
 }
 
 fn email_config_error(operation: &str, reason: &str) -> i64 {
-    email_err(runtime::jet_email::Error::Configuration {
-        operation: operation.to_string(),
-        server: None,
-        code: None,
-        reason: reason.to_string(),
-    })
+    email_err(runtime::jet_email::configuration_error(operation, reason))
 }
 
 fn unpack_limits(handle: i64) -> Option<runtime::jet_email::Limits> {
@@ -990,6 +910,19 @@ extern "C" fn jet_jit_email_message(
     }
 }
 
+extern "C" fn jet_jit_email_envelope(from: i64, recipients: i64) -> i64 {
+    let Some(from) = email_address_from_handle(from) else {
+        return email_config_error("envelope", "invalid sender address");
+    };
+    let Some(recipients) = email_address_list_from_handle(recipients) else {
+        return email_config_error("envelope", "invalid recipient list");
+    };
+    match runtime::jet_email::envelope(&from, &recipients) {
+        Ok(envelope) => result_ok(email_envelope_handle(&envelope) as u64),
+        Err(error) => email_err(error),
+    }
+}
+
 extern "C" fn jet_jit_email_serialize(message: i64) -> i64 {
     let msg = match email_message_from_handle(message) {
         Some(m) => m,
@@ -1182,6 +1115,8 @@ host_fns! {
     register: register_net_symbols;
     declare: declare_net_host_fns(module) {
         let cc = module.target_config().default_call_conv;
+        let mut sig0 = Signature::new(cc);
+        sig0.returns.push(AbiParam::new(types::I64));
         let mut sig1 = Signature::new(cc);
         sig1.params.push(AbiParam::new(types::I64));
         sig1.returns.push(AbiParam::new(types::I64));
@@ -1233,10 +1168,11 @@ host_fns! {
     email_address: "jet_jit_email_address" => jet_jit_email_address: sig1;
     email_attachment: "jet_jit_email_attachment" => jet_jit_email_attachment: sig3;
     email_message: "jet_jit_email_message" => jet_jit_email_message: sig7;
+    email_envelope: "jet_jit_email_envelope" => jet_jit_email_envelope: sig2;
     email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
-    email_limits_safe: "jet_jit_email_limits_safe" => jet_jit_email_limits_safe: sig1;
+    email_limits_safe: "jet_jit_email_limits_safe" => jet_jit_email_limits_safe: sig0;
     email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
-    email_smtp_from_env: "jet_jit_email_smtp_from_env" => jet_jit_email_smtp_from_env: sig1;
+    email_smtp_from_env: "jet_jit_email_smtp_from_env" => jet_jit_email_smtp_from_env: sig0;
     email_message_envelope: "jet_jit_email_message_envelope" => jet_jit_email_message_envelope: sig1;
     email_message_with_envelope: "jet_jit_email_message_with_envelope" => jet_jit_email_message_with_envelope: sig2;
     email_mailer_send: "jet_jit_email_mailer_send" => jet_jit_email_mailer_send: sig2;

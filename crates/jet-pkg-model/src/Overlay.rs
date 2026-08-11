@@ -495,6 +495,7 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
         packages: Vec::new(),
     };
     let mut saw_overrides = false;
+    let mut keyed_overrides = Vec::new();
     for line in top_level_statements(body) {
         let line = line.trim().trim_end_matches(';').trim();
         if line.is_empty() {
@@ -535,14 +536,15 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
             let record = record.strip_suffix('}').ok_or_else(|| {
                 OverlayError::Malformed("`overrides` record is not closed".to_string())
             })?;
-            for package in parse_keyed_overrides(record)? {
-                merge_package_override(&mut overlay.packages, package)?;
-            }
+            keyed_overrides.extend(parse_keyed_overrides(record)?);
             continue;
         }
         return Err(OverlayError::Malformed(format!(
             "unknown overlay declaration `{line}`"
         )));
+    }
+    for package in keyed_overrides {
+        merge_package_override(&mut overlay.packages, package)?;
     }
     Ok(overlay)
 }

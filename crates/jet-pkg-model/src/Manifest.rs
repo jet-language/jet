@@ -25,7 +25,7 @@ pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// into a specific era of Jet syntax (docs/spec/release-policy.md). The list is
 /// ordered oldest→newest; the last entry is the newest stable edition, used by
 /// single-file `jet run file.jet` which carries no edition marker (E2-V4).
-const LATEST_EDITION: &str = "2027";
+const LATEST_EDITION: &str = "2028";
 pub const SUPPORTED_EDITIONS: &[&str] = &["2026", "2027", "2028"];
 
 /// Parse an edition label like `"2027"` into its year. Unknown labels sort before

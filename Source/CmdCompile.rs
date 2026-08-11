@@ -1550,7 +1550,7 @@ pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
 /// With `coverage`, the harness is built with line/function probes (D-COV1) and
 /// a per-function coverage report prints after the test results. A directory
 /// target recurses into every subdirectory (D-TESTKIT1=A gap #2), running every
-/// `.jet` file found, in sorted path order.
+/// non-reserved `.jet` file found, in sorted path order.
 pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
@@ -1586,8 +1586,8 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
 }
 
 /// D-TESTKIT1=A gap #2: walk every subdirectory under `dir`, collecting `.ext`
-/// files. `build/` and dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped —
-/// a project's build output and VCS metadata are never test sources.
+/// files. `build/` and dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped,
+/// as are reserved package/env/workspace/config files.
 fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -1600,7 +1600,15 @@ fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
                 continue;
             }
             collect_test_files_recursive(&path, ext, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+        } else if path.extension().and_then(|e| e.to_str()) == Some(ext)
+            && !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("package.jet")
+                    | Some("env.jet")
+                    | Some("workspace.jet")
+                    | Some("config.jet")
+            )
+        {
             out.push(path);
         }
     }

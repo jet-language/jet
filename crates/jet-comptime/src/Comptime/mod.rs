@@ -542,6 +542,12 @@ pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
         _ => None,
     }
 }
+
+/// TIR static-call bridge for the shared Email limits constructor.
+pub fn email_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
+    (method == "safe" && path == "jet_email::Limits")
+        .then(EmailAdapter::limits_safe_value)
+}
 static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
     std::sync::OnceLock::new();
 fn empty_computed() -> &'static HashMap<(String, String), &'static Expr> {

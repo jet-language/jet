@@ -27,6 +27,73 @@ pub mod jet_email {
         DeliveryUnknown { operation: String, server: Option<String>, code: Option<i64>, reason: String },
     }
 
+    /// The one error projection used by AOT, JIT, and interpreter adapters.
+    /// Adapters marshal these fields; they do not own variant meaning.
+    pub fn error_parts(
+        error: Error,
+    ) -> (&'static str, i64, String, Option<String>, Option<i64>, String) {
+        match error {
+            Error::Configuration { operation, server, code, reason } => {
+                ("Configuration", 0, operation, server, code, reason)
+            }
+            Error::DNS { operation, server, code, reason } => {
+                ("DNS", 1, operation, server, code, reason)
+            }
+            Error::Connect { operation, server, code, reason } => {
+                ("Connect", 2, operation, server, code, reason)
+            }
+            Error::TLS { operation, server, code, reason } => {
+                ("TLS", 3, operation, server, code, reason)
+            }
+            Error::Auth { operation, server, code, reason } => {
+                ("Auth", 4, operation, server, code, reason)
+            }
+            Error::Protocol { operation, server, code, reason } => {
+                ("Protocol", 5, operation, server, code, reason)
+            }
+            Error::Rejected { operation, server, code, reason } => {
+                ("Rejected", 6, operation, server, code, reason)
+            }
+            Error::Transient { operation, server, code, reason } => {
+                ("Transient", 7, operation, server, code, reason)
+            }
+            Error::TimedOut { operation, server, code, reason } => {
+                ("TimedOut", 8, operation, server, code, reason)
+            }
+            Error::Cancelled { operation, server, code, reason } => {
+                ("Cancelled", 9, operation, server, code, reason)
+            }
+            Error::DeliveryUnknown { operation, server, code, reason } => {
+                ("DeliveryUnknown", 10, operation, server, code, reason)
+            }
+        }
+    }
+
+    pub fn error_reason(error: &Error) -> &str {
+        match error {
+            Error::Configuration { reason, .. }
+            | Error::DNS { reason, .. }
+            | Error::Connect { reason, .. }
+            | Error::TLS { reason, .. }
+            | Error::Auth { reason, .. }
+            | Error::Protocol { reason, .. }
+            | Error::Rejected { reason, .. }
+            | Error::Transient { reason, .. }
+            | Error::TimedOut { reason, .. }
+            | Error::Cancelled { reason, .. }
+            | Error::DeliveryUnknown { reason, .. } => reason,
+        }
+    }
+
+    pub fn configuration_error(operation: &str, reason: impl Into<String>) -> Error {
+        Error::Configuration {
+            operation: operation.to_string(),
+            server: None,
+            code: None,
+            reason: reason.into(),
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct Address {
         pub(crate) display: Option<String>,
@@ -1352,17 +1419,6 @@ pub mod jet_email {
 
     fn reply_text(reply: &SMTPReply) -> String { reply.lines.join("\n") }
 
-    fn error_reason(error: &Error) -> &str {
-        match error {
-            Error::Configuration { reason, .. } | Error::DNS { reason, .. }
-            | Error::Connect { reason, .. } | Error::TLS { reason, .. }
-            | Error::Auth { reason, .. } | Error::Protocol { reason, .. }
-            | Error::Rejected { reason, .. } | Error::Transient { reason, .. }
-            | Error::TimedOut { reason, .. } | Error::Cancelled { reason, .. }
-            | Error::DeliveryUnknown { reason, .. } => reason,
-        }
-    }
-
     fn with_server(error: Error, server: &str) -> Error {
         with_operation_server(error, "smtp", server)
     }
@@ -1425,9 +1481,7 @@ pub mod jet_email {
     }
 
     fn error(operation: &'static str, reason: impl Into<String>) -> Error {
-        Error::Configuration {
-            operation: operation.to_string(), server: None, code: None, reason: reason.into(),
-        }
+        configuration_error(operation, reason)
     }
 
     fn reject_controls(value: &str, what: &str) -> Result<(), Error> {

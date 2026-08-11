@@ -308,7 +308,7 @@ fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message,
     )
     .map_err(|error| {
         unsupported(
-            &format!("email Message is invalid: {}", error_reason(&error)),
+            &format!("email Message is invalid: {}", jet_email::error_reason(&error)),
             span,
         )
     })?;
@@ -317,7 +317,10 @@ fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message,
             let envelope = envelope_from_value(value, span)?;
             message.with_envelope(&envelope).map_err(|error| {
                 unsupported(
-                    &format!("email Message envelope is invalid: {}", error_reason(&error)),
+                    &format!(
+                        "email Message envelope is invalid: {}",
+                        jet_email::error_reason(&error)
+                    ),
                     span,
                 )
             })
@@ -326,102 +329,8 @@ fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message,
     }
 }
 
-fn error_parts(
-    error: jet_email::Error,
-) -> (&'static str, String, Option<String>, Option<i64>, String) {
-    macro_rules! parts {
-        ($variant:literal, $operation:expr, $server:expr, $code:expr, $reason:expr) => {
-            ($variant, $operation, $server, $code, $reason)
-        };
-    }
-    match error {
-        jet_email::Error::Configuration {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Configuration", operation, server, code, reason),
-        jet_email::Error::DNS {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("DNS", operation, server, code, reason),
-        jet_email::Error::Connect {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Connect", operation, server, code, reason),
-        jet_email::Error::TLS {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("TLS", operation, server, code, reason),
-        jet_email::Error::Auth {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Auth", operation, server, code, reason),
-        jet_email::Error::Protocol {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Protocol", operation, server, code, reason),
-        jet_email::Error::Rejected {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Rejected", operation, server, code, reason),
-        jet_email::Error::Transient {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Transient", operation, server, code, reason),
-        jet_email::Error::TimedOut {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("TimedOut", operation, server, code, reason),
-        jet_email::Error::Cancelled {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Cancelled", operation, server, code, reason),
-        jet_email::Error::DeliveryUnknown {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("DeliveryUnknown", operation, server, code, reason),
-    }
-}
-
-fn error_reason(error: &jet_email::Error) -> &str {
-    match error {
-        jet_email::Error::Configuration { reason, .. }
-        | jet_email::Error::DNS { reason, .. }
-        | jet_email::Error::Connect { reason, .. }
-        | jet_email::Error::TLS { reason, .. }
-        | jet_email::Error::Auth { reason, .. }
-        | jet_email::Error::Protocol { reason, .. }
-        | jet_email::Error::Rejected { reason, .. }
-        | jet_email::Error::Transient { reason, .. }
-        | jet_email::Error::TimedOut { reason, .. }
-        | jet_email::Error::Cancelled { reason, .. }
-        | jet_email::Error::DeliveryUnknown { reason, .. } => reason,
-    }
-}
-
 fn error_value(error: jet_email::Error) -> CtValue {
-    let (variant, operation, server, code, reason) = error_parts(error);
+    let (variant, _disc, operation, server, code, reason) = jet_email::error_parts(error);
     CtValue::Enum {
         type_name: "EmailError".to_string(),
         variant: variant.to_string(),
@@ -570,6 +479,24 @@ fn limits_from_value(value: &CtValue, span: Span) -> Result<jet_email::Limits, D
         max_message_bytes: field_int("max_message_bytes")?,
         max_auth_challenge_bytes: field_int("max_auth_challenge_bytes")?,
     })
+}
+
+pub fn limits_safe_value() -> CtValue {
+    let limits = jet_email::Limits::safe();
+    structure(
+        "Limits",
+        vec![
+            ("max_reply_line_bytes", CtValue::Int(limits.max_reply_line_bytes)),
+            ("max_reply_lines", CtValue::Int(limits.max_reply_lines)),
+            ("max_capabilities", CtValue::Int(limits.max_capabilities)),
+            ("max_recipients", CtValue::Int(limits.max_recipients)),
+            ("max_message_bytes", CtValue::Int(limits.max_message_bytes)),
+            (
+                "max_auth_challenge_bytes",
+                CtValue::Int(limits.max_auth_challenge_bytes),
+            ),
+        ],
+    )
 }
 
 fn auth_from_value(
