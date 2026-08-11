@@ -266,5 +266,3 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
             }
         }
     }
-
-}
