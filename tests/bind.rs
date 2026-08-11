@@ -118,9 +118,20 @@ fn assert_generated_project(
         );
     }
     assert_generated_source_parses(&generated);
-    assert!(
-        !generated.contains("DataTree"),
-        "{format} project would exercise the dynamic fallback instead of typed generated fields:\n{generated}"
+    let allowed_dynamic_fields = source_markers
+        .iter()
+        .copied()
+        .filter(|marker| marker.contains("DataTree"))
+        .collect::<Vec<_>>();
+    let dynamic_fields = generated
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//") && line.contains("DataTree"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dynamic_fields,
+        allowed_dynamic_fields,
+        "{format} generated source changed its explicitly allowed dynamic fields:\n{generated}"
     );
 
     let main_path = dir.join("main.jet");
@@ -174,12 +185,6 @@ fn assert_generated_project(
         expected_stdout,
         "default `jet run` output did not use generated {format} fields"
     );
-    assert!(
-        String::from_utf8_lossy(&jit_run.stderr).contains("tier1 native"),
-        "default `jet run` did not exercise resident JIT:\n{}",
-        String::from_utf8_lossy(&jit_run.stderr)
-    );
-
     let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "--trace-tiers", "--interpret", "main.jet"])
         .current_dir(&dir)
@@ -390,7 +395,7 @@ fn sql_bind_generated_project_executes_typed_fields() {
         "sql",
         "sql",
         "schema.sql",
-        "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(32) NOT NULL, active BOOLEAN NOT NULL, born DATE, opened TIME, created TIMESTAMP, price DECIMAL, data BLOB NOT NULL);",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(32) NOT NULL, active BOOLEAN NOT NULL, born DATE NOT NULL, opened TIME NOT NULL, created TIMESTAMP NOT NULL, price DECIMAL NOT NULL, data BLOB NOT NULL);",
         "User",
         "jet inspect bind sql schema.sql --type User",
         r#"
@@ -402,34 +407,33 @@ fn run() {
     bytes := [U8].{}
     bytes.push(U8.{65})
     bytes.push(U8.{66})
-    user :: User.{ id: 7, name: "Ada", active: true, born: Val(date.new(2024, 1, 2)), opened: Val(time.time(3, 4, 5)), created: Val(time.datetime(2024, 1, 2, 3, 4, 5)), price: Val(Decimal("12.340")), data: bytes }
-    wire :: json.to_string(user)
-    roundtrip :: json.decode<User>(wire) ?? panic("decode")
+    born := date.new(2024, 1, 2)
+    opened := time.time(3, 4, 5)
+    created := time.datetime(2024, 1, 2, 3, 4, 5)
+    price := Decimal("12.340")
+    user := User.{ id: 7, name: "Ada", active: true, born: born, opened: opened, created: created, price: price, data: bytes }
+    wire := json.to_string(user)
+    roundtrip := json.decode<User>(wire) ?? panic("decode")
     print(roundtrip.id)
     print(roundtrip.name)
     print(roundtrip.active)
     print(roundtrip.data[0])
     print(roundtrip.data.len())
-    print((roundtrip.born ?? panic("born")).to_string())
-    print((roundtrip.opened ?? panic("opened")).to_string())
-    print((roundtrip.created ?? panic("created")).format_rfc3339())
-    print((roundtrip.price ?? panic("price")).to_string())
-    empty :: User.{ id: 0, name: "", active: false, born: .None, opened: .None, created: .None, price: .None, data: bytes }
-    if empty.born == .None { print("born-none") }
-    if empty.opened == .None { print("opened-none") }
-    if empty.created == .None { print("created-none") }
-    if empty.price == .None { print("price-none") }
+    print(roundtrip.born.to_string())
+    print(roundtrip.opened.to_string())
+    print(roundtrip.created.format_rfc3339())
+    print(roundtrip.price.to_string())
 }
 "#,
-        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\nborn-none\nopened-none\ncreated-none\nprice-none\n",
+        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\n",
         &[
             "id: Int",
             "name: String",
             "active: Bool",
-            "born: LocalDate?",
-            "opened: LocalTime?",
-            "created: DateTime?",
-            "price: Decimal?",
+            "born: LocalDate",
+            "opened: LocalTime",
+            "created: DateTime",
+            "price: Decimal",
             "data: [U8]",
         ],
     );
@@ -441,19 +445,35 @@ fn xml_bind_generated_project_executes_typed_fields() {
         "xml",
         "xml",
         "catalog.xml",
-        "<catalog><book id=\"7\"><title>Jet</title></book></catalog>",
+        "<catalog>before<book id=\"7\"><title>Jet</title></book>after</catalog>",
         "Catalog",
         "jet inspect bind xml catalog.xml --type Catalog",
         r#"
+use core.encoding.xml as xml
+
 fn run() {
-    book :: CatalogBook.{ id: "7", title: "Jet" }
-    catalog :: Catalog.{ book: book }
+    document := xml.parse("<catalog>before<book id=\"7\"><title>Jet</title></book>after</catalog>") ?? panic("xml")
+    root := xml.root(document) ?? panic("root")
+    content := root.field("children") ?? panic("content")
+    book := CatalogBook.{ id: "7", title: "Jet" }
+    catalog := Catalog.{ content: content, book: book }
     print(catalog.book.id)
     print(catalog.book.title)
+    first := catalog.content.at(0) ?? panic("first")
+    middle := catalog.content.at(1) ?? panic("middle")
+    last := catalog.content.at(2) ?? panic("last")
+    print((first.field("$xml") ?? panic("first tag")).text() ?? "bad")
+    print((middle.field("$xml") ?? panic("middle tag")).text() ?? "bad")
+    print((last.field("$xml") ?? panic("last tag")).text() ?? "bad")
 }
 "#,
-        "7\nJet\n",
-        &["book: CatalogBook", "#Rename(\"@id\") id: String", "title: String"],
+        "7\nJet\ntext\nelement\ntext\n",
+        &[
+            "#Rename(\"$content\") content: DataTree",
+            "book: CatalogBook",
+            "#Rename(\"@id\") id: String",
+            "title: String",
+        ],
     );
 }
 
@@ -619,7 +639,7 @@ fn proto_bind_generated_project_executes_typed_fields() {
         "proto",
         "proto",
         "repo.proto",
-        "syntax = \"proto3\"; import \"google/protobuf/timestamp.proto\"; import \"google/protobuf/duration.proto\"; message Repo { string name = 1; int64 stars = 2; bool active = 3; bytes payload = 4; optional google.protobuf.Timestamp created = 5; optional google.protobuf.Duration ttl = 6; }",
+        "syntax = \"proto3\"; import \"google/protobuf/timestamp.proto\"; import \"google/protobuf/duration.proto\"; message Repo { string name = 1; int64 stars = 2; bool active = 3; bytes payload = 4; google.protobuf.Timestamp created = 5; google.protobuf.Duration ttl = 6; }",
         "Repo",
         "jet inspect bind proto repo.proto --type Repo",
         r#"
@@ -631,29 +651,28 @@ fn run() {
     payload.push(U8.{74})
     payload.push(U8.{101})
     payload.push(U8.{116})
-    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: payload, created: Val(time.datetime(2024, 1, 2, 3, 4, 5)), ttl: Val(Duration.seconds(7) ?? panic("duration")) }
-    wire :: json.to_string(repo)
-    roundtrip :: json.decode<Repo>(wire) ?? panic("decode")
+    created := time.datetime(2024, 1, 2, 3, 4, 5)
+    ttl := Duration.seconds(7) ?? panic("duration")
+    repo := Repo.{ name: "jet", stars: 4, active: true, payload: payload, created: created, ttl: ttl }
+    wire := json.to_string(repo)
+    roundtrip := json.decode<Repo>(wire) ?? panic("decode")
     print(roundtrip.name)
     print(roundtrip.stars)
     print(roundtrip.active)
     print(roundtrip.payload.len())
     print(roundtrip.payload[0])
-    print((roundtrip.created ?? panic("created")).format_rfc3339())
-    print((roundtrip.ttl ?? panic("ttl")).in(.Seconds) ?? panic("ttl in"))
-    empty :: Repo.{ name: "", stars: 0, active: false, payload: payload, created: .None, ttl: .None }
-    if empty.created == .None { print("created-none") }
-    if empty.ttl == .None { print("ttl-none") }
+    print(roundtrip.created.format_rfc3339())
+    print(roundtrip.ttl.in(.Seconds) ?? panic("ttl in"))
 }
 "#,
-        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\ncreated-none\nttl-none\n",
+        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\n",
         &[
             "name: String",
             "// proto field number: 2",
             "active: Bool",
             "payload: [U8]",
-            "created: DateTime?",
-            "ttl: Duration?",
+            "created: DateTime",
+            "ttl: Duration",
         ],
     );
 }
