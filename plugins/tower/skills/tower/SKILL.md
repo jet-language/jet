@@ -41,7 +41,8 @@ lanes, **never touch**: `decide`, plus `frozen` cards. Your lanes:
   **tower-ballot** skill for the ballot standard)
 - `implement` — plan vetted, decisions ratified: build it
 - `building` — in progress; continue to completion
-- `verify` — claimed done; verify 100%, then close
+- `verify` — owner visual acceptance or an explicit closeout follow-up; technical
+  cards do not wait there for a per-card review
 
 **Epochs** are the major groupings; **milestones** are goals within an epoch
 (cards link via `milestoneId`; progress is computed). `tower state` returns
@@ -72,16 +73,15 @@ everything as JSON; `tower status` is the human summary.
 4. Advance with attribution:
    `tower card update <#> --phase building --log "started: X" --by <me>`.
    Phase honesty: `planning`→(`deciding` if decisions raised, else `ready`);
-   `ready`→`building`; `building`→`verify` on claimed done; `verify`→`done`
-   only after real **agent** verification. Never close what you haven't verified.
-   If the card has a `criteria[]` checklist, meet each item as you finish it
-   (`tower card criteria <#> --meet n --evidence "…" --by <me>`) and get a
-   *different* agent to verify (`--verify n`) — the board refuses `--phase
-   done` (`E_CRITERIA`) while any item is unverified, and refuses a verifier
-   who is also the builder (`E_CRITERIA_SELF`).
+   `ready`→`building`; `building`→`done` after the orchestrator confirms robust
+   observable criteria, concrete evidence, an integrated patch, and no known
+   contradictory blocker. The orchestrator records each criterion's evidence before
+   close.
+   A per-card reviewer, duplicate proof, and `--verify` step are not closure
+   requirements.
    **Owner verification is not technical review.** Do not leave technical cards
-   sitting in `verify` for the owner. Agents own machine proof and independent
-   technical criteria verify, then `--phase done` themselves.
+   sitting in `verify` for the owner. Use `verify` only when a card needs the owner's
+   visual acceptance or an explicit closeout follow-up.
    Cards flagged `needsAcceptance` mint an owner accept/bounce ballot once the
    checklist is clean; the card waits in `verify` for that ratification, not
    `done`. Set `needsAcceptance` **only** for: visual/UI/UX/DX taste and design
@@ -108,7 +108,7 @@ execution order is sidequests first, then the current epoch, unless the owner
 names a different grouping.
 
 Run `tower lint` before or after a sweep to catch durability rot the guards
-don't: cards marked `done` with no verification evidence in the log, cards
+don't: cards marked `done` with no criteria and integration evidence in the log, cards
 claimed and idle 3+ days, events missing `by`, decisions that would fail the
 ballot-ready gate, stale drafts, and dangling `blockedBy` refs. `--docs` also
 flags a ratified decision id still sitting in `docs/ballots/*.md`. Exit code

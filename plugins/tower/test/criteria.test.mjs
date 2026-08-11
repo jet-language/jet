@@ -18,16 +18,16 @@ const fresh = () => {
   return openStore(dir);
 };
 
-test('done-gate: refuses close while a criterion is unverified (E_CRITERIA)', () => {
+test('done-gate: refuses close while a criterion is not met or verified (E_CRITERIA)', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addCriterion(s, '#1', 'matrix vs spec', 'planner'));
   st.mutate((s) => db.addCriterion(s, '#1', 'perf budget', 'planner'));
   st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'ran it', by: 'builder' }));
-  // criterion 2 still open, criterion 1 only met (not verified)
+  // criterion 2 is still open; criterion 1 is already met.
   assert.throws(
     () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg)),
-    (e) => e instanceof TowerError && e.code === 'E_CRITERIA' && /2 of 2 criteria unverified \(1,2\)/.test(e.message));
+    (e) => e instanceof TowerError && e.code === 'E_CRITERIA' && /1 of 2 criteria not met or verified \(2\)/.test(e.message));
   assert.equal(st.load().cards[0].phase, 'planning', 'refused write must not change phase');
 });
 
@@ -55,11 +55,13 @@ test('owner writes bypass the criteria gate entirely', () => {
   assert.equal(bypassEvent.note, 'owner bypass');
 });
 
-test('legacy card (no criteria) closes freely for agents', () => {
+test('a card with no criteria rejects an agent close', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'some-agent' }, cfg));
-  assert.equal(result.phase, 'done');
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'some-agent' }, cfg)),
+    (e) => e instanceof TowerError && e.code === 'E_CRITERIA');
+  assert.equal(st.load().cards[0].phase, 'planning');
 });
 
 test('flagged card: agent done-attempt with clean checklist mints D-ACCEPT, stays in verify; owner accept closes it', () => {
@@ -87,7 +89,9 @@ test('flagged card: agent done-attempt with clean checklist mints D-ACCEPT, stay
 test('flagged card: owner bounce reopens to building with the comment logged', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
-  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder-agent' }, cfg)); // no criteria — mints straight away
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built it', by: 'builder-agent' }));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder-agent' }, cfg));
   const before = st.load();
   assert.equal(before.cards[0].phase, 'verify');
   assert.ok(before.decisions.find(x => x.id === 'D-ACCEPT-1'));
@@ -102,6 +106,8 @@ test('flagged card: owner bounce reopens to building with the comment logged', (
 test('a second done-attempt while D-ACCEPT is still open does not mint a duplicate', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built it', by: 'agent-1' }));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-2' }, cfg));
   const s1 = st.load();
@@ -113,6 +119,8 @@ test('a second done-attempt while D-ACCEPT is still open does not mint a duplica
 test('after a bounce, a fresh done-attempt re-opens the same D-ACCEPT id (no id collision)', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built it', by: 'agent-1' }));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
   st.mutate((s) => resolveAcceptance(s, 'D-ACCEPT-1', 'bounce', 'fix it', ownerProvenance('bounce')));
   assert.equal(st.load().cards[0].phase, 'building');

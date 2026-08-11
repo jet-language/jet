@@ -212,7 +212,10 @@ test('editing an open ready ballot re-runs the profile gate', () => {
 test('acceptance ballots (mintAcceptance) are exempt from the narrative ballot standard', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
-  // no criteria — done-gate mints D-ACCEPT-1 straight away; must not throw E_BALLOT
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built it', by: 'agent-1' }));
+  // The closure guard passes, then the system acceptance ballot is exempt
+  // from the narrative ballot standard.
   const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
   assert.equal(result.phase, 'verify');
   assert.ok(st.load().decisions.find(d => d.id === 'D-ACCEPT-1'));
@@ -299,11 +302,13 @@ test('a fresh card lands in planning; an agent can change its phase with no owne
   assert.equal(result.phase, 'building');
 });
 
-test('a fresh card also closes freely for an agent (done-gate, not an owner lane, governs done)', () => {
+test('a fresh card needs exit criteria before an agent can close it', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
-  assert.equal(result.phase, 'done');
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg)),
+    (e) => e instanceof TowerError && e.code === 'E_CRITERIA');
+  assert.equal(st.load().cards[0].phase, 'planning');
 });
 
 // ---- 4. delete refuses when a ratified decision is attached -----------------

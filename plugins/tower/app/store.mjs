@@ -29,8 +29,8 @@ export const PHASES = [
   { id: 'planning', label: 'Planning', seq: 1, who: 'agent', blurb: 'Build a plan + raise the decisions it needs' },
   { id: 'ready',    label: 'Ready',    seq: 2, who: 'agent', blurb: 'Plan vetted, decisions cleared — implement it' },
   { id: 'building', label: 'Building', seq: 3, who: 'agent', blurb: 'Implementation in progress' },
-  { id: 'verify',   label: 'Verify',   seq: 4, who: 'agent', blurb: 'Claimed done — verify 100%, then close' },
-  { id: 'done',     label: 'Done',     seq: 5, who: null,    blurb: 'Verified — hidden' },
+  { id: 'verify',   label: 'Review',   seq: 4, who: 'agent', blurb: 'Owner visual review for flagged cards; no separate agent verify step' },
+  { id: 'done',     label: 'Done',     seq: 5, who: null,    blurb: 'Closed — exit criteria met' },
   { id: 'frozen',   label: 'Frozen',   seq: -1, who: 'owner', blurb: 'Owner-only — paused; the owner unpauses with a phase update' },
 ];
 export const PHASE_IDS = PHASES.map(p => p.id);
@@ -41,7 +41,7 @@ export const LANES = {
   plan:      { who: 'agent', label: 'Plan',      rank: 1 },
   implement: { who: 'agent', label: 'Implement', rank: 2 },
   building:  { who: 'agent', label: 'Building',  rank: 3 },
-  verify:    { who: 'agent', label: 'Verify',    rank: 4 },
+  verify:    { who: 'agent', label: 'Review',    rank: 4 },
   blocked:   { who: null,    label: 'Blocked',   rank: 5 },
   frozen:    { who: 'owner', label: 'Frozen',    rank: 6 },
   done:      { who: null,    label: 'Done',      rank: 7 },
@@ -80,7 +80,7 @@ export function openStore(dataDir) {
     }
     return value;
   };
-  const loadRaw = () => normalize(readJSON(file, empty(config.project)));
+  const loadRaw = () => normalize(readJSON(file, empty(config.project)), loadHistoryRaw(dataDir).cards);
   const load = () => consistentRead(loadRaw);
 
   // history.json can change through another CLI process. Read it fresh so a
@@ -94,10 +94,11 @@ export function openStore(dataDir) {
     const s = loadRaw();
     if (expectRev != null && Number(expectRev) !== s.meta.rev)
       fail('E_CONFLICT', `stale rev: expected ${expectRev}, store is at ${s.meta.rev} — re-read state and retry`);
-    const result = fn(s, config);
+    const history = loadHistoryRaw(dataDir);
+    const result = fn(s, config, history);
     // #461: single chokepoint — every write gets a chance to retire aged-out
     // cards/decisions/events to history.json before tower.json is persisted.
-    syncMilestones(s, undefined, loadHistoryRaw(dataDir).cards);
+    syncMilestones(s, undefined, history.cards);
     retire(s, config, dataDir);
     s.meta.rev += 1;
     backup(file, config.backups);
@@ -118,7 +119,7 @@ export function openStore(dataDir) {
       fail('E_USAGE', `restore requires expectRev — read the board first and pass its meta.rev (currently ${cur.meta.rev})`);
     if (Number(expectRev) !== cur.meta.rev)
       fail('E_CONFLICT', `undo refused: board changed since (rev ${cur.meta.rev} ≠ ${expectRev})`);
-    const s = normalize(prevState);
+    const s = normalize(prevState, loadHistoryRaw(dataDir).cards);
     s.meta.rev = cur.meta.rev + 1;
     backup(file, config.backups);
     writeJSON(file, s);
@@ -299,7 +300,7 @@ export function restoreFromHistory(s, h, ref, by) {
   fail('E_NOT_FOUND', `no archived card or decision ${ref}`);
 }
 
-export function normalize(s) {
+export function normalize(s, historyCards = null) {
   s = s && typeof s === 'object' ? s : empty();
   s.meta = { version: VERSION, project: 'Project', nextNum: 1, rev: 0, ...(s.meta || {}) };
   s.meta.version = VERSION;
@@ -326,7 +327,16 @@ export function normalize(s) {
     if (!('parentId' in c)) c.parentId = null;
     c.needsAcceptance = !!c.needsAcceptance;
   }
+  for (const m of s.milestones) {
+    m.criteria = normalizeMilestoneCriteria(m.criteria);
+    if (!['open', 'review-ready', 'met'].includes(m.status)) m.status = 'open';
+    if (m.status === 'met' && !m.verification) {
+      m.status = 'review-ready';
+      delete m.metAt;
+    }
+  }
   for (const d of s.decisions) d.draft = !!d.draft;
+  syncMilestones(s, undefined, historyCards == null ? [] : historyCards);
   return s;
 }
 
@@ -384,14 +394,14 @@ export function laneOf(card, decisions, cards) {
   if (card.phase === 'ready')    return { lane: 'implement', who: 'agent', label: 'Ready to implement' };
   if (card.phase === 'building') return { lane: 'building', who: 'agent', label: 'Continue building' };
   if (card.phase === 'verify') {
-    // needsAcceptance = owner visual/UX/DX taste only. Bare verify = agent technical closeout.
+    // needsAcceptance = owner visual/UX/DX taste only. Bare verify is legacy state.
     if (card.needsAcceptance) {
       const acceptOpen = decisions.some(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified');
       return acceptOpen
         ? { lane: 'verify', who: 'owner', label: 'Owner visual/UX acceptance' }
-        : { lane: 'verify', who: 'agent', label: 'Finish criteria, then owner visual check' };
+        : { lane: 'verify', who: 'agent', label: 'Finish criteria before owner visual review' };
     }
-    return { lane: 'verify', who: 'agent', label: 'Agent technical verify, then close' };
+    return { lane: 'verify', who: 'agent', label: 'Close when exit criteria are met' };
   }
   return { lane: 'blocked', who: null, label: '' };
 }
@@ -406,7 +416,14 @@ function milestoneCards(id, cards, historyCards = []) {
 export function milestoneProgress(m, cards, historyCards = []) {
   const linked = milestoneCards(m.id, cards, historyCards);
   const done = linked.filter(c => c.phase === 'done').length;
-  return { total: linked.length, done, met: linked.length > 0 && done === linked.length };
+  const reviewReady = linked.length > 0 && done === linked.length;
+  return { total: linked.length, done, reviewReady, met: reviewReady && m.status === 'met' && !!m.verification };
+}
+
+function clearMilestoneVerification(m) {
+  delete m.verification;
+  delete m.metAt;
+  if (m.status === 'met') m.status = 'review-ready';
 }
 
 function syncMilestone(s, id, historyCards = []) {
@@ -414,18 +431,32 @@ function syncMilestone(s, id, historyCards = []) {
   if (!m) return;
   const linked = milestoneCards(id, s.cards, historyCards);
   if (!linked.length) {
+    clearMilestoneVerification(m);
     m.status = 'open';
-    delete m.metAt;
     return;
   }
-  const met = linked.every(c => c.phase === 'done');
-  m.status = met ? 'met' : 'open';
-  if (met) m.metAt ||= today();
-  else delete m.metAt;
+  if (!linked.every(c => c.phase === 'done')) {
+    clearMilestoneVerification(m);
+    m.status = 'open';
+    return;
+  }
+  if (m.status === 'met' && m.verification) return;
+  // Card completion only opens the milestone review. `verifyMilestone` is the
+  // sole operation that may create the met signoff.
+  clearMilestoneVerification(m);
+  m.status = 'review-ready';
 }
 
 function syncMilestones(s, ids = s.milestones.map(m => m.id), historyCards = []) {
   for (const id of new Set(ids.filter(Boolean))) syncMilestone(s, id, historyCards);
+}
+
+function invalidateCardMilestone(s, card) {
+  if (!card?.milestoneId) return;
+  const m = s.milestones.find(x => x.id === card.milestoneId);
+  if (!m) return;
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
 }
 
 // ---- radar: roadmap-ledger + ops-table hybrid (#464, D-TWR-BOARD1=A) ------
@@ -491,7 +522,7 @@ export function radarData(s, historyCards = []) {
     const done = all.filter(c => c.phase === 'done');
     const milestones = s.milestones.filter(m => m.epochId === e.id).map(m => {
       const progress = milestoneProgress(m, s.cards, historyCards);
-      return { id: m.id, title: m.title, goal: m.goal, met: m.status === 'met',
+      return { id: m.id, title: m.title, goal: m.goal, status: m.status, met: progress.met,
         ...progress, stalledDays: milestoneStallDays(m, s.cards, s.events) };
     });
     const milestonesMet = milestones.filter(m => m.met).length;
@@ -644,7 +675,7 @@ export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
 // ---- mutations: cards ------------------------------------------------------
 
 // One exit-criteria item: 1-based stable n, open -> met (builder) -> verified
-// (a different agent). Card-embedded, no own id — addressed by (card, n).
+// (a different reviewer). Card-embedded, no own id — addressed by (card, n).
 function normalizeCriterion(it, i) {
   return {
     n: it.n ?? (i + 1),
@@ -655,6 +686,26 @@ function normalizeCriterion(it, i) {
     evidence: it.evidence || '',
     at: it.at || now(),
   };
+}
+
+function normalizeMilestoneCriterion(it, i) {
+  const source = typeof it === 'string' ? { text: it } : (it || {});
+  return {
+    n: source.n ?? (i + 1),
+    text: String(source.text || '').trim(),
+    status: ['open', 'met', 'verified'].includes(source.status) ? source.status : 'open',
+    metBy: source.metBy ?? null,
+    verifiedBy: source.verifiedBy ?? null,
+    evidence: source.evidence || '',
+    at: source.at || now(),
+  };
+}
+
+function normalizeMilestoneCriteria(raw) {
+  if (Array.isArray(raw)) return raw.map(normalizeMilestoneCriterion);
+  if (raw && typeof raw === 'object' && Array.isArray(raw.items)) return raw.items.map(normalizeMilestoneCriterion);
+  if (raw == null || raw === '') return [];
+  return [normalizeMilestoneCriterion(raw, 0)];
 }
 
 function touchCard(card, by) {
@@ -732,38 +783,37 @@ export function addCard(s, p, config) {
 
 const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId'];
 
-// D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Criteria remain
-// owner-soft, but needsAcceptance is transport-hard: caller attribution can
-// never stand in for the dedicated owner UI provenance. Once criteria clear,
-// an agent write mints the acceptance ballot and parks the card in verify.
-function applyDoneGate(s, c, targetPhase, by) {
+// D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
+// nonempty checklist with every row met or verified. Owner writes keep the
+// legacy bypass and audit event. needsAcceptance remains transport-hard.
+function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAcceptance = c.needsAcceptance) {
   if (targetPhase !== 'done') return null;
-  if (c.needsAcceptance && by === 'owner')
+  if (needsAcceptance && by === 'owner')
     fail('E_ACCEPTANCE_OWNER_UI', `card #${c.num} requires owner verification — caller-supplied by:owner cannot close it; use the dedicated owner verification UI`);
-  const items = c.criteria || [];
-  const unverified = items.filter(i => i.status !== 'verified');
-  const gated = items.length > 0 && unverified.length > 0;
-  if (gated && by !== 'owner') {
-    fail('E_CRITERIA', `${unverified.length} of ${items.length} criteria unverified (${unverified.map(i => i.n).join(',')}); verifier must not be the builder`);
-  }
-  if (gated && by === 'owner') {
+  const items = criteria || [];
+  const unsettled = items.filter(i => !['met', 'verified'].includes(i.status));
+  if (by !== 'owner' && !items.length)
+    fail('E_CRITERIA', `card #${c.num} needs at least one exit criterion before an agent can close it`);
+  if (by !== 'owner' && unsettled.length)
+    fail('E_CRITERIA', `${unsettled.length} of ${items.length} criteria not met or verified (${unsettled.map(i => i.n).join(',')})`);
+  if (by === 'owner' && (!items.length || unsettled.length)) {
     logEvent(s, { by, action: 'card.criteria-bypass', ref: c.id, note: 'owner bypass' });
     return null;
   }
-  if (c.needsAcceptance) {
+  if (needsAcceptance) {
     mintAcceptance(s, c);
     return 'verify';
   }
   return null;
 }
 
-// A needsAcceptance card parked in verify with every criterion verified is the
+// A needsAcceptance card parked in review with every criterion met or verified is the
 // same owner handoff as asking for done — without this the owner's Accept
 // button stays disabled forever, because the ballot only minted on a `--phase
 // done` attempt and agents park in verify directly.
 function maybeMintAcceptance(s, c) {
   const items = c.criteria || [];
-  if (c.needsAcceptance && c.phase === 'verify' && items.length && items.every(i => i.status === 'verified'))
+  if (c.needsAcceptance && c.phase === 'verify' && items.length && items.every(i => ['met', 'verified'].includes(i.status)))
     mintAcceptance(s, c);
 }
 
@@ -880,7 +930,16 @@ export function updateCard(s, ref, patch, config) {
   if (openAcceptance && 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true'))
     fail('E_ACCEPTANCE_OWNER_UI', `${openAcceptance.id} is open — needsAcceptance cannot be cleared to bypass owner verification`);
   assertOwnerLane(c, patch, patch.by);
-  const phaseOverride = 'phase' in patch ? applyDoneGate(s, c, patch.phase, patch.by) : null;
+  if ('criteria' in patch) invalidateCardMilestone(s, c);
+  const candidateCriteria = 'criteria' in patch && Array.isArray(patch.criteria)
+    ? patch.criteria.map((it, i) => normalizeCriterion(it, i))
+    : c.criteria;
+  const candidateAcceptance = 'needsAcceptance' in patch
+    ? patch.needsAcceptance === true || patch.needsAcceptance === 'true'
+    : c.needsAcceptance;
+  const phaseOverride = 'phase' in patch
+    ? applyDoneGate(s, c, patch.phase, patch.by, candidateCriteria, candidateAcceptance)
+    : null;
   for (const k of CARD_FIELDS) {
     if (k in patch) {
       if (k === 'phase') c.phase = phaseOverride || patch.phase;
@@ -915,6 +974,7 @@ export function addCriterion(s, ref, text, by) {
   const n = (c.criteria.length ? Math.max(...c.criteria.map(i => i.n)) : 0) + 1;
   const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
   c.criteria.push(item);
+  invalidateCardMilestone(s, c);
   touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}` });
   return { ...item, cardId: c.id, cardNum: c.num };
@@ -934,7 +994,9 @@ export function meetCriterion(s, ref, n, { evidence, by } = {}) {
   item.metBy = by;
   if (evidence != null) item.evidence = evidence;
   item.at = now();
+  invalidateCardMilestone(s, c);
   touchCard(c, by);
+  maybeMintAcceptance(s, c);
   logEvent(s, { by, action: 'card.criteria-meet', ref: c.id, note: `#${item.n}` });
   return { ...item, cardId: c.id, cardNum: c.num };
 }
@@ -949,6 +1011,7 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   item.verifiedBy = by;
   if (evidence != null) item.evidence = evidence;
   item.at = now();
+  invalidateCardMilestone(s, c);
   touchCard(c, by);
   maybeMintAcceptance(s, c);
   logEvent(s, { by, action: 'card.criteria-verify', ref: c.id, note: `#${item.n}` });
@@ -966,6 +1029,7 @@ export function reopenCriterion(s, ref, n, { reason, by } = {}) {
   item.verifiedBy = null;
   item.evidence = '';
   item.at = now();
+  invalidateCardMilestone(s, c);
   touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-reopen', ref: c.id, note: '#' + item.n + ': ' + String(reason).trim() });
   return { ...item, cardId: c.id, cardNum: c.num };
@@ -1540,23 +1604,118 @@ export function addMilestone(s, p) {
   checkEpoch(s, p.epochId || fail('E_INVALID', 'milestone needs --epoch <id>'));
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'milestone needs a title');
   const m = { id: p.id || newId('m'), epochId: p.epochId, title: String(p.title).trim(),
-    goal: p.goal || '', criteria: p.criteria || '', status: 'open', created: now() };
+    goal: p.goal || '', criteria: normalizeMilestoneCriteria(p.criteria), status: 'open', created: now() };
   s.milestones.push(m);
   logEvent(s, { by: p.by, action: 'milestone.add', ref: m.id, note: m.title });
   return m;
 }
+
+function mustMilestone(s, id) {
+  return s.milestones.find(x => x.id === id) || fail('E_NOT_FOUND', `no milestone ${id}`);
+}
+
+function mustMilestoneCriterion(m, n) {
+  const item = (m.criteria || []).find(i => i.n === Number(n));
+  if (!item) fail('E_NOT_FOUND', `no criterion #${n} on milestone ${m.id}`);
+  return item;
+}
+
 export function updateMilestone(s, id, patch, by) {
-  const m = s.milestones.find(x => x.id === id) || fail('E_NOT_FOUND', `no milestone ${id}`);
+  const m = mustMilestone(s, id);
   if ('epochId' in patch && patch.epochId !== m.epochId)
     fail('E_INVALID', 'milestone epoch is fixed after creation — create a new milestone and relink cards');
-  if ('status' in patch) checkEnum(patch.status, ['open', 'met'], 'milestone status');
-  for (const k of ['title', 'goal', 'criteria', 'status', 'epochId']) if (k in patch) m[k] = patch[k];
-  if (patch.status === 'met') m.metAt = today();
+  if ('status' in patch)
+    fail('E_MILESTONE_VERIFY', 'milestone ' + m.id + ' status is derived — use `tower milestone verify ' + m.id + ' --evidence "..." --by <reviewer>`');
+  if ('criteria' in patch) {
+    m.criteria = normalizeMilestoneCriteria(patch.criteria);
+    clearMilestoneVerification(m);
+  }
+  for (const k of ['title', 'goal', 'epochId']) if (k in patch) m[k] = patch[k];
+  syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.update', ref: m.id });
   return m;
 }
+
+export function addMilestoneCriterion(s, id, text, by) {
+  const m = mustMilestone(s, id);
+  if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
+  m.criteria ||= [];
+  const n = (m.criteria.length ? Math.max(...m.criteria.map(i => i.n)) : 0) + 1;
+  const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
+  m.criteria.push(item);
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
+  logEvent(s, { by, action: 'milestone.criteria-add', ref: m.id, note: `#${n} ${item.text.slice(0, 60)}` });
+  return { ...item, milestoneId: m.id };
+}
+
+export function meetMilestoneCriterion(s, id, n, { evidence, by } = {}) {
+  const m = mustMilestone(s, id);
+  const item = mustMilestoneCriterion(m, n);
+  if (!by) fail('E_INVALID', 'meet needs --by <agent>');
+  item.status = 'met';
+  item.metBy = by;
+  if (evidence != null) item.evidence = evidence;
+  item.at = now();
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
+  logEvent(s, { by, action: 'milestone.criteria-meet', ref: m.id, note: `#${item.n}` });
+  return { ...item, milestoneId: m.id };
+}
+
+export function verifyMilestoneCriterion(s, id, n, { evidence, by } = {}) {
+  const m = mustMilestone(s, id);
+  const item = mustMilestoneCriterion(m, n);
+  if (!by) fail('E_INVALID', 'verify needs --by <reviewer>');
+  if (item.status === 'open') fail('E_INVALID', `criterion #${n} not met yet — meet it before verifying`);
+  if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must not be the builder (${by})`);
+  item.status = 'verified';
+  item.verifiedBy = by;
+  if (evidence != null) item.evidence = evidence;
+  item.at = now();
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
+  logEvent(s, { by, action: 'milestone.criteria-verify', ref: m.id, note: `#${item.n}` });
+  return { ...item, milestoneId: m.id };
+}
+
+export function reopenMilestoneCriterion(s, id, n, { reason, by } = {}) {
+  const m = mustMilestone(s, id);
+  const item = mustMilestoneCriterion(m, n);
+  if (!by) fail('E_INVALID', 'reopen needs --by <agent>');
+  if (!reason || !String(reason).trim()) fail('E_INVALID', 'reopen needs --reason <text>');
+  if (item.status === 'open') fail('E_INVALID', `criterion #${n} is already open`);
+  item.status = 'open';
+  item.metBy = null;
+  item.verifiedBy = null;
+  item.evidence = '';
+  item.at = now();
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
+  logEvent(s, { by, action: 'milestone.criteria-reopen', ref: m.id, note: `#${item.n}: ${String(reason).trim()}` });
+  return { ...item, milestoneId: m.id };
+}
+
+export function verifyMilestone(s, id, { evidence, by } = {}, historyCards = []) {
+  const m = mustMilestone(s, id);
+  if (!by) fail('E_INVALID', 'milestone verify needs --by <reviewer>');
+  if (!evidence || !String(evidence).trim()) fail('E_INVALID', 'milestone verify needs --evidence <text>');
+  const linked = milestoneCards(m.id, s.cards, historyCards);
+  if (!linked.length || !linked.every(c => c.phase === 'done'))
+    fail('E_MILESTONE', `milestone ${m.id} is not review-ready — every linked card must be done`);
+  const unfinished = (m.criteria || []).filter(i => i.status !== 'verified');
+  if (unfinished.length)
+    fail('E_MILESTONE', `milestone ${m.id} has unverified criteria (${unfinished.map(i => i.n).join(',')})`);
+  const builders = new Set((m.criteria || []).map(i => i.metBy).filter(Boolean));
+  if (builders.has(by)) fail('E_CRITERIA_SELF', `milestone reviewer must not be a builder (${by})`);
+  m.status = 'met';
+  m.verification = { by, evidence: String(evidence).trim(), at: now() };
+  logEvent(s, { by, action: 'milestone.verify', ref: m.id, note: String(evidence).trim() });
+  return m;
+}
+
 export function deleteMilestone(s, id, by) {
-  const m = s.milestones.find(x => x.id === id) || fail('E_NOT_FOUND', `no milestone ${id}`);
+  const m = mustMilestone(s, id);
   s.milestones = s.milestones.filter(x => x.id !== id);
   for (const c of s.cards) if (c.milestoneId === id) c.milestoneId = null;
   logEvent(s, { by, action: 'milestone.delete', ref: id, note: m.title });
@@ -1589,7 +1748,7 @@ export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
     }
     return true;
   });
-  // Verification always closes before more work continues. Within each lane,
+  // Review work always comes before more work. Within each lane,
   // ready-across groups by epoch; every other scope follows workOrder.
   if (scope === 'ready-across') {
     pool.sort((a, b) =>
@@ -1626,9 +1785,10 @@ function harvestRefs(text) {
 
 const BRIEF_RULES = [
   'Log advances with --by.',
-  'Phase honesty: building → verify → done.',
-  'Criteria: meet as you finish; verifier must differ (E_CRITERIA_SELF).',
-  'Technical cards: agents meet+verify criteria then --phase done. Never park them for owner review.',
+  'Phase honesty: builder marks criteria met; orchestrator closes when all are met or verified.',
+  'Verified criteria are milestone-review signoff; verifier must differ from builder (E_CRITERIA_SELF).',
+  'Technical cards close directly after the exit-criteria guard. There is no separate agent verify step.',
+  'Integration and no-known-blocker are orchestration evidence, not mandatory card criteria.',
   'needsAcceptance ONLY for visual/UI/UX/DX taste or real-world eyes — never technical correctness.',
   'Owner Now/beacon shows needsAcceptance only; bare verify is agent work.',
   'Release mid-card needs --handoff.',
@@ -1669,7 +1829,7 @@ export function buildBrief(s, ref) {
       phase: card.phase, priority: card.priority, workOrder: card.workOrder ?? null,
       assignee: card.assignee ?? null, track: card.track,
       epoch: card.epoch ? { id: card.epoch, name: epoch?.name ?? null, goal: epoch?.goal ?? null } : null,
-      milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, criteria: milestone.criteria } : null,
+      milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, status: milestone.status, criteria: milestone.criteria, verification: milestone.verification || null } : null,
     },
     blockers: (card.blockedBy || []).map(id => blockerState(s, id)),
     criteria: { items: card.criteria || [], needsAcceptance: !!card.needsAcceptance },

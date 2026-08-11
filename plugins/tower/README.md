@@ -6,7 +6,7 @@ A file-backed project board for one human **owner** + any number of AI
 The owner does one thing: **decide** (ratify decision ballots in a focused,
 keyboard-driven UI). There is no greenlight/activate gate — a new card lands
 straight in an agent lane. Agents do everything else through a CLI/HTTP API —
-plan, implement, verify, answer questions, raise new decisions — and every
+plan, implement, review, answer questions, raise new decisions — and every
 card always computes to exactly one **lane** that says who owns the next
 move. Decision state is derived on every read, so a card and its ballots can
 never desync.
@@ -57,21 +57,23 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 ## Model
 
 - **Epochs** — the major groupings of work (`epoch add/update/current`).
-- **Milestones** — goals within an epoch; cards link to one and milestone
-  progress is computed from their done-ratio (`milestone add/update`).
+- **Milestones** — goals within an epoch. Linked cards move a milestone to
+  `review-ready` when all are done. Only `milestone verify` can make it `met`.
 - **Cards** — the work. Stages: deciding → planning → ready → building →
-  verify → done (+ frozen). A fresh card lands in `planning` — no owner
-  greenlight step. Tower picks verify, building, implement, then plan cards.
+  review → done (+ frozen). A fresh card lands in `planning` — no owner
+  greenlight step. Tower picks review, building, implement, then plan cards.
   Fields include `workOrder` (pick order inside each lane), `blockedBy`, an
   internal renewable work lease, `plan`, `log`, and `refs`
   (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
-- **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
-  gates `--phase done` for anyone but the owner, and the verifier must differ
-  from whoever met it. Flag a card `needsAcceptance` **only** for owner
-  visual/UI/UX/DX taste (or a real environment eyes-only check). That mints an
-  accept/bounce ballot once the checklist is clean. Never use it for technical
-  correctness — agents meet, independently verify, and `--phase done` themselves.
-  Bare `verify` is agent work and must not appear in the owner's Now queue.
+- **Exit criteria** — a card needs a nonempty `criteria[]` checklist for agent
+  closure. Every row must be `met` or `verified`. A builder marks rows `met`;
+  the orchestrator closes the card. `verified` is milestone-review signoff,
+  and its reviewer must differ from the builder. There is no separate card
+  verify step. Flag a card `needsAcceptance` **only** for owner visual/UI/UX/DX
+  taste or a real environment eyes-only check. That mints an accept/bounce
+  ballot once the checklist is clean. Bare `verify` is legacy agent state and
+  does not appear in the owner's Now queue. Integration and no-known-blocker
+  are orchestration evidence, not mandatory rows on every card.
   Acceptance is owner-UI-only: generic ratify, batch clearance, CLI
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.
@@ -81,6 +83,11 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   contain the same complete base draft without reviews and require an explicit
   owner request. The `simple` skill applies to every visible ballot field. A
   card with an open decision surfaces as **Decide** no matter its stage.
+- **Milestone review** — milestone criteria use the same `open` → `met` →
+  `verified` flow. `tower milestone verify <id> --evidence "…" --by X` works
+  only when every linked card is done and every milestone criterion is verified.
+  It stores the reviewer, evidence, and timestamp. Reopening a linked card or
+  milestone criterion clears the milestone signoff.
 - **Questions** — owner ⇄ agent threads on a card.
 - **Ideas** — capture bay; promote to a card when real.
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
@@ -105,7 +112,7 @@ tower message   list|add|done
 tower papercut  list|add|resolve
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
-tower milestone list|add|update|delete
+tower milestone list|add|update|criteria|verify|delete
 tower archive   status | show <id> | restore <id>
 tower init | serve | import
 ```
@@ -211,8 +218,8 @@ Black & red, pure dark, phone-friendly. Red is reserved for what needs the
 **beacon** on the left edge carries one lit segment per owner-blocking item
 and goes dark as you clear them. Two views:
 
-- **Now** — everything blocked on you in one queue: cards needing your
-  verification, and decisions (opens focus mode: ←/→ move, 1–9 pick, Enter
+- **Now** — everything blocked on you in one queue: cards needing your visual
+  review, and decisions (opens focus mode: ←/→ move, 1–9 pick, Enter
   record). Focus Mode shows the five review summaries in order: slate base,
   violet breadth, cyan hybrid, green cooperative, and orange adversarial. The
   recommendation is blue, while reasons against alternatives are muted red.

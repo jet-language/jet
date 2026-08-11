@@ -57,9 +57,9 @@ test('radar: epoch grouping excludes sidequests and progress counts milestones',
   const e2 = r.find(x => x.id === 'e2');
   assert.equal(e1.done, 1);   // c1
   assert.equal(e1.active, 3); // c2, c_ms, c_none
-  assert.equal(e1.milestonesMet, 1);
+  assert.equal(e1.milestonesMet, 0);
   assert.equal(e1.milestoneTotal, 3);
-  assert.equal(e1.pct, 33);
+  assert.equal(e1.pct, 0);
   assert.equal(e2.done, 1);   // c3 (c5 sidequest excluded)
   assert.equal(e2.active, 1); // c4 (c5 sidequest excluded)
   assert.equal(e2.milestonesMet, 0);

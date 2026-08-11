@@ -11,7 +11,7 @@ import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
   ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleBallotDocGaps,
-  ruleCriteriaEvidenceConflicts, ruleCriteriaPhaseDrift, ruleDuplicateSuspects } from '../app/lint.mjs';
+  ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 
@@ -39,11 +39,13 @@ const OLD_ISO = '2000-01-01T00:00:00.000Z';
 test('done-without-evidence: clean when the log mentions verification', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'ship it', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'agent-1' }));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', logEntry: 'ran full suite, all green', by: 'agent-1' }, cfg));
   assert.deepEqual(ruleDoneWithoutEvidence(st.load()), []);
 });
 
-test('done-without-evidence: clean when criteria are all verified', () => {
+test('done-without-evidence: clean when criteria are all met or verified', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addCriterion(s, '#1', 'ship it', 'planner'));
@@ -53,10 +55,10 @@ test('done-without-evidence: clean when criteria are all verified', () => {
   assert.deepEqual(ruleDoneWithoutEvidence(st.load()), []);
 });
 
-test('done-without-evidence: flags a done card with no evidence and no verified criteria', () => {
+test('done-without-evidence: flags an owner-bypassed card with no evidence', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
   const findings = ruleDoneWithoutEvidence(st.load());
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, 'done-without-evidence');
@@ -125,7 +127,9 @@ test('ballot-gaps: flags an open non-draft decision missing ballot fields', () =
 test('ballot-gaps: excludes drafts and acceptance ballots', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
-  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg)); // mints D-ACCEPT-1
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'agent-1' }));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-WIP', title: 'WIP', draft: true }));
   const s = st.load();
   assert.ok(s.decisions.find(d => d.id === 'D-ACCEPT-1'));
@@ -255,26 +259,6 @@ test('criteria-evidence-conflict: stays clean for open rows and positive evidenc
   assert.deepEqual(ruleCriteriaEvidenceConflicts(st.load()), []);
 });
 
-test('criteria-phase-drift: flags complete rows or verified rows behind verify', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'All met while building', phase: 'building' }, cfg));
-  st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
-  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'builder' }));
-
-  st.mutate((s, cfg) => db.addCard(s, { title: 'Verified while building', phase: 'building' }, cfg));
-  st.mutate((s) => db.addCriterion(s, '#2', 'second', 'planner'));
-  st.mutate((s) => db.meetCriterion(s, '#2', 1, { evidence: 'built', by: 'builder' }));
-  st.mutate((s) => db.verifyCriterion(s, '#2', 1, { evidence: 'checked', by: 'verifier' }));
-
-  st.mutate((s, cfg) => db.addCard(s, { title: 'Open while building', phase: 'building' }, cfg));
-  st.mutate((s) => db.addCriterion(s, '#3', 'third', 'planner'));
-
-  const findings = ruleCriteriaPhaseDrift(st.load());
-  assert.equal(findings.length, 2);
-  assert.deepEqual(findings.map(f => f.ref), ['#1', '#2']);
-  assert.ok(findings.every(f => f.rule === 'criteria-phase-drift'));
-});
-
 // ---- 9. duplicate-suspect ---------------------------------------------------
 
 test('duplicate-suspect: flags shared test references only among open cards', () => {
@@ -302,7 +286,7 @@ test('lint(): combines core rules; --docs adds the doc-gap rule only when asked'
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-XYZ2', title: 't', ...ballot() }));
   st.mutate((s) => db.ratify(s, 'D-XYZ2', 'A', null, 'owner'));
-  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg)); // done, no evidence → finding
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg)); // owner bypass, no evidence → finding
 
   const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
   mkdirSync(join(docsRoot, 'ballots'), { recursive: true });

@@ -20,11 +20,11 @@ are LAW.
 - **Luna at max is the default worker.** `codex exec -m gpt-5.6-luna -c model_reasoning_effort=max
   --sandbox workspace-write -C <worktree> - < brief.txt > log 2>&1 &` then `disown`.
   Sol (`-m gpt-5.6-sol -c model_reasoning_effort=high`) ONLY when Luna demonstrably failed
-  the same task. Sol burn shocked the owner; never batch-launch Sol.
+  the same task. Sol burn shocked the owner; never launch Sol workers together.
 - **Scope moves need explicit approval.** "Could we move X to another epoch?" is a question.
   Deliver analysis + proposal, then wait.
 - **No doc bloat.** Docs GC is sidequest card #1848, owner-scheduled. Don't touch it.
-- Owner is watching burn rate; batch board writes, avoid redundant polling.
+- Owner is watching burn rate; keep board writes immediate and avoid redundant polling.
 
 ## 1. What buckets 1–4 mean (his vocabulary — use it)
 
@@ -33,7 +33,9 @@ are LAW.
 - **Bucket 2 — the bounded middle (~150 cards).** Well-defined cards with ratified law:
   the once-* remainder, the #1801–#1821 ratified-unbuilt family, the failure/meta/authority/
   build-config families, JIT-parity groups, and ~25 small test-red/doc-truth cards.
-  Conveyor-belt work: 8–15 Luna waves, batch merge, one ≤15-min proof, batch close.
+  Conveyor-belt work: Luna workers stream through milestone cards; the orchestrator
+  integrates and closes each card on robust criteria evidence, then runs one composed
+  closeout sweep and review for the milestone.
 - **Bucket 3 — cross-cutting tail (~40 cards).** Types-v2 consumers (number grid, units,
   time), concurrency substrate #1557–#1565, script-mode and `::`-body corpus migrations,
   marker rebuild, Core namespace tree, #1158/#1161 (framework transplants — NOT paperwork,
@@ -63,7 +65,7 @@ are LAW.
      (both: #1719's unified derive path broke interpreter reachability of derived Codable
      bodies for generic owners — was fixed once at `Codegen/TIR/mod.rs:721`, regressed)
   3. `fmt fmt_lossless::fmt_is_lossless_on_supported_source_corpus` (pinned manifest drift)
-- **#1719 is the only once-* card from the last batch still open** — held because those
+- **#1719 is the only once-* card from the current milestone still open** — held because those
   cbor reds are its fallout. Close it when final5 lands green.
 - **Building lane:** #1393 #1421 #1543 #1547 #1600 #1601 #1618 #1678 #1680 #1685 #1708
   #1719 #1754 #1758 #1810 #1822. Several are code-merged and need only criteria+close:
@@ -76,23 +78,25 @@ are LAW.
 
 ## 3. The loop that works
 
-1. Pick 8–15 unblocked ready e3 cards (`tower state`, filter `phase==ready` and every
-   `blockedBy` resolved). Claim, phase→building, one worktree each
-   (`git worktree add .claude/worktrees/w<N> -b sweep/w<N> master`).
+1. Select the active milestone's unblocked ready e3 cards (`tower state`, filter
+   `phase==ready` and every `blockedBy` resolved). Claim, phase→building, one worktree
+   per worker (`git worktree add .claude/worktrees/w<N> -b sweep/w<N> master`).
 2. Brief template that worked (heredoc it per card): read the card JSON in full + every
    cited decision verbatim; meet EVERY criterion; I3/I4/I5/I8/I9 laws named explicitly;
    greenfield migration deletes the replaced form; unratified spelling → STOP and return
    ballot-needed; writable paths listed; hard prohibitions (`plugins/tower`, `jet-adjacent`,
    `AGENTS.md`, other cards' files); **NO board writes, NO cargo/jet, NO git**; skills
    ponytail + caveman + simple; return caveman with files+lines and proof commands.
-3. Block on the logs. Commit each worktree, merge sequentially into master, resolve
-   conflicts yourself (or hand one conflict-resolution brief to a Luna in the main checkout).
-4. `cargo check --workspace --tests` — **always before the proof.** Integration fallout is
-   constant (visibility, unused imports, signature drift); fix or dispatch a fixer.
-5. ONE combined `cargo test -p jet --test <targets…>` over the batch's gates. Never
-   `--test cli`/`golden`/`corelib` whole (45–90 min).
-6. Batch-close on green; a red keeps ITS card open and gets a fixer — never a new card,
-   never a revert.
+3. Block on the logs. For each ready return, inspect the evidence, integrate the worktree
+   into master, record the criteria evidence, and close the card when no known blocker
+   contradicts it. Resolve conflicts yourself (or hand one conflict-resolution brief to
+   a Luna in the main checkout).
+4. At milestone end, run one composed targeted test sweep over the milestone's gates and
+   one fresh-context review of the integrated milestone diff. Include all applicable I9
+   tiers.
+5. Every finding reopens its owning card and affected criteria. Apply and integrate the
+   fix, review the delta, verify the affected criteria, and close the card again. Do not
+   create a replacement card or revert to hide a finding.
 
 ## 4. Traps that cost hours tonight
 
@@ -103,8 +107,7 @@ are LAW.
 - Codex workers cannot run cargo/jet (Nix daemon blocked by the sandbox) and cannot write
   the board. You run every proof and every board write.
 - Tower rejects `--epoch` moves while the card's milestone belongs to the old epoch; pass
-  `--milestone` too. Tower enforces verifier ≠ builder on every criterion.
-- `verify-full.sh` once at the very end of scope, not per batch.
+  `--milestone` too. The orchestrator owns criteria evidence and closure.
 
 ## 5. Resources
 

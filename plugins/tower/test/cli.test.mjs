@@ -65,9 +65,18 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   assert.equal(stale.code, 2);
 
   // milestone progress reflects done cards
+  run(cwd, ['card', 'criteria', '#1', '--add', 'the card works', '--by', 'tester']);
+  run(cwd, ['card', 'criteria', '#1', '--meet', '1', '--evidence', 'built', '--by', 'tester']);
   run(cwd, ['card', 'update', '#1', '--phase', 'done', '--by', 'tester']);
   const ms = JSON.parse(run(cwd, ['milestone', 'list', '--json']).out);
-  assert.deepEqual(ms[0].progress, { total: 1, done: 1, met: true });
+  assert.deepEqual(ms[0].progress, { total: 1, done: 1, reviewReady: true, met: false });
+  run(cwd, ['milestone', 'criteria', m.id, '--add', 'milestone review', '--by', 'planner']);
+  run(cwd, ['milestone', 'criteria', m.id, '--meet', '1', '--evidence', 'reviewed the card', '--by', 'builder']);
+  run(cwd, ['milestone', 'criteria', m.id, '--verify', '1', '--evidence', 'checked independently', '--by', 'reviewer']);
+  run(cwd, ['milestone', 'verify', m.id, '--evidence', 'owner reviewed the milestone', '--by', 'owner']);
+  const verified = JSON.parse(run(cwd, ['milestone', 'list', '--json']).out);
+  assert.equal(verified[0].status, 'met');
+  assert.equal(verified[0].verification.by, 'owner');
 });
 
 test('cli without init fails with a helpful hint', () => {
@@ -104,7 +113,7 @@ test('message CLI adds, lists, validates, and closes card-linked messages', () =
   assert.deepEqual(JSON.parse(run(cwd, ['message', 'list', '--json']).out), []);
 });
 
-test('status lists verification before building work', () => {
+test('status lists review before building work', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-status-'));
   run(cwd, ['init', '--name', 'CLI Status']);
   run(cwd, ['card', 'add', '--title', 'Build']);
@@ -112,7 +121,7 @@ test('status lists verification before building work', () => {
   run(cwd, ['card', 'add', '--title', 'Verify']);
   run(cwd, ['card', 'update', '#2', '--phase', 'verify', '--by', 'owner']);
   const out = run(cwd, ['status', '--color=never']).out;
-  assert.ok(out.indexOf('AGENT — verify') < out.indexOf('AGENT — building'));
+  assert.ok(out.indexOf('AGENT — review') < out.indexOf('AGENT — building'));
 });
 
 test('card add probes duplicates, allows separate work, and --force bypasses', () => {
@@ -182,7 +191,7 @@ test('card criteria --reopen reopens a verified row and audits the reason', () =
   assert.match(event.note, /phase moved back for a missed case/);
   const help = run(cwd, ['help']).out;
   assert.match(help, /--reopen n --reason/);
-  assert.match(help, /criteria-phase-drift/);
+  assert.match(help, /milestone verify/);
 });
 
 test('status renders and reports the open-card trend for a chosen window', () => {
@@ -212,6 +221,8 @@ test('CLI --by owner and --quote cannot resolve acceptance; rejection is audited
   run(cwd, ['init', '--name', 'CLI Accept Guard']);
   run(cwd, ['card', 'add', '--title', 'Owner must inspect', '--by', 'builder']);
   run(cwd, ['card', 'update', '#1', '--needs-acceptance', 'true', '--by', 'builder']);
+  run(cwd, ['card', 'criteria', '#1', '--add', 'thing works', '--by', 'planner']);
+  run(cwd, ['card', 'criteria', '#1', '--meet', '1', '--evidence', 'built', '--by', 'builder']);
   run(cwd, ['card', 'update', '#1', '--phase', 'done', '--by', 'builder']);
   for (const args of [
     ['card', 'update', '#1', '--phase', 'done', '--by', 'owner'],

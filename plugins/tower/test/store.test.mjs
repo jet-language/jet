@@ -113,6 +113,8 @@ test('expired claims do not block selection or takeover', () => {
 test('card writes renew active claims and terminal phases clear them', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'building' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'ship it', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built', by: 'agent-1' }));
   st.mutate((s) => db.claimCard(s, '#1', 'agent-1'));
   st.mutate((s) => { s.cards[0].claimedAt = '2000-01-01T00:00:00.000Z'; });
   st.mutate((s, cfg) => db.updateCard(s, '#1', { title: 'B', by: 'agent-1' }, cfg));
@@ -123,26 +125,26 @@ test('card writes renew active claims and terminal phases clear them', () => {
   assert.equal(st.load().cards[0].claimedAt, undefined);
 });
 
-test('milestones: cards drive progress and completion; delete unlinks', () => {
+test('milestones: cards drive progress and review readiness; delete unlinks', () => {
   const st = fresh();
   st.mutate((s) => db.updateEpoch(s, 'e1', { name: 'One' }));
   const { result: m } = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' }));
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', epoch: 'e1', milestoneId: m.id, phase: 'done' }, cfg));
   st.mutate((s, cfg) => db.addCard(s, { title: 'B', epoch: 'e1', milestoneId: m.id }, cfg));
   let proj = project(st.load());
-  assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 1, met: false });
-  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'agent-1' }, cfg));
+  assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 1, reviewReady: false, met: false });
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'owner' }, cfg));
   proj = project(st.load());
-  assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 2, met: true });
-  assert.equal(st.load().milestones[0].status, 'met');
+  assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 2, reviewReady: true, met: false });
+  assert.equal(st.load().milestones[0].status, 'review-ready');
   st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'building', by: 'agent-1' }, cfg));
   assert.equal(st.load().milestones[0].status, 'open');
-  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'agent-1' }, cfg));
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'owner' }, cfg));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { milestoneId: null, by: 'agent-1' }, cfg));
-  assert.equal(st.load().milestones[0].status, 'met', 'remaining linked card is done');
+  assert.equal(st.load().milestones[0].status, 'review-ready', 'remaining linked card is done');
   st.mutate((s, cfg) => db.updateCard(s, '#2', { milestoneId: null, by: 'agent-1' }, cfg));
   assert.equal(st.load().milestones[0].status, 'open', 'empty milestone reopens');
-  assert.deepEqual(project(st.load()).milestones[0].progress, { total: 0, done: 0, met: false });
+  assert.deepEqual(project(st.load()).milestones[0].progress, { total: 0, done: 0, reviewReady: false, met: false });
   st.mutate((s) => db.deleteMilestone(s, m.id, 'owner'));
   const s = st.load();
   assert.equal(s.milestones.length, 0);
@@ -156,7 +158,7 @@ test('milestone progress deduplicates live and archived copies by card id', () =
     { id: 'c-1', milestoneId: 'm-1', phase: 'done' },
     { id: 'c-2', milestoneId: 'm-1', phase: 'done' },
   ];
-  assert.deepEqual(db.milestoneProgress(milestone, live, history), { total: 2, done: 1, met: false });
+  assert.deepEqual(db.milestoneProgress(milestone, live, history), { total: 2, done: 1, reviewReady: false, met: false });
 });
 
 test('milestones: cards cannot cross epochs and sidequests stay unlinked', () => {
@@ -185,7 +187,7 @@ test('milestones: cards cannot cross epochs and sidequests stay unlinked', () =>
   );
 });
 
-test('nextCards ordering: verify > building > implement > plan, then workOrder', () => {
+test('nextCards ordering: review > building > implement > plan, then workOrder', () => {
   const st = fresh();
   st.mutate((s, cfg) => {
     db.addCard(s, { title: 'plan-2', phase: 'planning', workOrder: 2 }, cfg);
@@ -209,7 +211,7 @@ test('blockedBy gates the lane until blocker closes', () => {
   const lane = db.laneOf(db.findCard(s, '#2'), s.decisions, s.cards);
   assert.equal(lane.lane, 'blocked');
   assert.equal(lane.label, 'Blocked by #1');
-  st.mutate((s2, cfg) => db.updateCard(s2, '#1', { phase: 'done' }, cfg));
+  st.mutate((s2, cfg) => db.updateCard(s2, '#1', { phase: 'done', by: 'owner' }, cfg));
   s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#2'), s.decisions, s.cards).lane, 'implement');
 });

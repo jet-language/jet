@@ -1,7 +1,7 @@
 ---
 name: verify
 description: >-
-  Verify a Jet compiler/stdlib code change — scoped proof, major-push closeout,
+  Verify a Jet compiler/stdlib code change — criteria evidence, milestone closeout,
   fresh-binary smoke, snapshot/golden blessing, /tmp traps. Use before claiming
   code done, or when asked to verify. Not an audit skill.
 ---
@@ -22,38 +22,39 @@ Model and review policy follow `AGENTS.md` and the owner's current instruction.
 
 ## Test strategy
 
-- **Per card / change:** scoped targeted tests only —
-  `scripts/agent/jet-env cargo test --test <name>`. One fresh independent
-  reviewer inspects the diff and re-runs the relevant proof before close.
-- **Batch / major-push closeout:** after 3–5 integrated card closures, or at a
-  major-push boundary, the orchestrating session runs
-  `scripts/agent/jet-env full scripts/agent/verify-full.sh`, once on the push's
-  closeout card. Run it earlier only when targeted evidence identifies a
-  repository-wide interaction. It uses a repo-local `TMPDIR` and normal test
-  parallelism. CI also runs the full suite. An unrelated failure gets a new
-  scoped card; it does not invalidate an already proved card closure.
+- **Card closure:** use the evidence named by the card's robust observable exit
+  criteria. The orchestrator checks the evidence after integration and closes the
+  card when no known blocker contradicts it. No per-card reviewer or duplicate proof
+  is required.
+- **Milestone closeout:** after the milestone patches are integrated and cards are
+  closed, the orchestrator runs one composed targeted test sweep over the milestone's
+  gates and one fresh-context review of the integrated milestone diff. Include every
+  applicable I9 execution tier. Add broader targets only when the criteria or a known
+  interaction requires them.
+- **Closeout findings:** every finding reopens its owning card and affected criteria.
+  Apply and integrate the fix, review the delta, and verify the affected criteria
+  before the card and milestone close again.
 - Do not use global `-- --test-threads=1` for completion proof. Use it only for
   a targeted race reproduction after a parallel failure.
 
-## Adversarial review gate
+## Milestone review
 
-Every completed change has one implementer and one fresh independent reviewer.
-The reviewer receives only the diff, acceptance criteria, relevant authority and
-invariants, and test evidence; assumes the patch is wrong; and seeks concrete
-bugs, missed paths, false-green tests, invariant breaks, stale decisions, scope
-drift, duplicate mechanisms, and orphaned work. They never implement.
+The fresh-context reviewer receives the integrated milestone diff, acceptance
+criteria, relevant authority and invariants, and implementation evidence. The review
+checks concrete bugs, missed paths, false-green evidence, invariant breaks, stale
+decisions, scope drift, duplicate mechanisms, orphaned work, and I9 drift. The
+reviewer does not implement.
 
-The implementer fixes every material finding and the reviewer rechecks those
-fixes. Record reviewer identity, model/effort, reviewed commit or diff,
-findings, resolutions, and rerun evidence in Tower/PR handoff. Reviewer
-approval alone is not completion evidence.
+If the review finds a problem, the owning worker applies the fix. The orchestrator
+integrates it, the reviewer reviews the delta, and the orchestrator verifies the
+affected criteria. A review finding is not a reason to leave an unrelated card open.
 
 ## Owner acceptance boundary
 
-Technical correctness belongs to agents. Meet criteria, independently verify,
-and `--phase done`. Never park a technical card in `verify` for the owner, and
-never set `needsAcceptance` for tests, diagnostics, safety, compatibility, or
-other machine-verifiable claims.
+Technical correctness belongs to agents. Workers return evidence; the orchestrator
+records criteria evidence and sets `--phase done` after integration. Never park a
+technical card in `verify` for the owner, and never set `needsAcceptance` for tests,
+diagnostics, safety, compatibility, or other machine-verifiable claims.
 
 Owner verification (`needsAcceptance` / Now “visual check”) is **only** for
 look-and-feel with human eyes: UI/UX/DX taste, visual presentation, copy polish,
