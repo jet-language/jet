@@ -740,5 +740,5 @@ pub fn ambient_handle(
     };
     let send_result = mailer.send(message);
     mailers[index] = Some(mailer);
-    Some(Ok(result(send_result, send_report_value)))
+    Some(Ok(result(send_result, |value| send_report_value(&value))))
 }
