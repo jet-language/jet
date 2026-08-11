@@ -78,7 +78,7 @@ pub(super) fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, Sy
     Some((plan, system))
 }
 
-pub(super) fn load_user_profile_target(
+pub(super) fn load_user_generation_target(
     theme: &Theme,
     target: &Target,
     user: &str,
@@ -94,12 +94,12 @@ pub(super) fn load_user_profile_target(
         users.sort();
         users.dedup();
         let known = if users.is_empty() {
-            "this config defines no user profiles".to_string()
+            "this config defines no user generations".to_string()
         } else {
             format!("available users: {}", users.join(", "))
         };
         theme.error(
-            &format!("`{user}` is not a user profile in this config"),
+            &format!("`{user}` is not a user generation in this config"),
             &known,
             "define `user.<name>.*` or `users.<name>.*` options on a system, then rerun `jetos user plan <name>`.",
         );

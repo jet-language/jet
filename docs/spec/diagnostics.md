@@ -800,6 +800,7 @@ renumbered, and no new `W` code may be allocated.
 | E1298 | jetpack | `jetpack tool` ref names an external provider with no hangar realization path yet (JPK-TOOL-PROVIDER, D-JPK-TOOLRUN1) |
 | E1299 | jetpack | Hangar Store v2 path law rejected a store path component (case-fold collision, reserved Windows name, trailing `.`/` `, absolute/dot components) (E4-JP1) |
 | E1300 | jetpack | the retired `--profile` spelling selected an environment composition; presets own that word now (D-CONF-WORD1) |
+| E1342 | jetpack | the retired `--env-profile` spelling selected an environment module; `--env` owns that axis now (D-ENVFLAG1) |
 | E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
 | E1316 | jetpack | ambiguous or unmatched typed package variant selection (E4-JP15, D-JPK-VARIANT1) |
 | E1317 | jetpack | a direct CLI ref uses retired provider-first order or the retired `path@` prefix (D-JPK-REF1) |
@@ -940,7 +941,7 @@ names never provide an alternate lookup path.
 ### Ecosystem and environment composition diagnostics
 
 These diagnostics protect the single Package/environment graph. They fire before
-membership, profile, managed-file, service, or task state is applied.
+membership, generation, managed-file, service, or task state is applied.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -960,7 +961,8 @@ membership, profile, managed-file, service, or task state is applied.
 | E1335 | an environment integration or package-generation provider fact is conflicting or lossy | Integrations and package generations lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the generation. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 | E1300 | `--profile` is retired | Profile answers how hard to optimize a build. A named environment composition is a preset, so one word never answers two questions. | Select the composition with `--preset <name>`, declared under `presets:`. |
-| E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
+| E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env` to use `dev`, then `default`, then lexical order. |
+| E1342 | `--env-profile` is retired | `--env` selects one `env.<name>` module; `--preset` selects a named composition, so one flag never answers two questions. | Select the module with `--env <name>`. |
 | E1340 | {problem} | Jetpack could not complete the command because the named input, project fact, tool, or operating-system operation did not satisfy it. | Correct the named problem, then run the command again. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)

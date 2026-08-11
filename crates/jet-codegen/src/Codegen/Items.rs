@@ -1970,6 +1970,9 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     {
         // #Numeric keeps its specialized native ordering rule. #Comparable
         // dispatches through the sema-generated Jet hook instead.
+        // Rust's `PartialOrd` derive requires `PartialEq`; this is a backend
+        // representation prerequisite, not a new Jet capability.
+        rust_derives.push("PartialEq");
         rust_derives.push("PartialOrd");
     }
     out.push_str(&format!(

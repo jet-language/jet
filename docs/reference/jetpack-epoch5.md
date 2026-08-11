@@ -77,9 +77,9 @@ directories, duplicate Package names, and nested member roots.
 ## Environment presets and language packs
 
 Presets resolve parents before children. `--preset` selects one named preset
-for the command. The `env.<name>` modules are separate compositions:
-`--env-profile full` selects one module when an environment declares more than
-one. Without that flag, `dev`, then `default`, then lexical order chooses the
+for the command. The `env.<name>` modules are separate environment modules:
+`--env full` selects one module when an environment declares more than one.
+Without `--env`, `dev`, then `default`, then lexical order chooses the
 module. Conflicting facts fail closed. JetOS/tool generations keep their own
 commands and state.
 
@@ -106,16 +106,16 @@ module profile.dev {
 }
 ```
 
-Run `jet profile plan dev` to inspect the resolved profile. The plan keeps the
-raw package ref, source name, provider, channel, source module, and collision
-map. `--json` gives the same facts for tools. The command does not realize or
-change a generation.
+Run `jet profile plan dev` to inspect the resolved package generation. The plan
+keeps the raw package ref, source name, provider, channel, source module, and
+collision map. `--json` gives the same facts for tools. The command does not
+realize or change a generation.
 
-The resolver applies parent profiles first. It rejects missing parents, cycles,
-conflicting declarations, adapter packages, unsupported refs, and collision
-choices that do not name a package in the resolved profile. It records these
-facts in the environment trust identity so a source or collision change needs
-a new trust decision.
+The resolver applies parent generations first. It rejects missing parents,
+cycles, conflicting declarations, adapter packages, unsupported refs, and
+collision choices that do not name a package in the resolved generation. It
+records these facts in the environment trust identity so a source or collision
+change needs a new trust decision.
 
 The built-in catalog covers 58 language families: Ansible, C, Clojure,
 Cplusplus, Crystal, Cue, Dart, Deno, Dotnet, Elixir, Elm, Erlang, Fortran,
@@ -221,7 +221,7 @@ and must be inspected before retrying.
 
 ## Hangar external roots
 
-The Hangar keeps automatic roots for packages, profiles, processes, builds,
+The Hangar keeps automatic roots for packages, generations, processes, builds,
 toolchains, Systems, and Generations. Use a manual external root only when an
 external consumer needs to retain an existing closure. The command never
 realizes or downloads the reference.
