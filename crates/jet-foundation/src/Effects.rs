@@ -224,6 +224,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
                 | "period_days"
                 | "period_months"
                 | "period_years"
+                | "zone"
                 | "utc"
                 | "zoned"
                 | "zoned_local"

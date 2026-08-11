@@ -8086,6 +8086,172 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// #1488: every ambient random/time/crypto row stays live in AOT, resident JIT,
+/// and the forced interpreter. Seeded draws keep one state sequence;
+/// `shuffle` mutates its place and remains a Unit expression.
+#[test]
+fn nondeterministic_core_matrix_matches_all_execution_tiers() {
+    let fold_src = r#"
+use core.random as random
+
+fn run() {
+    values := [1, 2, 3]
+    $folded :: random.shuffle(&values)
+}
+"#;
+    let fold_diagnostics = jet::compile(fold_src).expect_err("ambient shuffle must not fold");
+    assert!(
+        fold_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "implicit random.shuffle fold must report E3403: {fold_diagnostics:#?}"
+    );
+    let impure_fold_src = r#"
+use core.random as random
+
+fn run() {
+    #Impure("the gate must not authorize nondeterministic folding") {
+        $folded :: random.int(1, 6)
+    }
+}
+"#;
+    let impure_diagnostics =
+        jet::compile(impure_fold_src).expect_err("#Impure must not bypass E3403");
+    assert!(
+        impure_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "#Impure must not bypass nondeterministic folding law: {impure_diagnostics:#?}"
+    );
+
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping nondeterministic tier matrix (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_nondeterministic_matrix_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source_name = "nondeterministic_matrix.jet";
+    let source = r#"
+use core.random as random
+use core.time as time
+use core.time.date as date
+use core.time.datetime as datetime
+use core.crypto.random as crypto_rand
+
+fn shuffle_unit() => Unit {
+    values := [1, 2, 3]
+    return random.shuffle(&values)
+}
+
+fn run() {
+    random.seed(31)
+    print(random.int(1, 6))
+    print(random.float() >= 0.0)
+    print(random.float_range(10.0, 20.0) >= 10.0)
+    print(random.bool(0.0))
+    print(random.normal(0.0, 1.0) == random.normal(0.0, 1.0))
+    print(random.exponential(2.0) >= 0.0)
+    items := ["red", "green", "blue"]
+    weights := [0.0, 1.0, 0.0]
+    print(random.pick(items) ?? "none")
+    print(random.weighted_pick(items, weights) ?? "none")
+    print(random.sample(items, 2))
+    random.shuffle(&items)
+    print(items.at(0) ?? "none")
+    print(items.at(1) ?? "none")
+    print(items.at(2) ?? "none")
+    float_items := [1.5, 2.5, 3.5]
+    print(random.pick(float_items) ?? -1.0)
+    print(random.weighted_pick(float_items, weights) ?? -1.0)
+    print(random.sample(float_items, 2))
+    random.shuffle(&float_items)
+    print(float_items.at(0) ?? -1.0)
+    print(random.split(9).float() >= 0.0)
+    print(random.bytes(4).len())
+    print(shuffle_unit())
+
+    rng := random.rng(99)
+    twin := random.rng(99)
+    print(rng.int(1, 100) == twin.int(1, 100))
+    print(rng.float() == twin.float())
+    print(rng.float_range(1.0, 2.0) == twin.float_range(1.0, 2.0))
+    print(rng.bool() == twin.bool())
+    print(rng.bool(1.0) == twin.bool(1.0))
+    print(rng.normal(0.0, 1.0) == twin.normal(0.0, 1.0))
+    print(rng.exponential(2.0) == twin.exponential(2.0))
+    rng_items := ["red", "green", "blue"]
+    twin_items := ["red", "green", "blue"]
+    print((rng.pick(rng_items) ?? "none") == (twin.pick(twin_items) ?? "none"))
+    print((rng.weighted_pick(rng_items, weights) ?? "none") == (twin.weighted_pick(twin_items, weights) ?? "none"))
+    print(rng.sample(rng_items, 2) == twin.sample(twin_items, 2))
+    rng.shuffle(&rng_items)
+    twin.shuffle(&twin_items)
+    print(rng_items == twin_items)
+    rng_float_items := [1.5, 2.5, 3.5]
+    twin_float_items := [1.5, 2.5, 3.5]
+    print((rng.pick(rng_float_items) ?? -1.0) == (twin.pick(twin_float_items) ?? -1.0))
+    print((rng.weighted_pick(rng_float_items, weights) ?? -1.0) == (twin.weighted_pick(twin_float_items, weights) ?? -1.0))
+    print(rng.sample(rng_float_items, 2) == twin.sample(twin_float_items, 2))
+    rng.shuffle(&rng_float_items)
+    twin.shuffle(&twin_float_items)
+    print(rng_float_items == twin_float_items)
+    print(rng.bytes(3) == twin.bytes(3))
+    child := rng.split()
+    twin_child := twin.split()
+    print(child.int(1, 100) == twin_child.int(1, 100))
+
+    print(time.now() >= 0)
+    print(time.now_utc().to_timestamp() > 0)
+    print(time.today().to_string().len() > 0)
+    print(time.instant().elapsed_millis() >= 0)
+    time.sleep(0)
+    stopwatch := time.start()
+    print(stopwatch.elapsed_millis() >= 0)
+    print(date.today().to_string().len() > 0)
+    print(datetime.now().to_timestamp() > 0)
+    print(crypto_rand.bytes(4).len())
+}
+"#;
+    let (code, aot_stdout, stderr) = build_and_run(
+        &dir,
+        source_name,
+        source,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "nondeterministic AOT matrix failed: {stderr}");
+    assert!(
+        aot_stdout.lines().any(|line| line == "()"),
+        "ambient random.shuffle must yield Unit: {aot_stdout}"
+    );
+
+    let path = dir.join(source_name);
+    fs::write(&path, source).unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    let resident_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stderr.as_str()), (0, ""), "resident JIT stderr");
+            stdout
+        }
+        other => panic!("nondeterministic matrix resident JIT failed: {other:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test(), "random/time matrix must execute in resident JIT");
+    assert!(!jet_jit::deopt_invoked_for_test(), "random/time matrix must not deopt");
+    assert!(!jet_jit::fallback_invoked_for_test(), "random/time matrix must not fall back");
+
+    let forced_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stderr.as_str()), (0, ""), "forced interpreter stderr");
+            stdout
+        }
+        other => panic!("nondeterministic matrix forced interpreter failed: {other:?}"),
+    };
+    assert_eq!(resident_stdout, aot_stdout, "resident JIT diverged from AOT matrix");
+    assert_eq!(forced_stdout, aot_stdout, "forced interpreter diverged from AOT matrix");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn encoding_breadth_codecs_share_data_tree() {
     let have_rustc = common::have_rustc();

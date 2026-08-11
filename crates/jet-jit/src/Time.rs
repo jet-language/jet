@@ -133,6 +133,55 @@ extern "C" fn jet_jit_time_period_months(months: i64) -> i64 {
     push(TimeValue::Period(time_rt::JetPeriod::months(months)))
 }
 
+extern "C" fn jet_jit_time_period(years: i64, months: i64, days: i64) -> i64 {
+    push(TimeValue::Period(time_rt::JetPeriod::new(years, months, days)))
+}
+
+extern "C" fn jet_jit_time_period_days(days: i64) -> i64 {
+    push(TimeValue::Period(time_rt::JetPeriod::days(days)))
+}
+
+extern "C" fn jet_jit_time_period_years(years: i64) -> i64 {
+    push(TimeValue::Period(time_rt::JetPeriod::years(years)))
+}
+
+extern "C" fn jet_jit_time_zone(name: i64) -> i64 {
+    match time_rt::JetZone::named(&clone_string(name)) {
+        Ok(zone) => result_ok(push(TimeValue::Zone(zone)) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+extern "C" fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
+    let date = with_time(date, |value| match value {
+        TimeValue::Date(date) => Some(date.clone()),
+        _ => None,
+    });
+    let time = with_time(time, |value| match value {
+        TimeValue::LocalTime(time) => Some(time.clone()),
+        _ => None,
+    });
+    let zone = with_time(zone, |value| match value {
+        TimeValue::Zone(zone) => Some(zone.clone()),
+        _ => None,
+    });
+    match (date, time, zone) {
+        (Some(date), Some(time), Some(zone)) => {
+            push(TimeValue::Zoned(time_rt::JetZonedDateTime::from_local(
+                &date, &time, &zone,
+            )))
+        }
+        _ => 0,
+    }
+}
+
+extern "C" fn jet_jit_time_parse_time(value: i64) -> i64 {
+    match time_rt::JetLocalTime::parse(&clone_string(value)) {
+        Ok(time) => result_ok(push(TimeValue::LocalTime(time)) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
 extern "C" fn jet_jit_time_instant() -> i64 {
     push(TimeValue::Instant(time_rt::JetInstant::now()))
 }
@@ -367,7 +416,13 @@ host_fns! {
     parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
     from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
     utc: "jet_jit_time_utc" => jet_jit_time_utc: nullary;
+    period: "jet_jit_time_period" => jet_jit_time_period: ternary;
+    period_days: "jet_jit_time_period_days" => jet_jit_time_period_days: unary;
     period_months: "jet_jit_time_period_months" => jet_jit_time_period_months: unary;
+    period_years: "jet_jit_time_period_years" => jet_jit_time_period_years: unary;
+    zone: "jet_jit_time_zone" => jet_jit_time_zone: unary;
+    zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: ternary;
+    parse_time: "jet_jit_time_parse_time" => jet_jit_time_parse_time: unary;
     instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
     zoned: "jet_jit_time_zoned" => jet_jit_time_zoned: binary;
     days_in_month: "jet_jit_time_days_in_month" => jet_jit_time_days_in_month: binary;

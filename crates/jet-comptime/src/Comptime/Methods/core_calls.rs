@@ -826,12 +826,6 @@ mod ambient_random_kernel {
     }
 }
 
-pub(super) fn shuffle_ct_list(xs: &mut [CtValue]) {
-    let mut items = xs.to_vec();
-    ambient_random_kernel::shuffle(&mut items);
-    xs.clone_from_slice(&items);
-}
-
 /// D-TEXTWIDTH1=B: pull the two policy flags back out of a `TextWidth`
 /// `CtValue::Struct` (`ambiguous: .Wide|.Narrow`, `controls: .Zero|.Reject`).
 /// Missing/malformed fields fall back to the portable default (`Narrow`,

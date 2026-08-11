@@ -4471,8 +4471,22 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
         THandleOp::DurationDifference => args.len() == 1,
         THandleOp::AllocAlloc => args.len() == 1,
-        THandleOp::AllocReset | THandleOp::ClockNow | THandleOp::RngBool => args.is_empty(),
+        THandleOp::AllocReset
+        | THandleOp::ClockNow
+        | THandleOp::StopwatchElapsedMillis
+        | THandleOp::RngBool
+        | THandleOp::RngFloat
+        | THandleOp::RngSplit => args.is_empty(),
         THandleOp::RngInt => args.len() == 2,
+        THandleOp::RngFloatRange
+        | THandleOp::RngNormal
+        | THandleOp::RngWeightedPick
+        | THandleOp::RngSample => {
+            args.len() == 2
+        }
+        THandleOp::RngBoolP | THandleOp::RngExponential | THandleOp::RngBytes => {
+            args.len() == 1
+        }
         THandleOp::ClockTick
         | THandleOp::ClockAdvance
         | THandleOp::ClockWait

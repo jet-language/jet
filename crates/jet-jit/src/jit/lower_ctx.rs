@@ -12308,8 +12308,40 @@ impl LowerCtx<'_, '_> {
                             vec![self.lower_expr(&args[0])?],
                         ),
                         ("core.time", "utc") if args.is_empty() => (self.host.time.utc, Vec::new()),
+                        ("core.time", "period") if args.len() == 3 => (
+                            self.host.time.period,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        ("core.time", "period_days") if args.len() == 1 => (
+                            self.host.time.period_days,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         ("core.time", "period_months") if args.len() == 1 => (
                             self.host.time.period_months,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "period_years") if args.len() == 1 => (
+                            self.host.time.period_years,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "zone") if args.len() == 1 => (
+                            self.host.time.zone,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "zoned_local") if args.len() == 3 => (
+                            self.host.time.zoned_local,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        ("core.time", "parse_time") if args.len() == 1 => (
+                            self.host.time.parse_time,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         ("core.time", "instant") if args.is_empty() => (self.host.time.instant, Vec::new()),

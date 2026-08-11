@@ -2312,14 +2312,17 @@ impl<'a> EvalCtx<'a> {
             return Ok(value);
         }
         let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
+        let is_shuffle = module == "core.random" && method == "shuffle";
         if !is_tier2 {
             let value = apply_core_call(module, method, argv, source_span, self.repl_mode)?;
-            if module == "core.random" && method == "shuffle" {
+            if is_shuffle {
                 if let Some(place) = args.first() {
-                    if let CtValue::List(items) = &value {
-                        self.write_back_place(place, CtValue::List(items.clone()), scope)?;
-                        return Ok(CtValue::Unit);
-                    }
+                    let items = match &value {
+                        CtValue::List(items) => items.clone(),
+                        _ => return Err(unsupported("random.shuffle needs a list", source_span)),
+                    };
+                    self.write_back_place(place, CtValue::List(items), scope)?;
+                    return Ok(CtValue::Unit);
                 }
             }
             return Ok(mark_unknown_progress_total(
@@ -2330,7 +2333,7 @@ impl<'a> EvalCtx<'a> {
                 progress_known_total,
             ));
         }
-        if self.repl_mode {
+        let value = if self.repl_mode {
             let mut sink = self
                 .sink
                 .as_ref()
@@ -2345,13 +2348,12 @@ impl<'a> EvalCtx<'a> {
                 &self.repl_grants,
                 reborrow_repl_authorizer(&mut self.repl_authorizer),
             )
-            .map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
         } else if self.impure_depth > 0 && self.allow_impure {
             let mut sink = self
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            let result = apply_impure_core_call(
+            apply_impure_core_call(
                 module,
                 method,
                 argv,
@@ -2361,10 +2363,9 @@ impl<'a> EvalCtx<'a> {
                 false,
                 None,
                 None,
-            );
-            result.map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
+            )
         } else if self.impure_depth == 0 {
-            Err(Diagnostic::error(
+            return Err(Diagnostic::error(
                 "E3410",
                 format!(
                     "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
@@ -2374,9 +2375,9 @@ impl<'a> EvalCtx<'a> {
                 "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime"
                     .to_string(),
                 Some(source_span),
-            ))
+            ));
         } else {
-            Err(Diagnostic::error(
+            return Err(Diagnostic::error(
                 "E3411",
                 format!(
                     "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
@@ -2384,8 +2385,19 @@ impl<'a> EvalCtx<'a> {
                 "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
                 "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
                 Some(source_span),
-            ))
+            ));
+        }?;
+        if is_shuffle {
+            if let Some(place) = args.first() {
+                let items = match &value {
+                    CtValue::List(items) => items.clone(),
+                    _ => return Err(unsupported("random.shuffle needs a list", source_span)),
+                };
+                self.write_back_place(place, CtValue::List(items), scope)?;
+                return Ok(CtValue::Unit);
+            }
         }
+        Ok(mark_unknown_progress_total(value, module, method, args, progress_known_total))
     }
 
     fn eval_expr_inner(
