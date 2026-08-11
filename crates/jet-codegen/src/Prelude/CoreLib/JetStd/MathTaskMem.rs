@@ -440,6 +440,19 @@
         pub fn cancel(&self) {
             self.state.control.cancel();
         }
+        pub fn trace(&self) -> String {
+            let paused = self
+                .state
+                .control
+                .paused
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let cancel = self
+                .state
+                .control
+                .cancelled
+                .load(std::sync::atomic::Ordering::Relaxed);
+            super::jet_task_control_trace(paused, cancel)
+        }
         pub fn join(self) -> super::JetOutcome<T, super::JetTaskFailure> {
             self
                 .state

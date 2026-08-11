@@ -5332,6 +5332,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     emit_tir_call_args(args, cx)
                 )
             }
+            TFnValueKind::Interrupt { value } => emit_tir_expr(value, cx),
         },
         // c109 Phase 14: a cross-module call. The path form was resolved at lowering;
         // emit prepends `cx.root_prefix` exactly where the AST path does (both the

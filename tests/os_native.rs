@@ -1,7 +1,7 @@
 mod common;
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -132,10 +132,21 @@ fn run() {
     assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
     let status = wait_bounded(&mut child, "interrupt child");
     assert!(status.success(), "interrupt child failed: {status}");
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
     let second = lines_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("second handler produced no output")
         .unwrap();
     assert_eq!(second, "second");
     assert!(lines_rx.try_recv().is_err(), "unexpected handler output");
+    assert!(
+        stderr.contains("panic: first handler failed"),
+        "first handler panic lost its interrupt boundary diagnostic: {stderr:?}"
+    );
 }

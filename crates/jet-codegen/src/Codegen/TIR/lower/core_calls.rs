@@ -16,6 +16,39 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 
+fn interrupt_callback_value(value: TExpr) -> TExpr {
+    let ty = value.ty.clone();
+    TExpr {
+        ty,
+        kind: TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::Interrupt {
+                value: Box::new(value),
+            },
+        },
+    }
+}
+
+fn normalize_interrupt_named_value(mut value: TExpr, cx: &Cx) -> TExpr {
+    let name = match &value.kind {
+        TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+                name: Some(name), ..
+            },
+        } => Some(name.clone()),
+        _ => None,
+    };
+    if let Some(name) = name {
+        let ty = value.ty.clone();
+        value.kind = TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+                wrapper: crate::Codegen::emit_named_fn_value_sync(cx, &name, &ty),
+                name: Some(name),
+            },
+        };
+    }
+    value
+}
+
 fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match expr {
         Expr::Paren(inner, _) => lower_interrupt_callback(inner, cx, env),
@@ -30,10 +63,10 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 param_contract: None,
                 return_view_provenance: lam.meta.return_view_provenance.clone(),
             };
-            TExpr {
+            interrupt_callback_value(TExpr {
                 ty,
                 kind: TExprKind::Lambda(Box::new(tl)),
-            }
+            })
         }
         Expr::Ident(name, _)
             if !env.locals.contains_key(name)
@@ -45,7 +78,7 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .get(name)
                 .cloned()
                 .expect("function type checked before interrupt lowering");
-            TExpr {
+            interrupt_callback_value(TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::FnValue {
                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
@@ -53,9 +86,12 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         name: Some(name.clone()),
                     },
                 },
-            }
+            })
         }
-        _ => lower_expr(expr, cx, env),
+        _ => interrupt_callback_value(normalize_interrupt_named_value(
+            lower_expr(expr, cx, env),
+            cx,
+        )),
     }
 }
 

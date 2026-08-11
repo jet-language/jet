@@ -984,13 +984,19 @@ mod tests {
         let CtValue::Failed(CtReport::Told(error)) = value else {
             return None;
         };
-        let CtValue::Struct { fields, .. } = *error else {
+        // DataTree's canonical failure carrier is `Vec<FieldError>`, even when
+        // one operation produces one error. Keep the assertion on the exact
+        // reason while decoding that shared shape.
+        let CtValue::List(errors) = *error else {
+            return None;
+        };
+        let [CtValue::Struct { fields, .. }] = errors.as_slice() else {
             return None;
         };
         fields
-            .into_iter()
+            .iter()
             .find_map(|(name, value)| match (name.as_str(), value) {
-                ("reason", CtValue::Str(reason)) => Some(reason),
+                ("reason", CtValue::Str(reason)) => Some(reason.clone()),
                 _ => None,
             })
     }

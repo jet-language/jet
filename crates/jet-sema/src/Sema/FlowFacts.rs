@@ -114,6 +114,13 @@ impl<P: Plane> Facts<P> {
         self.rows.get(name)?.last().map(|row| &row.fact)
     }
 
+    /// The innermost fact for this binding, mutably. Callers use this only for
+    /// facts that are changed by a write to the binding itself; path merges
+    /// still go through [`FlowFacts::merge_paths`].
+    pub(crate) fn get_mut(&mut self, name: &str) -> Option<&mut P::Fact> {
+        self.rows.get_mut(name)?.last_mut().map(|row| &mut row.fact)
+    }
+
     /// The fact this binding carries at exactly one scope depth.
     pub(crate) fn get_at(&self, name: &str, depth: usize) -> Option<&P::Fact> {
         self.rows
@@ -378,7 +385,20 @@ impl Plane for Binding {
     type Fact = super::LocalInfo;
 
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
-        keep_left(left, right)
+        match (left, right) {
+            (Some(left), Some(right)) => {
+                let mut joined = left.clone();
+                // D-OSINTERRUPT1: this field is a path-sensitive proof, even
+                // though the rest of LocalInfo describes the declaration.
+                // A callback is safe after a branch only when every path kept
+                // the Send-safe representation.
+                joined.interrupt_sendable =
+                    left.interrupt_sendable && right.interrupt_sendable;
+                Some(joined)
+            }
+            (Some(one), None) | (None, Some(one)) => Some(one.clone()),
+            (None, None) => None,
+        }
     }
 }
 

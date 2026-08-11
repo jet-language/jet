@@ -2508,9 +2508,15 @@ pub(crate) fn lower_method_call(
             let result_ty = match &op {
                 TBuiltinOp::OptionZip { elem_ty, .. } => Type::Option(Box::new(elem_ty.clone())),
                 TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
-                    crate::Collections::iter_elem(&recv_t.ty)
-                        .map(|e| Type::List(Box::new(e.clone())))
-                        .or_else(|| resolved_ret.cloned())
+                    // Sema's refined return wins over the iterator carrier's
+                    // placeholder element type. The latter is only a fallback
+                    // for defensive lowering without a resolved method fact.
+                    resolved_ret
+                        .cloned()
+                        .or_else(|| {
+                            crate::Collections::iter_elem(&recv_t.ty)
+                                .map(|e| Type::List(Box::new(e.clone())))
+                        })
                         .unwrap_or_else(unit_type)
                 }
                 _ if resolved_ret.is_some() => resolved_ret.cloned().unwrap_or_else(unit_type),
@@ -3443,7 +3449,7 @@ pub(crate) fn lower_method_call(
         };
         let elem = elem.unwrap_or_else(unit_type);
         let (op, ty) = match method {
-            "join" => (
+            "join" | Syntax::METHOD_TASK_WAIT => (
                 THandleOp::TaskJoin,
                 resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                     ok: Box::new(elem),
@@ -3455,6 +3461,7 @@ pub(crate) fn lower_method_call(
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
+            "trace" => (THandleOp::TaskTrace, Type::String),
             "receive" => (
                 THandleOp::ChannelReceive,
                 Type::Result {

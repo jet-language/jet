@@ -415,7 +415,7 @@ fn emit_named_fn_value_with_storage(
         ordinary
             .strip_prefix("std::rc::Rc<")
             .and_then(|inner| inner.strip_suffix('>'))
-            .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync>"))
+            .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync + 'static>"))
             .unwrap_or(ordinary)
     } else {
         cx.rust_type(ft)

@@ -1,7 +1,7 @@
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    types, Block, Endianness, InstBuilder, MemFlags, StackSlot, StackSlotData, StackSlotKind,
-    TrapCode, Value,
+    types, AbiParam, Block, Endianness, InstBuilder, MemFlags, StackSlot, StackSlotData,
+    StackSlotKind, TrapCode, Value,
 };
 use cranelift_frontend::{FunctionBuilder, Switch, Variable};
 use cranelift_jit::JITModule;
@@ -400,26 +400,47 @@ impl LowerCtx<'_, '_> {
                     let equal = self.bool_from_icmp(IntCC::Equal, actual, expected);
                     matches_variant = self.b.ins().bor(matches_variant, equal);
                 }
-                let Some(PatSlot::Range { lo, hi }) = bindings.first() else {
-                    return Ok(matches_variant);
-                };
-                let payload_ty = self
+                let payload_types = self
                     .meta
                     .enum_variant_payload_types(enum_name, variant)
-                    .and_then(|types| types.first())
-                    .cloned()
-                    .unwrap_or(Type::Int);
-                let payload = if heap {
-                    self.unpack_enum_heap_payload(subject, &payload_ty)?
-                } else {
-                    self.unpack_enum_scalar(subject, &payload_ty)?
-                };
-                let lo = self.b.ins().iconst(types::I64, *lo);
-                let hi = self.b.ins().iconst(types::I64, *hi);
-                let ge = self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, payload, lo);
-                let le = self.bool_from_icmp(IntCC::SignedLessThanOrEqual, payload, hi);
-                let in_range = self.b.ins().band(ge, le);
-                Ok(self.b.ins().band(matches_variant, in_range))
+                    .map(|types| types.to_vec())
+                    .unwrap_or_default();
+                let mut matches_payload = self.b.ins().iconst(types::I8, 1);
+                for (index, slot) in bindings.iter().enumerate() {
+                    // `index` is the declaration slot, including ignored/bound
+                    // fields before this range; heap payloads start at slot 1.
+                    let PatSlot::Range { lo, hi } = slot else {
+                        continue;
+                    };
+                    let payload_ty = payload_types
+                        .get(index)
+                        .cloned()
+                        .unwrap_or(Type::Int);
+                    let payload = self.unpack_enum_payload_at(
+                        subject,
+                        &payload_ty,
+                        index,
+                        heap,
+                    )?;
+                    let payload = match self.meta.clif_ty(&payload_ty) {
+                        Some(types::I64) => payload,
+                        Some(types::I8) | Some(types::I32) => {
+                            self.b.ins().uextend(types::I64, payload)
+                        }
+                        other => {
+                            return Err(format!(
+                                "jit enum range payload type unsupported: {payload_ty:?} ({other:?})"
+                            ))
+                        }
+                    };
+                    let lo = self.b.ins().iconst(types::I64, *lo);
+                    let hi = self.b.ins().iconst(types::I64, *hi);
+                    let ge = self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, payload, lo);
+                    let le = self.bool_from_icmp(IntCC::SignedLessThanOrEqual, payload, hi);
+                    let in_range = self.b.ins().band(ge, le);
+                    matches_payload = self.b.ins().band(matches_payload, in_range);
+                }
+                Ok(self.b.ins().band(matches_variant, matches_payload))
             }
             _ => Err("jit enum arm is not a supported pattern".to_string()),
         }
@@ -908,6 +929,24 @@ impl LowerCtx<'_, '_> {
         payload_ty: &Type,
     ) -> Result<Value, String> {
         self.unpack_enum_heap_payload_at(packed, payload_ty, 1)
+    }
+
+    fn unpack_enum_payload_at(
+        &mut self,
+        packed: Value,
+        payload_ty: &Type,
+        index: usize,
+        heap: bool,
+    ) -> Result<Value, String> {
+        if heap {
+            self.unpack_enum_heap_payload_at(packed, payload_ty, index + 1)
+        } else if index == 0 {
+            self.unpack_enum_scalar(packed, payload_ty)
+        } else {
+            Err(format!(
+                "jit scalar enum payload index unsupported: {index}"
+            ))
+        }
     }
 
     fn unpack_enum_heap_payload_at(
@@ -4335,17 +4374,20 @@ impl LowerCtx<'_, '_> {
                     {
                         let enum_name = enum_name.ok_or("jit enum binding missing type")?;
                         for (index, name) in bindings {
+                            // Preserve the declaration slot even when earlier
+                            // payload fields are wildcards or ranges.
                             let payload_ty = self
                                 .meta
                                 .enum_variant_payload_types(enum_name, variant)
                                 .and_then(|tys| tys.get(index))
                                 .cloned()
                                 .unwrap_or(Type::Int);
-                            let payload = if heap {
-                                self.unpack_enum_heap_payload_at(subj, &payload_ty, index + 1)?
-                            } else {
-                                self.unpack_enum_scalar(subj, &payload_ty)?
-                            };
+                            let payload = self.unpack_enum_payload_at(
+                                subj,
+                                &payload_ty,
+                                index,
+                                heap,
+                            )?;
                             let payload_clif =
                                 self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
                             let var = self.fresh_var(payload_clif);
@@ -7187,6 +7229,46 @@ impl LowerCtx<'_, '_> {
         Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
     }
 
+    fn lower_interrupt_fn_call(
+        &mut self,
+        callback_record: Value,
+        fn_ty: &Type,
+        args: &[TCallArg],
+    ) -> Result<Value, String> {
+        let mut signature = fn_value_signature(self.module, fn_ty, self.meta)?;
+        signature.params.insert(0, AbiParam::new(types::I64));
+        let sig_ref = self.b.import_signature(signature);
+        let callback_index = self.b.ins().iconst(types::I64, 0);
+        let environment_index = self.b.ins().iconst(types::I64, 1);
+        let callback = self.call_host(
+            self.host.struct_get_i64,
+            &[callback_record, callback_index],
+        );
+        let environment = self.call_host(
+            self.host.struct_get_i64,
+            &[callback_record, environment_index],
+        );
+        let values: Result<Vec<_>, _> = args
+            .iter()
+            .map(|arg| self.lower_call_arg(arg))
+            .collect();
+        let mut call_args = Vec::with_capacity(values.as_ref().map_or(0, |values| values.len()) + 1);
+        call_args.push(environment);
+        call_args.extend(values?);
+        let call = self
+            .b
+            .ins()
+            .call_indirect(sig_ref, callback, &call_args);
+        let result = match fn_ty {
+            Type::Fn { ret: Some(ret), .. } if self.meta.clif_ty(ret).is_some() => {
+                Some(self.b.inst_results(call)[0])
+            }
+            _ => None,
+        };
+        self.emit_trap_check()?;
+        Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+    }
+
     /// `TStrPart` (`TIR/mod.rs`) is exhaustive here inline (`Lit`/`Interp`), not
     /// factored into its own top-level fn: an all-literal string is folded to
     /// one heap allocation (`flatten_string`); an interpolated one streams each
@@ -8758,6 +8840,97 @@ impl LowerCtx<'_, '_> {
     /// a user-facing failure: `AotFallbackBackend`/`InterpreterBackend`
     /// (`Source/JitBackend.rs`) retry through AOT compilation and then the
     /// tier-0 interpreter, so unsupported-here only costs `jet dev` JIT speed.
+    fn make_interrupt_callback_record(
+        &mut self,
+        callback: Value,
+        environment: Value,
+    ) -> Value {
+        let fields = self.b.ins().iconst(types::I64, 2);
+        let record = self.call_host(self.host.struct_new, &[fields]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let set = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        self.b.ins().call(set, &[record, zero, callback]);
+        self.b.ins().call(set, &[record, one, environment]);
+        record
+    }
+
+    fn lower_interrupt_callback_value(&mut self, expr: &TExpr) -> Result<Value, String> {
+        let value = match &expr.kind {
+            TExprKind::FnValue {
+                kind: TFnValueKind::Interrupt { value },
+            } => value.as_ref(),
+            _ => expr,
+        };
+        match &value.kind {
+            TExprKind::Lambda(lam) => {
+                let id = super::functions_compile::lower_interrupt_callable_lambda(
+                    self.module,
+                    self.host,
+                    self.meta,
+                    lam,
+                    self.func_ids,
+                    self.spawn_func_ids,
+                    self.spawn_lambdas,
+                    self.spawn_site,
+                    self.runtime,
+                )?;
+                let func_ref = self.module.declare_func_in_func(id, self.b.func);
+                let callback = self.b.ins().func_addr(types::I64, func_ref);
+                let environment = if lam.captures.is_empty() {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    let environment = self.call_host(self.host.coll.list_new, &[]);
+                    for (outer, _place, ty) in &lam.captures {
+                        let key = TIR::local_place(outer);
+                        let var = self
+                            .vars
+                            .get(&key)
+                            .copied()
+                            .ok_or_else(|| {
+                                format!("jit interrupt callback capture unknown `{outer}`")
+                            })?;
+                        let value = self.b.use_var(var);
+                        let push = self.module.declare_func_in_func(
+                            if matches!(ty, Type::Float) {
+                                self.host.coll.list_push_f64
+                            } else {
+                                self.host.coll.list_push
+                            },
+                            self.b.func,
+                        );
+                        self.b.ins().call(push, &[environment, value]);
+                    }
+                    environment
+                };
+                Ok(self.make_interrupt_callback_record(callback, environment))
+            }
+            TExprKind::FnValue {
+                kind:
+                    TFnValueKind::NamedFn {
+                        name: Some(name), ..
+                    },
+            } => {
+                let id = super::functions_compile::lower_interrupt_named_callback(
+                    self.module,
+                    name,
+                    self.func_ids,
+                )?;
+                let func_ref = self.module.declare_func_in_func(id, self.b.func);
+                let callback = self.b.ins().func_addr(types::I64, func_ref);
+                let environment = self.b.ins().iconst(types::I64, 0);
+                Ok(self.make_interrupt_callback_record(callback, environment))
+            }
+            TExprKind::Local(_) => self.lower_expr(value),
+            TExprKind::FnValue {
+                kind: TFnValueKind::Interrupt { .. },
+            } => self.lower_interrupt_callback_value(value),
+            _ => Err("jit interrupt callback is not a canonical function value".to_string()),
+        }
+    }
+
     pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.kind {
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
@@ -12503,53 +12676,11 @@ impl LowerCtx<'_, '_> {
                     Err("jit http serve closure unsupported".to_string())
                 }
                 TCoreClosureKind::OnInterrupt { callback } => {
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    let (callback_ptr, env) = match &callback.kind {
-                        TExprKind::Lambda(lam) => {
-                            let id = super::functions_compile::lower_callable_lambda(
-                                self.module,
-                                self.host,
-                                self.meta,
-                                lam,
-                                self.func_ids,
-                                self.spawn_func_ids,
-                                self.spawn_lambdas,
-                                self.spawn_site,
-                                self.runtime,
-                            )?;
-                            let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                            let callback_ptr = self.b.ins().func_addr(types::I64, func_ref);
-                            if lam.captures.is_empty() {
-                                (callback_ptr, zero)
-                            } else {
-                                let env = self.call_host(self.host.coll.list_new, &[]);
-                                let push = self.module.declare_func_in_func(
-                                    self.host.coll.list_push,
-                                    self.b.func,
-                                );
-                                for (outer, _place, _ty) in &lam.captures {
-                                    let key = TIR::local_place(outer);
-                                    let var = self
-                                        .vars
-                                        .get(&key)
-                                        .copied()
-                                        .ok_or_else(|| {
-                                            format!(
-                                                "jit interrupt callback capture unknown `{outer}`"
-                                            )
-                                        })?;
-                                    let value = self.b.use_var(var);
-                                    self.b.ins().call(push, &[env, value]);
-                                }
-                                (callback_ptr, env)
-                            }
-                        }
-                        _ => (self.lower_expr(callback)?, zero),
-                    };
+                    let callback = self.lower_interrupt_callback_value(callback)?;
                     let host = self
                         .module
                         .declare_func_in_func(self.host.core.os_on_interrupt, self.b.func);
-                    self.b.ins().call(host, &[callback_ptr, env]);
+                    self.b.ins().call(host, &[callback]);
                     self.emit_trap_check()?;
                     Ok(self.b.ins().iconst(types::I64, 0))
                 }
@@ -13639,35 +13770,38 @@ impl LowerCtx<'_, '_> {
                     for (i, (_name, arg)) in fields.iter().enumerate() {
                         let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
                         let payload = self.lower_expr(&arg.value)?;
-                        match self.meta.clif_ty(&arg.value.ty).or_else(|| clif_ty(&arg.value.ty)) {
-                            Some(ty) if ty == types::F64 => {
-                                self.b.ins().call(set_f, &[handle, idx, payload]);
+                        let abi_ty = self.erase_distinct_ty(&arg.value.ty);
+                        // Float-family values cross the heap carrier as F64.
+                        if matches!(&abi_ty, Type::Float | Type::Float32) {
+                            self.b.ins().call(set_f, &[handle, idx, payload]);
+                            continue;
+                        }
+                        let ty = self
+                            .meta
+                            .clif_ty(&abi_ty)
+                            .or_else(|| clif_ty(&abi_ty))
+                            .ok_or_else(|| {
+                                format!(
+                                    "jit enum named payload field unsupported: {:?}",
+                                    arg.value.ty
+                                )
+                            })?;
+                        let bits = match ty {
+                            ty if ty == types::I64 => payload,
+                            ty if ty == types::I8 => {
+                                self.b.ins().uextend(types::I64, payload)
                             }
-                            Some(ty) => {
-                                let bits = match ty {
-                                    ty if ty == types::I64 => payload,
-                                    ty if ty == types::I8 => {
-                                        self.b.ins().uextend(types::I64, payload)
-                                    }
-                                    ty if ty == types::I32 => {
-                                        self.b.ins().sextend(types::I64, payload)
-                                    }
-                                    _ => {
-                                        return Err(format!(
-                                            "jit enum named payload field unsupported: {:?}",
-                                            arg.value.ty
-                                        ))
-                                    }
-                                };
-                                self.b.ins().call(set_i, &[handle, idx, bits]);
+                            ty if ty == types::I32 => {
+                                self.b.ins().sextend(types::I64, payload)
                             }
-                            None => {
+                            _ => {
                                 return Err(format!(
                                     "jit enum named payload field unsupported: {:?}",
                                     arg.value.ty
-                                ));
+                                ))
                             }
-                        }
+                        };
+                        self.b.ins().call(set_i, &[handle, idx, bits]);
                     }
                     Ok(handle)
                 }
@@ -14548,7 +14682,19 @@ impl LowerCtx<'_, '_> {
                 TFnValueKind::Call { callee, args } => {
                     let fn_ty = callee.ty.clone();
                     let value = self.lower_expr(callee)?;
-                    self.lower_fn_call(value, &fn_ty, args)
+                    if matches!(
+                        &callee.kind,
+                        TExprKind::FnValue {
+                            kind: TFnValueKind::Interrupt { .. }
+                        }
+                    ) {
+                        self.lower_interrupt_fn_call(value, &fn_ty, args)
+                    } else {
+                        self.lower_fn_call(value, &fn_ty, args)
+                    }
+                }
+                TFnValueKind::Interrupt { .. } => {
+                    self.lower_interrupt_callback_value(expr)
                 }
             },
             TExprKind::ModuleCall { form, args, .. } => match form {

@@ -963,6 +963,10 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        // D-OSINTERRUPT1: pending-count and registration-order semantics are
+        // shared by AOT, resident JIT, and the interpreter. Their callback
+        // storage remains an engine adapter.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
@@ -2218,6 +2222,8 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
+        let loadable =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Loadable.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
         let range_bounds =
             std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
@@ -2264,6 +2270,7 @@ mod tests {
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
+            ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
             ("src/Prelude/Core/Disjoint.rs", disjoint.as_str()),
@@ -2322,6 +2329,9 @@ mod tests {
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
             .unwrap();
+        let loadable_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Loadable.rs\")")
+            .unwrap();
         let values_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Values.rs\")")
             .unwrap();
@@ -2372,7 +2382,8 @@ mod tests {
             .unwrap();
         assert!(
             outcome_pos < unicode_pos
-                && unicode_pos < values_pos
+                && unicode_pos < loadable_pos
+                && loadable_pos < values_pos
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
@@ -2397,6 +2408,7 @@ mod tests {
             [
                 outcome.as_str(),
                 unicode.as_str(),
+                loadable.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
                 disjoint.as_str(),
@@ -2430,6 +2442,7 @@ mod tests {
         let expected = [
             outcome.as_str(),
             unicode.as_str(),
+            loadable.as_str(),
             values.as_str(),
             range_bounds.as_str(),
             disjoint.as_str(),
@@ -2460,10 +2473,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 344_633, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 361_229, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "5f06e715b4c38dbd0d75f561b08abd6e57e2584278568e92b32c049954d2f5d7",
+            "3c47fc8e66538a639a30d39e68d87a1afa46aff22e248e71540c79af7ef09cae",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }

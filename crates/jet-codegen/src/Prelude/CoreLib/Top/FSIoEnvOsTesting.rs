@@ -792,10 +792,9 @@ fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
 }
 
 mod jet_os_interrupt {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc, OnceLock};
 
-    static PENDING: AtomicUsize = AtomicUsize::new(0);
+    static QUEUE: JetInterruptQueue = JetInterruptQueue::new();
     static DISPATCH: OnceLock<Result<mpsc::Sender<Command>, String>> = OnceLock::new();
 
     enum Command {
@@ -819,7 +818,7 @@ mod jet_os_interrupt {
 
     fn note_interrupt() {
         // OS callbacks do no allocation, locking, or user work.
-        PENDING.fetch_add(1, Ordering::Relaxed);
+        QUEUE.note();
     }
 
     #[cfg(unix)]
@@ -891,19 +890,16 @@ mod jet_os_interrupt {
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
-                        let count = PENDING.swap(0, Ordering::Acquire);
-                        for _ in 0..count {
-                            for handler in &handlers {
-                                if let Err(payload) = std::panic::catch_unwind(
-                                    std::panic::AssertUnwindSafe(|| {
-                                        let _boundary = PanicBoundary::enter();
-                                        handler();
-                                    }),
-                                ) {
-                                    super::jet_report_caught_unwind(payload);
-                                }
+                        QUEUE.dispatch(&handlers, |handler| {
+                            if let Err(payload) = std::panic::catch_unwind(
+                                std::panic::AssertUnwindSafe(|| {
+                                    let _boundary = PanicBoundary::enter();
+                                    handler();
+                                }),
+                            ) {
+                                super::jet_report_caught_unwind(payload);
                             }
-                        }
+                        });
                     }
                 })
                 .map_err(|e| format!("could not start interrupt dispatcher: {e}"))?;

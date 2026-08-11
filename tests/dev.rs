@@ -8734,6 +8734,57 @@ fn run() {
 }
 
 #[test]
+fn multi_head_payload_range_checks_each_slot_across_runtime_tiers() {
+    require_multi_head_parity_prereqs();
+    let src = r#"enum Pair {
+    Values(left: Int, right: Int)
+    Empty
+}
+fn classify(pair: Pair) => String {
+    if pair == {
+        .Values(_, 10..19) -> { return "range" }
+        .Values(_, _) -> { return "other" }
+        .Empty -> { return "empty" }
+    }
+    return "unknown"
+}
+fn run() {
+    print(classify(.Values.{ left: 1, right: 15 }))
+    print(classify(.Values.{ left: 1, right: 25 }))
+}
+"#;
+    let dir = common::unique_tmp("jet_multi_head_payload_range");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("multi_head_payload_range.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("interpreter failed payload-range fixture: {diags:?}"),
+    };
+    let jit = run_cranelift_resident(src, "multi_head_payload_range");
+    let default_dev = run_default_dev_resident(&shown, "multi_head_payload_range_default_dev");
+    let aot = compiled_binary_output(
+        &dir,
+        "multi_head_payload_range",
+        0,
+        "multi_head_payload_range",
+        &shown,
+    );
+    let expected = ProgramOutput::ran("range\nother\n".into(), String::new(), 0);
+    assert_eq!(interpreted, expected, "interpreter payload-range slot drifted");
+    assert_eq!(jit, expected, "resident JIT payload-range slot drifted");
+    assert_eq!(default_dev, expected, "default dev/JIT payload-range slot drifted");
+    assert_eq!(aot, expected, "AOT payload-range slot drifted");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn multi_head_missing_head_e0307_reaches_all_diagnostic_entries() {
     let file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/ui/multi_head_not_exhaustive.jet");
@@ -8769,7 +8820,7 @@ fn multi_head_missing_head_e0307_reaches_all_diagnostic_entries() {
         ("AOT", RunOutcome::Problems(entries.aot)),
         ("resident JIT", entries.jit),
         ("default dev", entries.default_dev),
-        ("forced interpreter", entries.interpreter),
+        ("forced interpreter diagnostic gate", entries.interpreter_gate),
     ] {
         let RunOutcome::Problems(diags) = diags else {
             panic!("{tier} entry must reject missing multi-head coverage")
@@ -8785,6 +8836,11 @@ fn multi_head_missing_head_e0307_reaches_all_diagnostic_entries() {
             "{tier} rendered diagnostic drifted from the UI snapshot"
         );
     }
+    assert_eq!(
+        entries.forced_interpreter,
+        ProgramOutput::ran("first\n".into(), String::new(), 0),
+        "successful forced interpreter entry must reach InterpreterBackend and keep first-head order"
+    );
 }
 
 #[derive(Debug)]
@@ -8793,7 +8849,8 @@ struct MultiHeadDiagnosticEntries {
     aot: Vec<jet::Diagnostics::Diagnostic>,
     jit: RunOutcome,
     default_dev: RunOutcome,
-    interpreter: RunOutcome,
+    interpreter_gate: RunOutcome,
+    forced_interpreter: ProgramOutput,
 }
 
 fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEntries {
@@ -8810,12 +8867,31 @@ fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEn
             let aot = jet::compile_with_path(&src, &file)
                 .err()
                 .expect("AOT entry must reject missing multi-head coverage");
+            let jit = run_jit_once(&file);
+            let default_dev = dev_iteration(&file, false, false);
+            // Keep the invalid fixture as the interpreter diagnostic gate. Use a
+            // valid multi-head fixture for the separate backend entry below.
+            let interpreter_gate = dev_iteration(&file, false, true);
+            let valid_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/ui_lint/multi_head_unreachable.jet");
+            let valid_shown = valid_file.to_string_lossy().into_owned();
+            let forced_interpreter = match dev_iteration(&valid_shown, false, true) {
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => ProgramOutput::ran(stdout, stderr, exit_code),
+                RunOutcome::Problems(diags) => {
+                    panic!("valid multi-head entry must reach forced interpreter: {diags:?}")
+                }
+            };
             let entries = MultiHeadDiagnosticEntries {
                 sema,
                 aot,
-                jit: run_jit_once(&file),
-                default_dev: dev_iteration(&file, false, false),
-                interpreter: dev_iteration(&file, false, true),
+                jit,
+                default_dev,
+                interpreter_gate,
+                forced_interpreter,
             };
             tx.send(entries).expect("multi-head diagnostic receiver");
         })
@@ -8887,6 +8963,7 @@ fn multi_head_duplicate_head_l0301_keeps_first_match_across_runtime_tiers() {
         RunOutcome::Problems(diags) => panic!("interpreter rejected duplicate-head fixture: {diags:?}"),
     };
     let jit = run_cranelift_resident(&src, "multi_head_duplicate_head");
+    let default_dev = run_default_dev_resident(&shown, "multi_head_duplicate_head_default_dev");
     let aot = compiled_binary_output(
         &dir,
         "multi_head_duplicate_head",
@@ -8894,10 +8971,15 @@ fn multi_head_duplicate_head_l0301_keeps_first_match_across_runtime_tiers() {
         "multi_head",
         &shown,
     );
+    let cli_run = run_cli_default_resident("run", &shown, "multi_head_duplicate_head_cli_run");
+    let cli_dev = run_cli_default_resident("dev", &shown, "multi_head_duplicate_head_cli_dev");
     let expected = ProgramOutput::ran("first\n".into(), String::new(), 0);
     assert_eq!(interpreted, expected, "interpreter first-head order drifted");
     assert_eq!(jit, expected, "resident JIT first-head order drifted");
+    assert_eq!(default_dev, expected, "default dev/JIT first-head order drifted");
     assert_eq!(aot, expected, "AOT first-head order drifted");
+    assert_eq!(cli_run, expected, "default `jet run` first-head order drifted");
+    assert_eq!(cli_dev, expected, "default `jet dev` first-head order drifted");
     let _ = fs::remove_dir_all(&dir);
 }
 

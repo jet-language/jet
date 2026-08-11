@@ -4281,6 +4281,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether an expression already has the one representation that may
+    /// cross `core.os.on_interrupt`. This is intentionally narrower than
+    /// ordinary function typing: arbitrary function-producing expressions
+    /// must not reach codegen as an unexamined `Rc` value.
+    pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
+        if !matches!(ty, Type::Fn { .. }) {
+            return false;
+        }
+        match expr {
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
+                .unwrap_or_else(|| {
+                    self.funcs.contains_key(name)
+                        || self.unqualified.contains_key(name)
+                        || self.unqualified_file.contains_key(name)
+                }),
+            Expr::Paren(inner, _) => self.interrupt_callback_expr_sendable(inner, ty),
+            Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, ty),
+            _ => false,
+        }
+    }
+
     /// Reject a local function value that would otherwise reach the callback
     /// host as an ordinary Rc. Direct named functions and callback-safe aliases
     /// are admitted; function parameters and all other local function values
@@ -4296,7 +4319,30 @@ impl<'a> Checker<'a> {
                 _ => None,
             }
         }
+        fn lambda(expr: &Expr) -> bool {
+            match expr {
+                Expr::Lambda(_) => true,
+                Expr::Paren(inner, _) => lambda(inner),
+                _ => false,
+            }
+        }
         let Some(name) = ident(expr) else {
+            if lambda(expr) {
+                // Lambda capture checking runs while the interrupt callback
+                // depth is active. It owns the detailed Send/'static proof.
+                return;
+            }
+            self.report_unsendable(
+                "this callback",
+                ty,
+                SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ClosureCaptures,
+                },
+                SendCrossing::InterruptCallback,
+                expr.span(),
+            );
             return;
         };
         if self

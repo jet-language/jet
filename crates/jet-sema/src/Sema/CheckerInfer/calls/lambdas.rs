@@ -163,7 +163,11 @@ use std::collections::HashSet;
                             let callback_safe = self
                                 .lookup(name)
                                 .map(|info| info.interrupt_sendable)
-                                .unwrap_or(false);
+                                .unwrap_or_else(|| {
+                                    self.funcs.contains_key(name)
+                                        || self.unqualified.contains_key(name)
+                                        || self.unqualified_file.contains_key(name)
+                                });
                             if callback_safe {
                                 None
                             } else {

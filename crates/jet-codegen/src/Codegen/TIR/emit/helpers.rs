@@ -354,7 +354,7 @@ pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
             let send = ordinary
                 .strip_prefix("std::rc::Rc<")
                 .and_then(|inner| inner.strip_suffix('>'))
-                .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync>"))
+                .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync + 'static>"))
                 .unwrap_or(ordinary);
             format!(": {send}")
         }

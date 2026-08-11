@@ -8,11 +8,14 @@
 use super::Concurrency;
 use std::cell::{Cell, RefCell};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
+}
+
+mod interrupt_queue {
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs");
 }
 
 // ── core.os (mirrors jet_std_os_* in FSIoEnvOsTesting.rs) ────────────────────
@@ -78,13 +81,13 @@ extern "C" fn jet_jit_os_hostname() -> i64 {
 }
 
 // The resident JIT cannot hand a Rust `Rc` callback to the process signal
-// boundary. Its one callback ABI is `(function address, optional capture-list
-// handle)`, and this adapter owns the same signal-mark/dispatcher split as the
-// embedded Prelude. The dispatcher is the only place that invokes JIT code.
+// boundary. TIR gives it one Send-safe record containing a function address and
+// environment handle. This adapter owns only the raw-code invocation boundary;
+// pending counts and additive ordering come from the shared Prelude queue.
 mod jit_os_interrupt {
-    use super::{mpsc, AtomicUsize, Concurrency, OnceLock, Ordering};
+    use super::{interrupt_queue::JetInterruptQueue, mpsc, Concurrency, OnceLock};
 
-    static PENDING: AtomicUsize = AtomicUsize::new(0);
+    static QUEUE: JetInterruptQueue = JetInterruptQueue::new();
     static DISPATCH: OnceLock<Result<mpsc::Sender<DispatchCommand>, String>> = OnceLock::new();
 
     struct Command {
@@ -99,7 +102,7 @@ mod jit_os_interrupt {
     }
 
     fn note_interrupt() {
-        PENDING.fetch_add(1, Ordering::Relaxed);
+        QUEUE.note();
     }
 
     #[cfg(unix)]
@@ -167,33 +170,23 @@ mod jit_os_interrupt {
                             }
                             Ok(DispatchCommand::Reset(ready)) => {
                                 handlers.clear();
-                                PENDING.store(0, Ordering::Release);
+                                QUEUE.clear();
                                 let _ = ready.send(());
                             }
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
-                        let count = PENDING.swap(0, Ordering::Acquire);
-                        for _ in 0..count {
-                            for &(callback, env) in &handlers {
-                                Concurrency::with_http_jet_runtime(|| {
-                                    // The callback ABI is selected by whether a
-                                    // capture-list handle was supplied. Both
-                                    // forms are emitted by the same TIR node.
-                                    unsafe {
-                                        if env == 0 {
-                                            let callback: extern "C" fn() =
-                                                std::mem::transmute(callback);
-                                            callback();
-                                        } else {
-                                            let callback: extern "C" fn(i64) =
-                                                std::mem::transmute(callback);
-                                            callback(env);
-                                        }
-                                    }
-                                });
-                            }
-                        }
+                        QUEUE.dispatch(&handlers, |&(callback, environment)| {
+                            Concurrency::with_http_jet_runtime(|| {
+                                // Every callback, including named and
+                                // capture-free callbacks, uses this one ABI.
+                                unsafe {
+                                    let callback: extern "C" fn(i64) =
+                                        std::mem::transmute(callback);
+                                    callback(environment);
+                                }
+                            });
+                        });
                     }
                 })
                 .map_err(|e| format!("could not start interrupt dispatcher: {e}"))?;
@@ -204,13 +197,22 @@ mod jit_os_interrupt {
         }
     }
 
-    pub(super) fn register(callback: i64, env: i64) {
+    pub(super) fn register(callback_record: i64) {
         let result = (|| {
+            let (callback, environment) = Concurrency::with_runtime_mut(|rt| {
+                (
+                    rt.heap.record_get_int(callback_record, 0).unwrap_or(0),
+                    rt.heap.record_get_int(callback_record, 1).unwrap_or(0),
+                )
+            });
+            if callback == 0 {
+                return Err("invalid interrupt callback record".to_string());
+            }
             let tx = dispatcher()?;
             let (ready_tx, ready_rx) = mpsc::sync_channel(0);
             tx.send(DispatchCommand::Register(Command {
                 callback: callback as usize,
-                env,
+                env: environment,
                 ready: ready_tx,
             }))
             .map_err(|_| "interrupt dispatcher stopped".to_string())?;
@@ -236,8 +238,8 @@ mod jit_os_interrupt {
     }
 }
 
-extern "C" fn jet_jit_os_on_interrupt(callback: i64, env: i64) {
-    jit_os_interrupt::register(callback, env);
+extern "C" fn jet_jit_os_on_interrupt(callback_record: i64) {
+    jit_os_interrupt::register(callback_record);
 }
 
 pub(crate) fn reset_jit_interrupts() {
@@ -2484,7 +2486,7 @@ host_fns! {
     os_wait: "jet_jit_os_wait" => jet_jit_os_wait: sig_i64;
     os_waitpid: "jet_jit_os_waitpid" => jet_jit_os_waitpid: sig_i64_i64_i64;
     os_utime: "jet_jit_os_utime" => jet_jit_os_utime: sig_i64_i64_i64_i64;
-    os_on_interrupt: "jet_jit_os_on_interrupt" => jet_jit_os_on_interrupt: sig_void_i64_i64;
+    os_on_interrupt: "jet_jit_os_on_interrupt" => jet_jit_os_on_interrupt: sig_void_i64;
     os_atexit: "jet_jit_os_atexit" => jet_jit_os_atexit: sig_unary_i64;
     os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
     log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;

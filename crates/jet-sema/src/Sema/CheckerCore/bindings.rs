@@ -14,6 +14,22 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
     )
 }
 
+fn interrupt_callback_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name, _) => Some(name),
+        Expr::Paren(inner, _) => interrupt_callback_name(inner),
+        _ => None,
+    }
+}
+
+fn interrupt_callback_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
+    match expr {
+        Expr::Lambda(lambda) => Some(lambda),
+        Expr::Paren(inner, _) => interrupt_callback_lambda(inner),
+        _ => None,
+    }
+}
+
 
 fn contains_taskgroup(ty: &Type) -> bool {
     match ty {
@@ -776,17 +792,18 @@ impl<'a> Checker<'a> {
             let interrupt_sendable = if !matches!(&final_ty, Type::Fn { .. }) {
                 false
             } else {
-                match &b.init {
-                    Expr::Ident(name, _) => self
-                        .lookup(name)
+                if let Some(name) = interrupt_callback_name(&b.init) {
+                    self.lookup(name)
                         .map(|info| info.interrupt_sendable)
                         .unwrap_or_else(|| {
                             self.funcs.contains_key(name)
                                 || self.unqualified.contains_key(name)
                                 || self.unqualified_file.contains_key(name)
-                        }),
-                    Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, &final_ty),
-                    _ => false,
+                        })
+                } else if let Some(lambda) = interrupt_callback_lambda(&b.init) {
+                    self.lambda_interrupt_sendable(lambda, &final_ty)
+                } else {
+                    false
                 }
             };
             let task_lint_span = if is_task_type(&final_ty) && !self.in_taskgroup_spawn {

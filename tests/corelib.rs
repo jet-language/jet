@@ -3491,6 +3491,7 @@ fn run() {
 #[cfg(unix)]
 #[test]
 fn core_os_interrupt_callback_forms_match_dev_tiers() {
+    use std::io::{BufRead, Read};
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
@@ -3502,6 +3503,7 @@ fn core_os_interrupt_callback_forms_match_dev_tiers() {
 
     let aot_source = r#"
 use core.os as os
+use core.process as process
 
 fn named_callback() {
     print("named")
@@ -3511,12 +3513,50 @@ fn run() {
     indirect :: named_callback
     os.on_interrupt(named_callback)
     os.on_interrupt(indirect)
-    print("registered")
+    os.on_interrupt(() => {
+        print("inline")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
 }
 "#;
-    let (code, stdout, stderr) = build_and_run(&dir, "named_indirect_aot", aot_source, &[], None);
-    assert_eq!(code, 0, "named/indirect AOT callback program failed: {stderr}");
-    assert_eq!(stdout, "registered\n");
+    let out = compile_temp("named_indirect_aot.jet", aot_source);
+    let rs = dir.join("named_indirect_aot.rs");
+    let bin = dir.join("named_indirect_aot");
+    let mut rustc = Command::new("rustc");
+    common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let built = rustc.arg("-o").arg(&bin).output().unwrap();
+    assert!(
+        built.status.success(),
+        "named/indirect/inline AOT rustc failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let mut child = Command::new(&bin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn AOT callback program");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).unwrap();
+    assert_eq!(ready, "ready\n", "AOT callback registration was not ready");
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
+    let status = child.wait().unwrap();
+    let mut rest = String::new();
+    stdout.read_to_string(&mut rest).unwrap();
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(status.success(), "AOT callback program failed: {stderr}");
+    assert_eq!(rest, "named\nnamed\ninline\n");
 
     let dev_source = r#"
 use core.os as os
@@ -3542,6 +3582,7 @@ fn run() {
         os.on_interrupt(local_lambda)
         os.on_interrupt(named_callback)
         os.on_interrupt(indirect)
+        print("ready")
         loop {
             tick :: 0
         }
@@ -3566,7 +3607,24 @@ fn run() {
         let mut child = command
             .spawn()
             .unwrap_or_else(|error| panic!("spawn {tier} callback program: {error}"));
-        std::thread::sleep(Duration::from_secs(5));
+        let (lines_tx, lines_rx) = std::sync::mpsc::channel();
+        let child_stdout = child.stdout.take().unwrap();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(child_stdout).lines() {
+                if lines_tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let ready = match lines_rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(line) => line.unwrap_or_else(|error| panic!("read {tier} readiness: {error}")),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("{tier} callback program did not become ready: {error}");
+            }
+        };
+        assert_eq!(ready, "ready", "{tier} callback registration was not ready");
         unsafe extern "C" {
             fn kill(pid: i32, signal: i32) -> i32;
         }
@@ -3582,20 +3640,25 @@ fn run() {
             }
             if Instant::now() >= deadline {
                 let _ = child.kill();
-                let output = child
-                    .wait_with_output()
-                    .expect("collect timed-out callback child output");
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
                 panic!(
-                    "{tier} callback program did not exit after SIGINT: stdout={stdout:?} stderr={stderr:?}"
+                    "{tier} callback program did not exit after SIGINT"
                 );
             }
             std::thread::sleep(Duration::from_millis(25));
         };
-        let output = child.wait_with_output().unwrap();
-        let stdout = String::from_utf8(output.stdout).expect("callback stdout is UTF-8");
-        let stderr = String::from_utf8(output.stderr).expect("callback stderr is UTF-8");
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        let stdout = lines_rx
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("callback stdout is readable")
+            .join("\n")
+            + "\n";
         assert!(
             status.code() == Some(70),
             "{tier} callback program failed: stdout={stdout:?} stderr={stderr:?}"
@@ -3721,8 +3784,19 @@ fn run() {
     let status = child.wait().unwrap();
     let mut rest = String::new();
     stdout.read_to_string(&mut rest).unwrap();
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
     assert!(status.success(), "interrupt child failed: {status}");
     assert_eq!(rest, "second\n");
+    assert!(
+        stderr.contains("panic: first handler failed"),
+        "first handler panic lost its interrupt boundary diagnostic: {stderr:?}"
+    );
 }
 
 #[cfg(unix)]

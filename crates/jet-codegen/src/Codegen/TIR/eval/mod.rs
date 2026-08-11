@@ -38,6 +38,10 @@ mod disjoint_semantics {
     }
 }
 
+mod interrupt_queue {
+    include!("../../../Prelude/CoreLib/Top/Interrupt.rs");
+}
+
 #[allow(dead_code)]
 mod uninit_semantics {
     include!("../../../Prelude/Uninit.rs");
@@ -51,7 +55,7 @@ mod shared_protocol {
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -80,11 +84,12 @@ pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
 }
 
-static INTERPRETER_INTERRUPT_PENDING: AtomicUsize = AtomicUsize::new(0);
+static INTERPRETER_INTERRUPT_QUEUE: interrupt_queue::JetInterruptQueue =
+    interrupt_queue::JetInterruptQueue::new();
 static INTERPRETER_INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
 fn note_interpreter_interrupt() {
-    INTERPRETER_INTERRUPT_PENDING.fetch_add(1, Ordering::Relaxed);
+    INTERPRETER_INTERRUPT_QUEUE.note();
 }
 
 #[cfg(unix)]
@@ -1096,6 +1101,9 @@ struct EvalTaskConfig<'a> {
 
 impl EvalRuntime<'_> {
     fn new() -> Self {
+        // A fresh interpreter runtime is a teardown boundary. Do not deliver
+        // a SIGINT that was marked for a previous dev/restart instance.
+        INTERPRETER_INTERRUPT_QUEUE.clear();
         Self {
             callables: Vec::new(),
             interrupt_handlers: Vec::new(),
@@ -2065,10 +2073,6 @@ impl<'a> EvalCtx<'a> {
         &mut self,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
-        let count = INTERPRETER_INTERRUPT_PENDING.swap(0, Ordering::Acquire);
-        if count == 0 {
-            return Ok(());
-        }
         let handlers = self
             .runtime
             .lock()
@@ -2076,27 +2080,32 @@ impl<'a> EvalCtx<'a> {
             .interrupt_handlers
             .clone();
         let mut deferred_panic = None;
-        for _ in 0..count {
-            for index in &handlers {
-                let value = Self::callable_value(*index);
-                match self.call_callable(&value, Vec::new()) {
-                    Ok(_) => {}
-                    Err(error) if error.code == "SOFT_EXIT" => {
-                        let panic_stop = self.sink.as_ref().is_some_and(|sink| {
-                            sink.lock()
-                                .expect("evaluator sink poisoned")
-                                .exit_code
-                                == Some(70)
-                        });
-                        if panic_stop {
-                            deferred_panic.get_or_insert(error);
-                            continue;
-                        }
-                        return Err(error);
-                    }
-                    Err(error) => return Err(error),
-                }
+        let mut failure = None;
+        INTERPRETER_INTERRUPT_QUEUE.dispatch(&handlers, |index| {
+            if failure.is_some() {
+                return;
             }
+            let value = Self::callable_value(*index);
+            match self.call_callable(&value, Vec::new()) {
+                Ok(_) => {}
+                Err(error) if error.code == "SOFT_EXIT" => {
+                    let panic_stop = self.sink.as_ref().is_some_and(|sink| {
+                        sink.lock()
+                            .expect("evaluator sink poisoned")
+                            .exit_code
+                            == Some(70)
+                    });
+                    if panic_stop {
+                        deferred_panic.get_or_insert(error);
+                    } else {
+                        failure = Some(error);
+                    }
+                }
+                Err(error) => failure = Some(error),
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
         }
         if let Some(error) = deferred_panic {
             return Err(error);

@@ -368,7 +368,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.os", "utime", "jet_std_os_utime", true, &[true, false, false]),
     CoreCallRecord::new("core.os", "stop", "jet_std_os_stop", true, &[false]),
     CoreCallRecord::new("core.os", "set_current_dir", "jet_std_os_set_current_dir", true, &[true]),
-    CoreCallRecord::new("core.os", "on_interrupt", "jet_std_os_on_interrupt", true, &[false]).without_direct_jit(),
+    CoreCallRecord::new("core.os", "on_interrupt", "jet_std_os_on_interrupt", true, &[false])
+        .without_direct_aot()
+        .without_direct_jit(),
     CoreCallRecord::new("core.os", "atexit", "jet_std_os_atexit", true, &[false]),
     CoreCallRecord::new("core.os", "fork", "jet_std_os_fork", true, &[]),
     CoreCallRecord::new("core.os", "setuid", "jet_std_os_setuid", true, &[false]),

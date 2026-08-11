@@ -1430,6 +1430,7 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
         | (Syntax::METHOD_TASK_PAUSE, 1)
         | (Syntax::METHOD_TASK_RESUME, 0)
         | (Syntax::METHOD_TASK_CANCEL, 0) => Some(None),
+        ("trace", 0) => Some(Some(Type::String)),
         _ => None,
     }
 }

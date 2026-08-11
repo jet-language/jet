@@ -50,6 +50,14 @@ use crate::Codegen::tuple_struct_name;
 use crate::Diagnostics::Span;
 use crate::Syntax;
 
+fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name, _) => Some(name),
+        Expr::Paren(inner, _) => interrupt_callback_ident(inner),
+        _ => None,
+    }
+}
+
 /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
 /// `.insert()`, …). Ordinarily identical to `lower_expr`; the one exception is
 /// a place rooted in a `Pool` index (`pool[id]`, or `pool[id].field`) — the
@@ -644,7 +652,25 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
         // Function-type parameters are unmarked, therefore Read under D-MEM-PARAM1.
         Expr::CallValue { callee, args, .. } => {
-            let callee_t = lower_expr(callee, cx, env);
+            let mut callee_t = lower_expr(callee, cx, env);
+            if interrupt_callback_ident(callee)
+                .is_some_and(|name| env.is_send_fn(name))
+                && matches!(&callee_t.ty, Type::Fn { .. })
+            {
+                // A callback-safe local is stored in the canonical callback
+                // representation. Mark call-through uses too, so the JIT
+                // invokes its `(function, environment)` record instead of
+                // treating the record handle as a raw function address.
+                let ty = callee_t.ty.clone();
+                callee_t = TExpr {
+                    ty,
+                    kind: TExprKind::FnValue {
+                        kind: TFnValueKind::Interrupt {
+                            value: Box::new(callee_t),
+                        },
+                    },
+                };
+            }
             let ret_ty = match &callee_t.ty {
                 Type::Fn { ret: Some(r), .. } => (**r).clone(),
                 _ => unit_type(),
@@ -1045,10 +1071,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     Type::Fn { ret: Some(r), .. } => (**r).clone(),
                     _ => unit_type(),
                 };
-                let callee_t = TExpr {
+                let mut callee_t = TExpr {
                     ty: callee_ty,
                     kind: TExprKind::Local(env.local_of(&call.name)),
                 };
+                if env.is_send_fn(&call.name) {
+                    let ty = callee_t.ty.clone();
+                    callee_t = TExpr {
+                        ty,
+                        kind: TExprKind::FnValue {
+                            kind: TFnValueKind::Interrupt {
+                                value: Box::new(callee_t),
+                            },
+                        },
+                    };
+                }
                 let params = match &callee_t.ty {
                     Type::Fn { params, .. } => Some(params.as_slice()),
                     _ => None,
@@ -2615,6 +2652,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             // Sema's IndexKind::Unknown must not abort the interpreter path;
             // treat it as a list index and let runtime miss if wrong.
+            debug_assert!(
+                !matches!(kind, IndexKind::Unknown),
+                "sema-to-TIR handoff violated: unresolved index kind"
+            );
             let kind = if matches!(kind, IndexKind::Unknown) {
                 &IndexKind::List
             } else {
@@ -3383,7 +3424,12 @@ fn bind_arg_temporaries<A: OrderedArg>(
     // TIR argument list, while `order` was computed over the AST list the
     // receiver was stripped from. Recover the offset from the two lengths.
     let offset = args.len().saturating_sub(ast_arg_count);
-    let order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+    // The hidden prefix is the receiver (currently one slot for `#Root`),
+    // which is written before every explicit argument in the source call.
+    // Keep it at the front when the explicit slots are reordered.
+    let order: Vec<usize> = (0..offset)
+        .chain(order.iter().map(|slot| slot + offset))
+        .collect();
     // Only arguments that can actually be observed need pinning down. Count
     // them across the whole list, not just the written ones: a filled default
     // with an effect also has to run after every supplied argument, and it

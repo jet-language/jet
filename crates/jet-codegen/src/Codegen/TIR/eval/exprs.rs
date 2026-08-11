@@ -5684,6 +5684,7 @@ impl<'a> EvalCtx<'a> {
                     }
                     self.call_callable(&callable, argv)
                 }
+                TFnValueKind::Interrupt { value } => self.eval_expr(value, scope),
             },
             TExprKind::ModuleCall { form, args, .. } => {
                 let target = match form {

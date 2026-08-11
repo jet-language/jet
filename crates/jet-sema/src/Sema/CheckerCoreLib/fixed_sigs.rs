@@ -399,7 +399,19 @@ pub fn core_fixed_sig(
         ("core.os", "set_current_dir") => {
             Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty()))))
         }
-        ("core.os", "on_interrupt" | "atexit") => Some((
+        ("core.os", "on_interrupt") => Some((
+            vec![(
+                read,
+                Type::Fn {
+                    params: vec![],
+                    ret: None,
+                    effect_bound: None, return_view_provenance: None,
+                    param_contract: None,
+                },
+            )],
+            None,
+        )),
+        ("core.os", "atexit") => Some((
             vec![(
                 read,
                 Type::Fn {
