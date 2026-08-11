@@ -13,6 +13,8 @@
 // convention for the same "two independently-built crates can't share Rust
 // types" reason).
 
+use jet_crypto_entropy::jet_crypto_entropy_fill;
+
 use age::secrecy::ExposeSecret;
 use std::io::{Read as _, Write as _};
 use std::str::FromStr;

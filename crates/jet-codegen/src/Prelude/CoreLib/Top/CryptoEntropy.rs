@@ -420,9 +420,7 @@ pub fn jet_crypto_entropy_fill(out: &mut [u8]) -> Result<(), JetCryptoEntropyErr
 }
 }
 
-pub use jet_crypto_entropy::{
-    jet_crypto_entropy_bytes, jet_crypto_entropy_fill, JetCryptoEntropyError,
-};
+pub use jet_crypto_entropy::jet_crypto_entropy_bytes;
 #[allow(unused_imports)]
 pub use jet_crypto_entropy::JetCryptoError;
 #[allow(unused_imports)]
