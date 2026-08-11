@@ -52,17 +52,24 @@ impl __jet_Encode for char {
 }
 impl __jet_Encode for JetDate {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(jet_codec_date_encode(self))
+        jet_std::DataTree::Text(jet_codec_date_encode(self.year(), self.month(), self.day()))
     }
 }
 impl __jet_Encode for JetLocalTime {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(jet_codec_local_time_encode(self))
+        jet_std::DataTree::Text(jet_codec_local_time_encode(
+            self.hour(),
+            self.minute(),
+            self.second(),
+        ))
     }
 }
 impl __jet_Encode for JetDateTime {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(jet_codec_datetime_encode(self))
+        jet_std::DataTree::Text(jet_codec_datetime_encode(
+            self.to_timestamp(),
+            self.nanosecond() as u32,
+        ))
     }
 }
 impl __jet_Encode for jet_std::Duration {
@@ -192,6 +199,7 @@ impl __jet_Decode for JetDate {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
         jet_codec_date_decode(&value)
+            .map(|(year, month, day)| JetDate::new(year, month, day))
             .map_err(|error| jet_std::FieldError::one(format!("expected Date: {error}")))
     }
 }
@@ -199,6 +207,7 @@ impl __jet_Decode for JetLocalTime {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
         jet_codec_local_time_decode(&value)
+            .map(|(hour, minute, second)| JetLocalTime::new(hour, minute, second))
             .map_err(|error| jet_std::FieldError::one(format!("expected LocalTime: {error}")))
     }
 }
@@ -206,6 +215,7 @@ impl __jet_Decode for JetDateTime {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
         jet_codec_datetime_decode(&value)
+            .map(|(secs, nanos)| JetDateTime::from_timestamp_ns(secs, nanos))
             .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
     }
 }

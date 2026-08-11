@@ -23,10 +23,6 @@ use super::{
 };
 
 mod codec_rt {
-    mod time_rt {
-        include!("../../../Prelude/Core/Time.rs");
-    }
-    pub(crate) use time_rt::{JetDate, JetDateTime, JetLocalTime};
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
     }
@@ -780,28 +776,25 @@ fn builtin_codec_name(ty: &Type) -> Option<&'static str> {
     }
 }
 
-fn codec_date_from_value(value: &CtValue) -> Option<codec_rt::JetDate> {
-    Some(codec_rt::JetDate::new(
+fn codec_date_from_value(value: &CtValue) -> Option<(i64, i64, i64)> {
+    Some((
         struct_int(value, "year")?,
         struct_int(value, "month")?,
         struct_int(value, "day")?,
     ))
 }
 
-fn codec_local_time_from_value(value: &CtValue) -> Option<codec_rt::JetLocalTime> {
-    Some(codec_rt::JetLocalTime::new(
+fn codec_local_time_from_value(value: &CtValue) -> Option<(i64, i64, i64)> {
+    Some((
         struct_int(value, "hour")?,
         struct_int(value, "minute")?,
         struct_int(value, "second")?,
     ))
 }
 
-fn codec_datetime_from_value(value: &CtValue) -> Option<codec_rt::JetDateTime> {
+fn codec_datetime_from_value(value: &CtValue) -> Option<(i64, u32)> {
     let nanos = u32::try_from(struct_int(value, "nanos").unwrap_or(0)).ok()?;
-    Some(codec_rt::JetDateTime::from_timestamp_ns(
-        struct_int(value, "secs")?,
-        nanos,
-    ))
+    Some((struct_int(value, "secs")?, nanos))
 }
 
 fn builtin_codec_encode(
@@ -811,27 +804,29 @@ fn builtin_codec_encode(
 ) -> Result<CtValue, Diagnostic> {
     let tree = match name {
         "Date" => {
-            let date = codec_date_from_value(&value)
+            let (year, month, day) = codec_date_from_value(&value)
                 .ok_or_else(|| unsupported("malformed Date value", span))?;
             datatree(
                 "Text",
-                Some(CtValue::Str(codec_rt::jet_codec_date_encode(&date))),
+                Some(CtValue::Str(codec_rt::jet_codec_date_encode(year, month, day))),
             )
         }
         "LocalTime" => {
-            let time = codec_local_time_from_value(&value)
+            let (hour, minute, second) = codec_local_time_from_value(&value)
                 .ok_or_else(|| unsupported("malformed LocalTime value", span))?;
             datatree(
                 "Text",
-                Some(CtValue::Str(codec_rt::jet_codec_local_time_encode(&time))),
+                Some(CtValue::Str(codec_rt::jet_codec_local_time_encode(
+                    hour, minute, second,
+                ))),
             )
         }
         "DateTime" => {
-            let datetime = codec_datetime_from_value(&value)
+            let (secs, nanos) = codec_datetime_from_value(&value)
                 .ok_or_else(|| unsupported("malformed DateTime value", span))?;
             datatree(
                 "Text",
-                Some(CtValue::Str(codec_rt::jet_codec_datetime_encode(&datetime))),
+                Some(CtValue::Str(codec_rt::jet_codec_datetime_encode(secs, nanos))),
             )
         }
         "Duration" => {
@@ -860,12 +855,12 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
         "Date" => match datatree_variant(&tree) {
             Some(("Text", Some(CtValue::Str(text)))) => {
                 match codec_rt::jet_codec_date_decode(text) {
-                    Ok(date) => CtValue::Present(Box::new(CtValue::Struct {
+                    Ok((year, month, day)) => CtValue::Present(Box::new(CtValue::Struct {
                         type_name: "LocalDate".to_string(),
                         fields: vec![
-                            ("year".to_string(), CtValue::Int(date.year())),
-                            ("month".to_string(), CtValue::Int(date.month())),
-                            ("day".to_string(), CtValue::Int(date.day())),
+                            ("year".to_string(), CtValue::Int(year)),
+                            ("month".to_string(), CtValue::Int(month)),
+                            ("day".to_string(), CtValue::Int(day)),
                         ],
                     })),
                     Err(error) => CtValue::failed(Box::new(decode_error(
@@ -882,12 +877,12 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
         "LocalTime" => match datatree_variant(&tree) {
             Some(("Text", Some(CtValue::Str(text)))) => {
                 match codec_rt::jet_codec_local_time_decode(text) {
-                    Ok(time) => CtValue::Present(Box::new(CtValue::Struct {
+                    Ok((hour, minute, second)) => CtValue::Present(Box::new(CtValue::Struct {
                         type_name: "LocalTime".to_string(),
                         fields: vec![
-                            ("hour".to_string(), CtValue::Int(time.hour())),
-                            ("minute".to_string(), CtValue::Int(time.minute())),
-                            ("second".to_string(), CtValue::Int(time.second())),
+                            ("hour".to_string(), CtValue::Int(hour)),
+                            ("minute".to_string(), CtValue::Int(minute)),
+                            ("second".to_string(), CtValue::Int(second)),
                         ],
                     })),
                     Err(error) => CtValue::failed(Box::new(decode_error(
@@ -904,11 +899,11 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
         "DateTime" => match datatree_variant(&tree) {
             Some(("Text", Some(CtValue::Str(text)))) => {
                 match codec_rt::jet_codec_datetime_decode(text) {
-                    Ok(datetime) => CtValue::Present(Box::new(CtValue::Struct {
+                    Ok((secs, nanos)) => CtValue::Present(Box::new(CtValue::Struct {
                         type_name: "DateTime".to_string(),
                         fields: vec![
-                            ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
-                            ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
+                            ("secs".to_string(), CtValue::Int(secs)),
+                            ("nanos".to_string(), CtValue::Int(nanos as i64)),
                         ],
                     })),
                     Err(error) => CtValue::failed(Box::new(decode_error(

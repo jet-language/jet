@@ -2097,11 +2097,11 @@ fn bind_sql(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Strin
 
 #[derive(Clone, Debug)]
 enum XmlContent {
-    Text(String),
-    CData(String),
+    Text,
+    CData,
     Element(XmlNode),
-    Comment(String),
-    ProcessingInstruction { target: String, data: String },
+    Comment,
+    ProcessingInstruction,
 }
 
 #[derive(Clone, Debug)]
@@ -2292,7 +2292,7 @@ impl XmlParser {
         self.read_quoted_value("declaration value")
     }
 
-    fn consume_processing_instruction(&mut self) -> Result<(String, String), String> {
+    fn consume_processing_instruction(&mut self) -> Result<(), String> {
         self.pos += 2;
         let target = self.read_name()?;
         if target.eq_ignore_ascii_case("xml") {
@@ -2300,7 +2300,7 @@ impl XmlParser {
         }
         if self.starts_with("?>") {
             self.pos += 2;
-            return Ok((target, String::new()));
+            return Ok(());
         }
         if !self
             .peek()
@@ -2318,7 +2318,7 @@ impl XmlParser {
         let data: String = self.chars[start..self.pos].iter().collect();
         validate_xml_characters(&data)?;
         self.pos += 2;
-        Ok((target, data))
+        Ok(())
     }
 
     fn consume_xml_declaration(&mut self) -> Result<(), String> {
@@ -2400,7 +2400,7 @@ impl XmlParser {
                 }
                 validate_xml_entities(&text)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.content.push(XmlContent::Text(text));
+                    parent.content.push(XmlContent::Text);
                 } else if text.chars().any(|ch| !matches!(ch, ' ' | '\t' | '\r' | '\n')) {
                     return Err("XML has text outside its root element".to_string());
                 }
@@ -2421,7 +2421,7 @@ impl XmlParser {
                 }
                 validate_xml_characters(&body)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.content.push(XmlContent::Comment(body));
+                    parent.content.push(XmlContent::Comment);
                 }
                 self.pos += 3;
                 continue;
@@ -2438,7 +2438,7 @@ impl XmlParser {
                 let body: String = self.chars[start..self.pos].iter().collect();
                 validate_xml_characters(&body)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.content.push(XmlContent::CData(body));
+                    parent.content.push(XmlContent::CData);
                 } else {
                     return Err("XML CDATA appears outside its root element".to_string());
                 }
@@ -2446,11 +2446,9 @@ impl XmlParser {
                 continue;
             }
             if self.starts_with("<?") {
-                let (target, data) = self.consume_processing_instruction()?;
+                self.consume_processing_instruction()?;
                 if let Some(parent) = stack.last_mut() {
-                    parent
-                        .content
-                        .push(XmlContent::ProcessingInstruction { target, data });
+                    parent.content.push(XmlContent::ProcessingInstruction);
                 }
                 continue;
             }
@@ -2557,7 +2555,7 @@ fn xml_child_elements(node: &XmlNode) -> impl Iterator<Item = &XmlNode> {
 }
 
 fn xml_is_text_like(content: &XmlContent) -> bool {
-    matches!(content, XmlContent::Text(_) | XmlContent::CData(_))
+    matches!(content, XmlContent::Text | XmlContent::CData)
 }
 
 fn xml_is_simple(node: &XmlNode) -> bool {

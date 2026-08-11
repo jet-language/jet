@@ -19,7 +19,6 @@ mod encoding_base_rt {
 }
 
 mod codec_rt {
-    pub(crate) use crate::Time::time_rt::{JetDate, JetDateTime, JetLocalTime};
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
     }
@@ -2084,7 +2083,11 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
     match kind {
         CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE => {
             let text = crate::Time::with_time(value, |value| match value {
-                TimeValue::Date(date) => Some(codec_rt::jet_codec_date_encode(date)),
+                TimeValue::Date(date) => Some(codec_rt::jet_codec_date_encode(
+                    date.year(),
+                    date.month(),
+                    date.day(),
+                )),
                 _ => None,
             });
             text.map(json_rt::DataTree::Text)
@@ -2092,7 +2095,11 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
         }
         CODEC_KIND_LOCAL_TIME => {
             let text = crate::Time::with_time(value, |value| match value {
-                TimeValue::LocalTime(time) => Some(codec_rt::jet_codec_local_time_encode(time)),
+                TimeValue::LocalTime(time) => Some(codec_rt::jet_codec_local_time_encode(
+                    time.hour(),
+                    time.minute(),
+                    time.second(),
+                )),
                 _ => None,
             });
             text.map(json_rt::DataTree::Text)
@@ -2101,7 +2108,10 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
         CODEC_KIND_DATETIME => {
             let text = crate::Time::with_time(value, |value| match value {
                 TimeValue::DateTime(datetime) => {
-                    Some(codec_rt::jet_codec_datetime_encode(datetime))
+                    Some(codec_rt::jet_codec_datetime_encode(
+                        datetime.to_timestamp(),
+                        datetime.nanosecond() as u32,
+                    ))
                 }
                 _ => None,
             });
@@ -2144,21 +2154,25 @@ extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
     match (kind, tree) {
         (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text)) => {
             match codec_rt::jet_codec_date_decode(&text) {
-                Ok(date) => result_ok(crate::Time::push(TimeValue::Date(date)) as u64),
+                Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
+                    crate::Time::time_rt::JetDate::new(year, month, day),
+                )) as u64),
                 Err(error) => result_err_decode("", &format!("expected Date: {error}")),
             }
         }
         (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text)) => {
             match codec_rt::jet_codec_local_time_decode(&text) {
-                Ok(time) => result_ok(crate::Time::push(TimeValue::LocalTime(time)) as u64),
+                Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
+                    crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
+                )) as u64),
                 Err(error) => result_err_decode("", &format!("expected LocalTime: {error}")),
             }
         }
         (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text)) => {
             match codec_rt::jet_codec_datetime_decode(&text) {
-                Ok(datetime) => {
-                    result_ok(crate::Time::push(TimeValue::DateTime(datetime)) as u64)
-                }
+                Ok((secs, nanos)) => result_ok(crate::Time::push(TimeValue::DateTime(
+                    crate::Time::time_rt::JetDateTime::from_timestamp_ns(secs, nanos),
+                )) as u64),
                 Err(error) => result_err_decode("", &format!("expected DateTime: {error}")),
             }
         }
