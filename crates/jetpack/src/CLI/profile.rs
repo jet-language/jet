@@ -1,4 +1,4 @@
-//! D-JPK-PROFILE1=D: source-backed package-profile planning.
+//! D-JPK-PROFILE1=D: source-backed package-generation planning.
 //!
 //! This command is intentionally read-only. It exercises the shared module
 //! evaluator and resolver; generation publication, activation, rollback, and
@@ -15,7 +15,7 @@ pub(super) fn cmd_profile(theme: &Theme, parsed: &Parsed) -> i32 {
         Some(v) if v == Syntax::PROFILE_VERB_PLAN => profile_plan(theme, parsed),
         Some(other) => {
             theme.error(
-                &format!("`{other}` is not a package-profile verb"),
+                &format!("`{other}` is not a package-generation verb"),
                 &format!("`jet profile` verbs are: {}.", Syntax::PROFILE_VERBS.join(", ")),
                 "try `jet profile plan <name>`.",
             );
@@ -35,7 +35,7 @@ pub(super) fn cmd_profile(theme: &Theme, parsed: &Parsed) -> i32 {
 fn profile_plan(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(name) = parsed.positional.get(1) else {
         theme.error(
-            "`jet profile plan` needs a profile name",
+            "`jet profile plan` needs a generation name",
             "planning resolves one source-backed `profile.<name>` declaration and its parents",
             "try `jet profile plan dev`.",
         );
@@ -43,7 +43,7 @@ fn profile_plan(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     if parsed.positional.len() != 2 || parsed.command.is_some() {
         theme.error(
-            "`jet profile plan` accepts one profile name",
+            "`jet profile plan` accepts one generation name",
             "planning is read-only and has no trailing command",
             "run `jet profile plan <name> --json` for machine-readable output",
         );
@@ -114,7 +114,7 @@ fn profile_plan(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 0;
     }
-    theme.ok(&format!("profile {} planned", theme.bold(&plan.name)));
+    theme.ok(&format!("package generation {} planned", theme.bold(&plan.name)));
     theme.detail(&format!("applied: {}", plan.applied.join(" -> ")));
     if !plan.sources.is_empty() {
         theme.detail(&format!("declared by: {}", plan.sources.join(", ")));

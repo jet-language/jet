@@ -17,7 +17,6 @@ pub(crate) const STREAM_CANCEL_MARKER: &str = "__JET_STREAM_CANCEL_RETURN__";
 pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
-        tracked_float_origins: env.tracked_float_origins.clone(),
         fn_name: env.fn_name.clone(),
         ret_ty: env.ret_ty.clone(),
         self_owner: env.self_owner.clone(),

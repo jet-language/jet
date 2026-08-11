@@ -684,9 +684,11 @@ pub fn tensor_view_mut_window(
 ) -> Result<(usize, usize), Diagnostic> {
     let mut tensor = ct_to_tensor(value, span)?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    jet_compute_view_mut_checked(&mut tensor, start, end, exclusive)
-        .map(|view| (0, view.len()))
-        .map_err(|error| unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span))
+    let view = jet_compute_view_mut_checked(&mut tensor, start, end, exclusive)
+        .map_err(|error| unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span))?;
+    let len = usize::try_from(view.len())
+        .map_err(|_| unsupported("Tensor mutable view length", span))?;
+    Ok((0, len))
 }
 
 /// Mutable/read-only Tensor-window indexing is an adapter concern at the

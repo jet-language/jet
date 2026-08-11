@@ -375,9 +375,9 @@ impl<K: Ord + JetDebug, V: JetDebug> JetDebug for JetMap<K, V> {
         jet_debug_map(self.iter().map(|(key, value)| (key.jet_debug(), value.jet_debug())))
     }
 }
-// D-FAIL-CARRIER1=A: one carrier, so one printer. The report type says which
-// view is being read: the clean report prints the payload bare and `null` for
-// an absence; a failure report prints the verdict around them.
+// D-FAIL-CARRIER1=A: one carrier, so one printer. Show and Display keep clean
+// reports bare and render absence as `null`; Debug projects them as `Val(...)`
+// and `None`. A told report prints its verdict around the payload.
 impl JetShow for JetAbsent {
     fn jet_show(&self) -> String {
         "null".to_string()
@@ -451,9 +451,9 @@ impl<T: JetDebug, E: JetDebug> JetDebug for JetOutcome<T, E> {
     fn jet_debug(&self) -> String {
         let clean = <E as JetDebug>::jet_report_is_clean();
         match self {
-            Ok(v) if clean => v.jet_debug(),
+            Ok(v) if clean => jet_debug_optional(Some(v.jet_debug())),
             Ok(v) => format!("Ok({})", v.jet_debug()),
-            Err(e) if clean => e.jet_debug(),
+            Err(_) if clean => jet_debug_optional(None),
             Err(e) => format!("Err({})", e.jet_debug()),
         }
     }

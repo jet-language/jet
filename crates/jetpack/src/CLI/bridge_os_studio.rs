@@ -66,7 +66,7 @@ pub(super) fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// `jetos user <plan|build|switch|rollback|prove> <name>` — standalone user
-/// generations over the same profile engine used by `jet os switch`.
+/// generations over the same generation engine used by `jet os switch`.
 pub(super) fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
     let verb = parsed.positional.first().map(String::as_str);
     let args = parsed.positional.get(1..).unwrap_or(&[]);

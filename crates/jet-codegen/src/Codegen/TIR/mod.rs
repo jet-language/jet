@@ -368,8 +368,17 @@ pub fn local_place(name: &str) -> String {
     super::mangle(name)
 }
 
+/// Source identity for a tracked Float binding. Keep the sema binding facts
+/// intact until the `.origin()` operation is lowered; the operation is the
+/// single place that formats the user-facing note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TBindingOrigin {
+    pub name: String,
+    pub span: crate::Diagnostics::Span,
+}
+
 /// One local or parameter slot, carried as structure instead of a Rust place
-/// string. Every engine resolves a slot from these three facts alone.
+/// string. Every engine resolves a slot from these facts alone.
 ///
 /// `name` is the slot's identity: a user binding carries its Jet name, which Rust
 /// spells `__jet_<name>`; a compiler-generated temp (`generated`) carries its own
@@ -380,6 +389,9 @@ pub struct TLocal {
     pub name: String,
     pub generated: bool,
     pub deref: bool,
+    /// D-PROVENANCE1=B: source identity for the exact `#Track` Float binding.
+    /// The metadata travels with the slot until TIR lowers `.origin()`.
+    pub origin: Option<TBindingOrigin>,
     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
@@ -393,6 +405,7 @@ impl TLocal {
             name: name.into(),
             generated: false,
             deref: false,
+            origin: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -404,9 +417,16 @@ impl TLocal {
             name: name.into(),
             generated: true,
             deref: false,
+            origin: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
+    }
+
+    /// Preserve the source identity when a lowering path rebinds this slot.
+    pub fn with_origin(mut self, origin: TBindingOrigin) -> TLocal {
+        self.origin = Some(origin);
+        self
     }
 
     pub fn as_uninit_scalar(mut self) -> TLocal {
@@ -2831,6 +2851,18 @@ pub struct TExpr {
     pub kind: TExprKind,
 }
 
+impl TExpr {
+    /// The binding-level provenance carried by a local read or a value copy.
+    pub fn binding_origin(&self) -> Option<&TBindingOrigin> {
+        match &self.kind {
+            TExprKind::Local(local) => local.origin.as_ref(),
+            TExprKind::Clone(inner) => inner.binding_origin(),
+            TExprKind::Borrow { place, .. } => place.binding_origin(),
+            _ => None,
+        }
+    }
+}
+
 pub enum TExprKind {
     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
     /// width is the elaborated `(signed, bits)` sema attached to the AST node.
@@ -3686,8 +3718,9 @@ pub enum TNumericOp {
     /// `width` is the receiver's bit width (baked at lowering — TirBridge may
     /// evaluate before locals carry `IntN` types).
     BitCount { method: String, width: u32 },
-    /// `origin` on a Float receiver → resolved binding note or `"untracked"`.
-    Origin(Option<String>),
+    /// `origin` on a Float receiver. TIR resolves the final user-facing note
+    /// once; every engine consumes this payload without receiver policy.
+    Origin { origin: String },
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// D-NUMWIDEN-CROSS1=E: an implicit integer-to-float crossing whose source

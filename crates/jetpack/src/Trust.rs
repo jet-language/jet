@@ -257,7 +257,7 @@ pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[Str
 }
 
 /// Extend the trust identity with typed lifecycle facts. Hooks, dotenv paths,
-/// profile selection, and language-pack expansion are executable environment
+/// preset selection, and language-pack expansion are executable environment
 /// policy just like package refs, so changing any of them invalidates the old
 /// grant.
 pub fn environment_definition_hash(
@@ -269,33 +269,33 @@ pub fn environment_definition_hash(
     let mut content = env_definition_hash(refs, table, secrets);
     content.push_str("\n--lifecycle--\n");
     content.push_str(&facts.lifecycle.fingerprint());
-    content.push_str("--profiles--\n");
-    for profile in &facts.profiles {
-        content.push_str(&profile.name);
+    content.push_str("--presets--\n");
+    for preset in &facts.presets {
+        content.push_str(&preset.name);
         content.push('\n');
-        for parent in &profile.extends {
+        for parent in &preset.extends {
             content.push_str("extends=");
             content.push_str(parent);
             content.push('\n');
         }
-        for package in &profile.packages {
+        for package in &preset.packages {
             content.push_str("package=");
             content.push_str(package);
             content.push('\n');
         }
-        for (key, value) in &profile.variables {
+        for (key, value) in &preset.variables {
             content.push_str("var=");
             content.push_str(key);
             content.push('=');
             content.push_str(value);
             content.push('\n');
         }
-        if let Some(hostname) = &profile.hostname {
+        if let Some(hostname) = &preset.hostname {
             content.push_str("hostname=");
             content.push_str(hostname);
             content.push('\n');
         }
-        if let Some(user) = &profile.user {
+        if let Some(user) = &preset.user {
             content.push_str("user=");
             content.push_str(user);
             content.push('\n');
@@ -333,26 +333,26 @@ pub fn environment_definition_hash(
         content.push_str(name);
         content.push('\n');
     }
-    if let Some(profile) = &facts.selected_preset {
+    if let Some(preset) = &facts.selected_preset {
         content.push_str("selected=");
-        content.push_str(&profile.name);
+        content.push_str(&preset.name);
         content.push('\n');
-        for name in &profile.selected_presets {
-            content.push_str("selected-profile=");
+        for name in &preset.selected_presets {
+            content.push_str("selected-preset=");
             content.push_str(name);
             content.push('\n');
         }
-        for applied in &profile.applied {
+        for applied in &preset.applied {
             content.push_str("selected-applied=");
             content.push_str(applied);
             content.push('\n');
         }
-        for package in &profile.packages {
+        for package in &preset.packages {
             content.push_str("selected-package=");
             content.push_str(package);
             content.push('\n');
         }
-        for (key, value) in &profile.variables {
+        for (key, value) in &preset.variables {
             content.push_str("selected-var=");
             content.push_str(key);
             content.push('=');
@@ -521,7 +521,7 @@ pub fn is_typed_environment(facts: &jet_env_model::ModuleEval::EnvironmentFacts)
         || !facts.lifecycle.on_enter.is_empty()
         || !facts.lifecycle.checks.is_empty()
         || facts.lifecycle.reload_explicit
-        || !facts.profiles.is_empty()
+        || !facts.presets.is_empty()
         || !facts.package_profiles.is_empty()
         || !facts.languages.is_empty()
         || facts.selected_preset.is_some()
