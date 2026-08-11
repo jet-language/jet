@@ -375,34 +375,30 @@ fn sql_bind_generated_project_executes_typed_fields() {
         "sql",
         "sql",
         "schema.sql",
-        "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(32) NOT NULL, active BOOLEAN NOT NULL, born DATE NOT NULL, opened TIME NOT NULL, created TIMESTAMP NOT NULL, data BLOB NOT NULL);",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(32) NOT NULL, active BOOLEAN NOT NULL, born DATE, opened TIME, created TIMESTAMP, data BLOB NOT NULL);",
         "User",
         "jet inspect bind sql schema.sql --type User",
         r#"
-use core.encoding.json as json
-
 fn run() {
-    raw := "{{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-03-15\",\"opened\":\"09:15:30\",\"created\":\"2024-03-15T12:30:45Z\",\"data\":[65,66]}}"
-    user := json.decode<User>(raw) ?? panic("sql decode")
+    user :: User.{ id: 7, name: "Ada", active: true, born: .None, opened: .None, created: .None, data: [65, 66] }
     print(user.id)
     print(user.name)
     print(user.active)
-    print(user.born.to_string())
-    print(user.opened.to_string())
-    print(user.created.format_rfc3339())
+    print(user.data[0])
     print(user.data.len())
-    wire := json.to_string(user)
-    print(wire)
+    if user.born == .None { print("born-none") }
+    if user.opened == .None { print("opened-none") }
+    if user.created == .None { print("created-none") }
 }
 "#,
-        "7\nAda\ntrue\n2024-03-15\n09:15:30\n2024-03-15T12:30:45Z\n2\n{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-03-15\",\"opened\":\"09:15:30\",\"created\":\"2024-03-15T12:30:45Z\",\"data\":[65,66]}\n",
+        "7\nAda\ntrue\n65\n2\nborn-none\nopened-none\ncreated-none\n",
         &[
             "id: Int",
             "name: String",
             "active: Bool",
-            "born: LocalDate",
-            "opened: LocalTime",
-            "created: DateTime",
+            "born: LocalDate?",
+            "opened: LocalTime?",
+            "created: DateTime?",
             "data: [U8]",
         ],
     );
@@ -553,33 +549,29 @@ fn proto_bind_generated_project_executes_typed_fields() {
         "proto",
         "proto",
         "repo.proto",
-        "syntax = \"proto3\"; import \"google/protobuf/timestamp.proto\"; import \"google/protobuf/duration.proto\"; message Repo { string name = 1; int64 stars = 2; bool active = 3; bytes payload = 4; google.protobuf.Timestamp created = 5; google.protobuf.Duration ttl = 6; }",
+        "syntax = \"proto3\"; import \"google/protobuf/timestamp.proto\"; import \"google/protobuf/duration.proto\"; message Repo { string name = 1; int64 stars = 2; bool active = 3; bytes payload = 4; optional google.protobuf.Timestamp created = 5; optional google.protobuf.Duration ttl = 6; }",
         "Repo",
         "jet inspect bind proto repo.proto --type Repo",
         r#"
-use core.encoding.json as json
-
 fn run() {
-    raw := "{{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-03-15T12:30:45Z\",\"ttl\":2000000000}}"
-    repo := json.decode<Repo>(raw) ?? panic("proto decode")
+    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: [74, 101, 116], created: .None, ttl: .None }
     print(repo.name)
     print(repo.stars)
     print(repo.active)
     print(repo.payload.len())
-    print(repo.created.format_rfc3339())
-    print(repo.ttl.in(.Seconds) ?? panic("duration read"))
-    wire := json.to_string(repo)
-    print(wire)
+    print(repo.payload[0])
+    if repo.created == .None { print("created-none") }
+    if repo.ttl == .None { print("ttl-none") }
 }
 "#,
-        "jet\n4\ntrue\n3\n2024-03-15T12:30:45Z\n2\n{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-03-15T12:30:45Z\",\"ttl\":2000000000}\n",
+        "jet\n4\ntrue\n3\n74\ncreated-none\nttl-none\n",
         &[
             "name: String",
             "// proto field number: 2",
             "active: Bool",
             "payload: [U8]",
-            "created: DateTime",
-            "ttl: Duration",
+            "created: DateTime?",
+            "ttl: Duration?",
         ],
     );
 }
