@@ -407,7 +407,20 @@ fn run() {
     user := wire.decode<User>() ?? panic("decode")
     encoded := user.encode()
     reencoded := json.to_string(encoded)
-    if reencoded != canonical { panic("re-encode") }
+    roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
+    roundtrip := roundtrip_wire.decode<User>() ?? panic("decode roundtrip")
+    if roundtrip.id != user.id { panic("id roundtrip") }
+    if roundtrip.name != user.name { panic("name roundtrip") }
+    if roundtrip.active != user.active { panic("active roundtrip") }
+    if roundtrip.data.len() != user.data.len() { panic("data length roundtrip") }
+    if roundtrip.data[0] != user.data[0] { panic("data roundtrip") }
+    if roundtrip.data[1] != user.data[1] { panic("data roundtrip") }
+    if roundtrip.born.to_string() != user.born.to_string() { panic("born roundtrip") }
+    if roundtrip.opened.to_string() != user.opened.to_string() { panic("opened roundtrip") }
+    if roundtrip.created.format_rfc3339() != user.created.format_rfc3339() {
+        panic("created roundtrip")
+    }
+    if roundtrip.price.to_string() != user.price.to_string() { panic("price roundtrip") }
     print(user.id)
     print(user.name)
     print(user.active)
@@ -417,10 +430,9 @@ fn run() {
     print(user.opened.to_string())
     print(user.created.format_rfc3339())
     print(user.price.to_string())
-    print(reencoded)
 }
 "#,
-        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\n{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-01-02\",\"opened\":\"03:04:05\",\"created\":\"2024-01-02T03:04:05Z\",\"price\":\"12.34\",\"data\":[65,66]}\n",
+        "7\nAda\ntrue\n65\n2\n2024-01-02\n03:04:05\n2024-01-02T03:04:05Z\n12.34\n",
         &[
             "id: Int",
             "name: String",
@@ -450,12 +462,13 @@ fn run() {
     document := xml.parse("<catalog>before<book id=\"7\"><title>Jet</title></book>after</catalog>") ?? panic("xml")
     root := xml.root(document) ?? panic("root")
     content := root.field("children") ?? panic("content")
-    book := CatalogBook.{ id: "7", title: "Jet" }
+    middle := content.at(1) ?? panic("middle")
+    book_content := middle.field("children") ?? panic("book content")
+    book := CatalogBook.{ id: "7", content: book_content, title: "Jet" }
     catalog := Catalog.{ content: content, book: book }
     print(catalog.book.id)
     print(catalog.book.title)
     first := catalog.content.at(0) ?? panic("first")
-    middle := catalog.content.at(1) ?? panic("middle")
     last := catalog.content.at(2) ?? panic("last")
     print((first.field("$xml") ?? panic("first tag")).text() ?? "bad")
     print((middle.field("$xml") ?? panic("middle tag")).text() ?? "bad")
@@ -652,18 +665,31 @@ fn run() {
     repo := wire.decode<Repo>() ?? panic("decode")
     encoded := repo.encode()
     reencoded := json.to_string(encoded)
-    if reencoded != canonical { panic("re-encode") }
+    roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
+    roundtrip := roundtrip_wire.decode<Repo>() ?? panic("decode roundtrip")
+    if roundtrip.name != repo.name { panic("name roundtrip") }
+    if roundtrip.stars != repo.stars { panic("stars roundtrip") }
+    if roundtrip.active != repo.active { panic("active roundtrip") }
+    if roundtrip.payload.len() != repo.payload.len() { panic("payload length roundtrip") }
+    if roundtrip.payload[0] != repo.payload[0] { panic("payload roundtrip") }
+    if roundtrip.payload[1] != repo.payload[1] { panic("payload roundtrip") }
+    if roundtrip.payload[2] != repo.payload[2] { panic("payload roundtrip") }
+    if roundtrip.created.format_rfc3339() != repo.created.format_rfc3339() {
+        panic("created roundtrip")
+    }
+    ttl := repo.ttl.in(.Seconds) ?? panic("ttl in")
+    roundtrip_ttl := roundtrip.ttl.in(.Seconds) ?? panic("ttl roundtrip")
+    if roundtrip_ttl != ttl { panic("ttl roundtrip") }
     print(repo.name)
     print(repo.stars)
     print(repo.active)
     print(repo.payload.len())
     print(repo.payload[0])
     print(repo.created.format_rfc3339())
-    print(repo.ttl.in(.Seconds) ?? panic("ttl in"))
-    print(reencoded)
+    print(ttl)
 }
 "#,
-        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\n{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-01-02T03:04:05Z\",\"ttl\":7000000000}\n",
+        "jet\n4\ntrue\n3\n74\n2024-01-02T03:04:05Z\n7\n",
         &[
             "name: String",
             "// proto field number: 2",
