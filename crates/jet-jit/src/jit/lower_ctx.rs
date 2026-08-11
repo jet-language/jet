@@ -229,7 +229,7 @@ impl LowerCtx<'_, '_> {
         if !row.jit_direct {
             return Ok(None);
         }
-        let Some(host_id) = row
+        let Some(_host_id) = row
             .jit_symbol_candidates()
             .into_iter()
             .find_map(|symbol| self.host.lookup(&symbol))
@@ -240,8 +240,27 @@ impl LowerCtx<'_, '_> {
             .iter()
             .map(|arg| self.lower_expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        self.lower_recorded_core_call_values(row, &arg_values, ret_ty)
+    }
+
+    fn lower_recorded_core_call_values(
+        &mut self,
+        row: &jet_foundation::Syntax::CoreCallRecord,
+        arg_values: &[Value],
+        ret_ty: &Type,
+    ) -> Result<Option<Value>, String> {
+        if !row.jit_direct {
+            return Ok(None);
+        }
+        let Some(host_id) = row
+            .jit_symbol_candidates()
+            .into_iter()
+            .find_map(|symbol| self.host.lookup(&symbol))
+        else {
+            return Ok(None);
+        };
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &arg_values);
+        let call = self.b.ins().call(host_ref, arg_values);
         self.emit_trap_check()?;
         Ok(Some(
             clif_ty(ret_ty)
@@ -9035,6 +9054,279 @@ impl LowerCtx<'_, '_> {
         Ok(handle)
     }
 
+    /// Lower the crypto CoreCall/list subgraph in post-order.
+    ///
+    /// `lower_expr_core` is intentionally exhaustive and therefore a large
+    /// frame. Calling `lower_expr` recursively for every nested crypto
+    /// projection used to stack one such frame per CoreCall. The worklist keeps
+    /// the traversal state on the heap while preserving source-order argument
+    /// evaluation. The final host call remains the same Prelude marshalling
+    /// seam used by AOT.
+    pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
+        if matches!(
+            &expr.kind,
+            TExprKind::CoreCall { module, .. }
+                if matches!(module.as_str(), "core.crypto" | "core.crypto.expert")
+        ) {
+            return self.lower_crypto_core_call(expr);
+        }
+        self.lower_expr_core(expr)
+    }
+
+    #[inline(never)]
+    fn lower_crypto_core_call(&mut self, expr: &TExpr) -> Result<Value, String> {
+        enum Task<'a> {
+            Eval(&'a TExpr),
+            BuildList {
+                list_ty: &'a Type,
+                len: usize,
+            },
+            ApplyCall {
+                expr: &'a TExpr,
+                len: usize,
+            },
+        }
+
+        let mut tasks = vec![Task::Eval(expr)];
+        let mut values = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Eval(expr) => match &expr.kind {
+                    TExprKind::CoreCall {
+                        module,
+                        method,
+                        args,
+                        ..
+                    } if matches!(module.as_str(), "core.crypto" | "core.crypto.expert") => {
+                        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+                            if !row.accepts_arity(args.len()) {
+                                return Err(format!(
+                                    "jit core call arity mismatch: {module}.{method} expects {}..{}, got {}",
+                                    row.arity(),
+                                    row.signature.max_arity,
+                                    args.len()
+                                ));
+                            }
+                        }
+                        tasks.push(Task::ApplyCall {
+                            expr,
+                            len: args.len(),
+                        });
+                        tasks.extend(args.iter().rev().map(Task::Eval));
+                    }
+                    TExprKind::ListLit(elems)
+                        if elems.iter().all(|elem| !Self::is_range_ty(&elem.ty)) =>
+                    {
+                        tasks.push(Task::BuildList {
+                            list_ty: &expr.ty,
+                            len: elems.len(),
+                        });
+                        tasks.extend(elems.iter().rev().map(Task::Eval));
+                    }
+                    TExprKind::IntLit(value, _) => {
+                        values.push(self.b.ins().iconst(types::I64, *value));
+                    }
+                    TExprKind::FloatLit(value) => {
+                        values.push(self.b.ins().f64const(if expr.ty == Type::Float32 {
+                            (*value as f32) as f64
+                        } else {
+                            *value
+                        }));
+                    }
+                    TExprKind::BoolLit(value) => {
+                        values.push(self.b.ins().iconst(types::I8, i64::from(*value)));
+                    }
+                    TExprKind::CharLit(value) => {
+                        values.push(self.b.ins().iconst(types::I32, *value as i64));
+                    }
+                    TExprKind::StrLit(parts) => values.push(self.lower_string_lit(parts)?),
+                    TExprKind::Local(local) => values.push(self.load_local(local)?),
+                    _ => values.push(self.lower_expr(expr)?),
+                },
+                Task::BuildList { list_ty, len } => {
+                    let start = values
+                        .len()
+                        .checked_sub(len)
+                        .ok_or("jit crypto list lowering value stack underflow")?;
+                    let elems = values.split_off(start);
+                    let handle = self.call_host(self.host.coll.list_new, &[]);
+                    let push_id = if jit_list_float_type(list_ty) {
+                        self.host.coll.list_push_f64
+                    } else {
+                        self.host.coll.list_push
+                    };
+                    let push = self.module.declare_func_in_func(push_id, self.b.func);
+                    for value in elems {
+                        self.b.ins().call(push, &[handle, value]);
+                    }
+                    values.push(handle);
+                }
+                Task::ApplyCall { expr, len } => {
+                    let start = values
+                        .len()
+                        .checked_sub(len)
+                        .ok_or("jit crypto call lowering value stack underflow")?;
+                    let arg_values = values.split_off(start);
+                    let TExprKind::CoreCall { module, method, .. } = &expr.kind else {
+                        return Err("jit crypto call work item is not a CoreCall".to_string());
+                    };
+                    let value = if let Some(row) = jet_foundation::Syntax::core_call(module, method)
+                    {
+                        if let Some(value) =
+                            self.lower_recorded_core_call_values(row, &arg_values, &expr.ty)?
+                        {
+                            value
+                        } else {
+                            self.lower_crypto_core_call_values(
+                                module,
+                                method,
+                                &arg_values,
+                                expr,
+                            )?
+                        }
+                    } else {
+                        self.lower_crypto_core_call_values(module, method, &arg_values, expr)?
+                    };
+                    values.push(value);
+                }
+            }
+        }
+        values
+            .pop()
+            .ok_or_else(|| "jit crypto lowering produced no value".to_string())
+    }
+
+    #[inline(never)]
+    fn lower_crypto_core_call_values(
+        &mut self,
+        module: &str,
+        method: &str,
+        arg_values: &[Value],
+        expr: &TExpr,
+    ) -> Result<Value, String> {
+        let (host_id, append_mode) = match (module, method, arg_values.len()) {
+            ("core.crypto", "__signing_generate", 0) => {
+                (self.host.crypto.signing_generate, false)
+            }
+            ("core.crypto", "__x25519_generate", 0) => {
+                (self.host.crypto.x25519_generate, false)
+            }
+            ("core.crypto", "__signing_public", 1) => {
+                (self.host.crypto.signing_public, false)
+            }
+            ("core.crypto", "__x25519_public", 1) => {
+                (self.host.crypto.x25519_public, false)
+            }
+            ("core.crypto", "sign", 2) => (self.host.crypto.sign, false),
+            ("core.crypto", "verify", 3) => (self.host.crypto.verify, false),
+            ("core.crypto", "sha256", 1) => (self.host.crypto.sha256, false),
+            ("core.crypto", "sha512_bytes", 1) => (self.host.crypto.sha512_bytes, false),
+            ("core.crypto", "blake3_bytes", 1) => (self.host.crypto.blake3_bytes, false),
+            ("core.crypto", "seal", 3) => (self.host.crypto.seal, false),
+            ("core.crypto", "open", 3) => (self.host.crypto.open, false),
+            ("core.crypto", "password_hash", 1) => (self.host.crypto.password_hash, false),
+            ("core.crypto", "password_verify", 2) => {
+                (self.host.crypto.password_verify, false)
+            }
+            ("core.crypto", "__password_text", 1) => {
+                (self.host.crypto.password_text, false)
+            }
+            ("core.crypto", "file_open", 3) => (self.host.crypto.file_open, false),
+            ("core.crypto", "__secret_from_bytes", 1) => {
+                (self.host.crypto.secret_from_bytes, false)
+            }
+            ("core.crypto", "hkdf_sha256", 4) => (self.host.crypto.hkdf_sha256, false),
+            ("core.crypto", "x25519_public", 1) => {
+                (self.host.crypto.x25519_public_from_bytes, false)
+            }
+            ("core.crypto", "x25519_shared", 2) => (self.host.crypto.x25519_shared, false),
+            ("core.crypto", "constant_time_equal", 2) => {
+                (self.host.crypto.constant_time_equal, false)
+            }
+            ("core.crypto", "constant_time_equal_bytes", 2) => {
+                (self.host.crypto.constant_time_equal_bytes, false)
+            }
+            ("core.crypto", "file_seal", 3) => (self.host.crypto.file_seal, false),
+            ("core.crypto", "__digest256_hex", 1) => {
+                (self.host.crypto.digest256_hex, false)
+            }
+            ("core.crypto", "__digest256_bytes", 1) => {
+                (self.host.crypto.digest256_bytes, false)
+            }
+            ("core.crypto", "__signature_bytes", 1) => {
+                (self.host.crypto.signature_bytes, false)
+            }
+            ("core.crypto", "__sealed_bytes", 1) => (self.host.crypto.sealed_bytes, false),
+            ("core.crypto", "__x25519_public_bytes", 1) => {
+                (self.host.crypto.x25519_public_bytes, false)
+            }
+            ("core.crypto", "__x25519_public_text", 1) => {
+                (self.host.crypto.x25519_public_text, false)
+            }
+            ("core.crypto", "__x25519_public_from_text", 1) => {
+                (self.host.crypto.x25519_public_from_text, false)
+            }
+            ("core.crypto", "__secret_from_text", 1) => {
+                (self.host.crypto.secret_from_text, false)
+            }
+            ("core.crypto", "__vault_wrapped_from_bytes", 1) => {
+                (self.host.crypto.vault_wrapped_from_bytes, false)
+            }
+            ("core.crypto", "__vault_wrapped_bytes", 1) => {
+                (self.host.crypto.vault_wrapped_bytes, false)
+            }
+            ("core.crypto", "__vault_unlock_recipient", 1) => {
+                (self.host.crypto.vault_unlock_recipient, false)
+            }
+            ("core.crypto", "__vault_unlock_passphrase", 1) => {
+                (self.host.crypto.vault_unlock_passphrase, false)
+            }
+            ("core.crypto.expert", "aes256gcm_seal", 4) => {
+                (self.host.crypto.expert_aes256gcm_seal, false)
+            }
+            ("core.crypto.expert", "aes256gcm_open", 4) => {
+                (self.host.crypto.expert_aes256gcm_open, false)
+            }
+            ("core.crypto.expert", "open_v1", 2) => {
+                (self.host.crypto.expert_open_v1, false)
+            }
+            ("core.crypto.expert", "migrate_v1", 4) => {
+                (self.host.crypto.expert_migrate_v1, false)
+            }
+            ("core.crypto.expert", "x25519_raw", 2) => {
+                (self.host.crypto.expert_x25519, true)
+            }
+            ("core.crypto.expert", "hkdf_sha256_raw", 4) => {
+                (self.host.crypto.expert_hkdf_sha256, false)
+            }
+            ("core.crypto.expert", "secret_bytes", 1) => {
+                (self.host.crypto.expert_secret_bytes, false)
+            }
+            _ => {
+                return Err(format!("jit core call unsupported: {module}.{method}"));
+            }
+        };
+
+        let mut arg_values = arg_values.to_vec();
+        if append_mode {
+            arg_values.push(self.b.ins().iconst(types::I64, 1));
+        }
+        let host = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host, &arg_values);
+        let value = self.b.inst_results(call)[0];
+        if module == "core.crypto" {
+            self.emit_trap_check()?;
+            if matches!(
+                method,
+                "constant_time_equal" | "constant_time_equal_bytes"
+            ) || matches!(&expr.ty, Type::Bool)
+            {
+                return Ok(self.b.ins().ireduce(types::I8, value));
+            }
+        }
+        Ok(value)
+    }
+
     /// Exhaustive match on every `TExprKind` variant (`TIR/mod.rs`) — the JIT
     /// half of the R12 two-consumer contract; `TIR/emit/expressions.rs::
     /// emit_tir_expr` is the AOT half. Each variant here is either lowered for
@@ -9044,7 +9336,7 @@ impl LowerCtx<'_, '_> {
     /// a user-facing failure: `AotFallbackBackend`/`InterpreterBackend`
     /// (`Source/JitBackend.rs`) retry through AOT compilation and then the
     /// tier-0 interpreter, so unsupported-here only costs `jet dev` JIT speed.
-    pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
+    fn lower_expr_core(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.kind {
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
             TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
@@ -9434,245 +9726,10 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
                 if module == "core.crypto" {
-                    let (host_id, arg_values): (FuncId, Vec<Value>) =
-                        match (method.as_str(), args.as_slice()) {
-                            ("__signing_generate", []) => {
-                                (self.host.crypto.signing_generate, Vec::new())
-                            }
-                            ("__x25519_generate", []) => {
-                                (self.host.crypto.x25519_generate, Vec::new())
-                            }
-                            ("__signing_public", [key]) => {
-                                (self.host.crypto.signing_public, vec![self.lower_expr(key)?])
-                            }
-                            ("__x25519_public", [key]) => {
-                                (self.host.crypto.x25519_public, vec![self.lower_expr(key)?])
-                            }
-                            ("sign", [key, message]) => (
-                                self.host.crypto.sign,
-                                vec![self.lower_expr(key)?, self.lower_expr(message)?],
-                            ),
-                            ("verify", [key, message, signature]) => (
-                                self.host.crypto.verify,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(message)?,
-                                    self.lower_expr(signature)?,
-                                ],
-                            ),
-                            ("sha256", [data]) => {
-                                (self.host.crypto.sha256, vec![self.lower_expr(data)?])
-                            }
-                            ("sha512_bytes", [data]) => {
-                                (self.host.crypto.sha512_bytes, vec![self.lower_expr(data)?])
-                            }
-                            ("blake3_bytes", [data]) => {
-                                (self.host.crypto.blake3_bytes, vec![self.lower_expr(data)?])
-                            }
-                            ("seal", [recipients, plaintext, aad]) => (
-                                self.host.crypto.seal,
-                                vec![
-                                    self.lower_expr(recipients)?,
-                                    self.lower_expr(plaintext)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("open", [recipient, sealed, aad]) => (
-                                self.host.crypto.open,
-                                vec![
-                                    self.lower_expr(recipient)?,
-                                    self.lower_expr(sealed)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("password_hash", [password]) => (
-                                self.host.crypto.password_hash,
-                                vec![self.lower_expr(password)?],
-                            ),
-                            ("password_verify", [password, stored]) => (
-                                self.host.crypto.password_verify,
-                                vec![self.lower_expr(password)?, self.lower_expr(stored)?],
-                            ),
-                            ("__password_text", [hash]) => (
-                                self.host.crypto.password_text,
-                                vec![self.lower_expr(hash)?],
-                            ),
-                            ("file_open", [recipient, source, dest]) => (
-                                self.host.crypto.file_open,
-                                vec![
-                                    self.lower_expr(recipient)?,
-                                    self.lower_expr(source)?,
-                                    self.lower_expr(dest)?,
-                                ],
-                            ),
-                            ("__secret_from_bytes", [bytes]) => (
-                                self.host.crypto.secret_from_bytes,
-                                vec![self.lower_expr(bytes)?],
-                            ),
-                            ("hkdf_sha256", [ikm, salt, info, length]) => (
-                                self.host.crypto.hkdf_sha256,
-                                vec![
-                                    self.lower_expr(ikm)?,
-                                    self.lower_expr(salt)?,
-                                    self.lower_expr(info)?,
-                                    self.lower_expr(length)?,
-                                ],
-                            ),
-                            ("x25519_public", [secret]) => (
-                                self.host.crypto.x25519_public_from_bytes,
-                                vec![self.lower_expr(secret)?],
-                            ),
-                            ("x25519_shared", [secret, public]) => (
-                                self.host.crypto.x25519_shared,
-                                vec![self.lower_expr(secret)?, self.lower_expr(public)?],
-                            ),
-                            ("constant_time_equal", [a, b]) => (
-                                self.host.crypto.constant_time_equal,
-                                vec![self.lower_expr(a)?, self.lower_expr(b)?],
-                            ),
-                            ("constant_time_equal_bytes", [a, b]) => (
-                                self.host.crypto.constant_time_equal_bytes,
-                                vec![self.lower_expr(a)?, self.lower_expr(b)?],
-                            ),
-                            ("file_seal", [recipients, source, dest]) => (
-                                self.host.crypto.file_seal,
-                                vec![
-                                    self.lower_expr(recipients)?,
-                                    self.lower_expr(source)?,
-                                    self.lower_expr(dest)?,
-                                ],
-                            ),
-                            ("__digest256_hex", [digest]) => (
-                                self.host.crypto.digest256_hex,
-                                vec![self.lower_expr(digest)?],
-                            ),
-                            ("__digest256_bytes", [digest]) => (
-                                self.host.crypto.digest256_bytes,
-                                vec![self.lower_expr(digest)?],
-                            ),
-                            ("__signature_bytes", [signature]) => (
-                                self.host.crypto.signature_bytes,
-                                vec![self.lower_expr(signature)?],
-                            ),
-                            ("__sealed_bytes", [sealed]) => (
-                                self.host.crypto.sealed_bytes,
-                                vec![self.lower_expr(sealed)?],
-                            ),
-                            ("__x25519_public_bytes", [key]) => (
-                                self.host.crypto.x25519_public_bytes,
-                                vec![self.lower_expr(key)?],
-                            ),
-                            ("__x25519_public_text", [key]) => (
-                                self.host.crypto.x25519_public_text,
-                                vec![self.lower_expr(key)?],
-                            ),
-                            ("__x25519_public_from_text", [text]) => (
-                                self.host.crypto.x25519_public_from_text,
-                                vec![self.lower_expr(text)?],
-                            ),
-                            ("__secret_from_text", [text]) => (
-                                self.host.crypto.secret_from_text,
-                                vec![self.lower_expr(text)?],
-                            ),
-                            ("__vault_wrapped_from_bytes", [bytes]) => (
-                                self.host.crypto.vault_wrapped_from_bytes,
-                                vec![self.lower_expr(bytes)?],
-                            ),
-                            ("__vault_wrapped_bytes", [wrapped]) => (
-                                self.host.crypto.vault_wrapped_bytes,
-                                vec![self.lower_expr(wrapped)?],
-                            ),
-                            ("__vault_unlock_recipient", [identity]) => (
-                                self.host.crypto.vault_unlock_recipient,
-                                vec![self.lower_expr(identity)?],
-                            ),
-                            ("__vault_unlock_passphrase", [passphrase]) => (
-                                self.host.crypto.vault_unlock_passphrase,
-                                vec![self.lower_expr(passphrase)?],
-                            ),
-                            _ => {
-                                return Err(format!(
-                                    "jit core call unsupported: {module}.{method}"
-                                ))
-                            }
-                        };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &arg_values);
-                    let value = self.b.inst_results(call)[0];
-                    self.emit_trap_check()?;
-                    if matches!(
-                        method.as_str(),
-                        "constant_time_equal" | "constant_time_equal_bytes"
-                    ) || matches!(&expr.ty, Type::Bool)
-                    {
-                        return Ok(self.b.ins().ireduce(types::I8, value));
-                    }
-                    return Ok(value);
+                    return self.lower_crypto_core_call(expr);
                 }
                 if module == "core.crypto.expert" {
-                    let (host_id, arg_values): (FuncId, Vec<Value>) =
-                        match (method.as_str(), args.as_slice()) {
-                            ("aes256gcm_seal", [key, nonce, plaintext, aad]) => (
-                                self.host.crypto.expert_aes256gcm_seal,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(nonce)?,
-                                    self.lower_expr(plaintext)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("aes256gcm_open", [key, nonce, ciphertext, aad]) => (
-                                self.host.crypto.expert_aes256gcm_open,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(nonce)?,
-                                    self.lower_expr(ciphertext)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("open_v1", [key, blob]) => (
-                                self.host.crypto.expert_open_v1,
-                                vec![self.lower_expr(key)?, self.lower_expr(blob)?],
-                            ),
-                            ("migrate_v1", [key, source, recipients, dest]) => (
-                                self.host.crypto.expert_migrate_v1,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(source)?,
-                                    self.lower_expr(recipients)?,
-                                    self.lower_expr(dest)?,
-                                ],
-                            ),
-                            ("x25519_raw", [secret, public]) => (
-                                self.host.crypto.expert_x25519,
-                                vec![
-                                    self.lower_expr(secret)?,
-                                    self.lower_expr(public)?,
-                                    self.b.ins().iconst(types::I64, 1),
-                                ],
-                            ),
-                            ("hkdf_sha256_raw", [ikm, salt, info, length]) => (
-                                self.host.crypto.expert_hkdf_sha256,
-                                vec![
-                                    self.lower_expr(ikm)?,
-                                    self.lower_expr(salt)?,
-                                    self.lower_expr(info)?,
-                                    self.lower_expr(length)?,
-                                ],
-                            ),
-                            ("secret_bytes", [secret]) => (
-                                self.host.crypto.expert_secret_bytes,
-                                vec![self.lower_expr(secret)?],
-                            ),
-                            _ => {
-                                return Err(format!(
-                                    "jit core call unsupported: {module}.{method}"
-                                ))
-                            }
-                        };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &arg_values);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return self.lower_crypto_core_call(expr);
                 }
                 if module == "core.io" && method == "args" && args.is_empty() {
                     return Ok(self.call_host(self.host.coll.io_args, &[]));
