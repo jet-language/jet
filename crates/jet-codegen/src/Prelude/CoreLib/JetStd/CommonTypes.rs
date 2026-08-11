@@ -1328,33 +1328,80 @@
         Object(std::collections::BTreeMap<String, JSON>),
     }
 
+    impl super::JetDebug for IOContext {
+        fn jet_debug(&self) -> String {
+            crate::jet_debug_record(
+                "IOContext",
+                [
+                    (
+                        "operation".to_string(),
+                        match self.operation {
+                            IOOperation::Read => "Read",
+                            IOOperation::Write => "Write",
+                            IOOperation::Flush => "Flush",
+                            IOOperation::Connect => "Connect",
+                            IOOperation::Accept => "Accept",
+                            IOOperation::Close => "Close",
+                            IOOperation::Resolve => "Resolve",
+                            IOOperation::Codec => "Codec",
+                        }
+                        .to_string(),
+                    ),
+                    (
+                        "resource".to_string(),
+                        super::JetDebug::jet_debug(&self.resource),
+                    ),
+                    (
+                        "os_code".to_string(),
+                        super::JetDebug::jet_debug(&self.os_code),
+                    ),
+                    (
+                        "cause".to_string(),
+                        super::JetDebug::jet_debug(&self.cause),
+                    ),
+                ],
+            )
+        }
+    }
+
     impl super::JetShow for IOError {
         fn jet_show(&self) -> String {
-            let (kind, context) = match self {
-                IOError::InvalidInput(context) => ("invalid input", context),
-                IOError::NotFound(context) => ("not found", context),
-                IOError::PermissionDenied(context) => ("permission denied", context),
-                IOError::TimedOut(context) => ("timed out", context),
-                IOError::Cancelled(context) => ("cancelled", context),
-                IOError::Closed(context) => ("closed", context),
-                IOError::Protocol(context) => ("protocol error", context),
-                IOError::Other(context) => ("I/O error", context),
+            let (variant, context) = match self {
+                IOError::InvalidInput(context) => (0, context),
+                IOError::NotFound(context) => (1, context),
+                IOError::PermissionDenied(context) => (2, context),
+                IOError::TimedOut(context) => (3, context),
+                IOError::Cancelled(context) => (4, context),
+                IOError::Closed(context) => (5, context),
+                IOError::Protocol(context) => (6, context),
+                IOError::Other(context) => (7, context),
             };
-            let operation = match context.operation {
-                IOOperation::Read => "read", IOOperation::Write => "write",
-                IOOperation::Flush => "flush", IOOperation::Connect => "connect",
-                IOOperation::Accept => "accept", IOOperation::Close => "close",
-                IOOperation::Resolve => "resolve", IOOperation::Codec => "codec",
-            };
-            let mut text = format!("{kind} during {operation}");
-            if let Ok(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
-            if let Ok(cause) = &context.cause { text.push_str(&format!(": {cause}")); }
-            text
+            crate::jet_show_io_error(
+                variant,
+                context.operation as i64,
+                context.resource.as_ref().ok().map(String::as_str),
+                context.cause.as_ref().ok().map(String::as_str),
+            )
+        }
+    }
+    impl super::JetDisplay for IOError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
         }
     }
     impl super::JetDebug for IOError {
         fn jet_debug(&self) -> String {
-            format!("{:?}", self)
+            let (variant, context) = match self {
+                IOError::InvalidInput(context) => ("InvalidInput", context),
+                IOError::NotFound(context) => ("NotFound", context),
+                IOError::PermissionDenied(context) => ("PermissionDenied", context),
+                IOError::TimedOut(context) => ("TimedOut", context),
+                IOError::Cancelled(context) => ("Cancelled", context),
+                IOError::Closed(context) => ("Closed", context),
+                IOError::Protocol(context) => ("Protocol", context),
+                IOError::Other(context) => ("Other", context),
+            };
+            crate::jet_debug_variant(variant, Some(super::JetDebug::jet_debug(context)))
         }
     }
     impl super::JetShow for EnvError {

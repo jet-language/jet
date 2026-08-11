@@ -515,7 +515,330 @@ pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
         || jit_value_type(ty)
 }
 
+enum ResidentSafeExprTask<'a> {
+    Visit(&'a TExpr),
+    FinishAll(usize),
+}
+
+/// Walk the recursive expression shapes on the heap before handing an
+/// unsupported shape to the exact coverage predicate below.
+///
+/// Tier planning runs on the caller's ordinary thread.  A deep expression can
+/// therefore exhaust that thread before Cranelift has a chance to classify the
+/// function: `plan_tiers -> resident_safe_func_detail -> resident_safe_stmt
+/// -> resident_safe_expr`.  The worklist changes only where the predicate's
+/// child calls are made; every gate and child remains the same predicate as
+/// `resident_safe_expr_recursive`.
 pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
+    let mut tasks = vec![ResidentSafeExprTask::Visit(expr)];
+    let mut results = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            ResidentSafeExprTask::Visit(expr) => {
+                let Some((gate, children)) = resident_safe_expr_work_item(expr, callees) else {
+                    results.push(resident_safe_expr_recursive(expr, callees));
+                    continue;
+                };
+                if !gate {
+                    results.push(false);
+                    continue;
+                }
+                let count = children.len();
+                tasks.push(ResidentSafeExprTask::FinishAll(count));
+                for child in children.into_iter().rev() {
+                    tasks.push(ResidentSafeExprTask::Visit(child));
+                }
+            }
+            ResidentSafeExprTask::FinishAll(count) => {
+                let Some(start) = results.len().checked_sub(count) else {
+                    results.push(false);
+                    continue;
+                };
+                let value = results[start..].iter().all(|value| *value);
+                results.truncate(start);
+                results.push(value);
+            }
+        }
+    }
+    results.pop().unwrap_or(false)
+}
+
+fn resident_safe_expr_work_item<'a>(
+    expr: &'a TExpr,
+    callees: &HashSet<String>,
+) -> Option<(bool, Vec<&'a TExpr>)> {
+    match &expr.kind {
+        TExprKind::Print(inner) => Some((true, vec![inner])),
+        TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } => resident_safe_crypto_work_item(module, method, args),
+        TExprKind::OrFallback { value, fallback } => {
+            if matches!(&value.ty, Type::Option(_)) {
+                return Some((
+                    matches!(
+                        fallback,
+                        TOrFallback::Value(_)
+                            | TOrFallback::Panic { .. }
+                            | TOrFallback::Break
+                            | TOrFallback::Continue
+                            | TOrFallback::BreakLabel(_)
+                            | TOrFallback::ContinueLabel(_)
+                    ),
+                    vec![value],
+                ));
+            }
+            match fallback {
+                TOrFallback::Value(e) => Some((true, vec![value, e])),
+                TOrFallback::Return(None) => Some((true, vec![value])),
+                TOrFallback::Return(Some(e)) => Some((true, vec![value, e])),
+                TOrFallback::Panic { .. }
+                | TOrFallback::Break
+                | TOrFallback::Continue
+                | TOrFallback::BreakLabel(_)
+                | TOrFallback::ContinueLabel(_) => Some((true, vec![value])),
+            }
+        }
+        TExprKind::ListLit(elems) => {
+            let scalar_list = jit_list_native_type(&expr.ty)
+                && elems.iter().all(|e| {
+                    matches!(
+                        &e.ty,
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Float
+                            | Type::String
+                            | Type::Char
+                    ) || jit_optional_scalar_type(&e.ty)
+                });
+            let nested_int_list = jit_list_of_int_list_type(&expr.ty);
+            let nested_string_list = matches!(
+                &expr.ty,
+                Type::List(inner)
+                    if jit_list_native_type(inner)
+                        && matches!(inner.as_ref(), Type::List(elem) if matches!(elem.as_ref(), Type::String))
+            );
+            let task_list = jit_list_task_int_type(&expr.ty);
+            let record_list = jit_list_record_type(&expr.ty);
+            let named_or_union = matches!(
+                &expr.ty,
+                Type::List(elem) | Type::FixedList { elem, .. }
+                    if matches!(elem.as_ref(), Type::Named(_) | Type::Union(_))
+            );
+            Some((
+                scalar_list || nested_int_list || nested_string_list || task_list || record_list || named_or_union,
+                elems.iter().collect(),
+            ))
+        }
+        TExprKind::Try { inner, convert, .. } => Some((
+            matches!(
+                convert,
+                TIR::TTryConvert::None
+                    | TIR::TTryConvert::DefaultErr
+                    | TIR::TTryConvert::Typed(_)
+            ),
+            vec![inner],
+        )),
+        TExprKind::DistinctConvert { arg, .. }
+        | TExprKind::DistinctRaw(arg)
+        | TExprKind::UnitConvert { arg, .. }
+        | TExprKind::Drop(arg)
+        | TExprKind::MaterializeView(arg)
+        | TExprKind::Deref(arg)
+        | TExprKind::RawOf(arg)
+        | TExprKind::Present(arg)
+        | TExprKind::Ok(arg)
+        | TExprKind::Err(arg)
+        | TExprKind::ResourceNew(arg)
+        | TExprKind::Clone(arg) => Some((true, vec![arg])),
+        TExprKind::Borrow { place, .. } => Some((true, vec![place])),
+        TExprKind::Unary { op, operand } => Some((
+            jit_value_type(&expr.ty) && matches!(op, UnOp::Neg | UnOp::Not),
+            vec![operand],
+        )),
+        TExprKind::Binary {
+            op,
+            overflow,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let gate = (if matches!(op, BinOp::And | BinOp::Or) {
+                matches!(&lhs.ty, Type::Bool) && matches!(&rhs.ty, Type::Bool)
+            } else if *overflow {
+                (intish_ty(&lhs.ty) || reactive_get_intish(lhs))
+                    && (intish_ty(&rhs.ty) || reactive_get_intish(rhs))
+            } else {
+                true
+            }) && jit_value_type(&expr.ty);
+            Some((gate, vec![lhs, rhs]))
+        }
+        TExprKind::CompareChain { operands, ops, hooks } => Some((
+            jit_value_type(&expr.ty)
+                && operands.len() == ops.len() + 1
+                && hooks.len() == ops.len()
+                && operands.iter().enumerate().all(|(i, operand)| {
+                    hooks[i]
+                        || matches!(
+                            &operand.ty,
+                            Type::Int | Type::IntN { .. } | Type::Float
+                        )
+                })
+                && ops
+                    .iter()
+                    .all(|op| matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)),
+            operands.iter().collect(),
+        )),
+        TExprKind::StrLit(parts) if jit_value_type(&expr.ty) => Some((
+            true,
+            parts
+                .iter()
+                .filter_map(|part| match part {
+                    TStrPart::Lit(_) => None,
+                    TStrPart::Interp(expr, _) => Some(expr),
+                })
+                .collect(),
+        )),
+        TExprKind::Call { name, args, .. } => {
+            let gate = callees.contains(name)
+                && args.iter().all(resident_safe_call_arg_gate);
+            Some((gate, args.iter().map(|arg| &arg.value).collect()))
+        }
+        TExprKind::ModuleCall { form, args, .. } => {
+            let target = match form {
+                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    format!("{rust_mod}::{rust_fn}")
+                }
+                TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
+            let gate = callees.contains(&target)
+                && args.iter().all(resident_safe_call_arg_gate);
+            Some((gate, args.iter().map(|arg| &arg.value).collect()))
+        }
+        TExprKind::MethodCall { recv, args, .. }
+        | TExprKind::FnFieldCall { recv, args, .. } => Some((
+            args.iter().all(resident_safe_call_arg_gate),
+            std::iter::once(recv.as_ref())
+                .chain(args.iter().map(|arg| &arg.value))
+                .collect(),
+        )),
+        TExprKind::StaticCall { args, .. } => Some((
+            (!matches!(
+                &expr.ty,
+                Type::Apply { name, args }
+                    if name == "Cell"
+                        && args.first().is_some_and(|ty| !jit_cell_value_type(ty))
+            )) && args.iter().all(resident_safe_call_arg_gate),
+            args.iter().map(|arg| &arg.value).collect(),
+        )),
+        _ => None,
+    }
+}
+
+fn resident_safe_crypto_work_item<'a>(
+    module: &str,
+    method: &str,
+    args: &'a [TExpr],
+) -> Option<(bool, Vec<&'a TExpr>)> {
+    let children = || -> Vec<&'a TExpr> { args.iter().collect() };
+    if module == "core.crypto" {
+        return Some(match (method, args) {
+            ("__signing_generate" | "__x25519_generate", []) => (true, Vec::new()),
+            (
+                "__signing_public"
+                | "__x25519_public"
+                | "sha256"
+                | "sha512_bytes"
+                | "blake3_bytes"
+                | "__digest256_hex"
+                | "__digest256_bytes"
+                | "__signature_bytes"
+                | "__sealed_bytes"
+                | "__x25519_public_bytes"
+                | "__x25519_public_text"
+                | "__x25519_public_from_text"
+                | "__secret_from_text"
+                | "__vault_wrapped_from_bytes"
+                | "__vault_wrapped_bytes"
+                | "__vault_unlock_recipient"
+                | "__vault_unlock_passphrase"
+                | "password_hash",
+                [value],
+            ) => (true, vec![value]),
+            ("sign" | "password_verify", [a, b]) => (true, vec![a, b]),
+            ("verify" | "seal" | "open" | "file_open", [a, b, c]) => {
+                (true, vec![a, b, c])
+            }
+            _ => (false, children()),
+        });
+    }
+    if module == "core.crypto.expert" {
+        return Some(match (method, args) {
+            ("secret_bytes", [value]) => (true, vec![value]),
+            ("open_v1" | "x25519_raw", args) if args.len() == 2 => (true, children()),
+            ("hkdf_sha256_raw", args) if args.len() == 4 => (true, children()),
+            ("aes256gcm_seal" | "aes256gcm_open" | "migrate_v1", args)
+                if args.len() == 4 => (true, children()),
+            _ => (false, children()),
+        });
+    }
+    if module == "core.crypto.random" && method == "bytes" {
+        return Some(match args {
+            [arg] => (true, vec![arg]),
+            _ => (false, children()),
+        });
+    }
+    None
+}
+
+fn resident_safe_call_arg_gate(arg: &TCallArg) -> bool {
+    if arg.arc_clone {
+        return false;
+    }
+    let ty = &arg.value.ty;
+    let handle_pass = jit_value_type(ty)
+        || jit_struct_type(ty)
+        || jit_tuple_type(ty)
+        || matches!(
+            ty,
+            Type::String
+                | Type::List(_)
+                | Type::FixedList { .. }
+                | Type::Option(_)
+                | Type::Map { .. }
+        );
+    if (arg.borrow || arg.mut_borrow) && !handle_pass {
+        return false;
+    }
+    if arg.clone {
+        let clone_ok = matches!(
+            ty,
+            Type::Int
+                | Type::Float
+                | Type::Bool
+                | Type::Char
+                | Type::String
+                | Type::Option(_)
+                | Type::IntN { .. }
+                | Type::Float32
+        ) || jit_struct_type(ty)
+            || jit_compound_type(ty)
+            || jit_tuple_type(ty)
+            || jit_list_native_type(ty)
+            || jit_list_record_type(ty)
+            || jit_map_string_type(ty);
+        if !clone_ok {
+            return false;
+        }
+    }
+    !arg.widen_to_vec
+        || jit_list_native_type(ty)
+        || matches!(ty, Type::FixedList { .. })
+}
+
+fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool {
     match &expr.kind {
         TExprKind::Print(inner) => {
             resident_safe_expr(inner, callees)
