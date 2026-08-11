@@ -1754,7 +1754,7 @@ fn run() {
         // full sema pass, hence `covers_after_sema`.
         let src = "\
 fn build() => [Int] {
-    xs := []
+    xs := [Int].{}
     loop i, 1..3 {
         xs.push(i * 10)
     }
