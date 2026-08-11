@@ -1,4 +1,4 @@
-//! Native tools-profile dispatcher.
+//! Native tool-generation dispatcher.
 //!
 //! Copies of the `jetpack` executable installed under `~/.jet/bin/<name>`
 //! enter here before ordinary CLI dispatch. The dispatcher reads one durable,
@@ -57,7 +57,7 @@ pub(crate) struct GenerationTool {
 
 pub(crate) fn format_current_pointer(pointer: &CurrentPointer) -> io::Result<String> {
     if pointer.generation == 0 {
-        return Err(invalid("profile generation is zero"));
+        return Err(invalid("tool generation is zero"));
     }
     validate_digest(&pointer.witness)?;
     let body = format!(
@@ -168,7 +168,7 @@ pub(crate) fn parse_generation_metadata(
     }
     let generation = integer_field(&root, "generation")?;
     if generation != expected_generation || generation == 0 {
-        return Err(invalid("profile generation metadata disagrees with path"));
+        return Err(invalid("tool generation metadata disagrees with path"));
     }
     let created_at = integer_field(&root, "created_at")?;
     let JSON::JSONValue::Array(entries) = root
@@ -416,7 +416,7 @@ fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<DispatchTarg
     }
     let complete = read_bounded_regular(&generation_dir.join(COMPLETE_FILE))?;
     if complete != format!("{witness}\n") {
-        return Err(invalid("profile generation complete witness mismatch"));
+        return Err(invalid("tool generation complete witness mismatch"));
     }
     let (tool, slot) = find_bin(&metadata, bin)?;
     let projection = generation_dir
@@ -565,7 +565,7 @@ fn target_command(
 
 fn validate_generation(metadata: &GenerationMetadata) -> io::Result<()> {
     if metadata.generation == 0 || metadata.tools.len() > MAX_TOOLS {
-        return Err(invalid("profile generation exceeds bounds"));
+        return Err(invalid("tool generation exceeds bounds"));
     }
     let mut identities = BTreeSet::new();
     let mut bins = BTreeSet::new();

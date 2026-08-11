@@ -229,7 +229,7 @@ impl LowerCtx<'_, '_> {
         if !row.jit_direct {
             return Ok(None);
         }
-        let Some(host_id) = row
+        let Some(_host_id) = row
             .jit_symbol_candidates()
             .into_iter()
             .find_map(|symbol| self.host.lookup(&symbol))
@@ -240,8 +240,27 @@ impl LowerCtx<'_, '_> {
             .iter()
             .map(|arg| self.lower_expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        self.lower_recorded_core_call_values(row, &arg_values, ret_ty)
+    }
+
+    fn lower_recorded_core_call_values(
+        &mut self,
+        row: &jet_foundation::Syntax::CoreCallRecord,
+        arg_values: &[Value],
+        ret_ty: &Type,
+    ) -> Result<Option<Value>, String> {
+        if !row.jit_direct {
+            return Ok(None);
+        }
+        let Some(host_id) = row
+            .jit_symbol_candidates()
+            .into_iter()
+            .find_map(|symbol| self.host.lookup(&symbol))
+        else {
+            return Ok(None);
+        };
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &arg_values);
+        let call = self.b.ins().call(host_ref, arg_values);
         self.emit_trap_check()?;
         Ok(Some(
             clif_ty(ret_ty)
@@ -7367,6 +7386,10 @@ impl LowerCtx<'_, '_> {
                         // other Options use 0 = None, bits+1 = Some.
                         let uses_result = matches!(inner.as_ref(), Type::IntN { .. })
                             || Self::uses_result_option_abi(e);
+                        if matches!(fmt, StrFormat::Debug) {
+                            self.lower_debug_option(buf_id, val, inner, uses_result)?;
+                            continue;
+                        }
                         let is_none = if uses_result {
                             let ok = self.call_host(self.host.result_is_ok, &[val]);
                             let ok_wide = self.b.ins().uextend(types::I64, ok);
@@ -7434,6 +7457,8 @@ impl LowerCtx<'_, '_> {
                                     Type::String => 1,
                                     Type::IntN { signed: true, .. } => 2,
                                     Type::IntN { signed: false, .. } => 3,
+                                    Type::Float => 4,
+                                    Type::Float32 => 7,
                                     _ => 0,
                                 };
                                 let flag = self.b.ins().iconst(types::I64, kind);
@@ -7459,6 +7484,10 @@ impl LowerCtx<'_, '_> {
                         self.b.seal_block(done);
                         continue;
                     }
+                    if matches!(fmt, StrFormat::Debug) {
+                        self.lower_debug_value(buf_id, val, &push_ty)?;
+                        continue;
+                    }
                     if let Some(elem) = jit_list_iter_elem_type(&push_ty).or_else(|| {
                         match &push_ty {
                             Type::List(inner)
@@ -7473,6 +7502,8 @@ impl LowerCtx<'_, '_> {
                             Type::String => 1,
                             Type::IntN { signed: true, .. } => 2,
                             Type::IntN { signed: false, .. } => 3,
+                            Type::Float => 4,
+                            Type::Float32 => 7,
                             _ => 0,
                         };
                         let flag = self
@@ -7537,6 +7568,21 @@ impl LowerCtx<'_, '_> {
             return Ok(());
         }
         if matches!(fmt, StrFormat::Display) {
+            if type_name == "IOError" {
+                let packed = self.lower_expr(expr)?;
+                // This process-local pointer and its host table cannot
+                // survive disk tier-cache reuse in another process.
+                super::tier_cache::abort_capture();
+                let leaked: &'static str = Box::leak(type_name.to_string().into_boxed_str());
+                let ptr = self.b.ins().iconst(types::I64, leaked.as_ptr() as i64);
+                let len = self.b.ins().iconst(types::I64, leaked.len() as i64);
+                let text = self.call_host(self.host.coll.enum_show, &[packed, ptr, len]);
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
             if type_name == "EncodingError" {
                 let recv = self.lower_expr(expr)?;
                 let text = self.call_host(self.host.encoding.encoding_error_show, &[recv]);
@@ -7603,80 +7649,349 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(push_ref, &[buf_id, text]);
                 return Ok(());
             }
+            if self.meta.is_enum(type_name) && self.meta.enum_packed_showable(type_name) {
+                let packed = self.lower_expr(expr)?;
+                return self.lower_packed_enum_debug(buf_id, packed, type_name);
+            }
         }
-        let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
-            format!("jit string interp type unsupported: Named({type_name:?})")
-        })?;
-        // Both lenses render records with Jet-source names (I2), so both need
-        // #[Redact] metadata from the ProgramBundle. Refuse when it is missing
-        // rather than leak secrets.
-        if !field_names.is_empty()
-            && super::types_meta::struct_field_redacted(type_name, 0).is_none()
-        {
+        let handle = self.lower_expr(expr)?;
+        self.lower_named_str_interp_handle(buf_id, type_name, handle)
+    }
+
+    fn lower_named_str_interp_handle(
+        &mut self,
+        buf_id: Value,
+        type_name: &str,
+        handle: Value,
+    ) -> Result<(), String> {
+        let (field_names, field_tys) = self
+            .meta
+            .struct_layout(type_name)
+            .map(|(names, tys)| (names.to_vec(), tys.to_vec()))
+            .or_else(|| core_debug_layout(type_name))
+            .ok_or_else(|| format!("jit string interp type unsupported: Named({type_name:?})"))?;
+        // Lower fields in declaration order. StructuralDebug owns canonical
+        // Debug order; this keeps field evaluation source-ordered while each
+        // marshalled field retains its declaration/storage index.
+        // Both lenses render records with Jet-source names (I2). The metadata
+        // adapter owns user/core redaction lookup; this lowering only marshals
+        // each storage index and flag into StructuralDebug.
+        let field_redacted = |field_index| {
+            super::types_meta::struct_field_redacted(type_name, field_index)
+        };
+        if !field_names.is_empty() && field_redacted(0).is_none() {
             return Err(format!(
                 "jit string interp type unsupported: Named({type_name:?})"
             ));
         }
-        let handle = self.lower_expr(expr)?;
-        self.push_str_lit(buf_id, &format!("{type_name} {{ "))?;
-        for (i, (fname, fty)) in field_names.iter().zip(field_tys.iter()).enumerate() {
-            if i > 0 {
-                self.push_str_lit(buf_id, ", ")?;
-            }
-            let label = fname.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(fname.as_str());
-            self.push_str_lit(buf_id, &format!("{label}: "))?;
-            if super::types_meta::struct_field_redacted(type_name, i) == Some(true) {
-                self.push_str_lit(buf_id, "[redacted]")?;
-                continue;
-            }
-            let idx = self.b.ins().iconst(types::I64, i as i64);
-            match fty {
-                Type::Int => {
-                    let val = self.call_host(self.host.struct_get_i64, &[handle, idx]);
-                    let push = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_i64, self.b.func);
-                    self.b.ins().call(push, &[buf_id, val]);
-                }
-                Type::Float => {
-                    let val = self.call_host(self.host.struct_get_f64, &[handle, idx]);
-                    let push = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_f64, self.b.func);
-                    self.b.ins().call(push, &[buf_id, val]);
-                }
-                Type::Bool => {
-                    let val = self.call_host(self.host.struct_get_bool, &[handle, idx]);
-                    let push = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_bool, self.b.func);
-                    self.b.ins().call(push, &[buf_id, val]);
-                }
-                Type::Char => {
-                    let val = self.call_host(self.host.struct_get_char, &[handle, idx]);
-                    let push = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_char, self.b.func);
-                    self.b.ins().call(push, &[buf_id, val]);
-                }
-                Type::String => {
-                    // Rust Debug quotes string fields; JetShow/`{:?}` matches.
-                    self.push_str_lit(buf_id, "\"")?;
-                    let val = self.call_host(self.host.struct_get_str, &[handle, idx]);
-                    let push = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_str, self.b.func);
-                    self.b.ins().call(push, &[buf_id, val]);
-                    self.push_str_lit(buf_id, "\"")?;
-                }
-                other => {
-                    return Err(format!(
-                        "jit string interp named field unsupported: {type_name}.{fname}: {other:?}"
-                    ));
-                }
+        let fields_id = self.call_host(self.host.coll.list_new, &[]);
+        let push_field = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        for field_index in 0..field_names.len() {
+            let fname = &field_names[field_index];
+            let fty = &field_tys[field_index];
+            let label = fname
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(fname.as_str());
+            let redacted = field_redacted(field_index).ok_or_else(|| {
+                format!("jit string interp type unsupported: Named({type_name:?})")
+            })?;
+            let value_id = if redacted {
+                let empty_id = self.runtime.heap.alloc_string(String::new());
+                self.b.ins().iconst(types::I64, empty_id)
+            } else {
+                let idx = self.b.ins().iconst(types::I64, field_index as i64);
+                let abi_ty = self.erase_distinct_ty(fty);
+                let val = match abi_ty {
+                    Type::Float | Type::Float32 => {
+                        self.call_host(self.host.struct_get_f64, &[handle, idx])
+                    }
+                    Type::Bool => self.call_host(self.host.struct_get_bool, &[handle, idx]),
+                    Type::Char => self.call_host(self.host.struct_get_char, &[handle, idx]),
+                    Type::Int
+                    | Type::IntN { .. }
+                    | Type::String
+                    | Type::Named(_)
+                    | Type::Option(_) => self.call_host(self.host.struct_get_i64, &[handle, idx]),
+                    other => {
+                        return Err(format!(
+                            "jit string interp named field unsupported: {type_name}.{fname}: {other:?}"
+                        ));
+                    }
+                };
+                self.lower_debug_value_text(val, fty)?
+            };
+            let name_id = self.runtime.heap.alloc_string(label.to_string());
+            let name_id = self.b.ins().iconst(types::I64, name_id);
+            let storage_index = self.b.ins().iconst(types::I64, field_index as i64);
+            let redacted = self
+                .b
+                .ins()
+                .iconst(types::I64, i64::from(redacted));
+            for value in [name_id, value_id, storage_index, redacted] {
+                self.b.ins().call(push_field, &[fields_id, value]);
             }
         }
-        self.push_str_lit(buf_id, " }")?;
+        let type_name_id = self.runtime.heap.alloc_string(type_name.to_string());
+        let type_name_id = self.b.ins().iconst(types::I64, type_name_id);
+        let push_record = self
+            .module
+            .declare_func_in_func(self.host.coll.str_push_debug_record, self.b.func);
+        self.b
+            .ins()
+            .call(push_record, &[buf_id, type_name_id, fields_id]);
+        Ok(())
+    }
+
+    fn lower_debug_value_text(&mut self, value: Value, ty: &Type) -> Result<Value, String> {
+        let buf_id = self.call_host(self.host.str_begin, &[]);
+        self.lower_debug_value(buf_id, value, ty)?;
+        Ok(buf_id)
+    }
+
+    fn append_scalar_debug(
+        &mut self,
+        buf_id: Value,
+        value: Value,
+        kind: i64,
+    ) {
+        let kind = self.b.ins().iconst(types::I64, kind);
+        let text = self.call_host(self.host.coll.scalar_debug, &[value, kind]);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.str_push_str, self.b.func);
+        self.b.ins().call(push, &[buf_id, text]);
+    }
+
+    fn lower_debug_value(
+        &mut self,
+        buf_id: Value,
+        value: Value,
+        ty: &Type,
+    ) -> Result<(), String> {
+        match ty {
+            Type::Tagged { inner, .. } => self.lower_debug_value(buf_id, value, inner),
+            Type::Option(inner) => self.lower_debug_option(
+                buf_id,
+                value,
+                inner,
+                matches!(inner.as_ref(), Type::IntN { .. }),
+            ),
+            Type::Int => {
+                self.append_scalar_debug(buf_id, value, 0);
+                Ok(())
+            }
+            Type::IntN { signed, .. } => {
+                let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
+                let text = self.call_host(self.host.intn_to_string, &[value, signed]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push, &[buf_id, text]);
+                Ok(())
+            }
+            Type::Float => {
+                let bits = self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    value,
+                );
+                self.append_scalar_debug(buf_id, bits, 1);
+                Ok(())
+            }
+            Type::Float32 => {
+                let value = match self.b.func.dfg.value_type(value) {
+                    types::F32 => value,
+                    types::F64 => self.b.ins().fdemote(types::F32, value),
+                    actual => {
+                        return Err(format!(
+                            "jit F32 Debug ABI mismatch: expected F32/F64, got {actual:?}"
+                        ));
+                    }
+                };
+                let bits = self.b.ins().bitcast(
+                    types::I32,
+                    Self::scalar_bitcast_memflags(),
+                    value,
+                );
+                let bits = self.b.ins().uextend(types::I64, bits);
+                self.append_scalar_debug(buf_id, bits, 4);
+                Ok(())
+            }
+            Type::Bool => {
+                let bits = self.b.ins().uextend(types::I64, value);
+                self.append_scalar_debug(buf_id, bits, 2);
+                Ok(())
+            }
+            Type::Char => {
+                let bits = self.b.ins().uextend(types::I64, value);
+                self.append_scalar_debug(buf_id, bits, 3);
+                Ok(())
+            }
+            Type::String => {
+                let text = self.call_host(self.host.coll.string_debug, &[value]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push, &[buf_id, text]);
+                Ok(())
+            }
+            Type::List(elem) | Type::FixedList { elem, .. } => {
+                let kind = Self::debug_list_kind(elem).ok_or_else(|| {
+                    format!("jit string interp named field unsupported: List({elem:?})")
+                })?;
+                let kind = self.b.ins().iconst(types::I64, kind);
+                let text = self.call_host(self.host.coll.list_debug, &[value, kind]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push, &[buf_id, text]);
+                Ok(())
+            }
+            Type::Named(name) if self.meta.enum_packed_showable(name) => {
+                self.lower_packed_enum_debug(buf_id, value, name)
+            }
+            Type::Named(name) => self.lower_named_str_interp_handle(buf_id, name, value),
+            Type::Apply { name, .. } if self.meta.enum_packed_showable(name) => {
+                self.lower_packed_enum_debug(buf_id, value, name)
+            }
+            Type::Apply { name, .. } => self.lower_named_str_interp_handle(buf_id, name, value),
+            other => Err(format!("jit string interp named field unsupported: {other:?}")),
+        }
+    }
+
+    fn debug_list_kind(elem: &Type) -> Option<i64> {
+        Some(match elem {
+            Type::Int => 0,
+            Type::String => 1,
+            Type::IntN { signed: true, .. } => 2,
+            Type::IntN { signed: false, .. } => 3,
+            Type::Float => 4,
+            Type::Float32 => 7,
+            Type::Bool => 5,
+            Type::Char => 6,
+            _ => return None,
+        })
+    }
+
+    fn lower_debug_option(
+        &mut self,
+        buf_id: Value,
+        packed: Value,
+        inner: &Type,
+        result_abi: bool,
+    ) -> Result<(), String> {
+        let present = if result_abi {
+            self.call_host(self.host.result_is_ok, &[packed])
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.bool_from_icmp(IntCC::NotEqual, packed, zero)
+        };
+        let none_block = self.b.create_block();
+        let some_block = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.ins().brif(present, some_block, &[], none_block, &[]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        let empty_id = self.runtime.heap.alloc_string(String::new());
+        let empty_id = self.b.ins().iconst(types::I64, empty_id);
+        let absent = self.b.ins().iconst(types::I64, 0);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.str_push_debug_optional, self.b.func);
+        self.b.ins().call(push, &[buf_id, empty_id, absent]);
+        self.b.ins().jump(done, &[]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let payload = if result_abi {
+            self.call_host(self.host.result_get_i64, &[packed])
+        } else {
+            self.unpack_option_payload(packed, inner)?
+        };
+        let payload_id = if matches!(inner, Type::String) {
+            self.call_host(self.host.coll.string_debug, &[payload])
+        } else {
+            self.lower_debug_value_text(payload, inner)?
+        };
+        let present = self.b.ins().iconst(types::I64, 1);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.str_push_debug_optional, self.b.func);
+        self.b.ins().call(push, &[buf_id, payload_id, present]);
+        self.b.ins().jump(done, &[]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(())
+    }
+
+    fn lower_packed_enum_debug(
+        &mut self,
+        buf_id: Value,
+        packed: Value,
+        enum_name: &str,
+    ) -> Result<(), String> {
+        let variants = self
+            .meta
+            .enum_variant_names(enum_name)
+            .map(|variants| variants.to_vec())
+            .ok_or_else(|| format!("jit packed enum metadata `{enum_name}`"))?;
+        if variants.is_empty() {
+            return Err(format!("jit packed enum has no variants `{enum_name}`"));
+        }
+        let mask = self.b.ins().iconst(types::I64, 0xff);
+        let disc = self.b.ins().band(packed, mask);
+        let empty_payload = self.runtime.heap.alloc_string(String::new());
+        let empty_payload = self.b.ins().iconst(types::I64, empty_payload);
+        let done = self.b.create_block();
+        for (index, variant) in variants.iter().enumerate() {
+            let arm = self.b.create_block();
+            let next = (index + 1 < variants.len()).then(|| self.b.create_block());
+            if let Some(next) = next {
+                let expected = self.b.ins().iconst(types::I64, index as i64);
+                let matched = self.bool_from_icmp(IntCC::Equal, disc, expected);
+                self.b.ins().brif(matched, arm, &[], next, &[]);
+            } else {
+                self.b.ins().jump(arm, &[]);
+            }
+            self.b.switch_to_block(arm);
+            self.b.seal_block(arm);
+            let variant = variant
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(variant.as_str());
+            let variant_id = self.runtime.heap.alloc_string(variant.to_string());
+            let variant_id = self.b.ins().iconst(types::I64, variant_id);
+            let payload_ty = self
+                .meta
+                .enum_variant_payload_types(enum_name, variant)
+                .and_then(|types| types.first())
+                .cloned();
+            let (payload_id, has_payload) = if let Some(payload_ty) = payload_ty {
+                let payload = self.unpack_enum_scalar(packed, &payload_ty)?;
+                (
+                    self.lower_debug_value_text(payload, &payload_ty)?,
+                    self.b.ins().iconst(types::I64, 1),
+                )
+            } else {
+                (empty_payload, self.b.ins().iconst(types::I64, 0))
+            };
+            let push = self
+                .module
+                .declare_func_in_func(self.host.coll.str_push_debug_variant, self.b.func);
+            self.b
+                .ins()
+                .call(push, &[buf_id, variant_id, payload_id, has_payload]);
+            self.b.ins().jump(done, &[]);
+            if let Some(next) = next {
+                self.b.switch_to_block(next);
+                self.b.seal_block(next);
+            }
+        }
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
         Ok(())
     }
 
@@ -8198,19 +8513,17 @@ impl LowerCtx<'_, '_> {
 
     /// Shared backing for `TExprKind::StructLit`/`TupleLit`: both lower to the
     /// same boxed-handle host-struct representation (`struct_new`/
-    /// `struct_set_*`), keyed by positional index — a struct's declared field
-    /// order for `StructLit`, tuple position for `TupleLit`. Field values are
-    /// lowered in source order, not name order, so evaluation order matches
-    /// the AOT emitter (side effects in field-init exprs must run in the same
-    /// sequence under both tiers, R12).
+    /// `struct_set_*`). Field values are lowered in source order, not name
+    /// order, while `storage_index` preserves the declaration layout (R12).
     fn lower_record_fields<'f>(
         &mut self,
-        fields: impl Iterator<Item = &'f TExpr>,
+        fields: impl Iterator<Item = (&'f TExpr, usize)>,
+        field_count: usize,
     ) -> Result<Value, String> {
-        let values: Vec<&TExpr> = fields.collect();
-        let n = self.b.ins().iconst(types::I64, values.len() as i64);
+        let values: Vec<(&TExpr, usize)> = fields.collect();
+        let n = self.b.ins().iconst(types::I64, field_count as i64);
         let handle = self.call_host(self.host.struct_new, &[n]);
-        for (i, value) in values.iter().enumerate() {
+        for (value, storage_index) in values {
             let raw = self.lower_expr(value)?;
             let abi_ty = self.erase_distinct_ty(&value.ty);
             let host_id = match &abi_ty {
@@ -8227,7 +8540,10 @@ impl LowerCtx<'_, '_> {
                     ))
                 }
             };
-            let idx = self.b.ins().iconst(types::I64, i as i64);
+            let idx = self
+                .b
+                .ins()
+                .iconst(types::I64, storage_index as i64);
             let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
             self.b.ins().call(set_ref, &[handle, idx, raw]);
         }
@@ -8238,8 +8554,26 @@ impl LowerCtx<'_, '_> {
         &mut self,
         fields: &[(String, TExpr, bool)],
         as_trait: Option<&(String, String)>,
+        type_name: &str,
     ) -> Result<Value, String> {
-        let concrete = self.lower_record_fields(fields.iter().map(|(_, value, _)| value))?;
+        let field_names = self
+            .meta
+            .struct_layout(type_name)
+            .map(|(names, _)| names.to_vec())
+            .or_else(|| core_debug_layout(type_name).map(|(names, _)| names))
+            .ok_or_else(|| format!("jit struct literal type `{type_name}`"))?;
+        let indexed = fields
+            .iter()
+            .map(|(name, value, _)| {
+                self.meta
+                    .struct_field_index(type_name, name)
+                    .or_else(|| core_struct_field_index(type_name, name))
+                    .ok_or_else(|| format!("jit field `{name}` on `{type_name}`"))
+                    .map(|index| (value, index))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let concrete =
+            self.lower_record_fields(indexed.into_iter(), field_names.len())?;
         let Some((_, concrete_name)) = as_trait else {
             return Ok(concrete);
         };
@@ -8255,7 +8589,13 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_tuple_lit(&mut self, fields: &[(String, TExpr)]) -> Result<Value, String> {
-        self.lower_record_fields(fields.iter().map(|(_, value)| value))
+        self.lower_record_fields(
+            fields
+                .iter()
+                .enumerate()
+                .map(|(index, (_, value))| (value, index)),
+            fields.len(),
+        )
     }
 
     fn lower_record_field(
@@ -8831,6 +9171,279 @@ impl LowerCtx<'_, '_> {
         Ok(handle)
     }
 
+    /// Lower the crypto CoreCall/list subgraph in post-order.
+    ///
+    /// `lower_expr_core` is intentionally exhaustive and therefore a large
+    /// frame. Calling `lower_expr` recursively for every nested crypto
+    /// projection used to stack one such frame per CoreCall. The worklist keeps
+    /// the traversal state on the heap while preserving source-order argument
+    /// evaluation. The final host call remains the same Prelude marshalling
+    /// seam used by AOT.
+    pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
+        if matches!(
+            &expr.kind,
+            TExprKind::CoreCall { module, .. }
+                if matches!(module.as_str(), "core.crypto" | "core.crypto.expert")
+        ) {
+            return self.lower_crypto_core_call(expr);
+        }
+        self.lower_expr_core(expr)
+    }
+
+    #[inline(never)]
+    fn lower_crypto_core_call(&mut self, expr: &TExpr) -> Result<Value, String> {
+        enum Task<'a> {
+            Eval(&'a TExpr),
+            BuildList {
+                list_ty: &'a Type,
+                len: usize,
+            },
+            ApplyCall {
+                expr: &'a TExpr,
+                len: usize,
+            },
+        }
+
+        let mut tasks = vec![Task::Eval(expr)];
+        let mut values = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Eval(expr) => match &expr.kind {
+                    TExprKind::CoreCall {
+                        module,
+                        method,
+                        args,
+                        ..
+                    } if matches!(module.as_str(), "core.crypto" | "core.crypto.expert") => {
+                        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+                            if !row.accepts_arity(args.len()) {
+                                return Err(format!(
+                                    "jit core call arity mismatch: {module}.{method} expects {}..{}, got {}",
+                                    row.arity(),
+                                    row.signature.max_arity,
+                                    args.len()
+                                ));
+                            }
+                        }
+                        tasks.push(Task::ApplyCall {
+                            expr,
+                            len: args.len(),
+                        });
+                        tasks.extend(args.iter().rev().map(Task::Eval));
+                    }
+                    TExprKind::ListLit(elems)
+                        if elems.iter().all(|elem| !Self::is_range_ty(&elem.ty)) =>
+                    {
+                        tasks.push(Task::BuildList {
+                            list_ty: &expr.ty,
+                            len: elems.len(),
+                        });
+                        tasks.extend(elems.iter().rev().map(Task::Eval));
+                    }
+                    TExprKind::IntLit(value, _) => {
+                        values.push(self.b.ins().iconst(types::I64, *value));
+                    }
+                    TExprKind::FloatLit(value) => {
+                        values.push(self.b.ins().f64const(if expr.ty == Type::Float32 {
+                            (*value as f32) as f64
+                        } else {
+                            *value
+                        }));
+                    }
+                    TExprKind::BoolLit(value) => {
+                        values.push(self.b.ins().iconst(types::I8, i64::from(*value)));
+                    }
+                    TExprKind::CharLit(value) => {
+                        values.push(self.b.ins().iconst(types::I32, *value as i64));
+                    }
+                    TExprKind::StrLit(parts) => values.push(self.lower_string_lit(parts)?),
+                    TExprKind::Local(local) => values.push(self.load_local(local)?),
+                    _ => values.push(self.lower_expr(expr)?),
+                },
+                Task::BuildList { list_ty, len } => {
+                    let start = values
+                        .len()
+                        .checked_sub(len)
+                        .ok_or("jit crypto list lowering value stack underflow")?;
+                    let elems = values.split_off(start);
+                    let handle = self.call_host(self.host.coll.list_new, &[]);
+                    let push_id = if jit_list_float_type(list_ty) {
+                        self.host.coll.list_push_f64
+                    } else {
+                        self.host.coll.list_push
+                    };
+                    let push = self.module.declare_func_in_func(push_id, self.b.func);
+                    for value in elems {
+                        self.b.ins().call(push, &[handle, value]);
+                    }
+                    values.push(handle);
+                }
+                Task::ApplyCall { expr, len } => {
+                    let start = values
+                        .len()
+                        .checked_sub(len)
+                        .ok_or("jit crypto call lowering value stack underflow")?;
+                    let arg_values = values.split_off(start);
+                    let TExprKind::CoreCall { module, method, .. } = &expr.kind else {
+                        return Err("jit crypto call work item is not a CoreCall".to_string());
+                    };
+                    let value = if let Some(row) = jet_foundation::Syntax::core_call(module, method)
+                    {
+                        if let Some(value) =
+                            self.lower_recorded_core_call_values(row, &arg_values, &expr.ty)?
+                        {
+                            value
+                        } else {
+                            self.lower_crypto_core_call_values(
+                                module,
+                                method,
+                                &arg_values,
+                                expr,
+                            )?
+                        }
+                    } else {
+                        self.lower_crypto_core_call_values(module, method, &arg_values, expr)?
+                    };
+                    values.push(value);
+                }
+            }
+        }
+        values
+            .pop()
+            .ok_or_else(|| "jit crypto lowering produced no value".to_string())
+    }
+
+    #[inline(never)]
+    fn lower_crypto_core_call_values(
+        &mut self,
+        module: &str,
+        method: &str,
+        arg_values: &[Value],
+        expr: &TExpr,
+    ) -> Result<Value, String> {
+        let (host_id, append_mode) = match (module, method, arg_values.len()) {
+            ("core.crypto", "__signing_generate", 0) => {
+                (self.host.crypto.signing_generate, false)
+            }
+            ("core.crypto", "__x25519_generate", 0) => {
+                (self.host.crypto.x25519_generate, false)
+            }
+            ("core.crypto", "__signing_public", 1) => {
+                (self.host.crypto.signing_public, false)
+            }
+            ("core.crypto", "__x25519_public", 1) => {
+                (self.host.crypto.x25519_public, false)
+            }
+            ("core.crypto", "sign", 2) => (self.host.crypto.sign, false),
+            ("core.crypto", "verify", 3) => (self.host.crypto.verify, false),
+            ("core.crypto", "sha256", 1) => (self.host.crypto.sha256, false),
+            ("core.crypto", "sha512_bytes", 1) => (self.host.crypto.sha512_bytes, false),
+            ("core.crypto", "blake3_bytes", 1) => (self.host.crypto.blake3_bytes, false),
+            ("core.crypto", "seal", 3) => (self.host.crypto.seal, false),
+            ("core.crypto", "open", 3) => (self.host.crypto.open, false),
+            ("core.crypto", "password_hash", 1) => (self.host.crypto.password_hash, false),
+            ("core.crypto", "password_verify", 2) => {
+                (self.host.crypto.password_verify, false)
+            }
+            ("core.crypto", "__password_text", 1) => {
+                (self.host.crypto.password_text, false)
+            }
+            ("core.crypto", "file_open", 3) => (self.host.crypto.file_open, false),
+            ("core.crypto", "__secret_from_bytes", 1) => {
+                (self.host.crypto.secret_from_bytes, false)
+            }
+            ("core.crypto", "hkdf_sha256", 4) => (self.host.crypto.hkdf_sha256, false),
+            ("core.crypto", "x25519_public", 1) => {
+                (self.host.crypto.x25519_public_from_bytes, false)
+            }
+            ("core.crypto", "x25519_shared", 2) => (self.host.crypto.x25519_shared, false),
+            ("core.crypto", "constant_time_equal", 2) => {
+                (self.host.crypto.constant_time_equal, false)
+            }
+            ("core.crypto", "constant_time_equal_bytes", 2) => {
+                (self.host.crypto.constant_time_equal_bytes, false)
+            }
+            ("core.crypto", "file_seal", 3) => (self.host.crypto.file_seal, false),
+            ("core.crypto", "__digest256_hex", 1) => {
+                (self.host.crypto.digest256_hex, false)
+            }
+            ("core.crypto", "__digest256_bytes", 1) => {
+                (self.host.crypto.digest256_bytes, false)
+            }
+            ("core.crypto", "__signature_bytes", 1) => {
+                (self.host.crypto.signature_bytes, false)
+            }
+            ("core.crypto", "__sealed_bytes", 1) => (self.host.crypto.sealed_bytes, false),
+            ("core.crypto", "__x25519_public_bytes", 1) => {
+                (self.host.crypto.x25519_public_bytes, false)
+            }
+            ("core.crypto", "__x25519_public_text", 1) => {
+                (self.host.crypto.x25519_public_text, false)
+            }
+            ("core.crypto", "__x25519_public_from_text", 1) => {
+                (self.host.crypto.x25519_public_from_text, false)
+            }
+            ("core.crypto", "__secret_from_text", 1) => {
+                (self.host.crypto.secret_from_text, false)
+            }
+            ("core.crypto", "__vault_wrapped_from_bytes", 1) => {
+                (self.host.crypto.vault_wrapped_from_bytes, false)
+            }
+            ("core.crypto", "__vault_wrapped_bytes", 1) => {
+                (self.host.crypto.vault_wrapped_bytes, false)
+            }
+            ("core.crypto", "__vault_unlock_recipient", 1) => {
+                (self.host.crypto.vault_unlock_recipient, false)
+            }
+            ("core.crypto", "__vault_unlock_passphrase", 1) => {
+                (self.host.crypto.vault_unlock_passphrase, false)
+            }
+            ("core.crypto.expert", "aes256gcm_seal", 4) => {
+                (self.host.crypto.expert_aes256gcm_seal, false)
+            }
+            ("core.crypto.expert", "aes256gcm_open", 4) => {
+                (self.host.crypto.expert_aes256gcm_open, false)
+            }
+            ("core.crypto.expert", "open_v1", 2) => {
+                (self.host.crypto.expert_open_v1, false)
+            }
+            ("core.crypto.expert", "migrate_v1", 4) => {
+                (self.host.crypto.expert_migrate_v1, false)
+            }
+            ("core.crypto.expert", "x25519_raw", 2) => {
+                (self.host.crypto.expert_x25519, true)
+            }
+            ("core.crypto.expert", "hkdf_sha256_raw", 4) => {
+                (self.host.crypto.expert_hkdf_sha256, false)
+            }
+            ("core.crypto.expert", "secret_bytes", 1) => {
+                (self.host.crypto.expert_secret_bytes, false)
+            }
+            _ => {
+                return Err(format!("jit core call unsupported: {module}.{method}"));
+            }
+        };
+
+        let mut arg_values = arg_values.to_vec();
+        if append_mode {
+            arg_values.push(self.b.ins().iconst(types::I64, 1));
+        }
+        let host = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host, &arg_values);
+        let value = self.b.inst_results(call)[0];
+        if module == "core.crypto" {
+            self.emit_trap_check()?;
+            if matches!(
+                method,
+                "constant_time_equal" | "constant_time_equal_bytes"
+            ) || matches!(&expr.ty, Type::Bool)
+            {
+                return Ok(self.b.ins().ireduce(types::I8, value));
+            }
+        }
+        Ok(value)
+    }
+
     /// Exhaustive match on every `TExprKind` variant (`TIR/mod.rs`) — the JIT
     /// half of the R12 two-consumer contract; `TIR/emit/expressions.rs::
     /// emit_tir_expr` is the AOT half. Each variant here is either lowered for
@@ -8931,5883 +9544,5657 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
-        match &expr.kind {
-            TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
-            TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
-                (*v as f32) as f64
+    fn lower_expr_core(&mut self, expr: &TExpr) -> Result<Value, String> { match &expr.kind { TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
+    TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
+        (*v as f32) as f64
+    } else {
+        *v
+    })),
+    TExprKind::BoolLit(v) => Ok(self.b.ins().iconst(types::I8, if *v { 1 } else { 0 })),
+    TExprKind::CharLit(v) => Ok(self.b.ins().iconst(types::I32, *v as i64)),
+    TExprKind::StrLit(parts) => self.lower_string_lit(parts),
+    TExprKind::Local(local) => self.load_local(local),
+    TExprKind::InlineBlock(stmts) => self.lower_inline_block(stmts, &expr.ty),
+    TExprKind::Borrow { place, .. } => {
+        // JIT has no borrow ABI — materialize the place value (scalar /
+        // field / already-materialized view handle).
+        self.lower_expr(place)
+    }
+    TExprKind::Unary { op, operand } => {
+        let inner = self.lower_expr(operand)?;
+        Ok(match op {
+            UnOp::Neg => match &operand.ty {
+                Type::Int => self.b.ins().ineg(inner),
+                Type::IntN {
+                    signed: true,
+                    bits,
+                } => {
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    self.lower_intn_values(
+                        BinOp::Sub,
+                        INTN_MODE_TRAP,
+                        zero,
+                        inner,
+                        true,
+                        *bits,
+                        true,
+                    )?
+                }
+                Type::Float => self.b.ins().fneg(inner),
+                other => {
+                    return Err(format!("jit unary neg unsupported type: {other:?}"));
+                }
+            },
+            // D-BITNOT1=A: `!` turns over every bit it is given. On a
+            // Bool that is the one bit; on a whole number it is the
+            // bitwise complement, which Cranelift spells `bnot`.
+            UnOp::Not => match &operand.ty {
+                Type::Int => self.b.ins().bnot(inner),
+                // Turning over every bit is exclusive-or with a value
+                // whose bits are all set, so the fixed-width path
+                // reuses the host table that already narrows to the
+                // declared width.
+                Type::IntN { signed, bits } => {
+                    let ones = self.b.ins().iconst(types::I64, -1);
+                    self.lower_intn_values(
+                        BinOp::BitXor,
+                        INTN_MODE_TRAP,
+                        inner,
+                        ones,
+                        *signed,
+                        *bits,
+                        true,
+                    )?
+                }
+                _ => {
+                    let zero = self.b.ins().iconst(types::I8, 0);
+                    let one = self.b.ins().iconst(types::I8, 1);
+                    let cmp = self.b.ins().icmp(IntCC::Equal, inner, zero);
+                    self.b.ins().select(cmp, one, zero)
+                }
+            },
+        })
+    }
+    TExprKind::IncDec {
+        op,
+        place,
+        postfix,
+        ty,
+    } => self.lower_incdec(*op, place, *postfix, ty),
+    TExprKind::Binary {
+        op,
+        overflow,
+        line,
+        lhs,
+        rhs,
+    } => {
+        if matches!(op, BinOp::And | BinOp::Or) {
+            return self.lower_short_circuit(*op, lhs, rhs);
+        }
+        if matches!(op, BinOp::Add | BinOp::Sub)
+            && (Self::is_layout_axis_ty(&expr.ty)
+                || Self::is_layout_axis_ty(&lhs.ty)
+                || Self::is_layout_axis_ty(&rhs.ty))
+        {
+            let l = self.lower_expr(lhs)?;
+            let r = self.lower_expr(rhs)?;
+            let host_id = if matches!(op, BinOp::Add) {
+                self.host.layout.add
             } else {
-                *v
-            })),
-            TExprKind::BoolLit(v) => Ok(self.b.ins().iconst(types::I8, if *v { 1 } else { 0 })),
-            TExprKind::CharLit(v) => Ok(self.b.ins().iconst(types::I32, *v as i64)),
-            TExprKind::StrLit(parts) => self.lower_string_lit(parts),
-            TExprKind::Local(local) => self.load_local(local),
-            TExprKind::InlineBlock(stmts) => self.lower_inline_block(stmts, &expr.ty),
-            TExprKind::Borrow { place, .. } => {
-                // JIT has no borrow ABI — materialize the place value (scalar /
-                // field / already-materialized view handle).
-                self.lower_expr(place)
-            }
-            TExprKind::Unary { op, operand } => {
-                let inner = self.lower_expr(operand)?;
-                Ok(match op {
-                    UnOp::Neg => match &operand.ty {
-                        Type::Int => self.b.ins().ineg(inner),
-                        Type::IntN {
-                            signed: true,
-                            bits,
-                        } => {
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            self.lower_intn_values(
-                                BinOp::Sub,
-                                INTN_MODE_TRAP,
-                                zero,
-                                inner,
-                                true,
-                                *bits,
-                                true,
-                            )?
-                        }
-                        Type::Float => self.b.ins().fneg(inner),
-                        other => {
-                            return Err(format!("jit unary neg unsupported type: {other:?}"));
-                        }
-                    },
-                    // D-BITNOT1=A: `!` turns over every bit it is given. On a
-                    // Bool that is the one bit; on a whole number it is the
-                    // bitwise complement, which Cranelift spells `bnot`.
-                    UnOp::Not => match &operand.ty {
-                        Type::Int => self.b.ins().bnot(inner),
-                        // Turning over every bit is exclusive-or with a value
-                        // whose bits are all set, so the fixed-width path
-                        // reuses the host table that already narrows to the
-                        // declared width.
-                        Type::IntN { signed, bits } => {
-                            let ones = self.b.ins().iconst(types::I64, -1);
-                            self.lower_intn_values(
-                                BinOp::BitXor,
-                                INTN_MODE_TRAP,
-                                inner,
-                                ones,
-                                *signed,
-                                *bits,
-                                true,
-                            )?
-                        }
-                        _ => {
-                            let zero = self.b.ins().iconst(types::I8, 0);
-                            let one = self.b.ins().iconst(types::I8, 1);
-                            let cmp = self.b.ins().icmp(IntCC::Equal, inner, zero);
-                            self.b.ins().select(cmp, one, zero)
-                        }
-                    },
-                })
-            }
-            TExprKind::IncDec {
-                op,
-                place,
-                postfix,
-                ty,
-            } => self.lower_incdec(*op, place, *postfix, ty),
-            TExprKind::Binary {
-                op,
-                overflow,
-                line,
-                lhs,
-                rhs,
-            } => {
-                if matches!(op, BinOp::And | BinOp::Or) {
-                    return self.lower_short_circuit(*op, lhs, rhs);
-                }
-                if matches!(op, BinOp::Add | BinOp::Sub)
-                    && (Self::is_layout_axis_ty(&expr.ty)
-                        || Self::is_layout_axis_ty(&lhs.ty)
-                        || Self::is_layout_axis_ty(&rhs.ty))
+                self.host.layout.sub
+            };
+            return Ok(self.call_host(host_id, &[l, r]));
+        }
+        self.lower_binary(*op, *overflow, *line, lhs, rhs)
+    }
+    TExprKind::CompareChain { operands, ops, hooks } => {
+        self.lower_compare_chain(operands, ops, hooks)
+    }
+    TExprKind::Call { name, args, .. } => {
+        let func_id = self
+            .func_ids
+            .get(name)
+            .copied()
+            .ok_or_else(|| format!("jit call to unknown function `{name}`"))?;
+        let mut arg_vals = Vec::with_capacity(args.len());
+        let mut copy_back = Vec::new();
+        for arg in args {
+            if Self::is_range_ty(&arg.value.ty) {
+                if arg.mut_borrow
+                    || arg.arc_clone
+                    || arg.widen_to_vec
+                    || arg.widen_to_union.is_some()
                 {
-                    let l = self.lower_expr(lhs)?;
-                    let r = self.lower_expr(rhs)?;
-                    let host_id = if matches!(op, BinOp::Add) {
-                        self.host.layout.add
-                    } else {
-                        self.host.layout.sub
-                    };
-                    return Ok(self.call_host(host_id, &[l, r]));
+                    return Err("jit Range call wrapper unsupported".to_string());
                 }
-                self.lower_binary(*op, *overflow, *line, lhs, rhs)
+                arg_vals.extend(self.lower_range_expr(&arg.value)?);
+                continue;
             }
-            TExprKind::CompareChain { operands, ops, hooks } => {
-                self.lower_compare_chain(operands, ops, hooks)
+            let scalar_write = arg.mut_borrow
+                && matches!(
+                    &arg.value.ty,
+                    Type::Int
+                        | Type::IntN { .. }
+                        | Type::Float
+                        | Type::Float32
+                        | Type::Bool
+                        | Type::Char
+                );
+            if !scalar_write {
+                arg_vals.push(self.lower_call_arg(arg)?);
+                continue;
             }
-            TExprKind::Call { name, args, .. } => {
-                let func_id = self
-                    .func_ids
-                    .get(name)
+            let TExprKind::Local(local) = &arg.value.kind else {
+                return Err("jit writable scalar argument must be a local".to_string());
+            };
+            let key = Self::local_key(local);
+            let var = self
+                .vars
+                .get(&key)
+                .copied()
+                .ok_or_else(|| format!("jit writable scalar unknown `{key}`"))?;
+            let value = self.b.use_var(var);
+            let clif = self
+                .meta
+                .clif_ty(&arg.value.ty)
+                .ok_or("jit writable scalar argument type")?;
+            let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                u32::from(clif.bytes()),
+                0,
+            ));
+            self.b.ins().stack_store(value, slot, 0);
+            let pointer = self.b.ins().stack_addr(
+                self.module.target_config().pointer_type(),
+                slot,
+                0,
+            );
+            arg_vals.push(pointer);
+            copy_back.push((var, slot, clif));
+        }
+        let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+        let call = self.b.ins().call(func_ref, &arg_vals);
+        for (var, slot, clif) in copy_back {
+            let value = self.b.ins().stack_load(clif, slot, 0);
+            self.b.def_var(var, value);
+        }
+        if Self::is_range_ty(&expr.ty) {
+            return Err("jit Range call needs the three-value ABI".to_string());
+        }
+        let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+        self.emit_trap_check()?;
+        Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+    }
+    TExprKind::Print(inner) => {
+        self.emit_print(inner)?;
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+    TExprKind::IfExpr {
+        cond,
+        then_body,
+        then_value,
+        else_body,
+        else_value,
+    } => {
+        if let Some(entries) =
+            Self::map_lit_desugar_entries(cond.as_ref(), then_body, then_value)
+        {
+            return self.lower_map_lit_pairs(entries);
+        }
+        let cond_val = match cond.as_ref() {
+            TIfCond::Plain(cond) => self.lower_expr(cond)?,
+            TIfCond::And { .. } => {
+                return Err("jit if-expression binding conjunction unsupported".to_string())
+            }
+            TIfCond::IfLet { pattern, subj } => {
+                return self.lower_if_let_expr(
+                    pattern,
+                    subj,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    &expr.ty,
+                );
+            }
+            TIfCond::IsNone { .. } => {
+                return Err("jit if-expression is-none unsupported".to_string())
+            }
+            TIfCond::Matches { .. } => {
+                return Err("jit if-expression pattern match unsupported".to_string())
+            }
+        };
+        let ret_ty = clif_ty(&expr.ty).ok_or("jit if-expr result type unsupported")?;
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        self.b.append_block_param(merge_block, ret_ty);
+        self.b
+            .ins()
+            .brif(cond_val, then_block, &[], else_block, &[]);
+    
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+        self.lower_stmts_scoped(then_body)?;
+        if !self.dead {
+            let then_val = self.lower_expr(then_value)?;
+            if !self.dead {
+                self.b.ins().jump(merge_block, &[then_val]);
+            }
+        }
+        let then_reaches_merge = !self.dead;
+    
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.lower_stmts_scoped(else_body)?;
+        if !self.dead {
+            let else_val = self.lower_expr(else_value)?;
+            if !self.dead {
+                self.b.ins().jump(merge_block, &[else_val]);
+            }
+        }
+        let else_reaches_merge = !self.dead;
+    
+        self.b.switch_to_block(merge_block);
+        self.b.seal_block(merge_block);
+        self.dead = !(then_reaches_merge || else_reaches_merge);
+        let phi = self.b.block_params(merge_block)[0];
+        Ok(phi)
+    }
+    TExprKind::Clone(inner) => self.lower_clone(inner),
+    TExprKind::CoreCall {
+        module,
+        method,
+        args,
+        ..
+    } => {
+        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+            if !row.accepts_arity(args.len()) {
+                return Err(format!(
+                    "jit core call arity mismatch: {module}.{method} expects {}..{}, got {}",
+                    row.arity(),
+                    row.signature.max_arity,
+                    args.len()
+                ));
+            }
+            if let Some(value) = self.lower_recorded_core_call(row, args, &expr.ty)? {
+                return Ok(value);
+            }
+        }
+        if module == "core.reflect" && method == "of" && args.len() == 1 {
+            return self.lower_reflect_of(&args[0]);
+        }
+        if module == "jet.unit" && method == "magnitude" && args.len() == 1 {
+            let value = self.lower_expr(&args[0])?;
+            let text = self.call_host(self.host.str_begin, &[]);
+            let push = match self.meta.clif_ty(&args[0].ty) {
+                Some(ty) if ty == types::I64 => self.host.str_push_i64,
+                Some(ty) if ty == types::F64 => {
+                    self.host.str_push_compact_f64
+                }
+                _ => {
+                    return Err(
+                        "jit unit magnitude numeric type unsupported".to_string()
+                    )
+                }
+            };
+            let push = self.module.declare_func_in_func(push, self.b.func);
+            self.b.ins().call(push, &[text, value]);
+            return Ok(text);
+        }
+        if module == "core.testing" {
+            return self.lower_testing_call(method, args, &expr.ty);
+        }
+        if module == "core.data" {
+            return self.lower_data_call(method, args, &expr.ty);
+        }
+        if module == "core.mod" && method == "load" && args.len() == 2 {
+            let path = self.lower_expr(&args[0])?;
+            let grant = self.lower_expr(&args[1])?;
+            return Ok(self.call_host(self.host.core.mod_load, &[path, grant]));
+        }
+        if module == "core.mem" && method == "address_of" && args.len() == 1 {
+            let place = &args[0];
+            if let Some(local) = Self::raw_place_local(place) {
+                let key = Self::local_key(local);
+                let var = self
+                    .vars
+                    .get(&key)
                     .copied()
-                    .ok_or_else(|| format!("jit call to unknown function `{name}`"))?;
-                let mut arg_vals = Vec::with_capacity(args.len());
-                let mut copy_back = Vec::new();
-                for arg in args {
-                    if Self::is_range_ty(&arg.value.ty) {
-                        if arg.mut_borrow
-                            || arg.arc_clone
-                            || arg.widen_to_vec
-                            || arg.widen_to_union.is_some()
-                        {
-                            return Err("jit Range call wrapper unsupported".to_string());
-                        }
-                        arg_vals.extend(self.lower_range_expr(&arg.value)?);
-                        continue;
-                    }
-                    let scalar_write = arg.mut_borrow
-                        && matches!(
-                            &arg.value.ty,
-                            Type::Int
-                                | Type::IntN { .. }
-                                | Type::Float
-                                | Type::Float32
-                                | Type::Bool
-                                | Type::Char
-                        );
-                    if !scalar_write {
-                        arg_vals.push(self.lower_call_arg(arg)?);
-                        continue;
-                    }
-                    let TExprKind::Local(local) = &arg.value.kind else {
-                        return Err("jit writable scalar argument must be a local".to_string());
-                    };
-                    let key = Self::local_key(local);
-                    let var = self
-                        .vars
-                        .get(&key)
-                        .copied()
-                        .ok_or_else(|| format!("jit writable scalar unknown `{key}`"))?;
-                    let value = self.b.use_var(var);
-                    let clif = self
-                        .meta
-                        .clif_ty(&arg.value.ty)
-                        .ok_or("jit writable scalar argument type")?;
+                    .ok_or_else(|| {
+                        format!("jit address_of unknown local `{}`", local.name)
+                    })?;
+                let clif = self.meta.clif_ty(&place.ty).ok_or_else(|| {
+                    format!("jit address_of payload unsupported: {:?}", place.ty)
+                })?;
+                let slot = if let Some(slot) = self.raw_slots.get(&key).copied() {
+                    slot
+                } else {
                     let slot = self.b.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         u32::from(clif.bytes()),
                         0,
                     ));
+                    let value = self.b.use_var(var);
                     self.b.ins().stack_store(value, slot, 0);
-                    let pointer = self.b.ins().stack_addr(
-                        self.module.target_config().pointer_type(),
-                        slot,
-                        0,
-                    );
-                    arg_vals.push(pointer);
-                    copy_back.push((var, slot, clif));
-                }
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &arg_vals);
-                for (var, slot, clif) in copy_back {
-                    let value = self.b.ins().stack_load(clif, slot, 0);
-                    self.b.def_var(var, value);
-                }
-                if Self::is_range_ty(&expr.ty) {
-                    return Err("jit Range call needs the three-value ABI".to_string());
-                }
-                let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                self.emit_trap_check()?;
-                Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
-            }
-            TExprKind::Print(inner) => {
-                self.emit_print(inner)?;
-                Ok(self.b.ins().iconst(types::I8, 0))
-            }
-            TExprKind::IfExpr {
-                cond,
-                then_body,
-                then_value,
-                else_body,
-                else_value,
-            } => {
-                if let Some(entries) =
-                    Self::map_lit_desugar_entries(cond.as_ref(), then_body, then_value)
-                {
-                    return self.lower_map_lit_pairs(entries);
-                }
-                let cond_val = match cond.as_ref() {
-                    TIfCond::Plain(cond) => self.lower_expr(cond)?,
-                    TIfCond::And { .. } => {
-                        return Err("jit if-expression binding conjunction unsupported".to_string())
-                    }
-                    TIfCond::IfLet { pattern, subj } => {
-                        return self.lower_if_let_expr(
-                            pattern,
-                            subj,
-                            then_body,
-                            then_value,
-                            else_body,
-                            else_value,
-                            &expr.ty,
-                        );
-                    }
-                    TIfCond::IsNone { .. } => {
-                        return Err("jit if-expression is-none unsupported".to_string())
-                    }
-                    TIfCond::Matches { .. } => {
-                        return Err("jit if-expression pattern match unsupported".to_string())
-                    }
+                    self.raw_slots.insert(key, slot);
+                    slot
                 };
-                let ret_ty = clif_ty(&expr.ty).ok_or("jit if-expr result type unsupported")?;
-                let then_block = self.b.create_block();
-                let else_block = self.b.create_block();
-                let merge_block = self.b.create_block();
-                self.b.append_block_param(merge_block, ret_ty);
-                self.b
-                    .ins()
-                    .brif(cond_val, then_block, &[], else_block, &[]);
-
-                self.b.switch_to_block(then_block);
-                self.b.seal_block(then_block);
-                self.lower_stmts_scoped(then_body)?;
-                if !self.dead {
-                    let then_val = self.lower_expr(then_value)?;
-                    if !self.dead {
-                        self.b.ins().jump(merge_block, &[then_val]);
-                    }
-                }
-                let then_reaches_merge = !self.dead;
-
-                self.b.switch_to_block(else_block);
-                self.b.seal_block(else_block);
-                self.lower_stmts_scoped(else_body)?;
-                if !self.dead {
-                    let else_val = self.lower_expr(else_value)?;
-                    if !self.dead {
-                        self.b.ins().jump(merge_block, &[else_val]);
-                    }
-                }
-                let else_reaches_merge = !self.dead;
-
-                self.b.switch_to_block(merge_block);
-                self.b.seal_block(merge_block);
-                self.dead = !(then_reaches_merge || else_reaches_merge);
-                let phi = self.b.block_params(merge_block)[0];
-                Ok(phi)
+                let address = self.b.ins().stack_addr(
+                    self.module.target_config().pointer_type(),
+                    slot,
+                    0,
+                );
+                self.real_address_values.insert(address);
+                return Ok(address);
             }
-            TExprKind::Clone(inner) => self.lower_clone(inner),
-            TExprKind::CoreCall {
-                module,
-                method,
-                args,
-                ..
-            } => {
-                if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-                    if !row.accepts_arity(args.len()) {
-                        return Err(format!(
-                            "jit core call arity mismatch: {module}.{method} expects {}..{}, got {}",
-                            row.arity(),
-                            row.signature.max_arity,
-                            args.len()
-                        ));
-                    }
-                    if let Some(value) = self.lower_recorded_core_call(row, args, &expr.ty)? {
-                        return Ok(value);
-                    }
+            // D-PIN1 / S58: the place is not a bare local (e.g. a field
+            // projection through a heap record, `node.payload`). Arena
+            // records can grow/reallocate their backing storage, so —
+            // unlike the local's own Cranelift stack slot above — there
+            // is no real, stable pointer to hand back safely. TIR-eval
+            // faces the same "no real address" fact (see
+            // `tir_place_address_key` / `stable_place_address` in
+            // jet-codegen's TIR eval) and mints a stable non-zero
+            // identity from the place's structural path instead; mirror
+            // that exact algorithm here so every non-AOT tier agrees on
+            // the one non-zero / inequality facts a program can observe
+            // (I9). AOT alone keeps the real `&place as *const _` cast.
+            let key = jet_codegen::Codegen::TIR::tir_place_address_key(place);
+            let addr = jet_codegen::Codegen::TIR::stable_place_address(&key);
+            return Ok(self.b.ins().iconst(types::I64, addr));
+        }
+        if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
+            if self.unsafe_depth == 0 {
+                return Err("jit volatile read outside #Unsafe".to_string());
+            }
+            let pointer = self.lower_expr(&args[0])?;
+            if !self.real_address_values.contains(&pointer) {
+                return Err("jit volatile read address unsupported".to_string());
+            }
+            let clif = self.meta.clif_ty(&expr.ty).ok_or_else(|| {
+                format!("jit volatile read result unsupported: {:?}", expr.ty)
+            })?;
+            return Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0));
+        }
+        if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
+            if self.unsafe_depth == 0 {
+                return Err("jit volatile write outside #Unsafe".to_string());
+            }
+            let pointer = self.lower_expr(&args[0])?;
+            if !self.real_address_values.contains(&pointer) {
+                return Err("jit volatile write address unsupported".to_string());
+            }
+            let value = self.lower_expr(&args[1])?;
+            self.b
+                .ins()
+                .store(MemFlags::trusted(), value, pointer, 0);
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        if module == "core.crypto" {
+            return self.lower_crypto_core_call(expr);
+        }
+        if module == "core.crypto.expert" {
+            return self.lower_crypto_core_call(expr);
+        }
+        if module == "core.io" && method == "args" && args.is_empty() {
+            return Ok(self.call_host(self.host.coll.io_args, &[]));
+        }
+        if module == "core.io" && method == "print" && args.len() == 1 {
+            self.emit_print(&args[0])?;
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        if module == "core.io" && method == "println" && args.len() == 1 {
+            self.emit_print(&args[0])?;
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        if module == "core.io" && method == "readline" && args.is_empty() {
+            // #1480: dedicated host — marshals only, calls the same
+            // `jet_std_io_readline` Prelude symbol AOT emits (I9).
+            // Do not route through `io_input`: that host backs the
+            // separate `core.io.input` surface.
+            return Ok(self.call_host(self.host.io.readline, &[]));
+        }
+        if module == "core.science.measurement"
+            && method == "from"
+            && args.len() == 2
+        {
+            let value = self.lower_expr(&args[0])?;
+            let uncertainty = self.lower_expr(&args[1])?;
+            return Ok(self.call_host(self.host.measurement_new, &[value, uncertainty]));
+        }
+        if module == "core.io" && method == "input" && args.len() <= 1 {
+            let (has_prompt, prompt) = if args.is_empty() {
+                (
+                    self.b.ins().iconst(types::I8, 0),
+                    self.b.ins().iconst(types::I64, 0),
+                )
+            } else {
+                (
+                    self.b.ins().iconst(types::I8, 1),
+                    self.lower_expr(&args[0])?,
+                )
+            };
+            return Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt]));
+        }
+        if module == "core.io" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "stdout" if args.is_empty() => (self.host.io.stdout, Vec::new()),
+                "stderr" if args.is_empty() => (self.host.io.stderr, Vec::new()),
+                "stdin" if args.is_empty() => (self.host.io.stdin, Vec::new()),
+                "terminal_width" if args.is_empty() => {
+                    (self.host.io.terminal_width, Vec::new())
                 }
-                if module == "core.reflect" && method == "of" && args.len() == 1 {
-                    return self.lower_reflect_of(&args[0]);
+                "terminal_height" if args.is_empty() => {
+                    (self.host.io.terminal_height, Vec::new())
                 }
-                if module == "jet.unit" && method == "magnitude" && args.len() == 1 {
-                    let value = self.lower_expr(&args[0])?;
-                    let text = self.call_host(self.host.str_begin, &[]);
-                    let push = match self.meta.clif_ty(&args[0].ty) {
-                        Some(ty) if ty == types::I64 => self.host.str_push_i64,
-                        Some(ty) if ty == types::F64 => {
-                            self.host.str_push_compact_f64
-                        }
-                        _ => {
-                            return Err(
-                                "jit unit magnitude numeric type unsupported".to_string()
-                            )
-                        }
-                    };
-                    let push = self.module.declare_func_in_func(push, self.b.func);
-                    self.b.ins().call(push, &[text, value]);
-                    return Ok(text);
-                }
-                if module == "core.testing" {
-                    return self.lower_testing_call(method, args, &expr.ty);
-                }
-                if module == "core.data" {
-                    return self.lower_data_call(method, args, &expr.ty);
-                }
-                if module == "core.mod" && method == "load" && args.len() == 2 {
-                    let path = self.lower_expr(&args[0])?;
-                    let grant = self.lower_expr(&args[1])?;
-                    return Ok(self.call_host(self.host.core.mod_load, &[path, grant]));
-                }
-                if module == "core.mem" && method == "address_of" && args.len() == 1 {
-                    let place = &args[0];
-                    if let Some(local) = Self::raw_place_local(place) {
-                        let key = Self::local_key(local);
-                        let var = self
-                            .vars
-                            .get(&key)
-                            .copied()
-                            .ok_or_else(|| {
-                                format!("jit address_of unknown local `{}`", local.name)
-                            })?;
-                        let clif = self.meta.clif_ty(&place.ty).ok_or_else(|| {
-                            format!("jit address_of payload unsupported: {:?}", place.ty)
-                        })?;
-                        let slot = if let Some(slot) = self.raw_slots.get(&key).copied() {
-                            slot
-                        } else {
-                            let slot = self.b.create_sized_stack_slot(StackSlotData::new(
-                                StackSlotKind::ExplicitSlot,
-                                u32::from(clif.bytes()),
-                                0,
-                            ));
-                            let value = self.b.use_var(var);
-                            self.b.ins().stack_store(value, slot, 0);
-                            self.raw_slots.insert(key, slot);
-                            slot
-                        };
-                        let address = self.b.ins().stack_addr(
-                            self.module.target_config().pointer_type(),
-                            slot,
-                            0,
-                        );
-                        self.real_address_values.insert(address);
-                        return Ok(address);
-                    }
-                    // D-PIN1 / S58: the place is not a bare local (e.g. a field
-                    // projection through a heap record, `node.payload`). Arena
-                    // records can grow/reallocate their backing storage, so —
-                    // unlike the local's own Cranelift stack slot above — there
-                    // is no real, stable pointer to hand back safely. TIR-eval
-                    // faces the same "no real address" fact (see
-                    // `tir_place_address_key` / `stable_place_address` in
-                    // jet-codegen's TIR eval) and mints a stable non-zero
-                    // identity from the place's structural path instead; mirror
-                    // that exact algorithm here so every non-AOT tier agrees on
-                    // the one non-zero / inequality facts a program can observe
-                    // (I9). AOT alone keeps the real `&place as *const _` cast.
-                    let key = jet_codegen::Codegen::TIR::tir_place_address_key(place);
-                    let addr = jet_codegen::Codegen::TIR::stable_place_address(&key);
-                    return Ok(self.b.ins().iconst(types::I64, addr));
-                }
-                if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
-                    if self.unsafe_depth == 0 {
-                        return Err("jit volatile read outside #Unsafe".to_string());
-                    }
-                    let pointer = self.lower_expr(&args[0])?;
-                    if !self.real_address_values.contains(&pointer) {
-                        return Err("jit volatile read address unsupported".to_string());
-                    }
-                    let clif = self.meta.clif_ty(&expr.ty).ok_or_else(|| {
-                        format!("jit volatile read result unsupported: {:?}", expr.ty)
-                    })?;
-                    return Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0));
-                }
-                if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
-                    if self.unsafe_depth == 0 {
-                        return Err("jit volatile write outside #Unsafe".to_string());
-                    }
-                    let pointer = self.lower_expr(&args[0])?;
-                    if !self.real_address_values.contains(&pointer) {
-                        return Err("jit volatile write address unsupported".to_string());
-                    }
-                    let value = self.lower_expr(&args[1])?;
-                    self.b
-                        .ins()
-                        .store(MemFlags::trusted(), value, pointer, 0);
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
-                if module == "core.crypto" {
-                    let (host_id, arg_values): (FuncId, Vec<Value>) =
-                        match (method.as_str(), args.as_slice()) {
-                            ("__signing_generate", []) => {
-                                (self.host.crypto.signing_generate, Vec::new())
-                            }
-                            ("__x25519_generate", []) => {
-                                (self.host.crypto.x25519_generate, Vec::new())
-                            }
-                            ("__signing_public", [key]) => {
-                                (self.host.crypto.signing_public, vec![self.lower_expr(key)?])
-                            }
-                            ("__x25519_public", [key]) => {
-                                (self.host.crypto.x25519_public, vec![self.lower_expr(key)?])
-                            }
-                            ("sign", [key, message]) => (
-                                self.host.crypto.sign,
-                                vec![self.lower_expr(key)?, self.lower_expr(message)?],
-                            ),
-                            ("verify", [key, message, signature]) => (
-                                self.host.crypto.verify,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(message)?,
-                                    self.lower_expr(signature)?,
-                                ],
-                            ),
-                            ("sha256", [data]) => {
-                                (self.host.crypto.sha256, vec![self.lower_expr(data)?])
-                            }
-                            ("sha512_bytes", [data]) => {
-                                (self.host.crypto.sha512_bytes, vec![self.lower_expr(data)?])
-                            }
-                            ("blake3_bytes", [data]) => {
-                                (self.host.crypto.blake3_bytes, vec![self.lower_expr(data)?])
-                            }
-                            ("seal", [recipients, plaintext, aad]) => (
-                                self.host.crypto.seal,
-                                vec![
-                                    self.lower_expr(recipients)?,
-                                    self.lower_expr(plaintext)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("open", [recipient, sealed, aad]) => (
-                                self.host.crypto.open,
-                                vec![
-                                    self.lower_expr(recipient)?,
-                                    self.lower_expr(sealed)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("password_hash", [password]) => (
-                                self.host.crypto.password_hash,
-                                vec![self.lower_expr(password)?],
-                            ),
-                            ("password_verify", [password, stored]) => (
-                                self.host.crypto.password_verify,
-                                vec![self.lower_expr(password)?, self.lower_expr(stored)?],
-                            ),
-                            ("__password_text", [hash]) => (
-                                self.host.crypto.password_text,
-                                vec![self.lower_expr(hash)?],
-                            ),
-                            ("file_open", [recipient, source, dest]) => (
-                                self.host.crypto.file_open,
-                                vec![
-                                    self.lower_expr(recipient)?,
-                                    self.lower_expr(source)?,
-                                    self.lower_expr(dest)?,
-                                ],
-                            ),
-                            ("__secret_from_bytes", [bytes]) => (
-                                self.host.crypto.secret_from_bytes,
-                                vec![self.lower_expr(bytes)?],
-                            ),
-                            ("hkdf_sha256", [ikm, salt, info, length]) => (
-                                self.host.crypto.hkdf_sha256,
-                                vec![
-                                    self.lower_expr(ikm)?,
-                                    self.lower_expr(salt)?,
-                                    self.lower_expr(info)?,
-                                    self.lower_expr(length)?,
-                                ],
-                            ),
-                            ("x25519_public", [secret]) => (
-                                self.host.crypto.x25519_public_from_bytes,
-                                vec![self.lower_expr(secret)?],
-                            ),
-                            ("x25519_shared", [secret, public]) => (
-                                self.host.crypto.x25519_shared,
-                                vec![self.lower_expr(secret)?, self.lower_expr(public)?],
-                            ),
-                            ("constant_time_equal", [a, b]) => (
-                                self.host.crypto.constant_time_equal,
-                                vec![self.lower_expr(a)?, self.lower_expr(b)?],
-                            ),
-                            ("constant_time_equal_bytes", [a, b]) => (
-                                self.host.crypto.constant_time_equal_bytes,
-                                vec![self.lower_expr(a)?, self.lower_expr(b)?],
-                            ),
-                            ("file_seal", [recipients, source, dest]) => (
-                                self.host.crypto.file_seal,
-                                vec![
-                                    self.lower_expr(recipients)?,
-                                    self.lower_expr(source)?,
-                                    self.lower_expr(dest)?,
-                                ],
-                            ),
-                            ("__digest256_hex", [digest]) => (
-                                self.host.crypto.digest256_hex,
-                                vec![self.lower_expr(digest)?],
-                            ),
-                            ("__digest256_bytes", [digest]) => (
-                                self.host.crypto.digest256_bytes,
-                                vec![self.lower_expr(digest)?],
-                            ),
-                            ("__signature_bytes", [signature]) => (
-                                self.host.crypto.signature_bytes,
-                                vec![self.lower_expr(signature)?],
-                            ),
-                            ("__sealed_bytes", [sealed]) => (
-                                self.host.crypto.sealed_bytes,
-                                vec![self.lower_expr(sealed)?],
-                            ),
-                            ("__x25519_public_bytes", [key]) => (
-                                self.host.crypto.x25519_public_bytes,
-                                vec![self.lower_expr(key)?],
-                            ),
-                            ("__x25519_public_text", [key]) => (
-                                self.host.crypto.x25519_public_text,
-                                vec![self.lower_expr(key)?],
-                            ),
-                            ("__x25519_public_from_text", [text]) => (
-                                self.host.crypto.x25519_public_from_text,
-                                vec![self.lower_expr(text)?],
-                            ),
-                            ("__secret_from_text", [text]) => (
-                                self.host.crypto.secret_from_text,
-                                vec![self.lower_expr(text)?],
-                            ),
-                            ("__vault_wrapped_from_bytes", [bytes]) => (
-                                self.host.crypto.vault_wrapped_from_bytes,
-                                vec![self.lower_expr(bytes)?],
-                            ),
-                            ("__vault_wrapped_bytes", [wrapped]) => (
-                                self.host.crypto.vault_wrapped_bytes,
-                                vec![self.lower_expr(wrapped)?],
-                            ),
-                            ("__vault_unlock_recipient", [identity]) => (
-                                self.host.crypto.vault_unlock_recipient,
-                                vec![self.lower_expr(identity)?],
-                            ),
-                            ("__vault_unlock_passphrase", [passphrase]) => (
-                                self.host.crypto.vault_unlock_passphrase,
-                                vec![self.lower_expr(passphrase)?],
-                            ),
-                            _ => {
-                                return Err(format!(
-                                    "jit core call unsupported: {module}.{method}"
-                                ))
-                            }
-                        };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &arg_values);
-                    let value = self.b.inst_results(call)[0];
-                    self.emit_trap_check()?;
-                    if matches!(
-                        method.as_str(),
-                        "constant_time_equal" | "constant_time_equal_bytes"
-                    ) || matches!(&expr.ty, Type::Bool)
-                    {
-                        return Ok(self.b.ins().ireduce(types::I8, value));
-                    }
-                    return Ok(value);
-                }
-                if module == "core.crypto.expert" {
-                    let (host_id, arg_values): (FuncId, Vec<Value>) =
-                        match (method.as_str(), args.as_slice()) {
-                            ("aes256gcm_seal", [key, nonce, plaintext, aad]) => (
-                                self.host.crypto.expert_aes256gcm_seal,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(nonce)?,
-                                    self.lower_expr(plaintext)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("aes256gcm_open", [key, nonce, ciphertext, aad]) => (
-                                self.host.crypto.expert_aes256gcm_open,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(nonce)?,
-                                    self.lower_expr(ciphertext)?,
-                                    self.lower_expr(aad)?,
-                                ],
-                            ),
-                            ("open_v1", [key, blob]) => (
-                                self.host.crypto.expert_open_v1,
-                                vec![self.lower_expr(key)?, self.lower_expr(blob)?],
-                            ),
-                            ("migrate_v1", [key, source, recipients, dest]) => (
-                                self.host.crypto.expert_migrate_v1,
-                                vec![
-                                    self.lower_expr(key)?,
-                                    self.lower_expr(source)?,
-                                    self.lower_expr(recipients)?,
-                                    self.lower_expr(dest)?,
-                                ],
-                            ),
-                            ("x25519_raw", [secret, public]) => (
-                                self.host.crypto.expert_x25519,
-                                vec![
-                                    self.lower_expr(secret)?,
-                                    self.lower_expr(public)?,
-                                    self.b.ins().iconst(types::I64, 1),
-                                ],
-                            ),
-                            ("hkdf_sha256_raw", [ikm, salt, info, length]) => (
-                                self.host.crypto.expert_hkdf_sha256,
-                                vec![
-                                    self.lower_expr(ikm)?,
-                                    self.lower_expr(salt)?,
-                                    self.lower_expr(info)?,
-                                    self.lower_expr(length)?,
-                                ],
-                            ),
-                            ("secret_bytes", [secret]) => (
-                                self.host.crypto.expert_secret_bytes,
-                                vec![self.lower_expr(secret)?],
-                            ),
-                            _ => {
-                                return Err(format!(
-                                    "jit core call unsupported: {module}.{method}"
-                                ))
-                            }
-                        };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &arg_values);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.io" && method == "args" && args.is_empty() {
-                    return Ok(self.call_host(self.host.coll.io_args, &[]));
-                }
-                if module == "core.io" && method == "print" && args.len() == 1 {
-                    self.emit_print(&args[0])?;
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
-                if module == "core.io" && method == "println" && args.len() == 1 {
-                    self.emit_print(&args[0])?;
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
-                if module == "core.io" && method == "readline" && args.is_empty() {
-                    // #1480: dedicated host — marshals only, calls the same
-                    // `jet_std_io_readline` Prelude symbol AOT emits (I9).
-                    // Do not route through `io_input`: that host backs the
-                    // separate `core.io.input` surface.
-                    return Ok(self.call_host(self.host.io.readline, &[]));
-                }
-                if module == "core.science.measurement"
-                    && method == "from"
-                    && args.len() == 2
+                "style" if args.len() == 2 => (
+                    self.host.io.style,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "style_force" if args.len() == 2 => (
+                    self.host.io.style_force,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "progress" if args.len() == 1
+                    && matches!(args.first().map(|arg| &arg.ty), Some(Type::String)) =>
                 {
-                    let value = self.lower_expr(&args[0])?;
-                    let uncertainty = self.lower_expr(&args[1])?;
-                    return Ok(self.call_host(self.host.measurement_new, &[value, uncertainty]));
+                    (self.host.io.progress, vec![self.lower_expr(&args[0])?])
                 }
-                if module == "core.io" && method == "input" && args.len() <= 1 {
-                    let (has_prompt, prompt) = if args.is_empty() {
-                        (
-                            self.b.ins().iconst(types::I8, 0),
-                            self.b.ins().iconst(types::I64, 0),
-                        )
-                    } else {
-                        (
-                            self.b.ins().iconst(types::I8, 1),
-                            self.lower_expr(&args[0])?,
-                        )
-                    };
-                    return Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt]));
-                }
-                if module == "core.io" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "stdout" if args.is_empty() => (self.host.io.stdout, Vec::new()),
-                        "stderr" if args.is_empty() => (self.host.io.stderr, Vec::new()),
-                        "stdin" if args.is_empty() => (self.host.io.stdin, Vec::new()),
-                        "terminal_width" if args.is_empty() => {
-                            (self.host.io.terminal_width, Vec::new())
+                "progress" if (1..=3).contains(&args.len()) => {
+                    let source = self.lower_expr(&args[0])?;
+                    let description = args
+                        .get(1)
+                        .map(|arg| self.lower_expr(arg))
+                        .unwrap_or_else(|| {
+                            Ok(self.b.ins().iconst(
+                                types::I64,
+                                self.runtime.heap.alloc_string("Progress".to_string()),
+                            ))
+                        })?;
+                    let format = args
+                        .get(2)
+                        .map(|arg| self.lower_expr(arg))
+                        .unwrap_or_else(|| {
+                            Ok(self.b.ins().iconst(
+                                types::I64,
+                                self.runtime.heap.alloc_string(String::new()),
+                            ))
+                        })?;
+                    let exact_iter = matches!(
+                        args.first().map(|arg| &arg.kind),
+                        Some(TExprKind::BuiltinMethod {
+                            op: TBuiltinOp::ListLazy,
+                            ..
+                        })
+                    );
+                    let host = match args.first().map(|arg| &arg.ty) {
+                        Some(Type::List(_)) | Some(Type::FixedList { .. }) => {
+                            self.host.io.progress_list
                         }
-                        "terminal_height" if args.is_empty() => {
-                            (self.host.io.terminal_height, Vec::new())
-                        }
-                        "style" if args.len() == 2 => (
-                            self.host.io.style,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "style_force" if args.len() == 2 => (
-                            self.host.io.style_force,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "progress" if args.len() == 1
-                            && matches!(args.first().map(|arg| &arg.ty), Some(Type::String)) =>
+                        Some(Type::Apply { name, .. })
+                            if name == jet_foundation::Syntax::TYPE_ITER && exact_iter =>
                         {
-                            (self.host.io.progress, vec![self.lower_expr(&args[0])?])
+                            self.host.io.progress_list
                         }
-                        "progress" if (1..=3).contains(&args.len()) => {
-                            let source = self.lower_expr(&args[0])?;
-                            let description = args
-                                .get(1)
-                                .map(|arg| self.lower_expr(arg))
-                                .unwrap_or_else(|| {
-                                    Ok(self.b.ins().iconst(
-                                        types::I64,
-                                        self.runtime.heap.alloc_string("Progress".to_string()),
-                                    ))
-                                })?;
-                            let format = args
-                                .get(2)
-                                .map(|arg| self.lower_expr(arg))
-                                .unwrap_or_else(|| {
-                                    Ok(self.b.ins().iconst(
-                                        types::I64,
-                                        self.runtime.heap.alloc_string(String::new()),
-                                    ))
-                                })?;
-                            let exact_iter = matches!(
-                                args.first().map(|arg| &arg.kind),
-                                Some(TExprKind::BuiltinMethod {
-                                    op: TBuiltinOp::ListLazy,
-                                    ..
-                                })
-                            );
-                            let host = match args.first().map(|arg| &arg.ty) {
-                                Some(Type::List(_)) | Some(Type::FixedList { .. }) => {
-                                    self.host.io.progress_list
-                                }
-                                Some(Type::Apply { name, .. })
-                                    if name == jet_foundation::Syntax::TYPE_ITER && exact_iter =>
-                                {
-                                    self.host.io.progress_list
-                                }
-                                _ => self.host.io.progress_iter,
-                            };
-                            (host, vec![source, description, format])
-                        }
-                        "confirm" if args.len() == 1 => {
-                            (self.host.io.confirm, vec![self.lower_expr(&args[0])?])
-                        }
-                        "choose" if args.len() == 2 => (
-                            self.host.io.choose,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "input_secret" if args.len() == 1 => (
-                            self.host.io.input_secret,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "buffered" if args.is_empty() => (self.host.io.stdin, Vec::new()),
-                        "sprint" if args.len() == 1 => {
-                            (self.host.io.sprint, vec![self.lower_expr(&args[0])?])
-                        }
-                        "repr" if args.len() == 1 => {
-                            (self.host.io.repr, vec![self.lower_expr(&args[0])?])
-                        }
-                        "take" if args.len() == 1 => {
-                            (self.host.io.take, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read_until" if args.len() == 1 => {
-                            (self.host.io.read_until, vec![self.lower_expr(&args[0])?])
-                        }
-                        "binread" if args.len() == 1 => (
-                            self.host.core.fs_read_bytes,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "binwrite" if args.len() == 2 => (
-                            self.host.core.fs_write_atomic,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
+                        _ => self.host.io.progress_iter,
                     };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    (host, vec![source, description, format])
+                }
+                "confirm" if args.len() == 1 => {
+                    (self.host.io.confirm, vec![self.lower_expr(&args[0])?])
+                }
+                "choose" if args.len() == 2 => (
+                    self.host.io.choose,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "input_secret" if args.len() == 1 => (
+                    self.host.io.input_secret,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "buffered" if args.is_empty() => (self.host.io.stdin, Vec::new()),
+                "sprint" if args.len() == 1 => {
+                    (self.host.io.sprint, vec![self.lower_expr(&args[0])?])
+                }
+                "repr" if args.len() == 1 => {
+                    (self.host.io.repr, vec![self.lower_expr(&args[0])?])
+                }
+                "take" if args.len() == 1 => {
+                    (self.host.io.take, vec![self.lower_expr(&args[0])?])
+                }
+                "read_until" if args.len() == 1 => {
+                    (self.host.io.read_until, vec![self.lower_expr(&args[0])?])
+                }
+                "binread" if args.len() == 1 => (
+                    self.host.core.fs_read_bytes,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "binwrite" if args.len() == 2 => (
+                    self.host.core.fs_write_atomic,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.os" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "name" if args.is_empty() => (self.host.core.os_name, vec![]),
+                "family" if args.is_empty() => (self.host.core.os_family, vec![]),
+                "arch" if args.is_empty() => (self.host.core.os_arch, vec![]),
+                "cpu_count" if args.is_empty() => (self.host.core.os_cpu_count, vec![]),
+                "temp_dir" if args.is_empty() => (self.host.core.os_temp_dir, vec![]),
+                "executable" if args.is_empty() => (self.host.core.os_executable, vec![]),
+                "pid" | "getpid" if args.is_empty() => (self.host.core.os_pid, vec![]),
+                "hostname" if args.is_empty() => (self.host.core.os_hostname, vec![]),
+                "username" if args.is_empty() => (self.host.core.os_username, vec![]),
+                "release" if args.is_empty() => (self.host.core.os_release, vec![]),
+                "version" if args.is_empty() => (self.host.core.os_version, vec![]),
+                "getppid" if args.is_empty() => (self.host.core.os_getppid, vec![]),
+                "getuid" if args.is_empty() => (self.host.core.os_getuid, vec![]),
+                "geteuid" if args.is_empty() => (self.host.core.os_geteuid, vec![]),
+                "getgid" if args.is_empty() => (self.host.core.os_getgid, vec![]),
+                "getegid" if args.is_empty() => (self.host.core.os_getegid, vec![]),
+                "getpgrp" if args.is_empty() => (self.host.core.os_getpgrp, vec![]),
+                "getgroups" if args.is_empty() => (self.host.core.os_getgroups, vec![]),
+                "uptime" if args.is_empty() => (self.host.core.os_uptime, vec![]),
+                "loadavg" if args.is_empty() => (self.host.core.os_loadavg, vec![]),
+                "times" if args.is_empty() => (self.host.core.os_times, vec![]),
+                "sync" if args.is_empty() => (self.host.core.os_sync, vec![]),
+                "setpgrp" if args.is_empty() => (self.host.core.os_setpgrp, vec![]),
+                "pipe" if args.is_empty() => (self.host.core.os_pipe, vec![]),
+                "success" if args.len() == 1 => {
+                    (self.host.core.os_success, vec![self.lower_expr(&args[0])?])
+                }
+                "exitcode" if args.len() == 1 => {
+                    (self.host.core.os_exitcode, vec![self.lower_expr(&args[0])?])
+                }
+                "expand" if args.len() == 1 => {
+                    (self.host.core.os_expand, vec![self.lower_expr(&args[0])?])
+                }
+                "getpgid" if args.len() == 1 => {
+                    (self.host.core.os_getpgid, vec![self.lower_expr(&args[0])?])
+                }
+                "getsid" if args.len() == 1 => {
+                    (self.host.core.os_getsid, vec![self.lower_expr(&args[0])?])
+                }
+                "umask" if args.len() == 1 => {
+                    (self.host.core.os_umask, vec![self.lower_expr(&args[0])?])
+                }
+                "getpriority" if args.len() == 1 => {
+                    (self.host.core.os_getpriority, vec![self.lower_expr(&args[0])?])
+                }
+                "close_fd" if args.len() == 1 => {
+                    (self.host.core.os_close_fd, vec![self.lower_expr(&args[0])?])
+                }
+                "setpgid" if args.len() == 2 => (
+                    self.host.core.os_setpgid,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "setpriority" if args.len() == 2 => (
+                    self.host.core.os_setpriority,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "kill" if args.len() == 2 => (
+                    self.host.core.os_kill,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "mkfifo" if args.len() == 2 => (
+                    self.host.core.os_mkfifo,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "fork" if args.is_empty() => (self.host.core.os_fork, vec![]),
+                "setuid" if args.len() == 1 => {
+                    (self.host.core.os_setuid, vec![self.lower_expr(&args[0])?])
+                }
+                "setgid" if args.len() == 1 => {
+                    (self.host.core.os_setgid, vec![self.lower_expr(&args[0])?])
+                }
+                "setsid" if args.is_empty() => (self.host.core.os_setsid, vec![]),
+                "initgroups" if args.len() == 2 => (
+                    self.host.core.os_initgroups,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "wait" if args.is_empty() => (self.host.core.os_wait, vec![]),
+                "waitpid" if args.len() == 2 => (
+                    self.host.core.os_waitpid,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "utime" if args.len() == 3 => (
+                    self.host.core.os_utime,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "atexit" if args.len() == 1 => {
+                    (self.host.core.os_atexit, vec![self.lower_expr(&args[0])?])
+                }
+                "stop" if args.len() == 1 => {
+                    (self.host.core.os_stop, vec![self.lower_expr(&args[0])?])
+                }
+                _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(clif_ty(&expr.ty)
+                .map(|_| self.b.inst_results(call)[0])
+                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        }
+        if module == "core.event" && method == "scope" && args.is_empty() {
+            return Ok(self.call_host(self.host.watcher.event_scope, &[]));
+        }
+        if module == "core.net" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "tcp_listen" if args.len() == 1 => (
+                    self.host.net_http.tcp_listen_str,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "tcp_listen_addr" if args.len() == 1 => (
+                    self.host.net_http.tcp_listen_addr,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "tcp_connect" if args.len() == 1 => (
+                    self.host.net_http.tcp_connect,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "listener_local_socket_addr" if args.len() == 1 => (
+                    self.host.net_http.listener_local_socket_addr,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "socket_port" if args.len() == 1 => (
+                    self.host.net_http.socket_port_typed,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "socket_host" if args.len() == 1 => (
+                    self.host.net_http.socket_host,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "socket_to_string" if args.len() == 1 => (
+                    self.host.net_http.socket_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "socket_addr" if args.len() == 2 => (
+                    self.host.net_http.socket_addr,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "set_timeout" if args.len() == 2 => (
+                    self.host.net_http.set_timeout,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "nodelay" if args.len() == 1 => (
+                    self.host.net_http.nodelay,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "set_nodelay" if args.len() == 2 => {
+                    let stream = self.lower_expr(&args[0])?;
+                    let enabled = self.lower_expr(&args[1])?;
+                    let enabled = self.b.ins().uextend(types::I64, enabled);
+                    (self.host.net_http.set_nodelay, vec![stream, enabled])
+                }
+                "ttl" if args.len() == 1 => (
+                    self.host.net_http.ttl,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "set_ttl" if args.len() == 2 => (
+                    self.host.net_http.set_ttl,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "socket_type" if args.len() == 1 => (
+                    self.host.net_http.socket_type,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "sendfile" if args.len() == 2 => (
+                    self.host.net_http.sendfile,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "dns_ptr" if args.len() == 2 => (
+                    self.host.net_http.dns_ptr,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "getservbyname" if args.len() == 1 => (
+                    self.host.net_http.getservbyname,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "getservbyport" if args.len() == 1 => (
+                    self.host.net_http.getservbyport,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "tcp_reply" if args.len() == 3 => (
+                    self.host.net_http.tcp_reply,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "udp_bind" if args.len() == 1 => (
+                    self.host.net_http.udp_bind,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "udp_local_addr" if args.len() == 1 => (
+                    self.host.net_http.udp_local_addr,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "udp_set_timeout" if args.len() == 2 => (
+                    self.host.net_http.udp_set_timeout,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "udp_send_bytes_to" if args.len() == 3 => (
+                    self.host.net_http.udp_send_bytes_to,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "udp_receive" if args.len() == 2 => (
+                    self.host.net_http.udp_receive,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "udp_packet_bytes" if args.len() == 1 => (
+                    self.host.net_http.udp_packet_bytes,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "udp_packet_original_len" if args.len() == 1 => (
+                    self.host.net_http.udp_packet_original_len,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "udp_packet_truncated" if args.len() == 1 => (
+                    self.host.net_http.udp_packet_truncated,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "unix_listen" if args.len() == 1 => (
+                    self.host.net_http.unix_listen,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "unix_accept" if args.len() == 1 => (
+                    self.host.net_http.unix_accept,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "unix_connect" if args.len() == 1 => (
+                    self.host.net_http.unix_connect,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "unix_read" if args.len() == 1 => (
+                    self.host.net_http.unix_read,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "unix_write" if args.len() == 2 => (
+                    self.host.net_http.unix_write,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "unix_write_all_bytes" if args.len() == 2 => (
+                    self.host.net_http.unix_write_all_bytes,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "unix_close" if args.len() == 1 => (
+                    self.host.net_http.unix_close,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            let v = self.b.inst_results(call)[0];
+            return if matches!(expr.ty, Type::Bool) {
+                Ok(self.b.ins().ireduce(types::I8, v))
+            } else {
+                Ok(v)
+            };
+        }
+        if module == "core.http.server" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "mux" if args.is_empty() => (self.host.net_http.http_mux_new, vec![]),
+                "response" if args.len() == 2 => (
+                    self.host.net_http.http_response,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "bind" if args.len() == 2 => (
+                    self.host.net_http.http_server_bind,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "serve_once_listener" if args.len() == 2 => (
+                    self.host.net_http.http_serve_once_listener,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "request_id" if args.len() == 1 => (
+                    self.host.net_http.http_request_id,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "sse" if args.len() == 1 => (
+                    self.host.net_http.http_sse,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "static_file_range" if args.len() == 3 => (
+                    self.host.net_http.http_static_file_range,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "json" if args.len() == 2 => {
+                    let status = self.lower_expr(&args[0])?;
+                    let body = self.lower_typed_json_to_string(&args[1], false)?;
+                    let host = self.module.declare_func_in_func(
+                        self.host.net_http.http_json_response,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(host, &[status, body]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.os" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "name" if args.is_empty() => (self.host.core.os_name, vec![]),
-                        "family" if args.is_empty() => (self.host.core.os_family, vec![]),
-                        "arch" if args.is_empty() => (self.host.core.os_arch, vec![]),
-                        "cpu_count" if args.is_empty() => (self.host.core.os_cpu_count, vec![]),
-                        "temp_dir" if args.is_empty() => (self.host.core.os_temp_dir, vec![]),
-                        "executable" if args.is_empty() => (self.host.core.os_executable, vec![]),
-                        "pid" | "getpid" if args.is_empty() => (self.host.core.os_pid, vec![]),
-                        "hostname" if args.is_empty() => (self.host.core.os_hostname, vec![]),
-                        "username" if args.is_empty() => (self.host.core.os_username, vec![]),
-                        "release" if args.is_empty() => (self.host.core.os_release, vec![]),
-                        "version" if args.is_empty() => (self.host.core.os_version, vec![]),
-                        "getppid" if args.is_empty() => (self.host.core.os_getppid, vec![]),
-                        "getuid" if args.is_empty() => (self.host.core.os_getuid, vec![]),
-                        "geteuid" if args.is_empty() => (self.host.core.os_geteuid, vec![]),
-                        "getgid" if args.is_empty() => (self.host.core.os_getgid, vec![]),
-                        "getegid" if args.is_empty() => (self.host.core.os_getegid, vec![]),
-                        "getpgrp" if args.is_empty() => (self.host.core.os_getpgrp, vec![]),
-                        "getgroups" if args.is_empty() => (self.host.core.os_getgroups, vec![]),
-                        "uptime" if args.is_empty() => (self.host.core.os_uptime, vec![]),
-                        "loadavg" if args.is_empty() => (self.host.core.os_loadavg, vec![]),
-                        "times" if args.is_empty() => (self.host.core.os_times, vec![]),
-                        "sync" if args.is_empty() => (self.host.core.os_sync, vec![]),
-                        "setpgrp" if args.is_empty() => (self.host.core.os_setpgrp, vec![]),
-                        "pipe" if args.is_empty() => (self.host.core.os_pipe, vec![]),
-                        "success" if args.len() == 1 => {
-                            (self.host.core.os_success, vec![self.lower_expr(&args[0])?])
-                        }
-                        "exitcode" if args.len() == 1 => {
-                            (self.host.core.os_exitcode, vec![self.lower_expr(&args[0])?])
-                        }
-                        "expand" if args.len() == 1 => {
-                            (self.host.core.os_expand, vec![self.lower_expr(&args[0])?])
-                        }
-                        "getpgid" if args.len() == 1 => {
-                            (self.host.core.os_getpgid, vec![self.lower_expr(&args[0])?])
-                        }
-                        "getsid" if args.len() == 1 => {
-                            (self.host.core.os_getsid, vec![self.lower_expr(&args[0])?])
-                        }
-                        "umask" if args.len() == 1 => {
-                            (self.host.core.os_umask, vec![self.lower_expr(&args[0])?])
-                        }
-                        "getpriority" if args.len() == 1 => {
-                            (self.host.core.os_getpriority, vec![self.lower_expr(&args[0])?])
-                        }
-                        "close_fd" if args.len() == 1 => {
-                            (self.host.core.os_close_fd, vec![self.lower_expr(&args[0])?])
-                        }
-                        "setpgid" if args.len() == 2 => (
-                            self.host.core.os_setpgid,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "setpriority" if args.len() == 2 => (
-                            self.host.core.os_setpriority,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "kill" if args.len() == 2 => (
-                            self.host.core.os_kill,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "mkfifo" if args.len() == 2 => (
-                            self.host.core.os_mkfifo,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "fork" if args.is_empty() => (self.host.core.os_fork, vec![]),
-                        "setuid" if args.len() == 1 => {
-                            (self.host.core.os_setuid, vec![self.lower_expr(&args[0])?])
-                        }
-                        "setgid" if args.len() == 1 => {
-                            (self.host.core.os_setgid, vec![self.lower_expr(&args[0])?])
-                        }
-                        "setsid" if args.is_empty() => (self.host.core.os_setsid, vec![]),
-                        "initgroups" if args.len() == 2 => (
-                            self.host.core.os_initgroups,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "wait" if args.is_empty() => (self.host.core.os_wait, vec![]),
-                        "waitpid" if args.len() == 2 => (
-                            self.host.core.os_waitpid,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "utime" if args.len() == 3 => (
-                            self.host.core.os_utime,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "atexit" if args.len() == 1 => {
-                            (self.host.core.os_atexit, vec![self.lower_expr(&args[0])?])
-                        }
-                        "stop" if args.len() == 1 => {
-                            (self.host.core.os_stop, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(clif_ty(&expr.ty)
-                        .map(|_| self.b.inst_results(call)[0])
-                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
-                }
-                if module == "core.event" && method == "scope" && args.is_empty() {
-                    return Ok(self.call_host(self.host.watcher.event_scope, &[]));
-                }
-                if module == "core.net" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "tcp_listen" if args.len() == 1 => (
-                            self.host.net_http.tcp_listen_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "tcp_listen_addr" if args.len() == 1 => (
-                            self.host.net_http.tcp_listen_addr,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "tcp_connect" if args.len() == 1 => (
-                            self.host.net_http.tcp_connect,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "listener_local_socket_addr" if args.len() == 1 => (
-                            self.host.net_http.listener_local_socket_addr,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "socket_port" if args.len() == 1 => (
-                            self.host.net_http.socket_port_typed,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "socket_host" if args.len() == 1 => (
-                            self.host.net_http.socket_host,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "socket_to_string" if args.len() == 1 => (
-                            self.host.net_http.socket_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "socket_addr" if args.len() == 2 => (
-                            self.host.net_http.socket_addr,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "set_timeout" if args.len() == 2 => (
-                            self.host.net_http.set_timeout,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "nodelay" if args.len() == 1 => (
-                            self.host.net_http.nodelay,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "set_nodelay" if args.len() == 2 => {
-                            let stream = self.lower_expr(&args[0])?;
-                            let enabled = self.lower_expr(&args[1])?;
-                            let enabled = self.b.ins().uextend(types::I64, enabled);
-                            (self.host.net_http.set_nodelay, vec![stream, enabled])
-                        }
-                        "ttl" if args.len() == 1 => (
-                            self.host.net_http.ttl,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "set_ttl" if args.len() == 2 => (
-                            self.host.net_http.set_ttl,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "socket_type" if args.len() == 1 => (
-                            self.host.net_http.socket_type,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "sendfile" if args.len() == 2 => (
-                            self.host.net_http.sendfile,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "dns_ptr" if args.len() == 2 => (
-                            self.host.net_http.dns_ptr,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "getservbyname" if args.len() == 1 => (
-                            self.host.net_http.getservbyname,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "getservbyport" if args.len() == 1 => (
-                            self.host.net_http.getservbyport,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "tcp_reply" if args.len() == 3 => (
-                            self.host.net_http.tcp_reply,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "udp_bind" if args.len() == 1 => (
-                            self.host.net_http.udp_bind,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "udp_local_addr" if args.len() == 1 => (
-                            self.host.net_http.udp_local_addr,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "udp_set_timeout" if args.len() == 2 => (
-                            self.host.net_http.udp_set_timeout,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "udp_send_bytes_to" if args.len() == 3 => (
-                            self.host.net_http.udp_send_bytes_to,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "udp_receive" if args.len() == 2 => (
-                            self.host.net_http.udp_receive,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "udp_packet_bytes" if args.len() == 1 => (
-                            self.host.net_http.udp_packet_bytes,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "udp_packet_original_len" if args.len() == 1 => (
-                            self.host.net_http.udp_packet_original_len,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "udp_packet_truncated" if args.len() == 1 => (
-                            self.host.net_http.udp_packet_truncated,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "unix_listen" if args.len() == 1 => (
-                            self.host.net_http.unix_listen,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "unix_accept" if args.len() == 1 => (
-                            self.host.net_http.unix_accept,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "unix_connect" if args.len() == 1 => (
-                            self.host.net_http.unix_connect,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "unix_read" if args.len() == 1 => (
-                            self.host.net_http.unix_read,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "unix_write" if args.len() == 2 => (
-                            self.host.net_http.unix_write,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "unix_write_all_bytes" if args.len() == 2 => (
-                            self.host.net_http.unix_write_all_bytes,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "unix_close" if args.len() == 1 => (
-                            self.host.net_http.unix_close,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    let v = self.b.inst_results(call)[0];
-                    return if matches!(expr.ty, Type::Bool) {
-                        Ok(self.b.ins().ireduce(types::I8, v))
+                "static_files" if (3..=6).contains(&args.len()) => {
+                    let mux = self.lower_expr(&args[0])?;
+                    let prefix = self.lower_expr(&args[1])?;
+                    let root = self.lower_expr(&args[2])?;
+                    let index = if args.len() > 3 {
+                        let v = self.lower_expr(&args[3])?;
+                        self.b.ins().uextend(types::I64, v)
                     } else {
-                        Ok(v)
+                        self.b.ins().iconst(types::I64, -1)
                     };
+                    let dotfiles = if args.len() > 4 {
+                        let v = self.lower_expr(&args[4])?;
+                        self.b.ins().uextend(types::I64, v)
+                    } else {
+                        self.b.ins().iconst(types::I64, -1)
+                    };
+                    let follow_links = if args.len() > 5 {
+                        let v = self.lower_expr(&args[5])?;
+                        self.b.ins().uextend(types::I64, v)
+                    } else {
+                        self.b.ins().iconst(types::I64, -1)
+                    };
+                    let host = self.module.declare_func_in_func(
+                        self.host.net_http.http_static_files,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(
+                        host,
+                        &[mux, prefix, root, index, dotfiles, follow_links],
+                    );
+                    return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.http.server" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "mux" if args.is_empty() => (self.host.net_http.http_mux_new, vec![]),
-                        "response" if args.len() == 2 => (
-                            self.host.net_http.http_response,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                "cors_policy" if (1..=5).contains(&args.len()) => {
+                    let (origins_mode, origins) = match &args[0].ty {
+                        Type::List(_) => (
+                            self.b.ins().iconst(types::I64, 1),
+                            self.lower_expr(&args[0])?,
                         ),
-                        "bind" if args.len() == 2 => (
-                            self.host.net_http.http_server_bind,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "serve_once_listener" if args.len() == 2 => (
-                            self.host.net_http.http_serve_once_listener,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "request_id" if args.len() == 1 => (
-                            self.host.net_http.http_request_id,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "sse" if args.len() == 1 => (
-                            self.host.net_http.http_sse,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "static_file_range" if args.len() == 3 => (
-                            self.host.net_http.http_static_file_range,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "json" if args.len() == 2 => {
-                            let status = self.lower_expr(&args[0])?;
-                            let body = self.lower_typed_json_to_string(&args[1], false)?;
-                            let host = self.module.declare_func_in_func(
-                                self.host.net_http.http_json_response,
-                                self.b.func,
-                            );
-                            let call = self.b.ins().call(host, &[status, body]);
-                            return Ok(self.b.inst_results(call)[0]);
-                        }
-                        "static_files" if (3..=6).contains(&args.len()) => {
-                            let mux = self.lower_expr(&args[0])?;
-                            let prefix = self.lower_expr(&args[1])?;
-                            let root = self.lower_expr(&args[2])?;
-                            let index = if args.len() > 3 {
-                                let v = self.lower_expr(&args[3])?;
-                                self.b.ins().uextend(types::I64, v)
-                            } else {
-                                self.b.ins().iconst(types::I64, -1)
-                            };
-                            let dotfiles = if args.len() > 4 {
-                                let v = self.lower_expr(&args[4])?;
-                                self.b.ins().uextend(types::I64, v)
-                            } else {
-                                self.b.ins().iconst(types::I64, -1)
-                            };
-                            let follow_links = if args.len() > 5 {
-                                let v = self.lower_expr(&args[5])?;
-                                self.b.ins().uextend(types::I64, v)
-                            } else {
-                                self.b.ins().iconst(types::I64, -1)
-                            };
-                            let host = self.module.declare_func_in_func(
-                                self.host.net_http.http_static_files,
-                                self.b.func,
-                            );
-                            let call = self.b.ins().call(
-                                host,
-                                &[mux, prefix, root, index, dotfiles, follow_links],
-                            );
-                            return Ok(self.b.inst_results(call)[0]);
-                        }
-                        "cors_policy" if (1..=5).contains(&args.len()) => {
-                            let (origins_mode, origins) = match &args[0].ty {
-                                Type::List(_) => (
-                                    self.b.ins().iconst(types::I64, 1),
-                                    self.lower_expr(&args[0])?,
-                                ),
-                                Type::Named(n) if n == "HTTPCorsOrigins" => {
-                                    match &args[0].kind {
-                                        TExprKind::EnumLit { variant, payload, .. }
-                                            if variant == "Any"
-                                                && matches!(payload, TEnumPayload::Unit) =>
+                        Type::Named(n) if n == "HTTPCorsOrigins" => {
+                            match &args[0].kind {
+                                TExprKind::EnumLit { variant, payload, .. }
+                                    if variant == "Any"
+                                        && matches!(payload, TEnumPayload::Unit) =>
+                                {
+                                    (
+                                        self.b.ins().iconst(types::I64, 0),
+                                        self.b.ins().iconst(types::I64, 0),
+                                    )
+                                }
+                                TExprKind::EnumLit { variant, payload, .. }
+                                    if variant == "List" =>
+                                {
+                                    match payload {
+                                        TEnumPayload::Positional(values)
+                                            if values.len() == 1 =>
                                         {
                                             (
-                                                self.b.ins().iconst(types::I64, 0),
-                                                self.b.ins().iconst(types::I64, 0),
+                                                self.b.ins().iconst(types::I64, 1),
+                                                self.lower_expr(&values[0].value)?,
                                             )
                                         }
-                                        TExprKind::EnumLit { variant, payload, .. }
-                                            if variant == "List" =>
-                                        {
-                                            match payload {
-                                                TEnumPayload::Positional(values)
-                                                    if values.len() == 1 =>
-                                                {
-                                                    (
-                                                        self.b.ins().iconst(types::I64, 1),
-                                                        self.lower_expr(&values[0].value)?,
-                                                    )
-                                                }
-                                                _ => {
-                                                    return Err(
-                                                        "jit cors_policy HTTPCorsOrigins.List needs one list payload"
-                                                            .into(),
-                                                    );
-                                                }
-                                            }
-                                        }
                                         _ => {
-                                            // Runtime: disc 0 = Any; else packed List handle.
-                                            let bits = self.lower_expr(&args[0])?;
-                                            let mask = self.b.ins().iconst(types::I64, 0xff);
-                                            let disc = self.b.ins().band(bits, mask);
-                                            let zero = self.b.ins().iconst(types::I64, 0);
-                                            let is_any =
-                                                self.b.ins().icmp(IntCC::Equal, disc, zero);
-                                            let list = self.b.ins().ushr_imm(bits, 8);
-                                            let one = self.b.ins().iconst(types::I64, 1);
-                                            let mode = self.b.ins().select(is_any, zero, one);
-                                            let origins = self.b.ins().select(is_any, zero, list);
-                                            (mode, origins)
+                                            return Err(
+                                                "jit cors_policy HTTPCorsOrigins.List needs one list payload"
+                                                    .into(),
+                                            );
                                         }
                                     }
                                 }
                                 _ => {
-                                    return Err(
-                                        "jit cors_policy origins must be List or HTTPCorsOrigins"
-                                            .into(),
-                                    );
+                                    // Runtime: disc 0 = Any; else packed List handle.
+                                    let bits = self.lower_expr(&args[0])?;
+                                    let mask = self.b.ins().iconst(types::I64, 0xff);
+                                    let disc = self.b.ins().band(bits, mask);
+                                    let zero = self.b.ins().iconst(types::I64, 0);
+                                    let is_any =
+                                        self.b.ins().icmp(IntCC::Equal, disc, zero);
+                                    let list = self.b.ins().ushr_imm(bits, 8);
+                                    let one = self.b.ins().iconst(types::I64, 1);
+                                    let mode = self.b.ins().select(is_any, zero, one);
+                                    let origins = self.b.ins().select(is_any, zero, list);
+                                    (mode, origins)
                                 }
-                            };
-                            let empty = self.b.ins().iconst(types::I64, 0);
-                            let methods = if args.len() > 1 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                empty
-                            };
-                            let headers = if args.len() > 2 {
-                                self.lower_expr(&args[2])?
-                            } else {
-                                empty
-                            };
-                            let credentials = if args.len() > 3 {
-                                let v = self.lower_expr(&args[3])?;
-                                self.b.ins().uextend(types::I64, v)
-                            } else {
-                                self.b.ins().iconst(types::I64, -1)
-                            };
-                            let max_age = if args.len() > 4 {
-                                self.lower_expr(&args[4])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            let has_max_age =
-                                self.b.ins().iconst(types::I64, i64::from(args.len() > 4));
-                            let host = self.module.declare_func_in_func(
-                                self.host.net_http.http_cors_policy,
-                                self.b.func,
-                            );
-                            let call = self.b.ins().call(
-                                host,
-                                &[
-                                    origins_mode,
-                                    origins,
-                                    methods,
-                                    headers,
-                                    credentials,
-                                    has_max_age,
-                                    max_age,
-                                ],
-                            );
-                            return Ok(self.b.inst_results(call)[0]);
-                        }
-                        "cors" if args.len() == 2 => (
-                            self.host.net_http.http_cors,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if matches!(module.as_str(), "core.http" | "core.http.client") {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "get" if args.len() == 1 => (
-                            self.host.net_http.http_client_get,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "post" if args.len() == 2 => (
-                            self.host.net_http.http_client_post,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "request" if args.len() == 2 => (
-                            self.host.net_http.http_client_request_new,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.ws" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "upgrade" if args.len() == 1 => (
-                            self.host.net_http.ws_upgrade,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "connect" if args.len() == 1 => (
-                            self.host.net_http.ws_connect,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.watcher" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "files" if args.len() == 1 => (
-                            self.host.watcher.watcher_files,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "process_pid" if args.len() == 1 => (
-                            self.host.watcher.watcher_process_pid,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "port" if args.len() == 2 => (
-                            self.host.watcher.watcher_port,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "set" if args.is_empty() => (self.host.watcher.watcher_set, vec![]),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.log" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "set_level" if args.len() == 1 => {
-                            (self.host.core.log_set_level, vec![self.lower_expr(&args[0])?])
-                        }
-                        "setup" if args.len() == 1 => {
-                            (self.host.core.log_setup, vec![self.lower_expr(&args[0])?])
-                        }
-                        "debug" if args.len() == 1 => {
-                            (self.host.core.log_debug, vec![self.lower_expr(&args[0])?])
-                        }
-                        "info" if args.len() == 1 => {
-                            (self.host.core.log_info, vec![self.lower_expr(&args[0])?])
-                        }
-                        "warn" if args.len() == 1 => {
-                            (self.host.core.log_warn, vec![self.lower_expr(&args[0])?])
-                        }
-                        "error" if args.len() == 1 => {
-                            (self.host.core.log_error, vec![self.lower_expr(&args[0])?])
-                        }
-                        "critical" if args.len() == 1 => {
-                            (self.host.core.log_critical, vec![self.lower_expr(&args[0])?])
-                        }
-                        "fatal" if args.len() == 1 => {
-                            (self.host.core.log_fatal, vec![self.lower_expr(&args[0])?])
-                        }
-                        "disable" if args.is_empty() => (self.host.core.log_disable, vec![]),
-                        "flush" if args.is_empty() => (self.host.core.log_flush, vec![]),
-                        "enabled" if args.len() == 1 => {
-                            (self.host.core.log_enabled, vec![self.lower_expr(&args[0])?])
-                        }
-                        "set_trace_id" if args.len() == 1 => (
-                            self.host.core.log_set_trace_id,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "field" if args.len() == 2 => (
-                            self.host.core.log_field,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "int" if args.len() == 2 => (
-                            self.host.core.log_int_field,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "bool" if args.len() == 2 => (
-                            self.host.core.log_bool_field,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "counter" if args.len() == 2 => (
-                            self.host.core.log_counter,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "span" if args.len() == 1 => {
-                            (self.host.core.log_span, vec![self.lower_expr(&args[0])?])
-                        }
-                        "enter" if args.len() == 1 => {
-                            (self.host.core.log_enter, vec![self.lower_expr(&args[0])?])
-                        }
-                        "close" if args.len() == 1 => {
-                            (self.host.core.log_close, vec![self.lower_expr(&args[0])?])
-                        }
-                        "info_fields" if args.len() == 2 => (
-                            self.host.core.log_info_fields,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(clif_ty(&expr.ty)
-                        .map(|_| self.b.inst_results(call)[0])
-                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
-                }
-                if module == "core.files" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "create" if args.len() == 1 => {
-                            (self.host.stream.fs_create, vec![self.lower_expr(&args[0])?])
-                        }
-                        "open" if args.len() == 1 => {
-                            (self.host.stream.fs_open, vec![self.lower_expr(&args[0])?])
-                        }
-                        "exists" if args.len() == 1 => {
-                            (self.host.core.fs_exists, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read" if args.len() == 1 => {
-                            (self.host.core.fs_read, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read_bytes" if args.len() == 1 => (
-                            self.host.core.fs_read_bytes,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "write" if args.len() == 2 => (
-                            self.host.core.fs_write,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "create_dir" | "create_dir_all" if args.len() == 1 => {
-                            (self.host.core.fs_create_dir, vec![self.lower_expr(&args[0])?])
-                        }
-                        "list_dir" if args.len() == 1 => {
-                            (self.host.core.fs_list_dir, vec![self.lower_expr(&args[0])?])
-                        }
-                        "remove_all" if args.len() == 1 => {
-                            (self.host.core.fs_remove_all, vec![self.lower_expr(&args[0])?])
-                        }
-                        "remove" if args.len() == 1 => {
-                            (self.host.core.fs_remove, vec![self.lower_expr(&args[0])?])
-                        }
-                        "stat" if args.len() == 1 => {
-                            (self.host.core.fs_stat, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read_at" if args.len() == 3 => (
-                            self.host.core.fs_read_at,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "write_at" if args.len() == 3 => (
-                            self.host.core.fs_write_at,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "fsync" if args.len() == 1 => {
-                            (self.host.core.fs_fsync, vec![self.lower_expr(&args[0])?])
-                        }
-                        "write_atomic" if args.len() == 2 => (
-                            self.host.core.fs_write_atomic,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "walk" if args.len() == 1 => {
-                            (self.host.core.fs_walk, vec![self.lower_expr(&args[0])?])
-                        }
-                        "glob" if args.len() == 1 => {
-                            (self.host.core.fs_glob, vec![self.lower_expr(&args[0])?])
-                        }
-                        "symlink" if args.len() == 2 => (
-                            self.host.core.fs_symlink,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "read_link" if args.len() == 1 => {
-                            (self.host.core.fs_read_link, vec![self.lower_expr(&args[0])?])
-                        }
-                        "hard_link" if args.len() == 2 => (
-                            self.host.core.fs_hard_link,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "canonicalize" if args.len() == 1 => {
-                            (self.host.core.fs_canonicalize, vec![self.lower_expr(&args[0])?])
-                        }
-                        "absolute" if args.len() == 1 => {
-                            (self.host.core.fs_absolute, vec![self.lower_expr(&args[0])?])
-                        }
-                        "copy_dir" if args.len() == 2 => (
-                            self.host.core.fs_copy_dir,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "temp_dir" if args.len() == 1 => {
-                            (self.host.core.fs_temp_dir, vec![self.lower_expr(&args[0])?])
-                        }
-                        "temp_file" if args.len() == 1 => {
-                            (self.host.core.fs_temp_file, vec![self.lower_expr(&args[0])?])
-                        }
-                        "lock" if args.len() == 1 => {
-                            (self.host.core.fs_lock, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.hex"
-                    || module == "core.encoding.base64"
-                    || module == "core.encoding.base32"
-                {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.encoding.hex", "encode") if args.len() == 1 => {
-                            (self.host.encoding.hex_encode, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.encoding.hex", "decode") if args.len() == 1 => {
-                            (self.host.encoding.hex_decode, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.encoding.base64", "encode") if args.len() == 1 => {
-                            (self.host.encoding.b64_encode, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.encoding.base64", "encode_url") if args.len() == 1 => (
-                            self.host.encoding.b64_encode_url,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.encoding.base64", "decode") if args.len() == 1 => {
-                            (self.host.encoding.b64_decode, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.encoding.base64", "decode_url") if args.len() == 1 => (
-                            self.host.encoding.b64_decode_url,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.encoding.base32", "encode") if args.len() == 1 => (
-                            self.host.encoding.base32_encode,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.encoding.base32", "decode") if args.len() == 1 => (
-                            self.host.encoding.base32_decode,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.csv" {
-                    // Typed `csv.decode<T>` → Result[[T], …]
-                    if method == "decode" && args.len() == 1 {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            if let Type::List(elem) = ok.as_ref() {
-                                return self.lower_typed_csv_decode(&args[0], elem);
                             }
                         }
-                    }
-                    // `csv.to_string` has two shapes: the dynamic `[[String]]` rows
-                    // form, and the typed `[T]` Codable form AOT renders through
-                    // `jet_enc_csv_to_string`. Only rows may reach the rows host —
-                    // feeding it a typed list used to render an empty string and
-                    // report success, which is silent data loss.
-                    let rows_arg = args.first().is_some_and(|a| {
-                        matches!(&a.ty, Type::List(inner)
-                            if matches!(inner.as_ref(), Type::List(cell)
-                                if matches!(cell.as_ref(), Type::String)))
-                    });
-                    if method == "to_string" && args.len() == 1 && !rows_arg {
-                        let tree = self.lower_serde_encode(&args[0])?;
-                        let host_ref = self.module.declare_func_in_func(
-                            self.host.encoding.csv_tree_to_string,
-                            self.b.func,
-                        );
-                        let call = self.b.ins().call(host_ref, &[tree]);
-                        let rendered = self.b.inst_results(call)[0];
-                        self.emit_trap_check()?;
-                        return Ok(rendered);
-                    }
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "parse" if args.len() == 1 => {
-                            (self.host.encoding.csv_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "to_string" if args.len() == 1 && rows_arg => (
-                            self.host.encoding.csv_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "writer" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.csv_writer, vec![file, limits])
-                        }
-                        "reader" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.csv_reader, vec![file, limits])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.json" {
-                    let datatree_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(
-                                ok.as_ref(),
-                                Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                            )
-                    );
-                    let datatree_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                        )
-                    });
-                    // Typed Codable decode/to_string (Encode-type path).
-                    if method == "decode" && args.len() == 1 && !datatree_ok {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            return self.lower_typed_json_decode(&args[0], ok);
-                        }
-                    }
-                    if method == "decode_traced" && args.len() == 1 {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            return self.lower_typed_json_decode_traced(&args[0], ok);
-                        }
-                    }
-                    if matches!(method.as_str(), "to_string" | "to_string_pretty")
-                        && args.len() == 1
-                        && !datatree_arg
-                    {
-                        return self.lower_typed_json_to_string(
-                            &args[0],
-                            method == "to_string_pretty",
-                        );
-                    }
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "parse" if args.len() == 1 && datatree_ok => {
-                            (self.host.encoding.json_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "decode" if args.len() == 1 && datatree_ok => {
-                            (self.host.encoding.json_decode, vec![self.lower_expr(&args[0])?])
-                        }
-                        "to_string" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.json_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "to_string_pretty" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.json_to_string_pretty,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        // D-JSONCANON1=A: sema already resolved which `canonical`
-                        // signature applies (arity 1 = pre-2027 infallible; 2 =
-                        // 2027+ fallible with a limits arg, default-filled when
-                        // the caller omits it) while its own edition scope was
-                        // live. Branch on that already-resolved TIR arity, not
-                        // a fresh `package_edition_at_least` read here: JIT
-                        // compile runs after sema's `with_package_edition`
-                        // scope has closed, so re-querying the thread-local
-                        // edition here reads the reverted default and can pick
-                        // the wrong host for a table already sized the other
-                        // way (desync, not a marshalling choice — I9).
-                        "canonical" if args.len() == 1 && datatree_arg => {
-                            (
-                                self.host.encoding.json_canonical,
-                                vec![self.lower_expr(&args[0])?],
-                            )
-                        }
-                        "canonical" if args.len() == 2 && datatree_arg => {
-                            let tree = self.lower_expr(&args[0])?;
-                            let limits = self.lower_expr(&args[1])?;
-                            (
-                                self.host.encoding.json_canonical_checked,
-                                vec![tree, limits],
-                            )
-                        }
-                        "events" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.json_events,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "writer" if (2..=3).contains(&args.len()) => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = self.lower_expr(&args[1])?;
-                            let canon = if args.len() == 3 {
-                                let b = self.lower_expr(&args[2])?;
-                                self.b.ins().uextend(types::I64, b)
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (
-                                self.host.stream.json_writer,
-                                vec![file, limits, canon],
-                            )
-                        }
-                        "reader" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.json_reader, vec![file, limits])
-                        }
                         _ => {
-                            return Err(format!(
-                                "jit core call unsupported: core.encoding.json.{method}"
-                            ))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.jsonl" {
-                    let datatree_list_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(ok.as_ref(), Type::List(elem)
-                                if matches!(
-                                    elem.as_ref(),
-                                    Type::Named(n)
-                                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                                ))
-                    );
-                    let datatree_list_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::List(elem)
-                                if matches!(
-                                    elem.as_ref(),
-                                    Type::Named(n)
-                                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                                )
-                        )
-                    });
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "parse" if args.len() == 1 && datatree_list_ok => {
-                            (self.host.encoding.jsonl_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "to_string" if args.len() == 1 && datatree_list_arg => (
-                            self.host.encoding.jsonl_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "writer" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.jsonl_writer, vec![file, limits])
-                        }
-                        "reader" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.jsonl_reader, vec![file, limits])
-                        }
-                        _ => {
-                            return Err(format!(
-                                "jit core call unsupported: core.encoding.jsonl.{method}"
-                            ))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.xml" {
-                    let datatree_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(
-                                ok.as_ref(),
-                                Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
-                            )
-                    );
-                    let datatree_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
-                        )
-                    });
-                    let datatree_list_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(
-                                ok.as_ref(),
-                                Type::List(elem)
-                                    if matches!(
-                                        elem.as_ref(),
-                                        Type::Named(n)
-                                            if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
-                                    )
-                            )
-                    );
-                    let option_string_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(ok.as_ref(), Type::Option(inner) if matches!(inner.as_ref(), Type::String))
-                    );
-                    let bytes_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(
-                                ok.as_ref(),
-                                Type::List(elem)
-                                    if matches!(
-                                        elem.as_ref(),
-                                        Type::IntN {
-                                            signed: false,
-                                            bits: 8
-                                        }
-                                    ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
-                            )
-                    );
-                    let bytes_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::List(elem)
-                                if matches!(
-                                    elem.as_ref(),
-                                    Type::IntN {
-                                        signed: false,
-                                        bits: 8
-                                    }
-                                ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
-                        )
-                    });
-                    let expanded_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Tuple(_))
-                    );
-                    // Typed `xml.decode<T>` / `decode_bytes<T>` → project then Codable decode.
-                    if method == "decode" && args.len() == 1 && !datatree_ok {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            return self.lower_typed_tree_decode(
-                                &args[0],
-                                ok,
-                                self.host.encoding.xml_project,
+                            return Err(
+                                "jit cors_policy origins must be List or HTTPCorsOrigins"
+                                    .into(),
                             );
                         }
-                    }
-                    if method == "decode_bytes" && args.len() == 1 && bytes_arg {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            return self.lower_typed_tree_decode(
-                                &args[0],
-                                ok,
-                                self.host.encoding.xml_project_bytes,
-                            );
-                        }
-                    }
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "parse" if args.len() == 1 && datatree_ok => {
-                            (self.host.encoding.xml_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "to_string" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.xml_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "root" if args.len() == 1 && datatree_ok && datatree_arg => {
-                            (self.host.encoding.xml_root, vec![self.lower_expr(&args[0])?])
-                        }
-                        "expanded_name" if args.len() == 1 && expanded_ok && datatree_arg => (
-                            self.host.encoding.xml_expanded_name,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "attribute" if args.len() == 2 && option_string_ok && datatree_arg => (
-                            self.host.encoding.xml_attribute,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "content" if args.len() == 1 && datatree_list_ok && datatree_arg => (
-                            self.host.encoding.xml_content,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "to_bytes" if args.len() == 1 && bytes_ok && datatree_arg => (
-                            self.host.encoding.xml_to_bytes,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "writer" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.xml_writer, vec![file, limits])
-                        }
-                        "reader" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.xml_reader, vec![file, limits])
-                        }
-                        _ => {
-                            return Err(format!(
-                                "jit core call unsupported: core.encoding.xml.{method}"
-                            ))
-                        }
                     };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.cbor" {
-                    let datatree_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(
-                                ok.as_ref(),
-                                Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                            )
-                    );
-                    let datatree_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                        )
-                    });
-                    let bytes_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::List(elem)
-                                if matches!(
-                                    elem.as_ref(),
-                                    Type::IntN {
-                                        signed: false,
-                                        bits: 8
-                                    }
-                                ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
-                            )
-                    });
-                    if method == "decode"
-                        && matches!(args.len(), 1 | 2)
-                        && bytes_arg
-                        && !datatree_ok
-                    {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            if args.len() == 1 {
-                                let parse_args = [self.lower_expr(&args[0])?];
-                                return self.lower_typed_tree_decode_values(
-                                    &parse_args,
-                                    ok,
-                                    self.host.encoding.cbor_decode_tree,
-                                    None,
-                                );
-                            }
-                            let parse_args =
-                                [self.lower_expr(&args[0])?, self.lower_expr(&args[1])?];
-                            return self.lower_typed_tree_decode_values(
-                                &parse_args,
-                                ok,
-                                self.host.encoding.cbor_decode_tree_options,
-                                None,
-                            );
-                        }
-                    }
-                    if matches!(method.as_str(), "to_bytes" | "to_bytes_canonical")
-                        && args.len() == 1
-                        && !datatree_arg
-                    {
-                        let render_host = if method == "to_bytes" {
-                            self.host.encoding.cbor_to_bytes
-                        } else {
-                            self.host.encoding.cbor_to_bytes_canonical
-                        };
-                        return self.lower_typed_tree_to_string(&args[0], render_host);
-                    }
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "to_bytes" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.cbor_to_bytes,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "to_bytes_canonical" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.cbor_to_bytes_canonical,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "parse" if args.len() == 1 && bytes_arg && datatree_ok => {
-                            (self.host.encoding.cbor_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "parse" if args.len() == 2 && bytes_arg && datatree_ok => (
-                            self.host.encoding.cbor_parse_options,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "writer" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.cbor_writer, vec![file, limits])
-                        }
-                        "reader" if args.len() == 1 || args.len() == 2 => {
-                            let file = self.lower_expr(&args[0])?;
-                            let limits = if args.len() == 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            (self.host.stream.cbor_reader, vec![file, limits])
-                        }
-                        _ => {
-                            return Err(format!(
-                                "jit core call unsupported: core.encoding.cbor.{method}"
-                            ))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.encoding.toml" || module == "core.encoding.yaml" {
-                    let datatree_ok = matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(
-                                ok.as_ref(),
-                                Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                            )
-                    );
-                    let datatree_arg = args.first().is_some_and(|a| {
-                        matches!(
-                            &a.ty,
-                            Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
-                        )
-                    });
-                    if method == "decode" && args.len() == 1 && !datatree_ok {
-                        if let Type::Result { ok, .. } = &expr.ty {
-                            let parse_host = if module == "core.encoding.toml" {
-                                self.host.encoding.toml_parse
-                            } else {
-                                self.host.encoding.yaml_parse
-                            };
-                            return self.lower_typed_tree_decode(&args[0], ok, parse_host);
-                        }
-                    }
-                    if method == "to_string" && args.len() == 1 && !datatree_arg {
-                        let render_host = if module == "core.encoding.toml" {
-                            self.host.encoding.toml_to_string
-                        } else {
-                            self.host.encoding.yaml_to_string
-                        };
-                        return self.lower_typed_tree_to_string(&args[0], render_host);
-                    }
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.encoding.toml", "parse") if args.len() == 1 && datatree_ok => {
-                            (self.host.encoding.toml_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.encoding.toml", "to_string") if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.toml_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.encoding.yaml", "parse") if args.len() == 1 && datatree_ok => {
-                            (self.host.encoding.yaml_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.encoding.yaml", "to_string") if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.yaml_to_string,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!(
-                                "jit core call unsupported: {module}.{method}"
-                            ))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.uuid" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "v4" if args.is_empty() => (self.host.encoding.uuid_v4, Vec::new()),
-                        "v7" if args.len() == 1 => {
-                            (self.host.encoding.uuid_v7, vec![self.lower_expr(&args[0])?])
-                        }
-                        "parse" if args.len() == 1 => {
-                            (self.host.encoding.uuid_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "v5" if args.len() == 2 => (
-                            self.host.encoding.uuid_v5,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.env" && method == "get" && args.len() == 1 {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.env_get, self.b.func);
-                    let a0 = self.lower_expr(&args[0])?;
-                    let call = self.b.ins().call(host_ref, &[a0]);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.env" && method == "set" && args.len() == 2 {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.env_set, self.b.func);
-                    let a0 = self.lower_expr(&args[0])?;
-                    let a1 = self.lower_expr(&args[1])?;
-                    let call = self.b.ins().call(host_ref, &[a0, a1]);
-                    let handle = self.b.inst_results(call)[0];
-                    self.emit_trap_check()?;
-                    return Ok(handle);
-                }
-                if module == "core.env" && method == "unset" && args.len() == 1 {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.env_unset, self.b.func);
-                    let a0 = self.lower_expr(&args[0])?;
-                    let call = self.b.ins().call(host_ref, &[a0]);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.env" && method == "vars" && args.is_empty() {
-                    return Ok(self.call_host(self.host.core.env_vars, &[]));
-                }
-                if module == "core.process" && method == "exit" && args.len() == 1 {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.process_exit, self.b.func);
-                    let a0 = self.lower_expr(&args[0])?;
-                    self.b.ins().call(host_ref, &[a0]);
-                    // Host sets exit_code + trap; unwind to epilogue like rich panic.
-                    self.emit_trap_check()?;
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
-                if module == "core.process" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "cmd" if args.len() == 1 => {
-                            (self.host.process.cmd, vec![self.lower_expr(&args[0])?])
-                        }
-                        "run" if args.len() == 1 => {
-                            (self.host.process.run, vec![self.lower_expr(&args[0])?])
-                        }
-                        "pipeline" if args.len() == 1 => {
-                            (self.host.process.pipeline, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.game" && method == "run" {
-                    let scene = self.lower_expr(&args[0])?;
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    let mut replay = zero;
-                    let mut backend = zero;
-                    // Named kwargs: replay: / backend: — TIR may pass 1–3 args.
-                    if args.len() >= 2 {
-                        replay = self.lower_expr(&args[1])?;
-                    }
-                    if args.len() >= 3 {
-                        backend = self.lower_expr(&args[2])?;
-                    }
-                    return Ok(self.call_host(self.host.game.run, &[scene, replay, backend]));
-                }
-                if module == "core.raylib" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "window_open" if args.len() == 3 => (
-                            self.host.raylib.window_open,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "color" if args.len() == 4 => (
-                            self.host.raylib.color,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                                self.lower_expr(&args[3])?,
-                            ],
-                        ),
-                        "set_target_fps" if args.len() == 1 => {
-                            (self.host.raylib.set_target_fps, vec![self.lower_expr(&args[0])?])
-                        }
-                        "key_down" if args.len() == 1 => {
-                            (self.host.raylib.key_down, vec![self.lower_expr(&args[0])?])
-                        }
-                        "begin_drawing" if args.len() == 1 => {
-                            (self.host.raylib.begin_drawing, vec![self.lower_expr(&args[0])?])
-                        }
-                        "clear_background" if args.len() == 1 => {
-                            (
-                                self.host.raylib.clear_background,
-                                vec![self.lower_expr(&args[0])?],
-                            )
-                        }
-                        "draw_rectangle" if args.len() == 5 => (
-                            self.host.raylib.draw_rectangle,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                                self.lower_expr(&args[3])?,
-                                self.lower_expr(&args[4])?,
-                            ],
-                        ),
-                        "draw_text" if args.len() == 5 => (
-                            self.host.raylib.draw_text,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                                self.lower_expr(&args[3])?,
-                                self.lower_expr(&args[4])?,
-                            ],
-                        ),
-                        "end_drawing" if args.is_empty() => (self.host.raylib.end_drawing, vec![]),
-                        "close_window" if args.len() == 1 => {
-                            (self.host.raylib.close_window, vec![self.lower_expr(&args[0])?])
-                        }
-                        "window_should_close" if args.len() == 1 => (
-                            self.host.raylib.window_should_close,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "window_ready" if args.len() == 1 => {
-                            (self.host.raylib.window_ready, vec![self.lower_expr(&args[0])?])
-                        }
-                        "load_sound" if args.len() == 1 => {
-                            (self.host.raylib.load_sound, vec![self.lower_expr(&args[0])?])
-                        }
-                        "play_sound" if args.len() == 1 => {
-                            (self.host.raylib.play_sound, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => {
-                            return Err(format!(
-                                "jit core call unsupported: core.raylib.{method}"
-                            ))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(match method.as_str() {
-                        "window_open"
-                        | "color"
-                        | "key_down"
-                        | "window_should_close"
-                        | "window_ready"
-                        | "load_sound"
-                        | "play_sound" => self.b.inst_results(call)[0],
-                        _ => self.b.ins().iconst(types::I8, 0),
-                    });
-                }
-                if module == "core.compress.gzip" || module == "core.compress.zstd" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.compress.gzip", "compress") if args.len() == 1 => {
-                            (self.host.compress.gzip_compress, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.compress.gzip", "decompress") if args.len() == 1 => {
-                            (self.host.compress.gzip_decompress, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.compress.zstd", "compress") if args.len() == 1 => {
-                            (self.host.compress.zstd_compress, vec![self.lower_expr(&args[0])?])
-                        }
-                        ("core.compress.zstd", "decompress") if args.len() == 1 => {
-                            (self.host.compress.zstd_decompress, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.archive" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "zip_compress" if args.len() == 2 => (
-                            self.host.archive.zip_compress,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "zip_decompress" if args.len() == 1 => {
-                            (self.host.archive.zip_decompress, vec![self.lower_expr(&args[0])?])
-                        }
-                        "tar_add" if args.len() == 3 => (
-                            self.host.archive.tar_add,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "tar_get" if args.len() == 2 => (
-                            self.host.archive.tar_get,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "tar_names_json" if args.len() == 1 => {
-                            (self.host.archive.tar_names_json, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.path" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "join" if args.len() == 2 => (
-                            self.host.core.path_join,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "parent" if args.len() == 1 => (
-                            self.host.core.path_parent_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "extension" if args.len() == 1 => (
-                            self.host.core.path_extension_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "normalize" if args.len() == 1 => (
-                            self.host.core.path_normalize_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.random" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "seed" if args.len() == 1 => {
-                            (self.host.random.seed, vec![self.lower_expr(&args[0])?])
-                        }
-                        "bool" if args.len() == 1 => {
-                            (self.host.random.bool_p, vec![self.lower_expr(&args[0])?])
-                        }
-                        "float_range" if args.len() == 2 => (
-                            self.host.random.float_range,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "normal" if args.len() == 2 => (
-                            self.host.random.normal,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "exponential" if args.len() == 1 => {
-                            (self.host.random.exponential, vec![self.lower_expr(&args[0])?])
-                        }
-                        "bytes" if args.len() == 1 => {
-                            (self.host.random.bytes, vec![self.lower_expr(&args[0])?])
-                        }
-                        "weighted_pick" if args.len() == 2 => {
-                            if matches!(
-                                &args[0].ty,
-                                Type::List(inner) | Type::FixedList { elem: inner, .. }
-                                    if matches!(inner.as_ref(), Type::IntN { .. })
-                            ) {
-                                return Err(
-                                    "jit random weighted_pick<IntN> needs typed Option lowering"
-                                        .to_string(),
-                                );
-                            }
-                            (
-                                self.host.random.weighted_pick,
-                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                            )
-                        }
-                        "sample" if args.len() == 2 => (
-                            self.host.random.sample,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "rng" if args.len() == 1 => {
-                            (self.host.random.rng_new, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    // Prefer method return shape over TIR `expr.ty` (can be Unit).
-                    let ret_ty = self
-                        .expr_arith_type_from_op(expr)
-                        .unwrap_or_else(|| expr.ty.clone());
-                    return Ok(clif_ty(&ret_ty)
-                        .map(|_| self.b.inst_results(call)[0])
-                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
-                }
-                if module == "core.crypto.random" && method == "bytes" && args.len() == 1 {
-                    let count = self.lower_expr(&args[0])?;
-                    return Ok(self.call_host(self.host.crypto.random_bytes, &[count]));
-                }
-                if module == "core.auth" && method == "verify_jwt" && (3..=5).contains(&args.len()) {
-                    let token = self.lower_expr(&args[0])?;
-                    let key = self.lower_expr(&args[1])?;
-                    let audience = self.lower_expr(&args[2])?;
-                    let issuer = if args.len() >= 4 {
-                        let value = self.lower_expr(&args[3])?;
-                        self.b.ins().iadd_imm(value, 1)
+                    let empty = self.b.ins().iconst(types::I64, 0);
+                    let methods = if args.len() > 1 {
+                        self.lower_expr(&args[1])?
                     } else {
-                        self.b.ins().iconst(types::I64, 0)
+                        empty
                     };
-                    let skew = if args.len() >= 5 {
+                    let headers = if args.len() > 2 {
+                        self.lower_expr(&args[2])?
+                    } else {
+                        empty
+                    };
+                    let credentials = if args.len() > 3 {
+                        let v = self.lower_expr(&args[3])?;
+                        self.b.ins().uextend(types::I64, v)
+                    } else {
+                        self.b.ins().iconst(types::I64, -1)
+                    };
+                    let max_age = if args.len() > 4 {
                         self.lower_expr(&args[4])?
                     } else {
                         self.b.ins().iconst(types::I64, 0)
                     };
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.crypto.verify_jwt, self.b.func);
-                    let call = self
-                        .b
-                        .ins()
-                        .call(host, &[token, key, audience, issuer, skew]);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.auth"
-                    && method == "verify_paseto"
-                    && (3..=7).contains(&args.len())
-                {
-                    let token = self.lower_expr(&args[0])?;
-                    let key = self.lower_expr(&args[1])?;
-                    let audience = self.lower_expr(&args[2])?;
-                    let issuer = if args.len() >= 4 {
-                        let value = self.lower_expr(&args[3])?;
-                        self.b.ins().iadd_imm(value, 1)
-                    } else {
-                        self.b.ins().iconst(types::I64, 0)
-                    };
-                    let skew = if args.len() >= 5 {
-                        self.lower_expr(&args[4])?
-                    } else {
-                        self.b.ins().iconst(types::I64, 0)
-                    };
-                    let footer = if args.len() >= 6 {
-                        self.lower_expr(&args[5])?
-                    } else {
-                        self.call_host(self.host.coll.list_new, &[])
-                    };
-                    let implicit = if args.len() >= 7 {
-                        self.lower_expr(&args[6])?
-                    } else {
-                        self.call_host(self.host.coll.list_new, &[])
-                    };
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.crypto.verify_paseto, self.b.func);
+                    let has_max_age =
+                        self.b.ins().iconst(types::I64, i64::from(args.len() > 4));
+                    let host = self.module.declare_func_in_func(
+                        self.host.net_http.http_cors_policy,
+                        self.b.func,
+                    );
                     let call = self.b.ins().call(
                         host,
-                        &[token, key, audience, issuer, skew, footer, implicit],
+                        &[
+                            origins_mode,
+                            origins,
+                            methods,
+                            headers,
+                            credentials,
+                            has_max_age,
+                            max_age,
+                        ],
                     );
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.vault" || module == "core.vault.expert" {
-                    let tag = crate::Crypto::vault_key_tag(&expr.ty)
-                        .or_else(|| {
-                            args.first()
-                                .and_then(|arg| crate::Crypto::vault_key_tag(&arg.ty))
-                        })
-                        .unwrap_or(1);
-                    let tag_val = self.b.ins().iconst(types::I64, tag);
-                    let (host_id, mut arg_values): (FuncId, Vec<Value>) =
-                        match (module.as_str(), method.as_str(), args.as_slice()) {
-                            ("core.vault", "get", [name]) => {
-                                (self.host.crypto.vault_get, vec![self.lower_expr(name)?])
-                            }
-                            ("core.vault", "current", [name]) => (
-                                self.host.crypto.vault_current,
-                                vec![self.lower_expr(name)?, tag_val],
-                            ),
-                            ("core.vault", "versions", [name]) => (
-                                self.host.crypto.vault_versions,
-                                vec![self.lower_expr(name)?, tag_val],
-                            ),
-                            ("core.vault", "prepare_generate", [name]) => (
-                                self.host.crypto.vault_prepare_generate,
-                                vec![self.lower_expr(name)?, tag_val],
-                            ),
-                            ("core.vault", "prepare_rotate", [name]) => (
-                                self.host.crypto.vault_prepare_rotate,
-                                vec![self.lower_expr(name)?, tag_val],
-                            ),
-                            ("core.vault", "prepare_store", [name, key]) => (
-                                self.host.crypto.vault_prepare_store,
-                                vec![self.lower_expr(name)?, self.lower_expr(key)?, tag_val],
-                            ),
-                            ("core.vault", "prepare_retire", [key_ref, reason]) => (
-                                self.host.crypto.vault_prepare_retire,
-                                vec![
-                                    self.lower_expr(key_ref)?,
-                                    self.lower_expr(reason)?,
-                                    tag_val,
-                                ],
-                            ),
-                            ("core.vault", "prepare_revoke", [key_ref, reason]) => (
-                                self.host.crypto.vault_prepare_revoke,
-                                vec![
-                                    self.lower_expr(key_ref)?,
-                                    self.lower_expr(reason)?,
-                                    tag_val,
-                                ],
-                            ),
-                            ("core.vault", "authorize_write", [plan, reason]) => (
-                                self.host.crypto.vault_authorize_write,
-                                vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
-                            ),
-                            ("core.vault", "commit_generate", [write, plan]) => (
-                                self.host.crypto.vault_commit_generate,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
-                            ),
-                            ("core.vault", "commit_store", [write, plan]) => (
-                                self.host.crypto.vault_commit_store,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
-                            ),
-                            ("core.vault", "commit_rotate", [write, plan]) => (
-                                self.host.crypto.vault_commit_rotate,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
-                            ),
-                            ("core.vault", "commit_retire", [write, plan]) => (
-                                self.host.crypto.vault_commit_retire,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
-                            ),
-                            ("core.vault", "commit_revoke", [write, plan]) => (
-                                self.host.crypto.vault_commit_revoke,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
-                            ),
-                            ("core.vault", "load", [key_ref]) => (
-                                self.host.crypto.vault_load,
-                                vec![self.lower_expr(key_ref)?, tag_val],
-                            ),
-                            ("core.vault", "status", [key_ref]) => (
-                                self.host.crypto.vault_status,
-                                vec![self.lower_expr(key_ref)?, tag_val],
-                            ),
-                            ("core.vault", "export_to_recipients", [key_ref, recipients]) => (
-                                self.host.crypto.vault_export_to_recipients,
-                                vec![
-                                    self.lower_expr(key_ref)?,
-                                    self.lower_expr(recipients)?,
-                                    tag_val,
-                                ],
-                            ),
-                            ("core.vault", "export_to_passphrase", [key_ref, passphrase]) => (
-                                self.host.crypto.vault_export_to_passphrase,
-                                vec![
-                                    self.lower_expr(key_ref)?,
-                                    self.lower_expr(passphrase)?,
-                                    tag_val,
-                                ],
-                            ),
-                            ("core.vault", "prepare_import_wrapped", [name, wrapped, unlock]) => (
-                                self.host.crypto.vault_prepare_import_wrapped,
-                                vec![
-                                    self.lower_expr(name)?,
-                                    self.lower_expr(wrapped)?,
-                                    self.lower_expr(unlock)?,
-                                    tag_val,
-                                ],
-                            ),
-                            ("core.vault", "authorize_wrapped_import", [plan, reason]) => (
-                                self.host.crypto.vault_authorize_wrapped_import,
-                                vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
-                            ),
-                            ("core.vault", "commit_import_wrapped", [write, plan]) => (
-                                self.host.crypto.vault_commit_import_wrapped,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
-                            ),
-                            ("core.vault.expert", "prepare_import_signing", [name, bytes]) => (
-                                self.host.crypto.vault_expert_prepare_import_signing,
-                                vec![self.lower_expr(name)?, self.lower_expr(bytes)?],
-                            ),
-                            ("core.vault.expert", "commit_import_signing", [write, plan]) => (
-                                self.host.crypto.vault_expert_commit_import_signing,
-                                vec![self.lower_expr(write)?, self.lower_expr(plan)?],
-                            ),
-                            _ => {
-                                return Err(format!(
-                                    "jit core call unsupported: {module}.{method}"
-                                ))
-                            }
-                        };
-                    if matches!(method.as_str(), "get") {
-                        arg_values.truncate(1);
+                "cors" if args.len() == 2 => (
+                    self.host.net_http.http_cors,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if matches!(module.as_str(), "core.http" | "core.http.client") {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "get" if args.len() == 1 => (
+                    self.host.net_http.http_client_get,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "post" if args.len() == 2 => (
+                    self.host.net_http.http_client_post,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "request" if args.len() == 2 => (
+                    self.host.net_http.http_client_request_new,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.ws" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "upgrade" if args.len() == 1 => (
+                    self.host.net_http.ws_upgrade,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "connect" if args.len() == 1 => (
+                    self.host.net_http.ws_connect,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.watcher" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "files" if args.len() == 1 => (
+                    self.host.watcher.watcher_files,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "process_pid" if args.len() == 1 => (
+                    self.host.watcher.watcher_process_pid,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "port" if args.len() == 2 => (
+                    self.host.watcher.watcher_port,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "set" if args.is_empty() => (self.host.watcher.watcher_set, vec![]),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.log" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "set_level" if args.len() == 1 => {
+                    (self.host.core.log_set_level, vec![self.lower_expr(&args[0])?])
+                }
+                "setup" if args.len() == 1 => {
+                    (self.host.core.log_setup, vec![self.lower_expr(&args[0])?])
+                }
+                "debug" if args.len() == 1 => {
+                    (self.host.core.log_debug, vec![self.lower_expr(&args[0])?])
+                }
+                "info" if args.len() == 1 => {
+                    (self.host.core.log_info, vec![self.lower_expr(&args[0])?])
+                }
+                "warn" if args.len() == 1 => {
+                    (self.host.core.log_warn, vec![self.lower_expr(&args[0])?])
+                }
+                "error" if args.len() == 1 => {
+                    (self.host.core.log_error, vec![self.lower_expr(&args[0])?])
+                }
+                "critical" if args.len() == 1 => {
+                    (self.host.core.log_critical, vec![self.lower_expr(&args[0])?])
+                }
+                "fatal" if args.len() == 1 => {
+                    (self.host.core.log_fatal, vec![self.lower_expr(&args[0])?])
+                }
+                "disable" if args.is_empty() => (self.host.core.log_disable, vec![]),
+                "flush" if args.is_empty() => (self.host.core.log_flush, vec![]),
+                "enabled" if args.len() == 1 => {
+                    (self.host.core.log_enabled, vec![self.lower_expr(&args[0])?])
+                }
+                "set_trace_id" if args.len() == 1 => (
+                    self.host.core.log_set_trace_id,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "field" if args.len() == 2 => (
+                    self.host.core.log_field,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "int" if args.len() == 2 => (
+                    self.host.core.log_int_field,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "bool" if args.len() == 2 => (
+                    self.host.core.log_bool_field,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "counter" if args.len() == 2 => (
+                    self.host.core.log_counter,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "span" if args.len() == 1 => {
+                    (self.host.core.log_span, vec![self.lower_expr(&args[0])?])
+                }
+                "enter" if args.len() == 1 => {
+                    (self.host.core.log_enter, vec![self.lower_expr(&args[0])?])
+                }
+                "close" if args.len() == 1 => {
+                    (self.host.core.log_close, vec![self.lower_expr(&args[0])?])
+                }
+                "info_fields" if args.len() == 2 => (
+                    self.host.core.log_info_fields,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(clif_ty(&expr.ty)
+                .map(|_| self.b.inst_results(call)[0])
+                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        }
+        if module == "core.files" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "create" if args.len() == 1 => {
+                    (self.host.stream.fs_create, vec![self.lower_expr(&args[0])?])
+                }
+                "open" if args.len() == 1 => {
+                    (self.host.stream.fs_open, vec![self.lower_expr(&args[0])?])
+                }
+                "exists" if args.len() == 1 => {
+                    (self.host.core.fs_exists, vec![self.lower_expr(&args[0])?])
+                }
+                "read" if args.len() == 1 => {
+                    (self.host.core.fs_read, vec![self.lower_expr(&args[0])?])
+                }
+                "read_bytes" if args.len() == 1 => (
+                    self.host.core.fs_read_bytes,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "write" if args.len() == 2 => (
+                    self.host.core.fs_write,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "create_dir" | "create_dir_all" if args.len() == 1 => {
+                    (self.host.core.fs_create_dir, vec![self.lower_expr(&args[0])?])
+                }
+                "list_dir" if args.len() == 1 => {
+                    (self.host.core.fs_list_dir, vec![self.lower_expr(&args[0])?])
+                }
+                "remove_all" if args.len() == 1 => {
+                    (self.host.core.fs_remove_all, vec![self.lower_expr(&args[0])?])
+                }
+                "remove" if args.len() == 1 => {
+                    (self.host.core.fs_remove, vec![self.lower_expr(&args[0])?])
+                }
+                "stat" if args.len() == 1 => {
+                    (self.host.core.fs_stat, vec![self.lower_expr(&args[0])?])
+                }
+                "read_at" if args.len() == 3 => (
+                    self.host.core.fs_read_at,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "write_at" if args.len() == 3 => (
+                    self.host.core.fs_write_at,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "fsync" if args.len() == 1 => {
+                    (self.host.core.fs_fsync, vec![self.lower_expr(&args[0])?])
+                }
+                "write_atomic" if args.len() == 2 => (
+                    self.host.core.fs_write_atomic,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "walk" if args.len() == 1 => {
+                    (self.host.core.fs_walk, vec![self.lower_expr(&args[0])?])
+                }
+                "glob" if args.len() == 1 => {
+                    (self.host.core.fs_glob, vec![self.lower_expr(&args[0])?])
+                }
+                "symlink" if args.len() == 2 => (
+                    self.host.core.fs_symlink,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "read_link" if args.len() == 1 => {
+                    (self.host.core.fs_read_link, vec![self.lower_expr(&args[0])?])
+                }
+                "hard_link" if args.len() == 2 => (
+                    self.host.core.fs_hard_link,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "canonicalize" if args.len() == 1 => {
+                    (self.host.core.fs_canonicalize, vec![self.lower_expr(&args[0])?])
+                }
+                "absolute" if args.len() == 1 => {
+                    (self.host.core.fs_absolute, vec![self.lower_expr(&args[0])?])
+                }
+                "copy_dir" if args.len() == 2 => (
+                    self.host.core.fs_copy_dir,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "temp_dir" if args.len() == 1 => {
+                    (self.host.core.fs_temp_dir, vec![self.lower_expr(&args[0])?])
+                }
+                "temp_file" if args.len() == 1 => {
+                    (self.host.core.fs_temp_file, vec![self.lower_expr(&args[0])?])
+                }
+                "lock" if args.len() == 1 => {
+                    (self.host.core.fs_lock, vec![self.lower_expr(&args[0])?])
+                }
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.hex"
+            || module == "core.encoding.base64"
+            || module == "core.encoding.base32"
+        {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                ("core.encoding.hex", "encode") if args.len() == 1 => {
+                    (self.host.encoding.hex_encode, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.encoding.hex", "decode") if args.len() == 1 => {
+                    (self.host.encoding.hex_decode, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.encoding.base64", "encode") if args.len() == 1 => {
+                    (self.host.encoding.b64_encode, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.encoding.base64", "encode_url") if args.len() == 1 => (
+                    self.host.encoding.b64_encode_url,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.encoding.base64", "decode") if args.len() == 1 => {
+                    (self.host.encoding.b64_decode, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.encoding.base64", "decode_url") if args.len() == 1 => (
+                    self.host.encoding.b64_decode_url,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.encoding.base32", "encode") if args.len() == 1 => (
+                    self.host.encoding.base32_encode,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.encoding.base32", "decode") if args.len() == 1 => (
+                    self.host.encoding.base32_decode,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.csv" {
+            // Typed `csv.decode<T>` → Result[[T], …]
+            if method == "decode" && args.len() == 1 {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    if let Type::List(elem) = ok.as_ref() {
+                        return self.lower_typed_csv_decode(&args[0], elem);
                     }
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &arg_values);
-                    return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.math" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "sin" if args.len() == 1 => {
-                            (self.host.core.math_sin, vec![self.lower_expr(&args[0])?])
-                        }
-                        "cos" if args.len() == 1 => {
-                            (self.host.core.math_cos, vec![self.lower_expr(&args[0])?])
-                        }
-                        "exp" if args.len() == 1 => {
-                            (self.host.core.math_exp, vec![self.lower_expr(&args[0])?])
-                        }
-                        "degrees" if args.len() == 1 => {
-                            (self.host.core.math_degrees, vec![self.lower_expr(&args[0])?])
-                        }
-                        "radians" if args.len() == 1 => {
-                            (self.host.core.math_radians, vec![self.lower_expr(&args[0])?])
-                        }
-                        "is_finite" if args.len() == 1 => {
-                            (self.host.core.math_is_finite, vec![self.lower_expr(&args[0])?])
-                        }
-                        "sign" if args.len() == 1 => {
-                            (self.host.core.math_sign, vec![self.lower_expr(&args[0])?])
-                        }
-                        "atan2" if args.len() == 2 => (
-                            self.host.core.math_atan2,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "hypot" if args.len() == 2 => (
-                            self.host.core.math_hypot,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "lerp" if args.len() == 3 => (
-                            self.host.core.math_lerp,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "checked_add" if args.len() == 2 => (
-                            self.host.core.math_checked_add,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "saturating_add" if args.len() == 2 => (
-                            self.host.core.math_saturating_add,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "wrapping_add" if args.len() == 2 => (
-                            self.host.core.math_wrapping_add,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "int_pow" if args.len() == 2 => (
-                            self.host.core.math_int_pow,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "gcd" if args.len() == 2 => (
-                            self.host.core.math_gcd,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "lcm" if args.len() == 2 => (
-                            self.host.core.math_lcm,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "sqrt" if args.len() == 1 => {
-                            let f32_path = matches!(args[0].ty, Type::Float32);
-                            (
-                                if f32_path {
-                                    self.host.core.math_sqrt_f32
-                                } else {
-                                    self.host.core.math_sqrt
-                                },
-                                vec![self.lower_expr(&args[0])?],
-                            )
-                        }
-                        "pow" if args.len() == 2 => {
-                            let f32_path = matches!(args[0].ty, Type::Float32);
-                            (
-                                if f32_path {
-                                    self.host.core.math_pow_f32
-                                } else {
-                                    self.host.core.math_pow
-                                },
-                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                            )
-                        }
-                        "floor" if args.len() == 1 => {
-                            let f32_path = matches!(args[0].ty, Type::Float32);
-                            (
-                                if f32_path {
-                                    self.host.core.math_floor_f32
-                                } else {
-                                    self.host.core.math_floor
-                                },
-                                vec![self.lower_expr(&args[0])?],
-                            )
-                        }
-                        "ceil" if args.len() == 1 => {
-                            let f32_path = matches!(args[0].ty, Type::Float32);
-                            (
-                                if f32_path {
-                                    self.host.core.math_ceil_f32
-                                } else {
-                                    self.host.core.math_ceil
-                                },
-                                vec![self.lower_expr(&args[0])?],
-                            )
-                        }
-                        "abs" if args.len() == 1 => {
-                            // Inline f64 abs — no separate host (Prelude uses libm).
-                            let x = self.lower_expr(&args[0])?;
-                            let neg = self.b.ins().fneg(x);
-                            let zero = self.b.ins().f64const(0.0);
-                            let neg_mask = self.b.ins().fcmp(FloatCC::LessThan, x, zero);
-                            return Ok(self.b.ins().select(neg_mask, neg, x));
-                        }
-                        "max" if args.len() == 2 => {
-                            let a = self.lower_expr(&args[0])?;
-                            let b = self.lower_expr(&args[1])?;
-                            return Ok(self.b.ins().fmax(a, b));
-                        }
-                        "min" if args.len() == 2 => {
-                            let a = self.lower_expr(&args[0])?;
-                            let b = self.lower_expr(&args[1])?;
-                            return Ok(self.b.ins().fmin(a, b));
-                        }
-                        "clamp" if args.len() == 3 => {
-                            let x = self.lower_expr(&args[0])?;
-                            let lo = self.lower_expr(&args[1])?;
-                            let hi = self.lower_expr(&args[2])?;
-                            let raised = self.b.ins().fmax(x, lo);
-                            return Ok(self.b.ins().fmin(raised, hi));
-                        }
-                        "decimal" if args.len() == 1 => (
-                            self.host.num.decimal_from_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "fraction" if args.len() == 2 => (
-                            self.host.num.fraction_new,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        // #1464 / I9 — Prelude MathLibPure + AOT-inline f64/i64 methods.
-                        "erf" if args.len() == 1 => {
-                            (self.host.math_extra.erf, vec![self.lower_expr(&args[0])?])
-                        }
-                        "erfc" if args.len() == 1 => {
-                            (self.host.math_extra.erfc, vec![self.lower_expr(&args[0])?])
-                        }
-                        "gamma" if args.len() == 1 => {
-                            (self.host.math_extra.gamma, vec![self.lower_expr(&args[0])?])
-                        }
-                        "lgamma" if args.len() == 1 => {
-                            (self.host.math_extra.lgamma, vec![self.lower_expr(&args[0])?])
-                        }
-                        "ulp" if args.len() == 1 => {
-                            (self.host.math_extra.ulp, vec![self.lower_expr(&args[0])?])
-                        }
-                        "significand" if args.len() == 1 => (
-                            self.host.math_extra.significand,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "logb" if args.len() == 1 => {
-                            (self.host.math_extra.logb, vec![self.lower_expr(&args[0])?])
-                        }
-                        "ldexp" | "scaleb" if args.len() == 2 => (
-                            self.host.math_extra.ldexp,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "next_after" if args.len() == 2 => (
-                            self.host.math_extra.next_after,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "cmp" if args.len() == 2 => (
-                            self.host.math_extra.cmp,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "ilogb" if args.len() == 1 => {
-                            (self.host.math_extra.ilogb, vec![self.lower_expr(&args[0])?])
-                        }
-                        "isqrt" if args.len() == 1 => {
-                            (self.host.math_extra.isqrt, vec![self.lower_expr(&args[0])?])
-                        }
-                        "factorial" if args.len() == 1 => (
-                            self.host.math_extra.factorial,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "binomial" if args.len() == 2 => (
-                            self.host.math_extra.binomial,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "digits" if args.len() == 1 => {
-                            (self.host.math_extra.digits, vec![self.lower_expr(&args[0])?])
-                        }
-                        "leading_ones" if args.len() == 1 => (
-                            self.host.math_extra.leading_ones,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "trailing_ones" if args.len() == 1 => (
-                            self.host.math_extra.trailing_ones,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "asinh" if args.len() == 1 => {
-                            (self.host.math_extra.asinh, vec![self.lower_expr(&args[0])?])
-                        }
-                        "acosh" if args.len() == 1 => {
-                            (self.host.math_extra.acosh, vec![self.lower_expr(&args[0])?])
-                        }
-                        "atanh" if args.len() == 1 => {
-                            (self.host.math_extra.atanh, vec![self.lower_expr(&args[0])?])
-                        }
-                        "cbrt" if args.len() == 1 => {
-                            (self.host.math_extra.cbrt, vec![self.lower_expr(&args[0])?])
-                        }
-                        "exp2" if args.len() == 1 => {
-                            (self.host.math_extra.exp2, vec![self.lower_expr(&args[0])?])
-                        }
-                        "exp_m1" if args.len() == 1 => {
-                            (self.host.math_extra.exp_m1, vec![self.lower_expr(&args[0])?])
-                        }
-                        "ln_1p" if args.len() == 1 => {
-                            (self.host.math_extra.ln_1p, vec![self.lower_expr(&args[0])?])
-                        }
-                        "log" if args.len() == 2 => (
-                            self.host.math_extra.log,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "copysign" if args.len() == 2 => (
-                            self.host.math_extra.copysign,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "signum" if args.len() == 1 => {
-                            (self.host.math_extra.signum, vec![self.lower_expr(&args[0])?])
-                        }
-                        "fma" if args.len() == 3 => (
-                            self.host.math_extra.fma,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "is_even" if args.len() == 1 => {
-                            (self.host.math_extra.is_even, vec![self.lower_expr(&args[0])?])
-                        }
-                        "is_odd" if args.len() == 1 => {
-                            (self.host.math_extra.is_odd, vec![self.lower_expr(&args[0])?])
-                        }
-                        "checked_abs" if args.len() == 1 => (
-                            self.host.math_extra.checked_abs,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "checked_neg" if args.len() == 1 => (
-                            self.host.math_extra.checked_neg,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "checked_div" if args.len() == 2 => (
-                            self.host.math_extra.checked_div,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "checked_rem" if args.len() == 2 => (
-                            self.host.math_extra.checked_rem,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "is_normal" if args.len() == 1 => (
-                            self.host.math_extra.is_normal,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_subnormal" if args.len() == 1 => (
-                            self.host.math_extra.is_subnormal,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_canonical" if args.len() == 1 => (
-                            self.host.math_extra.is_canonical,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_signed" | "sign_bit" if args.len() == 1 => (
-                            self.host.math_extra.is_signed,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_zero" if args.len() == 1 => (
-                            self.host.math_extra.is_zero_f,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_integer" if args.len() == 1 => (
-                            self.host.math_extra.is_integer,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "next_up" if args.len() == 1 => {
-                            (self.host.math_extra.next_up, vec![self.lower_expr(&args[0])?])
-                        }
-                        "next_down" if args.len() == 1 => (
-                            self.host.math_extra.next_down,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "cot" if args.len() == 1 => {
-                            (self.host.math_extra.cot, vec![self.lower_expr(&args[0])?])
-                        }
-                        "inv" if args.len() == 1 => {
-                            (self.host.math_extra.inv, vec![self.lower_expr(&args[0])?])
-                        }
-                        "copy" if args.len() == 1 => {
-                            return Ok(self.lower_expr(&args[0])?);
-                        }
-                        "zero" if args.is_empty() => {
-                            return Ok(self.b.ins().f64const(0.0));
-                        }
-                        "radix" if args.len() <= 1 => {
-                            return Ok(self.b.ins().iconst(types::I64, 2));
-                        }
-                        "sin_cos" if args.len() == 1 => {
-                            (self.host.math_extra.sin_cos, vec![self.lower_expr(&args[0])?])
-                        }
-                        "modf" if args.len() == 1 => {
-                            (self.host.math_extra.modf, vec![self.lower_expr(&args[0])?])
-                        }
-                        "frexp" if args.len() == 1 => {
-                            (self.host.math_extra.frexp, vec![self.lower_expr(&args[0])?])
-                        }
-                        "div_mod" if args.len() == 2 => (
-                            self.host.math_extra.div_mod,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "div_rem" if args.len() == 2 => (
-                            self.host.math_extra.div_rem,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "atan" if args.len() == 1 => {
-                            (self.host.math_extra.atan, vec![self.lower_expr(&args[0])?])
-                        }
-                        "asin" if args.len() == 1 => {
-                            (self.host.math_extra.asin, vec![self.lower_expr(&args[0])?])
-                        }
-                        "acos" if args.len() == 1 => {
-                            (self.host.math_extra.acos, vec![self.lower_expr(&args[0])?])
-                        }
-                        "tan" if args.len() == 1 => {
-                            (self.host.math_extra.tan, vec![self.lower_expr(&args[0])?])
-                        }
-                        "sinh" if args.len() == 1 => {
-                            (self.host.math_extra.sinh, vec![self.lower_expr(&args[0])?])
-                        }
-                        "cosh" if args.len() == 1 => {
-                            (self.host.math_extra.cosh, vec![self.lower_expr(&args[0])?])
-                        }
-                        "tanh" if args.len() == 1 => {
-                            (self.host.math_extra.tanh, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => {
-                            return Err(format!("jit core call unsupported: core.math.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    let result = self.b.inst_results(call)[0];
-                    if method == "decimal" {
-                        self.emit_trap_check()?;
-                    }
-                    return Ok(result);
+            }
+            // `csv.to_string` has two shapes: the dynamic `[[String]]` rows
+            // form, and the typed `[T]` Codable form AOT renders through
+            // `jet_enc_csv_to_string`. Only rows may reach the rows host —
+            // feeding it a typed list used to render an empty string and
+            // report success, which is silent data loss.
+            let rows_arg = args.first().is_some_and(|a| {
+                matches!(&a.ty, Type::List(inner)
+                    if matches!(inner.as_ref(), Type::List(cell)
+                        if matches!(cell.as_ref(), Type::String)))
+            });
+            if method == "to_string" && args.len() == 1 && !rows_arg {
+                let tree = self.lower_serde_encode(&args[0])?;
+                let host_ref = self.module.declare_func_in_func(
+                    self.host.encoding.csv_tree_to_string,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host_ref, &[tree]);
+                let rendered = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                return Ok(rendered);
+            }
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "parse" if args.len() == 1 => {
+                    (self.host.encoding.csv_parse, vec![self.lower_expr(&args[0])?])
                 }
-                if module == "core.tasks" && method == "channel" && args.is_empty() {
-                    return Ok(self.call_host(self.host.conc.channel_new, &[]));
-                }
-                if module == "core.tasks" && method == "channel" && args.len() == 1 {
-                    let cap = self.lower_expr(&args[0])?;
-                    return Ok(self.call_host(self.host.conc.channel_bounded, &[cap]));
-                }
-                if module == "core.tasks" && method == "after" {
-                    let ms = self.lower_expr(&args[0])?;
-                    let value = if args.len() >= 2 {
+                "to_string" if args.len() == 1 && rows_arg => (
+                    self.host.encoding.csv_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "writer" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
                         self.lower_expr(&args[1])?
                     } else {
                         self.b.ins().iconst(types::I64, 0)
                     };
-                    return Ok(self.call_host(self.host.conc.after_value, &[ms, value]));
+                    (self.host.stream.csv_writer, vec![file, limits])
                 }
-                if module == "core.tasks" && method == "interval" && args.len() == 1 {
-                    let ms = self.lower_expr(&args[0])?;
-                    return Ok(self.call_host(self.host.conc.interval, &[ms]));
-                }
-                if module == "core.tasks" && method == "yield_now" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.task_yield, self.b.func);
-                    self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
-                if module == "core.tasks" && method == "current_task" && args.is_empty() {
-                    return Ok(self.call_host(self.host.conc.task_current_trace, &[]));
-                }
-                if module == "core.time" && method == "now" && args.is_empty() {
-                    return Ok(self.call_host(self.host.conc.time_now, &[]));
-                }
-                if module == "core.time" && method == "sleep" && args.len() == 1 {
-                    let millis = self.lower_expr(&args[0])?;
-                    let sleep_status = self.call_host(self.host.conc.sleep, &[millis]);
-                    let _ = self.finish_wait_call(sleep_status);
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
-                if module == "core.text" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "lower" if args.len() == 1 => {
-                            (self.host.text.lower, vec![self.lower_expr(&args[0])?])
-                        }
-                        "upper" if args.len() == 1 => {
-                            (self.host.text.upper, vec![self.lower_expr(&args[0])?])
-                        }
-                        "trim" if args.len() == 1 => {
-                            (self.host.str_trim, vec![self.lower_expr(&args[0])?])
-                        }
-                        "scalar_count" if args.len() == 1 => {
-                            (self.host.str_len, vec![self.lower_expr(&args[0])?])
-                        }
-                        "byte_count" if args.len() == 1 => {
-                            (self.host.str_byte_len, vec![self.lower_expr(&args[0])?])
-                        }
-                        "graphemes" if args.len() == 1 => {
-                            (self.host.text.graphemes, vec![self.lower_expr(&args[0])?])
-                        }
-                        "words" if args.len() == 1 => {
-                            (self.host.text.words, vec![self.lower_expr(&args[0])?])
-                        }
-                        "sentences" if args.len() == 1 => {
-                            (self.host.text.sentences, vec![self.lower_expr(&args[0])?])
-                        }
-                        "nfc" if args.len() == 1 => {
-                            (self.host.text.nfc, vec![self.lower_expr(&args[0])?])
-                        }
-                        "nfkc" if args.len() == 1 => {
-                            (self.host.text.nfkc, vec![self.lower_expr(&args[0])?])
-                        }
-                        "nfd" if args.len() == 1 => {
-                            (self.host.text.nfd, vec![self.lower_expr(&args[0])?])
-                        }
-                        "nfkd" if args.len() == 1 => {
-                            (self.host.text.nfkd, vec![self.lower_expr(&args[0])?])
-                        }
-                        "caseless_eq" if args.len() == 2 => (
-                            self.host.text.caseless_eq,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "display_width" if args.len() == 1 => (
-                            self.host.text.display_width,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "display_width" if args.len() == 2 => (
-                            self.host.text.display_width_policy,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "is_alphabetic" if args.len() == 1 => (
-                            self.host.text.is_alphabetic,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_numeric" if args.len() == 1 => (
-                            self.host.text.is_numeric,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "pad_start" if args.len() == 3 => (
-                            self.host.text.pad_start,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "center" if args.len() == 3 => (
-                            self.host.text.center,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "starts_any" if args.len() == 2 => (
-                            self.host.text.starts_any,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "char_indices" if args.len() == 1 => (
-                            self.host.text.char_indices,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core.text call unsupported: {method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module.starts_with("core.sketch.") {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.sketch.hll", "new") if args.is_empty() => {
-                            (self.host.sketch.hll_new, Vec::new())
-                        }
-                        ("core.sketch.tdigest", "new") if args.is_empty() => {
-                            (self.host.sketch.tdigest_new, Vec::new())
-                        }
-                        ("core.sketch.cms", "new") if args.is_empty() => {
-                            (self.host.sketch.cms_new, Vec::new())
-                        }
-                        ("core.sketch.reservoir", "new") if args.len() == 1 => {
-                            (self.host.sketch.reservoir_new, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.args" && method == "spec" && args.is_empty() {
-                    return Ok(self.call_host(self.host.args.spec, &[]));
-                }
-                if module == "core.text.unicode" && args.len() == 1 {
-                    let host_id = match method.as_str() {
-                        // str_len already counts Unicode scalars via jet_rt.
-                        "scalar_count" => self.host.str_len,
-                        "byte_count" => self.host.str_byte_len,
-                        "is_ascii" => self.host.str_is_ascii,
-                        "lower" => self.host.str_to_lower,
-                        "upper" => self.host.str_to_upper,
-                        "scalars" => self.host.str_scalar_strings,
-                        _ => {
-                            return Err(format!(
-                                "jit core.text.unicode call unsupported: {method}"
-                            ))
-                        }
-                    };
-                    let text = self.lower_expr(&args[0])?;
-                    return Ok(self.call_host(host_id, &[text]));
-                }
-                if module == "core.fmt" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "number" | "bytes" | "duration" | "ordinal" if args.len() == 1 => {
-                            let host = match method.as_str() {
-                                "number" => self.host.fmt.number,
-                                "bytes" => self.host.fmt.bytes,
-                                "duration" => self.host.fmt.duration,
-                                _ => self.host.fmt.ordinal,
-                            };
-                            (host, vec![self.lower_expr(&args[0])?])
-                        }
-                        "decimal" | "percent" if args.len() == 2 => {
-                            let host = if method == "decimal" {
-                                self.host.fmt.decimal
-                            } else {
-                                self.host.fmt.percent
-                            };
-                            (
-                                host,
-                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                            )
-                        }
-                        "plural" if args.len() == 3 => (
-                            self.host.fmt.plural,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "pad_left" | "pad_right" | "pad_center" if args.len() == 3 => {
-                            let host = match method.as_str() {
-                                "pad_left" => self.host.fmt.pad_left,
-                                "pad_right" => self.host.fmt.pad_right,
-                                _ => self.host.fmt.pad_center,
-                            };
-                            (
-                                host,
-                                vec![
-                                    self.lower_expr(&args[0])?,
-                                    self.lower_expr(&args[1])?,
-                                    self.lower_expr(&args[2])?,
-                                ],
-                            )
-                        }
-                        _ => {
-                            return Err(format!("jit core call unsupported: core.fmt.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.perf" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "fidelity" if args.is_empty() => (self.host.perf_fidelity, Vec::new()),
-                        "default_fidelity" if args.is_empty() => {
-                            (self.host.perf_default_fidelity, Vec::new())
-                        }
-                        "override_fidelity" if args.len() == 1 => {
-                            (self.host.perf_override_fidelity, vec![self.lower_expr(&args[0])?])
-                        }
-                        "reset_fidelity" if args.is_empty() => {
-                            (self.host.perf_reset_fidelity, Vec::new())
-                        }
-                        _ => return Err(format!("jit core.perf call unsupported: {method}")),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(clif_ty(&expr.ty)
-                        .map(|_| self.b.inst_results(call)[0])
-                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
-                }
-
-                if module == "core.time.date" || module == "core.time.datetime" || module == "core.time" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.time.date", "new") if args.len() == 3 => (
-                            self.host.time.date_new,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
-                        ),
-                        ("core.time.date", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
-                        ("core.time.date", "parse") if args.len() == 1 => (self.host.time.date_parse, vec![self.lower_expr(&args[0])?]),
-                        ("core.time.datetime", "from_timestamp") if args.len() == 1 => (
-                            self.host.time.datetime_from_timestamp,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.time.datetime", "now") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
-                        ("core.time", "parse_rfc3339") if args.len() == 1 => (
-                            self.host.time.parse_rfc3339,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.time", "from_unix_ms") if args.len() == 1 => (
-                            self.host.time.from_unix_ms,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.time", "utc") if args.is_empty() => (self.host.time.utc, Vec::new()),
-                        ("core.time", "period_months") if args.len() == 1 => (
-                            self.host.time.period_months,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.time", "instant") if args.is_empty() => (self.host.time.instant, Vec::new()),
-                        ("core.time", "zoned") if args.len() == 2 => (
-                            self.host.time.zoned,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        ("core.time", "days_in_month") if args.len() == 2 => (
-                            self.host.time.days_in_month,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        ("core.time", "is_leap_year") if args.len() == 1 => (
-                            self.host.time.is_leap_year,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        ("core.time", "datetime") if args.len() == 6 => (
-                            self.host.time.datetime,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                                self.lower_expr(&args[3])?,
-                                self.lower_expr(&args[4])?,
-                                self.lower_expr(&args[5])?,
-                            ],
-                        ),
-                        ("core.time", "time" | "local_time") if args.len() == 3 => (
-                            self.host.time.local_time,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        ("core.time", "nanoseconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 0)],
-                        ),
-                        ("core.time", "microseconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 1)],
-                        ),
-                        ("core.time", "milliseconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 2)],
-                        ),
-                        ("core.time", "seconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 3)],
-                        ),
-                        ("core.time", "minutes") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 4)],
-                        ),
-                        ("core.time", "hours") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 5)],
-                        ),
-                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.regex" {
-                    let widen_bool = |this: &mut Self, e: &TExpr| -> Result<Value, String> {
-                        let v = this.lower_expr(e)?;
-                        if this.b.func.dfg.value_type(v) == types::I8 {
-                            Ok(this.b.ins().uextend(types::I64, v))
-                        } else {
-                            Ok(v)
-                        }
-                    };
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "flags" if args.len() == 3 => (
-                            self.host.text.regex_flags,
-                            vec![
-                                widen_bool(self, &args[0])?,
-                                widen_bool(self, &args[1])?,
-                                widen_bool(self, &args[2])?,
-                            ],
-                        ),
-                        "escape" if args.len() == 1 => (
-                            self.host.text.regex_escape,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "literal" if args.len() == 1 => (
-                            self.host.text.regex_literal,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "is_match" if args.len() == 2 => (
-                            self.host.text.regex_is_match,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "find" if args.len() == 2 => (
-                            self.host.text.regex_find,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "find_all" if args.len() == 2 => (
-                            self.host.text.regex_find_all,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "matches" if args.len() == 2 => (
-                            self.host.text.regex_matches,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "match" if args.len() == 2 => (
-                            self.host.text.regex_match,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "replace" if args.len() == 3 => (
-                            self.host.text.regex_replace,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
-                        ),
-                        "replace_all" if args.len() == 3 => (
-                            self.host.text.regex_replace_all,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
-                        ),
-                        "split" if args.len() == 2 => (
-                            self.host.text.regex_split,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "split_limit" if args.len() == 3 => (
-                            self.host.text.regex_split_limit,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
-                        ),
-                        "compile" if args.len() == 1 => (
-                            self.host.text.regex_compile,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "compile_with" if args.len() == 2 => (
-                            self.host.text.regex_compile_with,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.db" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "open_memory" if args.is_empty() => {
-                            (self.host.db.open_memory, Vec::new())
-                        }
-                        "open" if args.len() == 1 => {
-                            (self.host.db.open, vec![self.lower_expr(&args[0])?])
-                        }
-                        "policy" if args.len() == 2 => (
-                            self.host.db.policy,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "migrate" if args.len() == 3 => (
-                            self.host.db.migrate,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "transaction" if args.len() == 3 => (
-                            self.host.db.transaction,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "params" if args.len() == 1 => {
-                            (self.host.db.params, vec![self.lower_expr(&args[0])?])
-                        }
-                        "row_int" if args.len() == 2 => (
-                            self.host.db.row_int,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "row_text" if args.len() == 2 => (
-                            self.host.db.row_text,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.url" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "parse" if args.len() == 1 => {
-                            (self.host.net.url_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "file" if args.len() == 1 => {
-                            (self.host.net.url_file, vec![self.lower_expr(&args[0])?])
-                        }
-                        "data" if args.len() == 2 => (
-                            self.host.net.url_data,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "query" if args.len() == 1 => {
-                            (self.host.net.url_query, vec![self.lower_expr(&args[0])?])
-                        }
-                        "percent_encode" if args.len() == 1 => (
-                            self.host.net.url_percent_encode,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "percent_decode" if args.len() == 1 => (
-                            self.host.net.url_percent_decode,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.mime" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "parse" if args.len() == 1 => {
-                            (self.host.net.mime_parse, vec![self.lower_expr(&args[0])?])
-                        }
-                        "from_extension" if args.len() == 1 => (
-                            self.host.net.mime_from_extension,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "extension" if args.len() == 1 => (
-                            self.host.net.mime_extension,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.browser" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "profile" if args.len() == 1 => (
-                            self.host.net.browser_profile,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "timeout" if args.len() == 1 => (
-                            self.host.net.browser_timeout,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.email" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "address" if args.len() == 1 => (
-                            self.host.net.email_address,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "attachment" if args.len() == 3 => (
-                            self.host.net.email_attachment,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "message" if args.len() == 7 => (
-                            self.host.net.email_message,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                                self.lower_expr(&args[3])?,
-                                self.lower_expr(&args[4])?,
-                                self.lower_expr(&args[5])?,
-                                self.lower_expr(&args[6])?,
-                            ],
-                        ),
-                        "serialize" if args.len() == 1 => (
-                            self.host.net.email_serialize,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "smtp" if args.len() == 1 => (
-                            self.host.net.email_smtp,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.reactive" {
-                    match method.as_str() {
-                        "signal" if args.len() == 1 => {
-                            let init = self.lower_expr(&args[0])?;
-                            let packed = if matches!(
-                                self.erase_distinct_ty(&args[0].ty),
-                                Type::Float | Type::Float32
-                            ) {
-                                self.b.ins().bitcast(
-                                    types::I64,
-                                    Self::scalar_bitcast_memflags(),
-                                    init,
-                                )
-                            } else {
-                                init
-                            };
-                            return Ok(self.call_host(self.host.reactive.signal, &[packed]));
-                        }
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    }
-                }
-                if module == "core.reactive.loadable" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "idle" if args.is_empty() => (self.host.reactive.loadable_idle, Vec::new()),
-                        "loading" if args.is_empty() => {
-                            (self.host.reactive.loadable_loading, Vec::new())
-                        }
-                        "loaded" if args.len() == 1 => (
-                            self.host.reactive.loadable_loaded,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "failed" if args.len() == 1 => (
-                            self.host.reactive.loadable_failed,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.event" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "scope" | "policy_sync" if args.is_empty() => {
-                            (self.host.reactive.event_scope, Vec::new())
-                        }
-                        "new" | "with_policy" => (self.host.reactive.event_new, Vec::new()),
-                        "hook" if args.len() == 1 => (
-                            self.host.reactive.hook_new,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "decision_hook" if args.len() == 1 => (
-                            self.host.reactive.decision_hook_new,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "async_result" if args.len() == 2 => {
-                            // AsyncPolicy + FailurePolicy → thin host (capacity/overflow ignored for golden path)
-                            let _policy = self.lower_expr(&args[0])?;
-                            let _fail = self.lower_expr(&args[1])?;
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            (
-                                self.host.reactive.async_event_new,
-                                vec![zero, zero, zero],
-                            )
-                        }
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    // async_result is Result — pack as Ok(handle) via Option/Result ABI
-                    if method == "async_result" {
-                        let h = self.b.inst_results(call)[0];
-                        let ok = self.b.ins().iconst(types::I8, 1);
-                        return Ok(self.call_host(self.host.result_new_i64, &[ok, h]));
-                    }
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.ui" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "null_backend" if args.is_empty() => {
-                            (self.host.ui.null_backend, Vec::new())
-                        }
-                        "tui_backend" if args.is_empty() => (self.host.ui.tui_backend, Vec::new()),
-                        "gtk_backend" if args.is_empty() => (self.host.ui.gtk_backend, Vec::new()),
-                        "text" if args.len() == 1 => {
-                            (self.host.ui.text, vec![self.lower_expr(&args[0])?])
-                        }
-                        "button" if args.len() == 1 => {
-                            (self.host.ui.button, vec![self.lower_expr(&args[0])?])
-                        }
-                        "node" if args.len() == 3 => {
-                            let label = self.lower_expr(&args[0])?;
-                            let w = self.lower_as_f64(&args[1])?;
-                            let h = self.lower_as_f64(&args[2])?;
-                            (self.host.ui.node, vec![label, w, h])
-                        }
-                        "node_color" if args.len() == 4 => {
-                            let label = self.lower_expr(&args[0])?;
-                            let w = self.lower_as_f64(&args[1])?;
-                            let h = self.lower_as_f64(&args[2])?;
-                            let color = self.lower_expr(&args[3])?;
-                            (self.host.ui.node_color, vec![label, w, h, color])
-                        }
-                        "node_role" if args.len() == 4 => {
-                            let label = self.lower_expr(&args[0])?;
-                            let w = self.lower_as_f64(&args[1])?;
-                            let h = self.lower_as_f64(&args[2])?;
-                            let role = self.lower_expr(&args[3])?;
-                            (self.host.ui.node_role, vec![label, w, h, role])
-                        }
-                        "box" if args.len() == 1 => {
-                            (self.host.ui.box_node, vec![self.lower_expr(&args[0])?])
-                        }
-                        "constraint" if args.len() == 4 => (
-                            self.host.ui.constraint,
-                            vec![
-                                self.lower_as_f64(&args[0])?,
-                                self.lower_as_f64(&args[1])?,
-                                self.lower_as_f64(&args[2])?,
-                                self.lower_as_f64(&args[3])?,
-                            ],
-                        ),
-                        "rect" if args.len() == 4 => (
-                            self.host.ui.rect,
-                            vec![
-                                self.lower_as_f64(&args[0])?,
-                                self.lower_as_f64(&args[1])?,
-                                self.lower_as_f64(&args[2])?,
-                                self.lower_as_f64(&args[3])?,
-                            ],
-                        ),
-                        "key_event" if args.len() == 1 => {
-                            (self.host.ui.key_event, vec![self.lower_expr(&args[0])?])
-                        }
-                        "aria_role" if args.len() == 1 => {
-                            (self.host.ui.aria_role, vec![self.lower_expr(&args[0])?])
-                        }
-                        "aria_role_button" if args.is_empty() => {
-                            let kind = self.b.ins().iconst(types::I64, 0);
-                            (self.host.ui.aria_role, vec![kind])
-                        }
-                        "aria_role_text_input" if args.is_empty() => {
-                            let kind = self.b.ins().iconst(types::I64, 1);
-                            (self.host.ui.aria_role, vec![kind])
-                        }
-                        "aria_role_label" if args.is_empty() => {
-                            let kind = self.b.ins().iconst(types::I64, 2);
-                            (self.host.ui.aria_role, vec![kind])
-                        }
-                        "aria_role_container" if args.is_empty() => {
-                            let kind = self.b.ins().iconst(types::I64, 3);
-                            (self.host.ui.aria_role, vec![kind])
-                        }
-                        // D-UI-MOUNT1=A: void pipeline — return unit before the generic I64 path.
-                        "mount" if args.len() == 2 => {
-                            let backend = self.lower_expr(&args[0])?;
-                            let node = self.lower_expr(&args[1])?;
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.ui.mount_default, self.b.func);
-                            self.b.ins().call(host, &[backend, node]);
-                            return Ok(self.b.ins().iconst(types::I8, 0));
-                        }
-                        "mount" if args.len() == 3 => {
-                            let backend = self.lower_expr(&args[0])?;
-                            let node = self.lower_expr(&args[1])?;
-                            let constraint = self.lower_expr(&args[2])?;
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.ui.mount, self.b.func);
-                            self.b.ins().call(host, &[backend, node, constraint]);
-                            return Ok(self.b.ins().iconst(types::I8, 0));
-                        }
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.web" || module == "core.web.devserver" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.web", "on") if args.len() == 2 || args.len() == 3 => {
-                            let sel = self.lower_expr(&args[0])?;
-                            let ev = self.lower_expr(&args[1])?;
-                            // Native `web.on` is a no-op (Web.rs); capturing click
-                            // lambdas are not resident-callable. Skip the body.
-                            let cb = if args.len() == 3
-                                && !matches!(&args[2].kind, TExprKind::Lambda(_))
-                            {
-                                self.lower_expr(&args[2])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.web.on, self.b.func);
-                            self.b.ins().call(host, &[sel, ev, cb]);
-                            return Ok(self.b.ins().iconst(types::I8, 0));
-                        }
-                        ("core.web", "value") if args.is_empty() => {
-                            (self.host.web.value, Vec::new())
-                        }
-                        ("core.web", "app") if args.is_empty() => (self.host.web.app, Vec::new()),
-                        ("core.web", "page") if args.len() == 2 => (
-                            self.host.web.page,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        ("core.web.devserver", "app") if args.is_empty() => {
-                            (self.host.web.devserver_app, Vec::new())
-                        }
-                        ("core.web.devserver", "for_app") if args.len() == 1 => (
-                            self.host.web.devserver_for_app,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(clif_ty(&expr.ty)
-                        .map(|_| self.b.inst_results(call)[0])
-                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
-                }
-                Err(format!("jit core call unsupported: {module}.{method}"))
-            }
-            TExprKind::CoreClosureCall { kind } => match kind {
-                TCoreClosureKind::Spawn { group, .. } => {
-                    let group = match group {
-                        Some(group) => Some(self.lower_expr(group)?),
-                        None => None,
-                    };
-                    let task = self.lower_spawn()?;
-                    if let Some(group) = group {
-                        let host = self.module.declare_func_in_func(
-                            self.host.conc.task_group_register,
-                            self.b.func,
-                        );
-                        self.b.ins().call(host, &[group, task]);
-                    }
-                    Ok(task)
-                }
-                TCoreClosureKind::Serve { .. } => {
-                    Err("jit http serve closure unsupported".to_string())
-                }
-                TCoreClosureKind::OnInterrupt { callback } => {
-                    let callback = self.lower_interrupt_callback_value(callback)?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.core.os_on_interrupt, self.b.func);
-                    self.b.ins().call(host, &[callback]);
-                    self.emit_trap_check()?;
-                    Ok(self.b.ins().iconst(types::I64, 0))
-                }
-                TCoreClosureKind::Guard { executable, .. } => {
-                    let id = super::functions_compile::lower_callable_lambda(
-                        self.module,
-                        self.host,
-                        self.meta,
-                        executable,
-                        self.func_ids,
-                        self.spawn_func_ids,
-                        self.spawn_lambdas,
-                        self.spawn_site,
-                        self.runtime,
-                    )?;
-                    self.scope_guards.push(id);
-                    Ok(self.b.ins().iconst(types::I64, 0))
-                }
-                TCoreClosureKind::OnCommit { executable, .. } => {
-                    let id = super::functions_compile::lower_callable_lambda(
-                        self.module,
-                        self.host,
-                        self.meta,
-                        executable,
-                        self.func_ids,
-                        self.spawn_func_ids,
-                        self.spawn_lambdas,
-                        self.spawn_site,
-                        self.runtime,
-                    )?;
-                    let Some(frame) = self.txn_stack.last_mut() else {
-                        return Err("jit on_commit outside transaction".to_string());
-                    };
-                    frame.on_commit.push(id);
-                    Ok(self.b.ins().iconst(types::I64, 0))
-                }
-                TCoreClosureKind::OnRollback { executable, .. } => {
-                    let id = super::functions_compile::lower_callable_lambda(
-                        self.module,
-                        self.host,
-                        self.meta,
-                        executable,
-                        self.func_ids,
-                        self.spawn_func_ids,
-                        self.spawn_lambdas,
-                        self.spawn_site,
-                        self.runtime,
-                    )?;
-                    let Some(frame) = self.txn_stack.last_mut() else {
-                        return Err("jit on_rollback outside transaction".to_string());
-                    };
-                    frame.on_rollback.push(id);
-                    Ok(self.b.ins().iconst(types::I64, 0))
-                }
-                TCoreClosureKind::ReactiveDerived { .. } => self.lower_reactive_cb_call(
-                    self.host.reactive.derived,
-                    true,
-                    "reactive derived",
-                ),
-                TCoreClosureKind::ReactiveEffect { .. } => self.lower_reactive_cb_call(
-                    self.host.reactive.effect,
-                    true,
-                    "reactive effect",
-                ),
-                TCoreClosureKind::UiReactiveRender { .. } => self.lower_reactive_cb_call(
-                    self.host.ui.reactive_render,
-                    false,
-                    "ui reactive render",
-                ),
-                TCoreClosureKind::UiButtonOnClick { label, .. } => {
-                    let label_v = self.lower_expr(label)?;
-                    let (spawn_ptr, n_caps, caps) =
-                        self.lower_spawn_site_cb("ui button on_click")?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.ui.button_on_click, self.b.func);
-                    let call = self.b.ins().call(
-                        host,
-                        &[
-                            label_v, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3],
-                        ],
-                    );
-                    Ok(self.b.inst_results(call)[0])
-                }
-            },
-            TExprKind::HandleMethod { recv, op, args } => {
-                self.lower_handle_method(recv, op, args, &expr.ty)
-            }
-            TExprKind::TaskGroupAll { tasks } => {
-                let list = self.lower_expr(tasks)?;
-                let status = self.call_host(self.host.conc.task_all, &[list]);
-                Ok(self.finish_wait_call(status))
-            }
-            TExprKind::TaskGroupRace { tasks } => {
-                let list = self.lower_expr(tasks)?;
-                let status = self.call_host(self.host.conc.task_race, &[list]);
-                Ok(self.finish_wait_call(status))
-            }
-            TExprKind::TaskGroupAny { tasks } => {
-                let list = self.lower_expr(tasks)?;
-                let status = self.call_host(self.host.conc.task_any, &[list]);
-                Ok(self.finish_wait_call(status))
-            }
-            TExprKind::SelectStart => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::SelectRecv { builder, channel } => {
-                let _ = self.lower_expr(builder)?;
-                self.lower_expr(channel)
-            }
-            TExprKind::SelectAfter {
-                builder,
-                millis,
-                value: _,
-            } => {
-                let _ = self.lower_expr(builder)?;
-                self.lower_expr(millis)
-            }
-            TExprKind::SelectRead { builder, .. } => self.lower_expr(builder),
-            TExprKind::SelectWait { builder } => {
-                let (recvs, afters) = collect_select_arms_jit(builder);
-                let mut recv_vals = Vec::new();
-                for ch in recvs {
-                    recv_vals.push(self.lower_expr(ch)?);
-                }
-                let mut after_flat = Vec::new();
-                for (ms, value) in afters {
-                    after_flat.push(self.lower_expr(ms)?);
-                    after_flat.push(match value {
-                        Some(v) => self.lower_expr(v)?,
-                        None => self.b.ins().iconst(types::I64, 0),
-                    });
-                }
-                let recv_list = self.lower_i64_value_list(&recv_vals)?;
-                let after_list = self.lower_i64_value_list(&after_flat)?;
-                let status = self.call_host(self.host.conc.select_wait, &[recv_list, after_list]);
-                Ok(self.finish_wait_call(status))
-            }
-            TExprKind::OrFallback { value, fallback } => {
-                if matches!(value.ty, Type::Option(_)) {
-                    let status = self.lower_list_get_opt_status(value)?;
-                    let ok_block = self.b.create_block();
-                    let fail_block = self.b.create_block();
-                    let merge = self.b.create_block();
-                    self.b.append_block_param(merge, types::I64);
-                    let is_result_option = Self::uses_result_option_abi(value);
-                    let present = if is_result_option {
-                        self.call_host(self.host.result_is_ok, &[status])
+                "reader" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
                     } else {
-                        // Packed Option ABI: 0 = None, nonzero (incl. negative) = Some(bits-1).
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        self.b.ins().icmp(IntCC::NotEqual, status, zero)
+                        self.b.ins().iconst(types::I64, 0)
                     };
-                    self.b.ins().brif(present, ok_block, &[], fail_block, &[]);
-                    self.b.switch_to_block(ok_block);
-                    self.b.seal_block(ok_block);
-                    let val = if is_result_option
-                        || matches!(&value.kind, TExprKind::OverflowOpt { .. })
-                    {
-                        self.call_host(self.host.result_get_i64, &[status])
-                    } else if let Type::Option(inner) = &value.ty {
-                        self.unpack_option_payload(status, inner)?
-                    } else if let Some(Type::Option(inner)) =
-                        Self::recover_core_return_ty(value)
-                    {
-                        self.unpack_option_payload(status, &inner)?
+                    (self.host.stream.csv_reader, vec![file, limits])
+                }
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.json" {
+            let datatree_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(
+                        ok.as_ref(),
+                        Type::Named(n)
+                            if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                    )
+            );
+            let datatree_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::Named(n)
+                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                )
+            });
+            // Typed Codable decode/to_string (Encode-type path).
+            if method == "decode" && args.len() == 1 && !datatree_ok {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    return self.lower_typed_json_decode(&args[0], ok);
+                }
+            }
+            if method == "decode_traced" && args.len() == 1 {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    return self.lower_typed_json_decode_traced(&args[0], ok);
+                }
+            }
+            if matches!(method.as_str(), "to_string" | "to_string_pretty")
+                && args.len() == 1
+                && !datatree_arg
+            {
+                return self.lower_typed_json_to_string(
+                    &args[0],
+                    method == "to_string_pretty",
+                );
+            }
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "parse" if args.len() == 1 && datatree_ok => {
+                    (self.host.encoding.json_parse, vec![self.lower_expr(&args[0])?])
+                }
+                "decode" if args.len() == 1 && datatree_ok => {
+                    (self.host.encoding.json_decode, vec![self.lower_expr(&args[0])?])
+                }
+                "to_string" if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.json_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "to_string_pretty" if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.json_to_string_pretty,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                // D-JSONCANON1=A: sema already resolved which `canonical`
+                // signature applies (arity 1 = pre-2027 infallible; 2 =
+                // 2027+ fallible with a limits arg, default-filled when
+                // the caller omits it) while its own edition scope was
+                // live. Branch on that already-resolved TIR arity, not
+                // a fresh `package_edition_at_least` read here: JIT
+                // compile runs after sema's `with_package_edition`
+                // scope has closed, so re-querying the thread-local
+                // edition here reads the reverted default and can pick
+                // the wrong host for a table already sized the other
+                // way (desync, not a marshalling choice — I9).
+                "canonical" if args.len() == 1 && datatree_arg => {
+                    (
+                        self.host.encoding.json_canonical,
+                        vec![self.lower_expr(&args[0])?],
+                    )
+                }
+                "canonical" if args.len() == 2 && datatree_arg => {
+                    let tree = self.lower_expr(&args[0])?;
+                    let limits = self.lower_expr(&args[1])?;
+                    (
+                        self.host.encoding.json_canonical_checked,
+                        vec![tree, limits],
+                    )
+                }
+                "events" if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.json_events,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "writer" if (2..=3).contains(&args.len()) => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = self.lower_expr(&args[1])?;
+                    let canon = if args.len() == 3 {
+                        let b = self.lower_expr(&args[2])?;
+                        self.b.ins().uextend(types::I64, b)
                     } else {
-                        let one = self.b.ins().iconst(types::I64, 1);
-                        self.b.ins().isub(status, one)
+                        self.b.ins().iconst(types::I64, 0)
                     };
-                    self.b.ins().jump(merge, &[val]);
-                    self.b.switch_to_block(fail_block);
-                    self.b.seal_block(fail_block);
-                    match fallback {
-                        TOrFallback::Value(e) => {
-                            let fb = self.lower_expr(e)?;
-                            self.b.ins().jump(merge, &[fb]);
-                        }
-                        TOrFallback::Break => {
-                            self.emit_loop_fallback(None, "break", false)?;
-                        }
-                        TOrFallback::Continue => {
-                            self.emit_loop_fallback(None, "continue", true)?;
-                        }
-                        TOrFallback::BreakLabel(name) => {
-                            self.emit_loop_fallback(Some(name), "break", false)?;
-                        }
-                        TOrFallback::ContinueLabel(name) => {
-                            self.emit_loop_fallback(Some(name), "continue", true)?;
-                        }
-                        TOrFallback::Return(None) => {
-                            self.emit_lexical_exit(None, false, self.shield_depth)?;
-                        }
-                        TOrFallback::Return(Some(e)) => {
-                            let val = self.lower_expr(e)?;
-                            self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
-                        }
-                        TOrFallback::Panic { .. } => {
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            let host_ref = self
-                                .module
-                                .declare_func_in_func(self.host.trap_panic, self.b.func);
-                            self.b.ins().call(host_ref, &[zero]);
-                            self.emit_trap_check()?;
-                            let dummy = self.b.ins().iconst(types::I64, 0);
-                            self.b.ins().jump(merge, &[dummy]);
-                        }
-                    }
-                    self.b.switch_to_block(merge);
-                    self.b.seal_block(merge);
-                    return Ok(self.b.block_params(merge)[0]);
+                    (
+                        self.host.stream.json_writer,
+                        vec![file, limits, canon],
+                    )
                 }
-                // Channel receive-status encoding stays on lower_result_receive_status;
-                // Result ?? uses the Result handle + result_is_ok / result_payload.
-                if let Ok(status) = self.lower_result_receive_status(value) {
-                    let ok_block = self.b.create_block();
-                    let fail_block = self.b.create_block();
-                    let merge = self.b.create_block();
-                    self.b.append_block_param(merge, types::I64);
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, status, zero);
-                    self.b.ins().brif(gt, ok_block, &[], fail_block, &[]);
-                    self.b.switch_to_block(ok_block);
-                    self.b.seal_block(ok_block);
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    let val = self.b.ins().isub(status, one);
-                    self.b.ins().jump(merge, &[val]);
-                    self.b.switch_to_block(fail_block);
-                    self.b.seal_block(fail_block);
-                    match fallback {
-                        TOrFallback::Panic { .. } => {
-                            let line = self.b.ins().iconst(types::I32, 1);
-                            let host_ref = self.module.declare_func_in_func(
-                                self.host.conc.panic_channel_closed,
-                                self.b.func,
-                            );
-                            let call = self.b.ins().call(host_ref, &[line]);
-                            let panic_val = self.b.inst_results(call)[0];
-                            self.emit_trap_check()?;
-                            self.b.ins().jump(merge, &[panic_val]);
-                        }
-                        TOrFallback::Break => {
-                            self.emit_loop_fallback(None, "break", false)?;
-                        }
-                        TOrFallback::Continue => {
-                            self.emit_loop_fallback(None, "continue", true)?;
-                        }
-                        TOrFallback::BreakLabel(name) => {
-                            self.emit_loop_fallback(Some(name), "break", false)?;
-                        }
-                        TOrFallback::ContinueLabel(name) => {
-                            self.emit_loop_fallback(Some(name), "continue", true)?;
-                        }
-                        TOrFallback::Value(_) | TOrFallback::Return(_) => {
-                            return Err("jit or-fallback unsupported".to_string());
-                        }
-                    }
-                    self.b.switch_to_block(merge);
-                    self.b.seal_block(merge);
-                    return Ok(self.b.block_params(merge)[0]);
-                }
-                let handle = self.lower_expr(value)?;
-                let ok_ty = value
-                    .ty
-                    .unwrap_result()
-                    .map(|(ok, _)| ok.clone())
-                    .or_else(|| Self::result_ok_ty_recover(value))
-                    .ok_or_else(|| "jit result ?? operand is not Result".to_string())?;
-                let is_unit = matches!(&ok_ty, Type::Named(n) if n == "Unit")
-                    || matches!(&ok_ty, Type::Tuple(items) if items.is_empty());
-                let ret_ty = if is_unit {
-                    types::I8
-                } else {
-                    self.meta
-                        .clif_ty(&ok_ty)
-                        .or_else(|| clif_ty(&ok_ty))
-                        .or_else(|| self.meta.clif_ty(&expr.ty))
-                        .or_else(|| clif_ty(&expr.ty))
-                        .ok_or_else(|| {
-                            format!("jit result ?? type unsupported: ok={ok_ty:?} expr={:?}", expr.ty)
-                        })?
-                };
-                let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
-                let ok_block = self.b.create_block();
-                let fail_block = self.b.create_block();
-                let merge = self.b.create_block();
-                self.b.append_block_param(merge, ret_ty);
-                self.b.ins().brif(is_ok, ok_block, &[], fail_block, &[]);
-                self.b.switch_to_block(ok_block);
-                self.b.seal_block(ok_block);
-                let ok_val = self.result_payload(handle, &ok_ty)?;
-                self.b.ins().jump(merge, &[ok_val]);
-                self.b.switch_to_block(fail_block);
-                self.b.seal_block(fail_block);
-                match fallback {
-                    TOrFallback::Value(e) => {
-                        let fb = self.lower_expr(e)?;
-                        self.b.ins().jump(merge, &[fb]);
-                    }
-                    TOrFallback::Return(None) => {
-                        self.emit_lexical_exit(None, false, self.shield_depth)?;
-                    }
-                    TOrFallback::Return(Some(e)) => {
-                        let val = self.lower_expr(e)?;
-                        self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
-                    }
-                    TOrFallback::Panic { .. } => {
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.trap_panic, self.b.func);
-                        self.b.ins().call(host_ref, &[zero]);
-                        self.emit_trap_check()?;
-                        let dummy = if ret_ty == types::F64 {
-                            self.b.ins().f64const(0.0)
-                        } else {
-                            self.b.ins().iconst(ret_ty, 0)
-                        };
-                        self.b.ins().jump(merge, &[dummy]);
-                    }
-                    TOrFallback::Break => {
-                        self.emit_loop_fallback(None, "break", false)?;
-                    }
-                    TOrFallback::Continue => {
-                        self.emit_loop_fallback(None, "continue", true)?;
-                    }
-                    TOrFallback::BreakLabel(name) => {
-                        self.emit_loop_fallback(Some(name), "break", false)?;
-                    }
-                    TOrFallback::ContinueLabel(name) => {
-                        self.emit_loop_fallback(Some(name), "continue", true)?;
-                    }
-                }
-                self.b.switch_to_block(merge);
-                self.b.seal_block(merge);
-                Ok(self.b.block_params(merge)[0])
-            }
-            TExprKind::ListLit(elems) => self.lower_list_lit(&expr.ty, elems),
-            TExprKind::MapLit(entries) => self.lower_map_lit(entries),
-            TExprKind::Index {
-                base,
-                index,
-                is_map,
-                line,
-                ..
-            } => {
-                if *is_map {
-                    let map = self.lower_expr(base)?;
-                    let key = self.lower_expr(index)?;
-                    let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                    let raw = self.call_host(self.host.coll.map_get, &[map, key, line_const]);
-                    self.emit_trap_check()?;
-                    let val = match self.meta.clif_ty(&expr.ty) {
-                        Some(types::I32) => self.b.ins().ireduce(types::I32, raw),
-                        Some(types::I8) => self.b.ins().ireduce(types::I8, raw),
-                        Some(types::F64) => self.b.ins().bitcast(
-                            types::F64,
-                            Self::scalar_bitcast_memflags(),
-                            raw,
-                        ),
-                        _ => raw,
+                "reader" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
                     };
-                    return Ok(val);
+                    (self.host.stream.json_reader, vec![file, limits])
                 }
-                let list = self.lower_expr(base)?;
-                let idx = self.lower_expr(index)?;
-                let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                let (list, idx) = if Self::is_view_mut_ty(&base.ty) {
-                    let (inner, start, end) = self.unpack_view_mut(list)?;
-                    (inner, self.checked_view_mut_index(start, end, idx))
-                } else {
-                    (list, idx)
-                };
-                let host_id = match &expr.ty {
-                    Type::Float => self.host.coll.list_get_f64,
-                    _other => self.host.coll.list_get,
-                };
-                let result = self.call_host(host_id, &[list, idx, line_const]);
-                self.emit_trap_check()?;
-                Ok(result)
-            }
-            TExprKind::Slice {
-                base,
-                start,
-                end,
-                range,
-                line,
-            } => {
-                let list = self.lower_expr(base)?;
-                let (s, end_excl) = if let Some(range) = range {
-                    self.lower_range_window(list, range, *line)?
-                } else {
-                    let s = self.lower_expr(start)?;
-                    let e = self.lower_expr(end)?;
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    (s, self.b.ins().iadd(e, one))
-                };
-                let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                let result = self.call_host(self.host.coll.list_slice, &[list, s, end_excl, line_const]);
-                self.emit_trap_check()?;
-                Ok(result)
-            }
-            TExprKind::BuiltinMethod { recv, op, args } => {
-                self.lower_builtin_method(recv, op, args, &expr.ty)
-            }
-            TExprKind::StructLit {
-                fields, as_trait, ..
-            } => {
-                if Self::is_range_ty(&expr.ty) {
-                    Err("jit Range literal needs the three-value ABI".to_string())
-                } else if matches!(&expr.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
-                    let field = |name: &str| {
-                        fields
-                            .iter()
-                            .find(|(field, _, _)| field == name)
-                            .map(|(_, value, _)| value)
-                            .ok_or_else(|| format!("jit Err literal missing `{name}`"))
-                    };
-                    let message = self.lower_expr(field("message")?)?;
-                    let code = self.lower_expr(field("code")?)?;
-                    let cause = self.lower_expr(field("cause")?)?;
-                    Ok(self.call_host(self.host.err_new, &[message, code, cause]))
-                } else {
-                    self.lower_struct_lit(fields, as_trait.as_ref())
+                _ => {
+                    return Err(format!(
+                        "jit core call unsupported: core.encoding.json.{method}"
+                    ))
                 }
-            }
-            TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
-            TExprKind::Field {
-                recv, field, ..
-            } => {
-                if Self::is_range_ty(&recv.ty) {
-                    let values = self.lower_range_expr(recv)?;
-                    return match field.as_str() {
-                        "start" => Ok(values[0]),
-                        "end" => Ok(values[1]),
-                        "exclusive" => Ok(values[2]),
-                        _ => Err(format!("jit field `{field}` on `Range`")),
-                    };
-                }
-                let mut handle = self.lower_expr(recv)?;
-                if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
-                    let host = match field.as_str() {
-                        "message" => self.host.err_message,
-                        "code" => self.host.err_code,
-                        "cause" => self.host.err_cause,
-                        _ => return Err(format!("jit field `{field}` on `Err`")),
-                    };
-                    return Ok(self.call_host(host, &[handle]));
-                }
-                let record_ty = match &recv.ty {
-                    Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
-                        let (list, start, _) = self.unpack_view_mut(handle)?;
-                        let line = self.b.ins().iconst(types::I32, 1);
-                        handle = self.call_host(self.host.coll.list_get, &[list, start, line]);
-                        self.emit_trap_check()?;
-                        args[0].clone()
-                    }
-                    other => other.clone(),
-                };
-                // ProcessChild is an opaque resident handle, not a heap record.
-                // The host returns the child handle as the optional session
-                // payload when the child owns a PTY master; zero is None.
-                if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
-                    && field == "terminal"
-                {
-                    return Ok(self.call_host(self.host.process.child_terminal, &[handle]));
-                }
-                let type_name = record_type_key(&record_ty)
-                    .or_else(|| self.method_struct.clone());
-                // GameFrame.input / .index — TIR may erase the frame param to Int
-                // inside spawn-lambda bodies; treat input/index on Int as GameFrame.
-                if matches!(field.as_str(), "input" | "index")
-                    && (matches!(&record_ty, Type::Int)
-                        || matches!(
-                            type_name.as_deref().or_else(|| match &record_ty {
-                                Type::Named(n) => Some(n.as_str()),
-                                _ => None,
-                            }),
-                            Some("GameFrame")
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.jsonl" {
+            let datatree_list_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(ok.as_ref(), Type::List(elem)
+                        if matches!(
+                            elem.as_ref(),
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                         ))
-                {
-                    if field == "input" {
-                        return Ok(handle);
-                    }
-                    return Ok(self.call_host(self.host.game.frame_index, &[handle]));
+            );
+            let datatree_list_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::List(elem)
+                        if matches!(
+                            elem.as_ref(),
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                        )
+                )
+            });
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "parse" if args.len() == 1 && datatree_list_ok => {
+                    (self.host.encoding.jsonl_parse, vec![self.lower_expr(&args[0])?])
                 }
-                // GameScene.assets / .input — identity projection onto the scene handle.
-                if matches!(
-                    type_name.as_deref().or_else(|| match &record_ty {
-                        Type::Named(n) => Some(n.as_str()),
-                        _ => None,
-                    }),
-                    Some("GameScene")
-                ) && matches!(field.as_str(), "assets" | "input")
-                {
-                    return Ok(handle);
-                }
-                // UiNode opaque slot — host getters (not a heap record).
-                if matches!(
-                    type_name.as_deref().or_else(|| match &record_ty {
-                        Type::Named(n) => Some(n.as_str()),
-                        _ => None,
-                    }),
-                    Some("UiNode")
-                ) {
-                    return match field.as_str() {
-                        "label" => {
-                            Ok(self.call_host(self.host.ui.node_label, &[handle]))
-                        }
-                        "width" | "height" => {
-                            let which =
-                                self.b
-                                    .ins()
-                                    .iconst(types::I64, if field == "width" { 0 } else { 1 });
-                            Ok(self.call_host(self.host.ui.node_dim, &[handle, which]))
-                        }
-                        other => Err(format!("jit field `{other}` on `UiNode`")),
+                "to_string" if args.len() == 1 && datatree_list_arg => (
+                    self.host.encoding.jsonl_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "writer" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
                     };
+                    (self.host.stream.jsonl_writer, vec![file, limits])
                 }
-                let type_name = type_name.ok_or_else(|| {
-                    format!("jit field recv type: field `{field}` on {record_ty:?}")
-                })?;
-                if type_name == "HTTPShutdownReport" {
-                    let field_id = match field.as_str() {
-                        "accepted" => 0,
-                        "overloaded" => 1,
-                        "completed" => 2,
-                        "cancelled" => 3,
-                        other => {
-                            return Err(format!(
-                                "jit field `{other}` on `HTTPShutdownReport`"
-                            ));
-                        }
+                "reader" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
                     };
-                    let field_v = self.b.ins().iconst(types::I64, field_id);
-                    let host = self.module.declare_func_in_func(
-                        self.host.net_http.http_shutdown_report_field,
-                        self.b.func,
+                    (self.host.stream.jsonl_reader, vec![file, limits])
+                }
+                _ => {
+                    return Err(format!(
+                        "jit core call unsupported: core.encoding.jsonl.{method}"
+                    ))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.xml" {
+            let datatree_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(
+                        ok.as_ref(),
+                        Type::Named(n)
+                            if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
+                    )
+            );
+            let datatree_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::Named(n)
+                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
+                )
+            });
+            let datatree_list_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(
+                        ok.as_ref(),
+                        Type::List(elem)
+                            if matches!(
+                                elem.as_ref(),
+                                Type::Named(n)
+                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
+                            )
+                    )
+            );
+            let option_string_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(ok.as_ref(), Type::Option(inner) if matches!(inner.as_ref(), Type::String))
+            );
+            let bytes_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(
+                        ok.as_ref(),
+                        Type::List(elem)
+                            if matches!(
+                                elem.as_ref(),
+                                Type::IntN {
+                                    signed: false,
+                                    bits: 8
+                                }
+                            ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
+                    )
+            );
+            let bytes_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::List(elem)
+                        if matches!(
+                            elem.as_ref(),
+                            Type::IntN {
+                                signed: false,
+                                bits: 8
+                            }
+                        ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
+                )
+            });
+            let expanded_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Tuple(_))
+            );
+            // Typed `xml.decode<T>` / `decode_bytes<T>` → project then Codable decode.
+            if method == "decode" && args.len() == 1 && !datatree_ok {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    return self.lower_typed_tree_decode(
+                        &args[0],
+                        ok,
+                        self.host.encoding.xml_project,
                     );
-                    let call = self.b.ins().call(host, &[handle, field_v]);
-                    return Ok(self.b.inst_results(call)[0]);
                 }
-                // Prefer TIR field type for ABI. Metadata on generic owners still
-                // has binder params (`Wrap.value: T`); using that picks
-                // `struct_get_i64` for a String slot (stored via `struct_set_str`)
-                // and yields handle 0 — often a stale compile-time string lit.
-                // Fall back to meta only when TIR left Int (CORE structs missing
-                // from `cx.struct_fields`).
-                let field_ty = if matches!(&expr.ty, Type::Int) {
-                    self.meta
-                        .struct_field_ty(&type_name, field)
-                        .or_else(|| core_struct_field_type(&type_name, field))
-                        .unwrap_or_else(|| expr.ty.clone())
-                } else {
-                    expr.ty.clone()
-                };
-                self.lower_record_field(handle, &type_name, field, &field_ty)
             }
-            TExprKind::MethodCall {
-                recv,
-                method,
-                type_args,
-                args,
-                ..
-            } => {
-                if method.name == "compare"
-                    && args.len() == 1
-                    && matches!(&recv.ty, Type::Int)
-                {
-                    let left = self.lower_expr(recv)?;
-                    let right = self.lower_call_arg(&args[0])?;
-                    let equal = self.bool_from_icmp(IntCC::Equal, left, right);
-                    let greater =
-                        self.bool_from_icmp(IntCC::SignedGreaterThan, left, right);
-                    let less_disc = self.b.ins().iconst(types::I64, 0);
-                    let equal_disc = self.b.ins().iconst(types::I64, 1);
-                    let greater_disc = self.b.ins().iconst(types::I64, 2);
-                    let unequal =
-                        self.b.ins().select(greater, greater_disc, less_disc);
-                    return Ok(self.b.ins().select(equal, equal_disc, unequal));
+            if method == "decode_bytes" && args.len() == 1 && bytes_arg {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    return self.lower_typed_tree_decode(
+                        &args[0],
+                        ok,
+                        self.host.encoding.xml_project_bytes,
+                    );
                 }
-                if matches!(&recv.ty, Type::TraitObject(_)) {
-                    return self.lower_trait_object_method(recv, method, args, &expr.ty);
+            }
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "parse" if args.len() == 1 && datatree_ok => {
+                    (self.host.encoding.xml_parse, vec![self.lower_expr(&args[0])?])
                 }
-                if method.name == "apply"
-                    && args.len() == 1
-                    && record_type_key(&recv.ty).is_some_and(|base| {
-                        self.meta
-                            .struct_layout(&format!("{base}.Patch"))
-                            .is_some()
-                    })
-                {
-                    return self.lower_patch_apply(recv, &args[0]);
+                "to_string" if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.xml_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "root" if args.len() == 1 && datatree_ok && datatree_arg => {
+                    (self.host.encoding.xml_root, vec![self.lower_expr(&args[0])?])
                 }
-                if method.name == "merge"
-                    && args.len() == 1
-                    && record_type_key(&recv.ty)
-                        .is_some_and(|name| name.ends_with(".Patch"))
-                {
-                    return self.lower_patch_merge(recv, &args[0]);
+                "expanded_name" if args.len() == 1 && expanded_ok && datatree_arg => (
+                    self.host.encoding.xml_expanded_name,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "attribute" if args.len() == 2 && option_string_ok && datatree_arg => (
+                    self.host.encoding.xml_attribute,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "content" if args.len() == 1 && datatree_list_ok && datatree_arg => (
+                    self.host.encoding.xml_content,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "to_bytes" if args.len() == 1 && bytes_ok && datatree_arg => (
+                    self.host.encoding.xml_to_bytes,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "writer" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    (self.host.stream.xml_writer, vec![file, limits])
                 }
-                // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a clean
-                // absence into a failure. One packed carrier (0 = absent), so
-                // presence/absence reuse the same test `lower_option_enum_match`
-                // uses; the report handle shares the I64 ABI with every `T`
-                // this covers.
-                if method.name == jet_foundation::Syntax::METHOD_OUTCOME_OR_ERR
-                    && args.len() == 1
-                {
-                    if let Type::Option(inner) = &recv.ty {
-                        if self.meta.clif_ty(inner).or_else(|| clif_ty(inner))
-                            == Some(types::I64)
-                            && !matches!(inner.as_ref(), Type::IntN { .. })
-                        {
-                            let packed = self.lower_expr(recv)?;
-                            let why = self.lower_call_arg(&args[0])?;
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            let why = self.call_host(self.host.err_new, &[why, zero, zero]);
-                            let is_some =
-                                self.b.ins().icmp(IntCC::NotEqual, packed, zero);
-                            let ok_payload = self.unpack_option_payload(packed, inner)?;
-                            let ok_tag = self.b.ins().iconst(types::I8, 1);
-                            let err_tag = self.b.ins().iconst(types::I8, 0);
-                            let tag = self.b.ins().select(is_some, ok_tag, err_tag);
-                            let payload = self.b.ins().select(is_some, ok_payload, why);
-                            return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
-                        }
-                        return Err(format!("jit or_err payload type unsupported: {inner:?}"));
+                "reader" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    (self.host.stream.xml_reader, vec![file, limits])
+                }
+                _ => {
+                    return Err(format!(
+                        "jit core call unsupported: core.encoding.xml.{method}"
+                    ))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.cbor" {
+            let datatree_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(
+                        ok.as_ref(),
+                        Type::Named(n)
+                            if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                    )
+            );
+            let datatree_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::Named(n)
+                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                )
+            });
+            let bytes_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::List(elem)
+                        if matches!(
+                            elem.as_ref(),
+                            Type::IntN {
+                                signed: false,
+                                bits: 8
+                            }
+                        ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
+                    )
+            });
+            if method == "decode"
+                && matches!(args.len(), 1 | 2)
+                && bytes_arg
+                && !datatree_ok
+            {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    if args.len() == 1 {
+                        let parse_args = [self.lower_expr(&args[0])?];
+                        return self.lower_typed_tree_decode_values(
+                            &parse_args,
+                            ok,
+                            self.host.encoding.cbor_decode_tree,
+                            None,
+                        );
                     }
+                    let parse_args =
+                        [self.lower_expr(&args[0])?, self.lower_expr(&args[1])?];
+                    return self.lower_typed_tree_decode_values(
+                        &parse_args,
+                        ok,
+                        self.host.encoding.cbor_decode_tree_options,
+                        None,
+                    );
                 }
-                let key = self.method_key(&recv.ty, method, type_args)
-                    .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
-                let func_id = self
-                    .func_ids
-                    .get(&key)
-                    .copied()
-                    .ok_or_else(|| format!("jit missing method `{key}`"))?;
-                let mut arg_vals = vec![self.lower_expr(recv)?];
-                for a in args {
-                    arg_vals.push(self.lower_call_arg(a)?);
-                }
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &arg_vals);
-                let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                self.emit_trap_check()?;
-                Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
-            TExprKind::DecodeUnder { segment, inner } => {
-                let result = self.lower_expr(inner)?;
-                let segment = self.lower_expr(segment)?;
+            if matches!(method.as_str(), "to_bytes" | "to_bytes_canonical")
+                && args.len() == 1
+                && !datatree_arg
+            {
+                let render_host = if method == "to_bytes" {
+                    self.host.encoding.cbor_to_bytes
+                } else {
+                    self.host.encoding.cbor_to_bytes_canonical
+                };
+                return self.lower_typed_tree_to_string(&args[0], render_host);
+            }
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "to_bytes" if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.cbor_to_bytes,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "to_bytes_canonical" if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.cbor_to_bytes_canonical,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "parse" if args.len() == 1 && bytes_arg && datatree_ok => {
+                    (self.host.encoding.cbor_parse, vec![self.lower_expr(&args[0])?])
+                }
+                "parse" if args.len() == 2 && bytes_arg && datatree_ok => (
+                    self.host.encoding.cbor_parse_options,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "writer" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    (self.host.stream.cbor_writer, vec![file, limits])
+                }
+                "reader" if args.len() == 1 || args.len() == 2 => {
+                    let file = self.lower_expr(&args[0])?;
+                    let limits = if args.len() == 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    (self.host.stream.cbor_reader, vec![file, limits])
+                }
+                _ => {
+                    return Err(format!(
+                        "jit core call unsupported: core.encoding.cbor.{method}"
+                    ))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.encoding.toml" || module == "core.encoding.yaml" {
+            let datatree_ok = matches!(
+                &expr.ty,
+                Type::Result { ok, .. }
+                    if matches!(
+                        ok.as_ref(),
+                        Type::Named(n)
+                            if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                    )
+            );
+            let datatree_arg = args.first().is_some_and(|a| {
+                matches!(
+                    &a.ty,
+                    Type::Named(n)
+                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+                )
+            });
+            if method == "decode" && args.len() == 1 && !datatree_ok {
+                if let Type::Result { ok, .. } = &expr.ty {
+                    let parse_host = if module == "core.encoding.toml" {
+                        self.host.encoding.toml_parse
+                    } else {
+                        self.host.encoding.yaml_parse
+                    };
+                    return self.lower_typed_tree_decode(&args[0], ok, parse_host);
+                }
+            }
+            if method == "to_string" && args.len() == 1 && !datatree_arg {
+                let render_host = if module == "core.encoding.toml" {
+                    self.host.encoding.toml_to_string
+                } else {
+                    self.host.encoding.yaml_to_string
+                };
+                return self.lower_typed_tree_to_string(&args[0], render_host);
+            }
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                ("core.encoding.toml", "parse") if args.len() == 1 && datatree_ok => {
+                    (self.host.encoding.toml_parse, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.encoding.toml", "to_string") if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.toml_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.encoding.yaml", "parse") if args.len() == 1 && datatree_ok => {
+                    (self.host.encoding.yaml_parse, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.encoding.yaml", "to_string") if args.len() == 1 && datatree_arg => (
+                    self.host.encoding.yaml_to_string,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!(
+                        "jit core call unsupported: {module}.{method}"
+                    ))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.uuid" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "v4" if args.is_empty() => (self.host.encoding.uuid_v4, Vec::new()),
+                "v7" if args.len() == 1 => {
+                    (self.host.encoding.uuid_v7, vec![self.lower_expr(&args[0])?])
+                }
+                "parse" if args.len() == 1 => {
+                    (self.host.encoding.uuid_parse, vec![self.lower_expr(&args[0])?])
+                }
+                "v5" if args.len() == 2 => (
+                    self.host.encoding.uuid_v5,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.env" && method == "get" && args.len() == 1 {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.core.env_get, self.b.func);
+            let a0 = self.lower_expr(&args[0])?;
+            let call = self.b.ins().call(host_ref, &[a0]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.env" && method == "set" && args.len() == 2 {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.core.env_set, self.b.func);
+            let a0 = self.lower_expr(&args[0])?;
+            let a1 = self.lower_expr(&args[1])?;
+            let call = self.b.ins().call(host_ref, &[a0, a1]);
+            let handle = self.b.inst_results(call)[0];
+            self.emit_trap_check()?;
+            return Ok(handle);
+        }
+        if module == "core.env" && method == "unset" && args.len() == 1 {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.core.env_unset, self.b.func);
+            let a0 = self.lower_expr(&args[0])?;
+            let call = self.b.ins().call(host_ref, &[a0]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.env" && method == "vars" && args.is_empty() {
+            return Ok(self.call_host(self.host.core.env_vars, &[]));
+        }
+        if module == "core.process" && method == "exit" && args.len() == 1 {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.core.process_exit, self.b.func);
+            let a0 = self.lower_expr(&args[0])?;
+            self.b.ins().call(host_ref, &[a0]);
+            // Host sets exit_code + trap; unwind to epilogue like rich panic.
+            self.emit_trap_check()?;
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        if module == "core.process" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "cmd" if args.len() == 1 => {
+                    (self.host.process.cmd, vec![self.lower_expr(&args[0])?])
+                }
+                "run" if args.len() == 1 => {
+                    (self.host.process.run, vec![self.lower_expr(&args[0])?])
+                }
+                "pipeline" if args.len() == 1 => {
+                    (self.host.process.pipeline, vec![self.lower_expr(&args[0])?])
+                }
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.game" && method == "run" {
+            let scene = self.lower_expr(&args[0])?;
+            let zero = self.b.ins().iconst(types::I64, 0);
+            let mut replay = zero;
+            let mut backend = zero;
+            // Named kwargs: replay: / backend: — TIR may pass 1–3 args.
+            if args.len() >= 2 {
+                replay = self.lower_expr(&args[1])?;
+            }
+            if args.len() >= 3 {
+                backend = self.lower_expr(&args[2])?;
+            }
+            return Ok(self.call_host(self.host.game.run, &[scene, replay, backend]));
+        }
+        if module == "core.raylib" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "window_open" if args.len() == 3 => (
+                    self.host.raylib.window_open,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "color" if args.len() == 4 => (
+                    self.host.raylib.color,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                        self.lower_expr(&args[3])?,
+                    ],
+                ),
+                "set_target_fps" if args.len() == 1 => {
+                    (self.host.raylib.set_target_fps, vec![self.lower_expr(&args[0])?])
+                }
+                "key_down" if args.len() == 1 => {
+                    (self.host.raylib.key_down, vec![self.lower_expr(&args[0])?])
+                }
+                "begin_drawing" if args.len() == 1 => {
+                    (self.host.raylib.begin_drawing, vec![self.lower_expr(&args[0])?])
+                }
+                "clear_background" if args.len() == 1 => {
+                    (
+                        self.host.raylib.clear_background,
+                        vec![self.lower_expr(&args[0])?],
+                    )
+                }
+                "draw_rectangle" if args.len() == 5 => (
+                    self.host.raylib.draw_rectangle,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                        self.lower_expr(&args[3])?,
+                        self.lower_expr(&args[4])?,
+                    ],
+                ),
+                "draw_text" if args.len() == 5 => (
+                    self.host.raylib.draw_text,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                        self.lower_expr(&args[3])?,
+                        self.lower_expr(&args[4])?,
+                    ],
+                ),
+                "end_drawing" if args.is_empty() => (self.host.raylib.end_drawing, vec![]),
+                "close_window" if args.len() == 1 => {
+                    (self.host.raylib.close_window, vec![self.lower_expr(&args[0])?])
+                }
+                "window_should_close" if args.len() == 1 => (
+                    self.host.raylib.window_should_close,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "window_ready" if args.len() == 1 => {
+                    (self.host.raylib.window_ready, vec![self.lower_expr(&args[0])?])
+                }
+                "load_sound" if args.len() == 1 => {
+                    (self.host.raylib.load_sound, vec![self.lower_expr(&args[0])?])
+                }
+                "play_sound" if args.len() == 1 => {
+                    (self.host.raylib.play_sound, vec![self.lower_expr(&args[0])?])
+                }
+                _ => {
+                    return Err(format!(
+                        "jit core call unsupported: core.raylib.{method}"
+                    ))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(match method.as_str() {
+                "window_open"
+                | "color"
+                | "key_down"
+                | "window_should_close"
+                | "window_ready"
+                | "load_sound"
+                | "play_sound" => self.b.inst_results(call)[0],
+                _ => self.b.ins().iconst(types::I8, 0),
+            });
+        }
+        if module == "core.compress.gzip" || module == "core.compress.zstd" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                ("core.compress.gzip", "compress") if args.len() == 1 => {
+                    (self.host.compress.gzip_compress, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.compress.gzip", "decompress") if args.len() == 1 => {
+                    (self.host.compress.gzip_decompress, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.compress.zstd", "compress") if args.len() == 1 => {
+                    (self.host.compress.zstd_compress, vec![self.lower_expr(&args[0])?])
+                }
+                ("core.compress.zstd", "decompress") if args.len() == 1 => {
+                    (self.host.compress.zstd_decompress, vec![self.lower_expr(&args[0])?])
+                }
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.archive" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "zip_compress" if args.len() == 2 => (
+                    self.host.archive.zip_compress,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "zip_decompress" if args.len() == 1 => {
+                    (self.host.archive.zip_decompress, vec![self.lower_expr(&args[0])?])
+                }
+                "tar_add" if args.len() == 3 => (
+                    self.host.archive.tar_add,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "tar_get" if args.len() == 2 => (
+                    self.host.archive.tar_get,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "tar_names_json" if args.len() == 1 => {
+                    (self.host.archive.tar_names_json, vec![self.lower_expr(&args[0])?])
+                }
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.path" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "join" if args.len() == 2 => (
+                    self.host.core.path_join,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "parent" if args.len() == 1 => (
+                    self.host.core.path_parent_str,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "extension" if args.len() == 1 => (
+                    self.host.core.path_extension_str,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "normalize" if args.len() == 1 => (
+                    self.host.core.path_normalize_str,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.random" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "seed" if args.len() == 1 => {
+                    (self.host.random.seed, vec![self.lower_expr(&args[0])?])
+                }
+                "bool" if args.len() == 1 => {
+                    (self.host.random.bool_p, vec![self.lower_expr(&args[0])?])
+                }
+                "float_range" if args.len() == 2 => (
+                    self.host.random.float_range,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "normal" if args.len() == 2 => (
+                    self.host.random.normal,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "exponential" if args.len() == 1 => {
+                    (self.host.random.exponential, vec![self.lower_expr(&args[0])?])
+                }
+                "bytes" if args.len() == 1 => {
+                    (self.host.random.bytes, vec![self.lower_expr(&args[0])?])
+                }
+                "weighted_pick" if args.len() == 2 => {
+                    if matches!(
+                        &args[0].ty,
+                        Type::List(inner) | Type::FixedList { elem: inner, .. }
+                            if matches!(inner.as_ref(), Type::IntN { .. })
+                    ) {
+                        return Err(
+                            "jit random weighted_pick<IntN> needs typed Option lowering"
+                                .to_string(),
+                        );
+                    }
+                    (
+                        self.host.random.weighted_pick,
+                        vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                    )
+                }
+                "sample" if args.len() == 2 => (
+                    self.host.random.sample,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "rng" if args.len() == 1 => {
+                    (self.host.random.rng_new, vec![self.lower_expr(&args[0])?])
+                }
+                _ => return Err("jit core call unsupported".to_string()),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            // Prefer method return shape over TIR `expr.ty` (can be Unit).
+            let ret_ty = self
+                .expr_arith_type_from_op(expr)
+                .unwrap_or_else(|| expr.ty.clone());
+            return Ok(clif_ty(&ret_ty)
+                .map(|_| self.b.inst_results(call)[0])
+                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        }
+        if module == "core.crypto.random" && method == "bytes" && args.len() == 1 {
+            let count = self.lower_expr(&args[0])?;
+            return Ok(self.call_host(self.host.crypto.random_bytes, &[count]));
+        }
+        if module == "core.auth" && method == "verify_jwt" && (3..=5).contains(&args.len()) {
+            let token = self.lower_expr(&args[0])?;
+            let key = self.lower_expr(&args[1])?;
+            let audience = self.lower_expr(&args[2])?;
+            let issuer = if args.len() >= 4 {
+                let value = self.lower_expr(&args[3])?;
+                self.b.ins().iadd_imm(value, 1)
+            } else {
+                self.b.ins().iconst(types::I64, 0)
+            };
+            let skew = if args.len() >= 5 {
+                self.lower_expr(&args[4])?
+            } else {
+                self.b.ins().iconst(types::I64, 0)
+            };
+            let host = self
+                .module
+                .declare_func_in_func(self.host.crypto.verify_jwt, self.b.func);
+            let call = self
+                .b
+                .ins()
+                .call(host, &[token, key, audience, issuer, skew]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.auth"
+            && method == "verify_paseto"
+            && (3..=7).contains(&args.len())
+        {
+            let token = self.lower_expr(&args[0])?;
+            let key = self.lower_expr(&args[1])?;
+            let audience = self.lower_expr(&args[2])?;
+            let issuer = if args.len() >= 4 {
+                let value = self.lower_expr(&args[3])?;
+                self.b.ins().iadd_imm(value, 1)
+            } else {
+                self.b.ins().iconst(types::I64, 0)
+            };
+            let skew = if args.len() >= 5 {
+                self.lower_expr(&args[4])?
+            } else {
+                self.b.ins().iconst(types::I64, 0)
+            };
+            let footer = if args.len() >= 6 {
+                self.lower_expr(&args[5])?
+            } else {
+                self.call_host(self.host.coll.list_new, &[])
+            };
+            let implicit = if args.len() >= 7 {
+                self.lower_expr(&args[6])?
+            } else {
+                self.call_host(self.host.coll.list_new, &[])
+            };
+            let host = self
+                .module
+                .declare_func_in_func(self.host.crypto.verify_paseto, self.b.func);
+            let call = self.b.ins().call(
+                host,
+                &[token, key, audience, issuer, skew, footer, implicit],
+            );
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.vault" || module == "core.vault.expert" {
+            let tag = crate::Crypto::vault_key_tag(&expr.ty)
+                .or_else(|| {
+                    args.first()
+                        .and_then(|arg| crate::Crypto::vault_key_tag(&arg.ty))
+                })
+                .unwrap_or(1);
+            let tag_val = self.b.ins().iconst(types::I64, tag);
+            let (host_id, mut arg_values): (FuncId, Vec<Value>) =
+                match (module.as_str(), method.as_str(), args.as_slice()) {
+                    ("core.vault", "get", [name]) => {
+                        (self.host.crypto.vault_get, vec![self.lower_expr(name)?])
+                    }
+                    ("core.vault", "current", [name]) => (
+                        self.host.crypto.vault_current,
+                        vec![self.lower_expr(name)?, tag_val],
+                    ),
+                    ("core.vault", "versions", [name]) => (
+                        self.host.crypto.vault_versions,
+                        vec![self.lower_expr(name)?, tag_val],
+                    ),
+                    ("core.vault", "prepare_generate", [name]) => (
+                        self.host.crypto.vault_prepare_generate,
+                        vec![self.lower_expr(name)?, tag_val],
+                    ),
+                    ("core.vault", "prepare_rotate", [name]) => (
+                        self.host.crypto.vault_prepare_rotate,
+                        vec![self.lower_expr(name)?, tag_val],
+                    ),
+                    ("core.vault", "prepare_store", [name, key]) => (
+                        self.host.crypto.vault_prepare_store,
+                        vec![self.lower_expr(name)?, self.lower_expr(key)?, tag_val],
+                    ),
+                    ("core.vault", "prepare_retire", [key_ref, reason]) => (
+                        self.host.crypto.vault_prepare_retire,
+                        vec![
+                            self.lower_expr(key_ref)?,
+                            self.lower_expr(reason)?,
+                            tag_val,
+                        ],
+                    ),
+                    ("core.vault", "prepare_revoke", [key_ref, reason]) => (
+                        self.host.crypto.vault_prepare_revoke,
+                        vec![
+                            self.lower_expr(key_ref)?,
+                            self.lower_expr(reason)?,
+                            tag_val,
+                        ],
+                    ),
+                    ("core.vault", "authorize_write", [plan, reason]) => (
+                        self.host.crypto.vault_authorize_write,
+                        vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
+                    ),
+                    ("core.vault", "commit_generate", [write, plan]) => (
+                        self.host.crypto.vault_commit_generate,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                    ),
+                    ("core.vault", "commit_store", [write, plan]) => (
+                        self.host.crypto.vault_commit_store,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                    ),
+                    ("core.vault", "commit_rotate", [write, plan]) => (
+                        self.host.crypto.vault_commit_rotate,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                    ),
+                    ("core.vault", "commit_retire", [write, plan]) => (
+                        self.host.crypto.vault_commit_retire,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                    ),
+                    ("core.vault", "commit_revoke", [write, plan]) => (
+                        self.host.crypto.vault_commit_revoke,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                    ),
+                    ("core.vault", "load", [key_ref]) => (
+                        self.host.crypto.vault_load,
+                        vec![self.lower_expr(key_ref)?, tag_val],
+                    ),
+                    ("core.vault", "status", [key_ref]) => (
+                        self.host.crypto.vault_status,
+                        vec![self.lower_expr(key_ref)?, tag_val],
+                    ),
+                    ("core.vault", "export_to_recipients", [key_ref, recipients]) => (
+                        self.host.crypto.vault_export_to_recipients,
+                        vec![
+                            self.lower_expr(key_ref)?,
+                            self.lower_expr(recipients)?,
+                            tag_val,
+                        ],
+                    ),
+                    ("core.vault", "export_to_passphrase", [key_ref, passphrase]) => (
+                        self.host.crypto.vault_export_to_passphrase,
+                        vec![
+                            self.lower_expr(key_ref)?,
+                            self.lower_expr(passphrase)?,
+                            tag_val,
+                        ],
+                    ),
+                    ("core.vault", "prepare_import_wrapped", [name, wrapped, unlock]) => (
+                        self.host.crypto.vault_prepare_import_wrapped,
+                        vec![
+                            self.lower_expr(name)?,
+                            self.lower_expr(wrapped)?,
+                            self.lower_expr(unlock)?,
+                            tag_val,
+                        ],
+                    ),
+                    ("core.vault", "authorize_wrapped_import", [plan, reason]) => (
+                        self.host.crypto.vault_authorize_wrapped_import,
+                        vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
+                    ),
+                    ("core.vault", "commit_import_wrapped", [write, plan]) => (
+                        self.host.crypto.vault_commit_import_wrapped,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                    ),
+                    ("core.vault.expert", "prepare_import_signing", [name, bytes]) => (
+                        self.host.crypto.vault_expert_prepare_import_signing,
+                        vec![self.lower_expr(name)?, self.lower_expr(bytes)?],
+                    ),
+                    ("core.vault.expert", "commit_import_signing", [write, plan]) => (
+                        self.host.crypto.vault_expert_commit_import_signing,
+                        vec![self.lower_expr(write)?, self.lower_expr(plan)?],
+                    ),
+                    _ => {
+                        return Err(format!(
+                            "jit core call unsupported: {module}.{method}"
+                        ))
+                    }
+                };
+            if matches!(method.as_str(), "get") {
+                arg_values.truncate(1);
+            }
+            let host = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host, &arg_values);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.math" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "sin" if args.len() == 1 => {
+                    (self.host.core.math_sin, vec![self.lower_expr(&args[0])?])
+                }
+                "cos" if args.len() == 1 => {
+                    (self.host.core.math_cos, vec![self.lower_expr(&args[0])?])
+                }
+                "exp" if args.len() == 1 => {
+                    (self.host.core.math_exp, vec![self.lower_expr(&args[0])?])
+                }
+                "degrees" if args.len() == 1 => {
+                    (self.host.core.math_degrees, vec![self.lower_expr(&args[0])?])
+                }
+                "radians" if args.len() == 1 => {
+                    (self.host.core.math_radians, vec![self.lower_expr(&args[0])?])
+                }
+                "is_finite" if args.len() == 1 => {
+                    (self.host.core.math_is_finite, vec![self.lower_expr(&args[0])?])
+                }
+                "sign" if args.len() == 1 => {
+                    (self.host.core.math_sign, vec![self.lower_expr(&args[0])?])
+                }
+                "atan2" if args.len() == 2 => (
+                    self.host.core.math_atan2,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "hypot" if args.len() == 2 => (
+                    self.host.core.math_hypot,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "lerp" if args.len() == 3 => (
+                    self.host.core.math_lerp,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "checked_add" if args.len() == 2 => (
+                    self.host.core.math_checked_add,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "saturating_add" if args.len() == 2 => (
+                    self.host.core.math_saturating_add,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "wrapping_add" if args.len() == 2 => (
+                    self.host.core.math_wrapping_add,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "int_pow" if args.len() == 2 => (
+                    self.host.core.math_int_pow,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "gcd" if args.len() == 2 => (
+                    self.host.core.math_gcd,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "lcm" if args.len() == 2 => (
+                    self.host.core.math_lcm,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "sqrt" if args.len() == 1 => {
+                    let f32_path = matches!(args[0].ty, Type::Float32);
+                    (
+                        if f32_path {
+                            self.host.core.math_sqrt_f32
+                        } else {
+                            self.host.core.math_sqrt
+                        },
+                        vec![self.lower_expr(&args[0])?],
+                    )
+                }
+                "pow" if args.len() == 2 => {
+                    let f32_path = matches!(args[0].ty, Type::Float32);
+                    (
+                        if f32_path {
+                            self.host.core.math_pow_f32
+                        } else {
+                            self.host.core.math_pow
+                        },
+                        vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                    )
+                }
+                "floor" if args.len() == 1 => {
+                    let f32_path = matches!(args[0].ty, Type::Float32);
+                    (
+                        if f32_path {
+                            self.host.core.math_floor_f32
+                        } else {
+                            self.host.core.math_floor
+                        },
+                        vec![self.lower_expr(&args[0])?],
+                    )
+                }
+                "ceil" if args.len() == 1 => {
+                    let f32_path = matches!(args[0].ty, Type::Float32);
+                    (
+                        if f32_path {
+                            self.host.core.math_ceil_f32
+                        } else {
+                            self.host.core.math_ceil
+                        },
+                        vec![self.lower_expr(&args[0])?],
+                    )
+                }
+                "abs" if args.len() == 1 => {
+                    // Inline f64 abs — no separate host (Prelude uses libm).
+                    let x = self.lower_expr(&args[0])?;
+                    let neg = self.b.ins().fneg(x);
+                    let zero = self.b.ins().f64const(0.0);
+                    let neg_mask = self.b.ins().fcmp(FloatCC::LessThan, x, zero);
+                    return Ok(self.b.ins().select(neg_mask, neg, x));
+                }
+                "max" if args.len() == 2 => {
+                    let a = self.lower_expr(&args[0])?;
+                    let b = self.lower_expr(&args[1])?;
+                    return Ok(self.b.ins().fmax(a, b));
+                }
+                "min" if args.len() == 2 => {
+                    let a = self.lower_expr(&args[0])?;
+                    let b = self.lower_expr(&args[1])?;
+                    return Ok(self.b.ins().fmin(a, b));
+                }
+                "clamp" if args.len() == 3 => {
+                    let x = self.lower_expr(&args[0])?;
+                    let lo = self.lower_expr(&args[1])?;
+                    let hi = self.lower_expr(&args[2])?;
+                    let raised = self.b.ins().fmax(x, lo);
+                    return Ok(self.b.ins().fmin(raised, hi));
+                }
+                "decimal" if args.len() == 1 => (
+                    self.host.num.decimal_from_str,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "fraction" if args.len() == 2 => (
+                    self.host.num.fraction_new,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                // #1464 / I9 — Prelude MathLibPure + AOT-inline f64/i64 methods.
+                "erf" if args.len() == 1 => {
+                    (self.host.math_extra.erf, vec![self.lower_expr(&args[0])?])
+                }
+                "erfc" if args.len() == 1 => {
+                    (self.host.math_extra.erfc, vec![self.lower_expr(&args[0])?])
+                }
+                "gamma" if args.len() == 1 => {
+                    (self.host.math_extra.gamma, vec![self.lower_expr(&args[0])?])
+                }
+                "lgamma" if args.len() == 1 => {
+                    (self.host.math_extra.lgamma, vec![self.lower_expr(&args[0])?])
+                }
+                "ulp" if args.len() == 1 => {
+                    (self.host.math_extra.ulp, vec![self.lower_expr(&args[0])?])
+                }
+                "significand" if args.len() == 1 => (
+                    self.host.math_extra.significand,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "logb" if args.len() == 1 => {
+                    (self.host.math_extra.logb, vec![self.lower_expr(&args[0])?])
+                }
+                "ldexp" | "scaleb" if args.len() == 2 => (
+                    self.host.math_extra.ldexp,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "next_after" if args.len() == 2 => (
+                    self.host.math_extra.next_after,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "cmp" if args.len() == 2 => (
+                    self.host.math_extra.cmp,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "ilogb" if args.len() == 1 => {
+                    (self.host.math_extra.ilogb, vec![self.lower_expr(&args[0])?])
+                }
+                "isqrt" if args.len() == 1 => {
+                    (self.host.math_extra.isqrt, vec![self.lower_expr(&args[0])?])
+                }
+                "factorial" if args.len() == 1 => (
+                    self.host.math_extra.factorial,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "binomial" if args.len() == 2 => (
+                    self.host.math_extra.binomial,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "digits" if args.len() == 1 => {
+                    (self.host.math_extra.digits, vec![self.lower_expr(&args[0])?])
+                }
+                "leading_ones" if args.len() == 1 => (
+                    self.host.math_extra.leading_ones,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "trailing_ones" if args.len() == 1 => (
+                    self.host.math_extra.trailing_ones,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "asinh" if args.len() == 1 => {
+                    (self.host.math_extra.asinh, vec![self.lower_expr(&args[0])?])
+                }
+                "acosh" if args.len() == 1 => {
+                    (self.host.math_extra.acosh, vec![self.lower_expr(&args[0])?])
+                }
+                "atanh" if args.len() == 1 => {
+                    (self.host.math_extra.atanh, vec![self.lower_expr(&args[0])?])
+                }
+                "cbrt" if args.len() == 1 => {
+                    (self.host.math_extra.cbrt, vec![self.lower_expr(&args[0])?])
+                }
+                "exp2" if args.len() == 1 => {
+                    (self.host.math_extra.exp2, vec![self.lower_expr(&args[0])?])
+                }
+                "exp_m1" if args.len() == 1 => {
+                    (self.host.math_extra.exp_m1, vec![self.lower_expr(&args[0])?])
+                }
+                "ln_1p" if args.len() == 1 => {
+                    (self.host.math_extra.ln_1p, vec![self.lower_expr(&args[0])?])
+                }
+                "log" if args.len() == 2 => (
+                    self.host.math_extra.log,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "copysign" if args.len() == 2 => (
+                    self.host.math_extra.copysign,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "signum" if args.len() == 1 => {
+                    (self.host.math_extra.signum, vec![self.lower_expr(&args[0])?])
+                }
+                "fma" if args.len() == 3 => (
+                    self.host.math_extra.fma,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "is_even" if args.len() == 1 => {
+                    (self.host.math_extra.is_even, vec![self.lower_expr(&args[0])?])
+                }
+                "is_odd" if args.len() == 1 => {
+                    (self.host.math_extra.is_odd, vec![self.lower_expr(&args[0])?])
+                }
+                "checked_abs" if args.len() == 1 => (
+                    self.host.math_extra.checked_abs,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "checked_neg" if args.len() == 1 => (
+                    self.host.math_extra.checked_neg,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "checked_div" if args.len() == 2 => (
+                    self.host.math_extra.checked_div,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "checked_rem" if args.len() == 2 => (
+                    self.host.math_extra.checked_rem,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "is_normal" if args.len() == 1 => (
+                    self.host.math_extra.is_normal,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_subnormal" if args.len() == 1 => (
+                    self.host.math_extra.is_subnormal,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_canonical" if args.len() == 1 => (
+                    self.host.math_extra.is_canonical,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_signed" | "sign_bit" if args.len() == 1 => (
+                    self.host.math_extra.is_signed,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_zero" if args.len() == 1 => (
+                    self.host.math_extra.is_zero_f,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_integer" if args.len() == 1 => (
+                    self.host.math_extra.is_integer,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "next_up" if args.len() == 1 => {
+                    (self.host.math_extra.next_up, vec![self.lower_expr(&args[0])?])
+                }
+                "next_down" if args.len() == 1 => (
+                    self.host.math_extra.next_down,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "cot" if args.len() == 1 => {
+                    (self.host.math_extra.cot, vec![self.lower_expr(&args[0])?])
+                }
+                "inv" if args.len() == 1 => {
+                    (self.host.math_extra.inv, vec![self.lower_expr(&args[0])?])
+                }
+                "copy" if args.len() == 1 => {
+                    return Ok(self.lower_expr(&args[0])?);
+                }
+                "zero" if args.is_empty() => {
+                    return Ok(self.b.ins().f64const(0.0));
+                }
+                "radix" if args.len() <= 1 => {
+                    return Ok(self.b.ins().iconst(types::I64, 2));
+                }
+                "sin_cos" if args.len() == 1 => {
+                    (self.host.math_extra.sin_cos, vec![self.lower_expr(&args[0])?])
+                }
+                "modf" if args.len() == 1 => {
+                    (self.host.math_extra.modf, vec![self.lower_expr(&args[0])?])
+                }
+                "frexp" if args.len() == 1 => {
+                    (self.host.math_extra.frexp, vec![self.lower_expr(&args[0])?])
+                }
+                "div_mod" if args.len() == 2 => (
+                    self.host.math_extra.div_mod,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "div_rem" if args.len() == 2 => (
+                    self.host.math_extra.div_rem,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "atan" if args.len() == 1 => {
+                    (self.host.math_extra.atan, vec![self.lower_expr(&args[0])?])
+                }
+                "asin" if args.len() == 1 => {
+                    (self.host.math_extra.asin, vec![self.lower_expr(&args[0])?])
+                }
+                "acos" if args.len() == 1 => {
+                    (self.host.math_extra.acos, vec![self.lower_expr(&args[0])?])
+                }
+                "tan" if args.len() == 1 => {
+                    (self.host.math_extra.tan, vec![self.lower_expr(&args[0])?])
+                }
+                "sinh" if args.len() == 1 => {
+                    (self.host.math_extra.sinh, vec![self.lower_expr(&args[0])?])
+                }
+                "cosh" if args.len() == 1 => {
+                    (self.host.math_extra.cosh, vec![self.lower_expr(&args[0])?])
+                }
+                "tanh" if args.len() == 1 => {
+                    (self.host.math_extra.tanh, vec![self.lower_expr(&args[0])?])
+                }
+                _ => {
+                    return Err(format!("jit core call unsupported: core.math.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            let result = self.b.inst_results(call)[0];
+            if method == "decimal" {
+                self.emit_trap_check()?;
+            }
+            return Ok(result);
+        }
+        if module == "core.tasks" && method == "channel" && args.is_empty() {
+            return Ok(self.call_host(self.host.conc.channel_new, &[]));
+        }
+        if module == "core.tasks" && method == "channel" && args.len() == 1 {
+            let cap = self.lower_expr(&args[0])?;
+            return Ok(self.call_host(self.host.conc.channel_bounded, &[cap]));
+        }
+        if module == "core.tasks" && method == "after" {
+            let ms = self.lower_expr(&args[0])?;
+            let value = if args.len() >= 2 {
+                self.lower_expr(&args[1])?
+            } else {
+                self.b.ins().iconst(types::I64, 0)
+            };
+            return Ok(self.call_host(self.host.conc.after_value, &[ms, value]));
+        }
+        if module == "core.tasks" && method == "interval" && args.len() == 1 {
+            let ms = self.lower_expr(&args[0])?;
+            return Ok(self.call_host(self.host.conc.interval, &[ms]));
+        }
+        if module == "core.tasks" && method == "yield_now" && args.is_empty() {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.conc.task_yield, self.b.func);
+            self.b.ins().call(host_ref, &[]);
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        if module == "core.tasks" && method == "current_task" && args.is_empty() {
+            return Ok(self.call_host(self.host.conc.task_current_trace, &[]));
+        }
+        if module == "core.time" && method == "now" && args.is_empty() {
+            return Ok(self.call_host(self.host.conc.time_now, &[]));
+        }
+        if module == "core.time" && method == "sleep" && args.len() == 1 {
+            let millis = self.lower_expr(&args[0])?;
+            let sleep_status = self.call_host(self.host.conc.sleep, &[millis]);
+            let _ = self.finish_wait_call(sleep_status);
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        if module == "core.text" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "lower" if args.len() == 1 => {
+                    (self.host.text.lower, vec![self.lower_expr(&args[0])?])
+                }
+                "upper" if args.len() == 1 => {
+                    (self.host.text.upper, vec![self.lower_expr(&args[0])?])
+                }
+                "trim" if args.len() == 1 => {
+                    (self.host.str_trim, vec![self.lower_expr(&args[0])?])
+                }
+                "scalar_count" if args.len() == 1 => {
+                    (self.host.str_len, vec![self.lower_expr(&args[0])?])
+                }
+                "byte_count" if args.len() == 1 => {
+                    (self.host.str_byte_len, vec![self.lower_expr(&args[0])?])
+                }
+                "graphemes" if args.len() == 1 => {
+                    (self.host.text.graphemes, vec![self.lower_expr(&args[0])?])
+                }
+                "words" if args.len() == 1 => {
+                    (self.host.text.words, vec![self.lower_expr(&args[0])?])
+                }
+                "sentences" if args.len() == 1 => {
+                    (self.host.text.sentences, vec![self.lower_expr(&args[0])?])
+                }
+                "nfc" if args.len() == 1 => {
+                    (self.host.text.nfc, vec![self.lower_expr(&args[0])?])
+                }
+                "nfkc" if args.len() == 1 => {
+                    (self.host.text.nfkc, vec![self.lower_expr(&args[0])?])
+                }
+                "nfd" if args.len() == 1 => {
+                    (self.host.text.nfd, vec![self.lower_expr(&args[0])?])
+                }
+                "nfkd" if args.len() == 1 => {
+                    (self.host.text.nfkd, vec![self.lower_expr(&args[0])?])
+                }
+                "caseless_eq" if args.len() == 2 => (
+                    self.host.text.caseless_eq,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "display_width" if args.len() == 1 => (
+                    self.host.text.display_width,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "display_width" if args.len() == 2 => (
+                    self.host.text.display_width_policy,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "is_alphabetic" if args.len() == 1 => (
+                    self.host.text.is_alphabetic,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_numeric" if args.len() == 1 => (
+                    self.host.text.is_numeric,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "pad_start" if args.len() == 3 => (
+                    self.host.text.pad_start,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "center" if args.len() == 3 => (
+                    self.host.text.center,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "starts_any" if args.len() == 2 => (
+                    self.host.text.starts_any,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "char_indices" if args.len() == 1 => (
+                    self.host.text.char_indices,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core.text call unsupported: {method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module.starts_with("core.sketch.") {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                ("core.sketch.hll", "new") if args.is_empty() => {
+                    (self.host.sketch.hll_new, Vec::new())
+                }
+                ("core.sketch.tdigest", "new") if args.is_empty() => {
+                    (self.host.sketch.tdigest_new, Vec::new())
+                }
+                ("core.sketch.cms", "new") if args.is_empty() => {
+                    (self.host.sketch.cms_new, Vec::new())
+                }
+                ("core.sketch.reservoir", "new") if args.len() == 1 => {
+                    (self.host.sketch.reservoir_new, vec![self.lower_expr(&args[0])?])
+                }
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.args" && method == "spec" && args.is_empty() {
+            return Ok(self.call_host(self.host.args.spec, &[]));
+        }
+        if module == "core.text.unicode" && args.len() == 1 {
+            let host_id = match method.as_str() {
+                // str_len already counts Unicode scalars via jet_rt.
+                "scalar_count" => self.host.str_len,
+                "byte_count" => self.host.str_byte_len,
+                "is_ascii" => self.host.str_is_ascii,
+                "lower" => self.host.str_to_lower,
+                "upper" => self.host.str_to_upper,
+                "scalars" => self.host.str_scalar_strings,
+                _ => {
+                    return Err(format!(
+                        "jit core.text.unicode call unsupported: {method}"
+                    ))
+                }
+            };
+            let text = self.lower_expr(&args[0])?;
+            return Ok(self.call_host(host_id, &[text]));
+        }
+        if module == "core.fmt" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "number" | "bytes" | "duration" | "ordinal" if args.len() == 1 => {
+                    let host = match method.as_str() {
+                        "number" => self.host.fmt.number,
+                        "bytes" => self.host.fmt.bytes,
+                        "duration" => self.host.fmt.duration,
+                        _ => self.host.fmt.ordinal,
+                    };
+                    (host, vec![self.lower_expr(&args[0])?])
+                }
+                "decimal" | "percent" if args.len() == 2 => {
+                    let host = if method == "decimal" {
+                        self.host.fmt.decimal
+                    } else {
+                        self.host.fmt.percent
+                    };
+                    (
+                        host,
+                        vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                    )
+                }
+                "plural" if args.len() == 3 => (
+                    self.host.fmt.plural,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "pad_left" | "pad_right" | "pad_center" if args.len() == 3 => {
+                    let host = match method.as_str() {
+                        "pad_left" => self.host.fmt.pad_left,
+                        "pad_right" => self.host.fmt.pad_right,
+                        _ => self.host.fmt.pad_center,
+                    };
+                    (
+                        host,
+                        vec![
+                            self.lower_expr(&args[0])?,
+                            self.lower_expr(&args[1])?,
+                            self.lower_expr(&args[2])?,
+                        ],
+                    )
+                }
+                _ => {
+                    return Err(format!("jit core call unsupported: core.fmt.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.perf" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "fidelity" if args.is_empty() => (self.host.perf_fidelity, Vec::new()),
+                "default_fidelity" if args.is_empty() => {
+                    (self.host.perf_default_fidelity, Vec::new())
+                }
+                "override_fidelity" if args.len() == 1 => {
+                    (self.host.perf_override_fidelity, vec![self.lower_expr(&args[0])?])
+                }
+                "reset_fidelity" if args.is_empty() => {
+                    (self.host.perf_reset_fidelity, Vec::new())
+                }
+                _ => return Err(format!("jit core.perf call unsupported: {method}")),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(clif_ty(&expr.ty)
+                .map(|_| self.b.inst_results(call)[0])
+                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        }
+    
+        if module == "core.time.date" || module == "core.time.datetime" || module == "core.time" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                ("core.time.date", "new") if args.len() == 3 => (
+                    self.host.time.date_new,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
+                ),
+                ("core.time.date", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
+                ("core.time.date", "parse") if args.len() == 1 => (self.host.time.date_parse, vec![self.lower_expr(&args[0])?]),
+                ("core.time.datetime", "from_timestamp") if args.len() == 1 => (
+                    self.host.time.datetime_from_timestamp,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.time.datetime", "now") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
+                ("core.time", "parse_rfc3339") if args.len() == 1 => (
+                    self.host.time.parse_rfc3339,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.time", "from_unix_ms") if args.len() == 1 => (
+                    self.host.time.from_unix_ms,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.time", "utc") if args.is_empty() => (self.host.time.utc, Vec::new()),
+                ("core.time", "period_months") if args.len() == 1 => (
+                    self.host.time.period_months,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.time", "instant") if args.is_empty() => (self.host.time.instant, Vec::new()),
+                ("core.time", "zoned") if args.len() == 2 => (
+                    self.host.time.zoned,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                ("core.time", "days_in_month") if args.len() == 2 => (
+                    self.host.time.days_in_month,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                ("core.time", "is_leap_year") if args.len() == 1 => (
+                    self.host.time.is_leap_year,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                ("core.time", "datetime") if args.len() == 6 => (
+                    self.host.time.datetime,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                        self.lower_expr(&args[3])?,
+                        self.lower_expr(&args[4])?,
+                        self.lower_expr(&args[5])?,
+                    ],
+                ),
+                ("core.time", "time" | "local_time") if args.len() == 3 => (
+                    self.host.time.local_time,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                ("core.time", "nanoseconds") if args.len() == 1 => (
+                    self.host.time.duration_unit,
+                    vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 0)],
+                ),
+                ("core.time", "microseconds") if args.len() == 1 => (
+                    self.host.time.duration_unit,
+                    vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 1)],
+                ),
+                ("core.time", "milliseconds") if args.len() == 1 => (
+                    self.host.time.duration_unit,
+                    vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 2)],
+                ),
+                ("core.time", "seconds") if args.len() == 1 => (
+                    self.host.time.duration_unit,
+                    vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 3)],
+                ),
+                ("core.time", "minutes") if args.len() == 1 => (
+                    self.host.time.duration_unit,
+                    vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 4)],
+                ),
+                ("core.time", "hours") if args.len() == 1 => (
+                    self.host.time.duration_unit,
+                    vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 5)],
+                ),
+                _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.regex" {
+            let widen_bool = |this: &mut Self, e: &TExpr| -> Result<Value, String> {
+                let v = this.lower_expr(e)?;
+                if this.b.func.dfg.value_type(v) == types::I8 {
+                    Ok(this.b.ins().uextend(types::I64, v))
+                } else {
+                    Ok(v)
+                }
+            };
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "flags" if args.len() == 3 => (
+                    self.host.text.regex_flags,
+                    vec![
+                        widen_bool(self, &args[0])?,
+                        widen_bool(self, &args[1])?,
+                        widen_bool(self, &args[2])?,
+                    ],
+                ),
+                "escape" if args.len() == 1 => (
+                    self.host.text.regex_escape,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "literal" if args.len() == 1 => (
+                    self.host.text.regex_literal,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "is_match" if args.len() == 2 => (
+                    self.host.text.regex_is_match,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "find" if args.len() == 2 => (
+                    self.host.text.regex_find,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "find_all" if args.len() == 2 => (
+                    self.host.text.regex_find_all,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "matches" if args.len() == 2 => (
+                    self.host.text.regex_matches,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "match" if args.len() == 2 => (
+                    self.host.text.regex_match,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "replace" if args.len() == 3 => (
+                    self.host.text.regex_replace,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
+                ),
+                "replace_all" if args.len() == 3 => (
+                    self.host.text.regex_replace_all,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
+                ),
+                "split" if args.len() == 2 => (
+                    self.host.text.regex_split,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "split_limit" if args.len() == 3 => (
+                    self.host.text.regex_split_limit,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
+                ),
+                "compile" if args.len() == 1 => (
+                    self.host.text.regex_compile,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "compile_with" if args.len() == 2 => (
+                    self.host.text.regex_compile_with,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.db" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "open_memory" if args.is_empty() => {
+                    (self.host.db.open_memory, Vec::new())
+                }
+                "open" if args.len() == 1 => {
+                    (self.host.db.open, vec![self.lower_expr(&args[0])?])
+                }
+                "policy" if args.len() == 2 => (
+                    self.host.db.policy,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "migrate" if args.len() == 3 => (
+                    self.host.db.migrate,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "transaction" if args.len() == 3 => (
+                    self.host.db.transaction,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "params" if args.len() == 1 => {
+                    (self.host.db.params, vec![self.lower_expr(&args[0])?])
+                }
+                "row_int" if args.len() == 2 => (
+                    self.host.db.row_int,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "row_text" if args.len() == 2 => (
+                    self.host.db.row_text,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.url" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "parse" if args.len() == 1 => {
+                    (self.host.net.url_parse, vec![self.lower_expr(&args[0])?])
+                }
+                "file" if args.len() == 1 => {
+                    (self.host.net.url_file, vec![self.lower_expr(&args[0])?])
+                }
+                "data" if args.len() == 2 => (
+                    self.host.net.url_data,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                "query" if args.len() == 1 => {
+                    (self.host.net.url_query, vec![self.lower_expr(&args[0])?])
+                }
+                "percent_encode" if args.len() == 1 => (
+                    self.host.net.url_percent_encode,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "percent_decode" if args.len() == 1 => (
+                    self.host.net.url_percent_decode,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.mime" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "parse" if args.len() == 1 => {
+                    (self.host.net.mime_parse, vec![self.lower_expr(&args[0])?])
+                }
+                "from_extension" if args.len() == 1 => (
+                    self.host.net.mime_from_extension,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "extension" if args.len() == 1 => (
+                    self.host.net.mime_extension,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.browser" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "profile" if args.len() == 1 => (
+                    self.host.net.browser_profile,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "timeout" if args.len() == 1 => (
+                    self.host.net.browser_timeout,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.email" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "address" if args.len() == 1 => (
+                    self.host.net.email_address,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "attachment" if args.len() == 3 => (
+                    self.host.net.email_attachment,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                    ],
+                ),
+                "message" if args.len() == 7 => (
+                    self.host.net.email_message,
+                    vec![
+                        self.lower_expr(&args[0])?,
+                        self.lower_expr(&args[1])?,
+                        self.lower_expr(&args[2])?,
+                        self.lower_expr(&args[3])?,
+                        self.lower_expr(&args[4])?,
+                        self.lower_expr(&args[5])?,
+                        self.lower_expr(&args[6])?,
+                    ],
+                ),
+                "serialize" if args.len() == 1 => (
+                    self.host.net.email_serialize,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "smtp" if args.len() == 1 => (
+                    self.host.net.email_smtp,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.reactive" {
+            match method.as_str() {
+                "signal" if args.len() == 1 => {
+                    let init = self.lower_expr(&args[0])?;
+                    let packed = if matches!(
+                        self.erase_distinct_ty(&args[0].ty),
+                        Type::Float | Type::Float32
+                    ) {
+                        self.b.ins().bitcast(
+                            types::I64,
+                            Self::scalar_bitcast_memflags(),
+                            init,
+                        )
+                    } else {
+                        init
+                    };
+                    return Ok(self.call_host(self.host.reactive.signal, &[packed]));
+                }
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            }
+        }
+        if module == "core.reactive.loadable" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "idle" if args.is_empty() => (self.host.reactive.loadable_idle, Vec::new()),
+                "loading" if args.is_empty() => {
+                    (self.host.reactive.loadable_loading, Vec::new())
+                }
+                "loaded" if args.len() == 1 => (
+                    self.host.reactive.loadable_loaded,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "failed" if args.len() == 1 => (
+                    self.host.reactive.loadable_failed,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.event" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "scope" | "policy_sync" if args.is_empty() => {
+                    (self.host.reactive.event_scope, Vec::new())
+                }
+                "new" | "with_policy" => (self.host.reactive.event_new, Vec::new()),
+                "hook" if args.len() == 1 => (
+                    self.host.reactive.hook_new,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "decision_hook" if args.len() == 1 => (
+                    self.host.reactive.decision_hook_new,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                "async_result" if args.len() == 2 => {
+                    // AsyncPolicy + FailurePolicy → thin host (capacity/overflow ignored for golden path)
+                    let _policy = self.lower_expr(&args[0])?;
+                    let _fail = self.lower_expr(&args[1])?;
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    (
+                        self.host.reactive.async_event_new,
+                        vec![zero, zero, zero],
+                    )
+                }
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            // async_result is Result — pack as Ok(handle) via Option/Result ABI
+            if method == "async_result" {
+                let h = self.b.inst_results(call)[0];
+                let ok = self.b.ins().iconst(types::I8, 1);
+                return Ok(self.call_host(self.host.result_new_i64, &[ok, h]));
+            }
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.ui" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                "null_backend" if args.is_empty() => {
+                    (self.host.ui.null_backend, Vec::new())
+                }
+                "tui_backend" if args.is_empty() => (self.host.ui.tui_backend, Vec::new()),
+                "gtk_backend" if args.is_empty() => (self.host.ui.gtk_backend, Vec::new()),
+                "text" if args.len() == 1 => {
+                    (self.host.ui.text, vec![self.lower_expr(&args[0])?])
+                }
+                "button" if args.len() == 1 => {
+                    (self.host.ui.button, vec![self.lower_expr(&args[0])?])
+                }
+                "node" if args.len() == 3 => {
+                    let label = self.lower_expr(&args[0])?;
+                    let w = self.lower_as_f64(&args[1])?;
+                    let h = self.lower_as_f64(&args[2])?;
+                    (self.host.ui.node, vec![label, w, h])
+                }
+                "node_color" if args.len() == 4 => {
+                    let label = self.lower_expr(&args[0])?;
+                    let w = self.lower_as_f64(&args[1])?;
+                    let h = self.lower_as_f64(&args[2])?;
+                    let color = self.lower_expr(&args[3])?;
+                    (self.host.ui.node_color, vec![label, w, h, color])
+                }
+                "node_role" if args.len() == 4 => {
+                    let label = self.lower_expr(&args[0])?;
+                    let w = self.lower_as_f64(&args[1])?;
+                    let h = self.lower_as_f64(&args[2])?;
+                    let role = self.lower_expr(&args[3])?;
+                    (self.host.ui.node_role, vec![label, w, h, role])
+                }
+                "box" if args.len() == 1 => {
+                    (self.host.ui.box_node, vec![self.lower_expr(&args[0])?])
+                }
+                "constraint" if args.len() == 4 => (
+                    self.host.ui.constraint,
+                    vec![
+                        self.lower_as_f64(&args[0])?,
+                        self.lower_as_f64(&args[1])?,
+                        self.lower_as_f64(&args[2])?,
+                        self.lower_as_f64(&args[3])?,
+                    ],
+                ),
+                "rect" if args.len() == 4 => (
+                    self.host.ui.rect,
+                    vec![
+                        self.lower_as_f64(&args[0])?,
+                        self.lower_as_f64(&args[1])?,
+                        self.lower_as_f64(&args[2])?,
+                        self.lower_as_f64(&args[3])?,
+                    ],
+                ),
+                "key_event" if args.len() == 1 => {
+                    (self.host.ui.key_event, vec![self.lower_expr(&args[0])?])
+                }
+                "aria_role" if args.len() == 1 => {
+                    (self.host.ui.aria_role, vec![self.lower_expr(&args[0])?])
+                }
+                "aria_role_button" if args.is_empty() => {
+                    let kind = self.b.ins().iconst(types::I64, 0);
+                    (self.host.ui.aria_role, vec![kind])
+                }
+                "aria_role_text_input" if args.is_empty() => {
+                    let kind = self.b.ins().iconst(types::I64, 1);
+                    (self.host.ui.aria_role, vec![kind])
+                }
+                "aria_role_label" if args.is_empty() => {
+                    let kind = self.b.ins().iconst(types::I64, 2);
+                    (self.host.ui.aria_role, vec![kind])
+                }
+                "aria_role_container" if args.is_empty() => {
+                    let kind = self.b.ins().iconst(types::I64, 3);
+                    (self.host.ui.aria_role, vec![kind])
+                }
+                // D-UI-MOUNT1=A: void pipeline — return unit before the generic I64 path.
+                "mount" if args.len() == 2 => {
+                    let backend = self.lower_expr(&args[0])?;
+                    let node = self.lower_expr(&args[1])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.mount_default, self.b.func);
+                    self.b.ins().call(host, &[backend, node]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                "mount" if args.len() == 3 => {
+                    let backend = self.lower_expr(&args[0])?;
+                    let node = self.lower_expr(&args[1])?;
+                    let constraint = self.lower_expr(&args[2])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.mount, self.b.func);
+                    self.b.ins().call(host, &[backend, node, constraint]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if module == "core.web" || module == "core.web.devserver" {
+            let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                ("core.web", "on") if args.len() == 2 || args.len() == 3 => {
+                    let sel = self.lower_expr(&args[0])?;
+                    let ev = self.lower_expr(&args[1])?;
+                    // Native `web.on` is a no-op (Web.rs); capturing click
+                    // lambdas are not resident-callable. Skip the body.
+                    let cb = if args.len() == 3
+                        && !matches!(&args[2].kind, TExprKind::Lambda(_))
+                    {
+                        self.lower_expr(&args[2])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.web.on, self.b.func);
+                    self.b.ins().call(host, &[sel, ev, cb]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                ("core.web", "value") if args.is_empty() => {
+                    (self.host.web.value, Vec::new())
+                }
+                ("core.web", "app") if args.is_empty() => (self.host.web.app, Vec::new()),
+                ("core.web", "page") if args.len() == 2 => (
+                    self.host.web.page,
+                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                ),
+                ("core.web.devserver", "app") if args.is_empty() => {
+                    (self.host.web.devserver_app, Vec::new())
+                }
+                ("core.web.devserver", "for_app") if args.len() == 1 => (
+                    self.host.web.devserver_for_app,
+                    vec![self.lower_expr(&args[0])?],
+                ),
+                _ => {
+                    return Err(format!("jit core call unsupported: {module}.{method}"))
+                }
+            };
+            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host_ref, &arg_vals);
+            return Ok(clif_ty(&expr.ty)
+                .map(|_| self.b.inst_results(call)[0])
+                .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        }
+        Err(format!("jit core call unsupported: {module}.{method}"))
+    }
+    TExprKind::CoreClosureCall { kind } => match kind {
+        TCoreClosureKind::Spawn { group, .. } => {
+            let group = match group {
+                Some(group) => Some(self.lower_expr(group)?),
+                None => None,
+            };
+            let task = self.lower_spawn()?;
+            if let Some(group) = group {
                 let host = self.module.declare_func_in_func(
-                    self.host.encoding.decode_error_under_segment,
+                    self.host.conc.task_group_register,
                     self.b.func,
                 );
-                let call = self.b.ins().call(host, &[result, segment]);
-                Ok(self.b.inst_results(call)[0])
+                self.b.ins().call(host, &[group, task]);
             }
-            TExprKind::StaticCall {
-                owner,
-                owner_type,
-                method,
-                type_args,
-                args,
-                ..
-            } => {
-                if method.name == "diff" && args.len() == 2 {
-                    if let TStaticOwner::User(base) = owner {
-                        if self
-                            .meta
-                            .struct_layout(&format!("{base}.Patch"))
-                            .is_some()
-                        {
-                            return self.lower_patch_diff(base, &args[0], &args[1]);
-                        }
-                    }
+            Ok(task)
+        }
+        TCoreClosureKind::Serve { .. } => {
+            Err("jit http serve closure unsupported".to_string())
+        }
+        TCoreClosureKind::OnInterrupt { callback } => {
+            let callback = self.lower_interrupt_callback_value(callback)?;
+            let host = self
+                .module
+                .declare_func_in_func(self.host.core.os_on_interrupt, self.b.func);
+            self.b.ins().call(host, &[callback]);
+            self.emit_trap_check()?;
+            Ok(self.b.ins().iconst(types::I64, 0))
+        }
+        TCoreClosureKind::Guard { executable, .. } => {
+            let id = super::functions_compile::lower_callable_lambda(
+                self.module,
+                self.host,
+                self.meta,
+                executable,
+                self.func_ids,
+                self.spawn_func_ids,
+                self.spawn_lambdas,
+                self.spawn_site,
+                self.runtime,
+            )?;
+            self.scope_guards.push(id);
+            Ok(self.b.ins().iconst(types::I64, 0))
+        }
+        TCoreClosureKind::OnCommit { executable, .. } => {
+            let id = super::functions_compile::lower_callable_lambda(
+                self.module,
+                self.host,
+                self.meta,
+                executable,
+                self.func_ids,
+                self.spawn_func_ids,
+                self.spawn_lambdas,
+                self.spawn_site,
+                self.runtime,
+            )?;
+            let Some(frame) = self.txn_stack.last_mut() else {
+                return Err("jit on_commit outside transaction".to_string());
+            };
+            frame.on_commit.push(id);
+            Ok(self.b.ins().iconst(types::I64, 0))
+        }
+        TCoreClosureKind::OnRollback { executable, .. } => {
+            let id = super::functions_compile::lower_callable_lambda(
+                self.module,
+                self.host,
+                self.meta,
+                executable,
+                self.func_ids,
+                self.spawn_func_ids,
+                self.spawn_lambdas,
+                self.spawn_site,
+                self.runtime,
+            )?;
+            let Some(frame) = self.txn_stack.last_mut() else {
+                return Err("jit on_rollback outside transaction".to_string());
+            };
+            frame.on_rollback.push(id);
+            Ok(self.b.ins().iconst(types::I64, 0))
+        }
+        TCoreClosureKind::ReactiveDerived { .. } => self.lower_reactive_cb_call(
+            self.host.reactive.derived,
+            true,
+            "reactive derived",
+        ),
+        TCoreClosureKind::ReactiveEffect { .. } => self.lower_reactive_cb_call(
+            self.host.reactive.effect,
+            true,
+            "reactive effect",
+        ),
+        TCoreClosureKind::UiReactiveRender { .. } => self.lower_reactive_cb_call(
+            self.host.ui.reactive_render,
+            false,
+            "ui reactive render",
+        ),
+        TCoreClosureKind::UiButtonOnClick { label, .. } => {
+            let label_v = self.lower_expr(label)?;
+            let (spawn_ptr, n_caps, caps) =
+                self.lower_spawn_site_cb("ui button on_click")?;
+            let host = self
+                .module
+                .declare_func_in_func(self.host.ui.button_on_click, self.b.func);
+            let call = self.b.ins().call(
+                host,
+                &[
+                    label_v, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3],
+                ],
+            );
+            Ok(self.b.inst_results(call)[0])
+        }
+    },
+    TExprKind::HandleMethod { recv, op, args } => {
+        self.lower_handle_method(recv, op, args, &expr.ty)
+    }
+    TExprKind::TaskGroupAll { tasks } => {
+        let list = self.lower_expr(tasks)?;
+        let status = self.call_host(self.host.conc.task_all, &[list]);
+        Ok(self.finish_wait_call(status))
+    }
+    TExprKind::TaskGroupRace { tasks } => {
+        let list = self.lower_expr(tasks)?;
+        let status = self.call_host(self.host.conc.task_race, &[list]);
+        Ok(self.finish_wait_call(status))
+    }
+    TExprKind::TaskGroupAny { tasks } => {
+        let list = self.lower_expr(tasks)?;
+        let status = self.call_host(self.host.conc.task_any, &[list]);
+        Ok(self.finish_wait_call(status))
+    }
+    TExprKind::SelectStart => Ok(self.b.ins().iconst(types::I64, 0)),
+    TExprKind::SelectRecv { builder, channel } => {
+        let _ = self.lower_expr(builder)?;
+        self.lower_expr(channel)
+    }
+    TExprKind::SelectAfter {
+        builder,
+        millis,
+        value: _,
+    } => {
+        let _ = self.lower_expr(builder)?;
+        self.lower_expr(millis)
+    }
+    TExprKind::SelectRead { builder, .. } => self.lower_expr(builder),
+    TExprKind::SelectWait { builder } => {
+        let (recvs, afters) = collect_select_arms_jit(builder);
+        let mut recv_vals = Vec::new();
+        for ch in recvs {
+            recv_vals.push(self.lower_expr(ch)?);
+        }
+        let mut after_flat = Vec::new();
+        for (ms, value) in afters {
+            after_flat.push(self.lower_expr(ms)?);
+            after_flat.push(match value {
+                Some(v) => self.lower_expr(v)?,
+                None => self.b.ins().iconst(types::I64, 0),
+            });
+        }
+        let recv_list = self.lower_i64_value_list(&recv_vals)?;
+        let after_list = self.lower_i64_value_list(&after_flat)?;
+        let status = self.call_host(self.host.conc.select_wait, &[recv_list, after_list]);
+        Ok(self.finish_wait_call(status))
+    }
+    TExprKind::OrFallback { value, fallback } => {
+        if matches!(value.ty, Type::Option(_)) {
+            let status = self.lower_list_get_opt_status(value)?;
+            let ok_block = self.b.create_block();
+            let fail_block = self.b.create_block();
+            let merge = self.b.create_block();
+            self.b.append_block_param(merge, types::I64);
+            let is_result_option = Self::uses_result_option_abi(value);
+            let present = if is_result_option {
+                self.call_host(self.host.result_is_ok, &[status])
+            } else {
+                // Packed Option ABI: 0 = None, nonzero (incl. negative) = Some(bits-1).
+                let zero = self.b.ins().iconst(types::I64, 0);
+                self.b.ins().icmp(IntCC::NotEqual, status, zero)
+            };
+            self.b.ins().brif(present, ok_block, &[], fail_block, &[]);
+            self.b.switch_to_block(ok_block);
+            self.b.seal_block(ok_block);
+            let val = if is_result_option
+                || matches!(&value.kind, TExprKind::OverflowOpt { .. })
+            {
+                self.call_host(self.host.result_get_i64, &[status])
+            } else if let Type::Option(inner) = &value.ty {
+                self.unpack_option_payload(status, inner)?
+            } else if let Some(Type::Option(inner)) =
+                Self::recover_core_return_ty(value)
+            {
+                self.unpack_option_payload(status, &inner)?
+            } else {
+                let one = self.b.ins().iconst(types::I64, 1);
+                self.b.ins().isub(status, one)
+            };
+            self.b.ins().jump(merge, &[val]);
+            self.b.switch_to_block(fail_block);
+            self.b.seal_block(fail_block);
+            match fallback {
+                TOrFallback::Value(e) => {
+                    let fb = self.lower_expr(e)?;
+                    self.b.ins().jump(merge, &[fb]);
                 }
-                // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque handle.
-                let is_deque_new = method.name == "new"
-                    && args.is_empty()
-                    && matches!(
-                        owner,
-                        TStaticOwner::Prelude { path, .. }
-                            if path == "std::collections::VecDeque"
-                                || path.ends_with("::VecDeque")
-                                || path.ends_with(".VecDeque")
-                    );
-                if is_deque_new {
-                    return Ok(self.call_host(self.host.coll.deque_new, &[]));
+                TOrFallback::Break => {
+                    self.emit_loop_fallback(None, "break", false)?;
                 }
-                // #1478: `Set.new()` → empty HashSet handle.
-                let is_set_new = method.name == "new"
-                    && args.is_empty()
-                    && matches!(
-                        owner,
-                        TStaticOwner::Prelude { path, .. }
-                            if path == "std::collections::HashSet"
-                                || path.ends_with("::HashSet")
-                                || path.ends_with(".HashSet")
-                    );
-                if is_set_new {
+                TOrFallback::Continue => {
+                    self.emit_loop_fallback(None, "continue", true)?;
+                }
+                TOrFallback::BreakLabel(name) => {
+                    self.emit_loop_fallback(Some(name), "break", false)?;
+                }
+                TOrFallback::ContinueLabel(name) => {
+                    self.emit_loop_fallback(Some(name), "continue", true)?;
+                }
+                TOrFallback::Return(None) => {
+                    self.emit_lexical_exit(None, false, self.shield_depth)?;
+                }
+                TOrFallback::Return(Some(e)) => {
+                    let val = self.lower_expr(e)?;
+                    self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
+                }
+                TOrFallback::Panic { .. } => {
+                    let zero = self.b.ins().iconst(types::I64, 0);
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.coll.set_new, self.b.func);
+                        .declare_func_in_func(self.host.trap_panic, self.b.func);
+                    self.b.ins().call(host_ref, &[zero]);
+                    self.emit_trap_check()?;
+                    let dummy = self.b.ins().iconst(types::I64, 0);
+                    self.b.ins().jump(merge, &[dummy]);
+                }
+            }
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            return Ok(self.b.block_params(merge)[0]);
+        }
+        // Channel receive-status encoding stays on lower_result_receive_status;
+        // Result ?? uses the Result handle + result_is_ok / result_payload.
+        if let Ok(status) = self.lower_result_receive_status(value) {
+            let ok_block = self.b.create_block();
+            let fail_block = self.b.create_block();
+            let merge = self.b.create_block();
+            self.b.append_block_param(merge, types::I64);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, status, zero);
+            self.b.ins().brif(gt, ok_block, &[], fail_block, &[]);
+            self.b.switch_to_block(ok_block);
+            self.b.seal_block(ok_block);
+            let one = self.b.ins().iconst(types::I64, 1);
+            let val = self.b.ins().isub(status, one);
+            self.b.ins().jump(merge, &[val]);
+            self.b.switch_to_block(fail_block);
+            self.b.seal_block(fail_block);
+            match fallback {
+                TOrFallback::Panic { .. } => {
+                    let line = self.b.ins().iconst(types::I32, 1);
+                    let host_ref = self.module.declare_func_in_func(
+                        self.host.conc.panic_channel_closed,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(host_ref, &[line]);
+                    let panic_val = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    self.b.ins().jump(merge, &[panic_val]);
+                }
+                TOrFallback::Break => {
+                    self.emit_loop_fallback(None, "break", false)?;
+                }
+                TOrFallback::Continue => {
+                    self.emit_loop_fallback(None, "continue", true)?;
+                }
+                TOrFallback::BreakLabel(name) => {
+                    self.emit_loop_fallback(Some(name), "break", false)?;
+                }
+                TOrFallback::ContinueLabel(name) => {
+                    self.emit_loop_fallback(Some(name), "continue", true)?;
+                }
+                TOrFallback::Value(_) | TOrFallback::Return(_) => {
+                    return Err("jit or-fallback unsupported".to_string());
+                }
+            }
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            return Ok(self.b.block_params(merge)[0]);
+        }
+        let handle = self.lower_expr(value)?;
+        let ok_ty = value
+            .ty
+            .unwrap_result()
+            .map(|(ok, _)| ok.clone())
+            .or_else(|| Self::result_ok_ty_recover(value))
+            .ok_or_else(|| "jit result ?? operand is not Result".to_string())?;
+        let is_unit = matches!(&ok_ty, Type::Named(n) if n == "Unit")
+            || matches!(&ok_ty, Type::Tuple(items) if items.is_empty());
+        let ret_ty = if is_unit {
+            types::I8
+        } else {
+            self.meta
+                .clif_ty(&ok_ty)
+                .or_else(|| clif_ty(&ok_ty))
+                .or_else(|| self.meta.clif_ty(&expr.ty))
+                .or_else(|| clif_ty(&expr.ty))
+                .ok_or_else(|| {
+                    format!("jit result ?? type unsupported: ok={ok_ty:?} expr={:?}", expr.ty)
+                })?
+        };
+        let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
+        let ok_block = self.b.create_block();
+        let fail_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, ret_ty);
+        self.b.ins().brif(is_ok, ok_block, &[], fail_block, &[]);
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let ok_val = self.result_payload(handle, &ok_ty)?;
+        self.b.ins().jump(merge, &[ok_val]);
+        self.b.switch_to_block(fail_block);
+        self.b.seal_block(fail_block);
+        match fallback {
+            TOrFallback::Value(e) => {
+                let fb = self.lower_expr(e)?;
+                self.b.ins().jump(merge, &[fb]);
+            }
+            TOrFallback::Return(None) => {
+                self.emit_lexical_exit(None, false, self.shield_depth)?;
+            }
+            TOrFallback::Return(Some(e)) => {
+                let val = self.lower_expr(e)?;
+                self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
+            }
+            TOrFallback::Panic { .. } => {
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.trap_panic, self.b.func);
+                self.b.ins().call(host_ref, &[zero]);
+                self.emit_trap_check()?;
+                let dummy = if ret_ty == types::F64 {
+                    self.b.ins().f64const(0.0)
+                } else {
+                    self.b.ins().iconst(ret_ty, 0)
+                };
+                self.b.ins().jump(merge, &[dummy]);
+            }
+            TOrFallback::Break => {
+                self.emit_loop_fallback(None, "break", false)?;
+            }
+            TOrFallback::Continue => {
+                self.emit_loop_fallback(None, "continue", true)?;
+            }
+            TOrFallback::BreakLabel(name) => {
+                self.emit_loop_fallback(Some(name), "break", false)?;
+            }
+            TOrFallback::ContinueLabel(name) => {
+                self.emit_loop_fallback(Some(name), "continue", true)?;
+            }
+        }
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+    TExprKind::ListLit(elems) => self.lower_list_lit(&expr.ty, elems),
+    TExprKind::MapLit(entries) => self.lower_map_lit(entries),
+    TExprKind::Index {
+        base,
+        index,
+        is_map,
+        line,
+        ..
+    } => {
+        if *is_map {
+            let map = self.lower_expr(base)?;
+            let key = self.lower_expr(index)?;
+            let line_const = self.b.ins().iconst(types::I32, *line as i64);
+            let raw = self.call_host(self.host.coll.map_get, &[map, key, line_const]);
+            self.emit_trap_check()?;
+            let val = match self.meta.clif_ty(&expr.ty) {
+                Some(types::I32) => self.b.ins().ireduce(types::I32, raw),
+                Some(types::I8) => self.b.ins().ireduce(types::I8, raw),
+                Some(types::F64) => self.b.ins().bitcast(
+                    types::F64,
+                    Self::scalar_bitcast_memflags(),
+                    raw,
+                ),
+                _ => raw,
+            };
+            return Ok(val);
+        }
+        let list = self.lower_expr(base)?;
+        let idx = self.lower_expr(index)?;
+        let line_const = self.b.ins().iconst(types::I32, *line as i64);
+        let (list, idx) = if Self::is_view_mut_ty(&base.ty) {
+            let (inner, start, end) = self.unpack_view_mut(list)?;
+            (inner, self.checked_view_mut_index(start, end, idx))
+        } else {
+            (list, idx)
+        };
+        let host_id = match &expr.ty {
+            Type::Float => self.host.coll.list_get_f64,
+            _other => self.host.coll.list_get,
+        };
+        let result = self.call_host(host_id, &[list, idx, line_const]);
+        self.emit_trap_check()?;
+        Ok(result)
+    }
+    TExprKind::Slice {
+        base,
+        start,
+        end,
+        range,
+        line,
+    } => {
+        let list = self.lower_expr(base)?;
+        let (s, end_excl) = if let Some(range) = range {
+            self.lower_range_window(list, range, *line)?
+        } else {
+            let s = self.lower_expr(start)?;
+            let e = self.lower_expr(end)?;
+            let one = self.b.ins().iconst(types::I64, 1);
+            (s, self.b.ins().iadd(e, one))
+        };
+        let line_const = self.b.ins().iconst(types::I32, *line as i64);
+        let result = self.call_host(self.host.coll.list_slice, &[list, s, end_excl, line_const]);
+        self.emit_trap_check()?;
+        Ok(result)
+    }
+    TExprKind::BuiltinMethod { recv, op, args } => {
+        self.lower_builtin_method(recv, op, args, &expr.ty)
+    }
+    TExprKind::StructLit {
+        fields, as_trait, ..
+    } => {
+        if Self::is_range_ty(&expr.ty) {
+            Err("jit Range literal needs the three-value ABI".to_string())
+        } else if matches!(&expr.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
+            let values = fields
+                .iter()
+                .map(|(name, value, _)| Ok((name.as_str(), self.lower_expr(value)?)))
+                .collect::<Result<Vec<_>, String>>()?;
+            let field = |name: &str| {
+                values
+                    .iter()
+                    .find(|(field, _)| *field == name)
+                    .map(|(_, value)| *value)
+                    .ok_or_else(|| format!("jit Err literal missing `{name}`"))
+            };
+            let message = field("message")?;
+            let code = field("code")?;
+            let cause = field("cause")?;
+            Ok(self.call_host(self.host.err_new, &[message, code, cause]))
+        } else {
+            let type_name: std::borrow::Cow<'_, str> =
+                if let Some((_, concrete)) = as_trait.as_ref() {
+                    std::borrow::Cow::Borrowed(concrete.as_str())
+                } else {
+                    std::borrow::Cow::Owned(
+                        record_type_key(&expr.ty)
+                            .ok_or("jit struct literal missing type")?,
+                    )
+                };
+            self.lower_struct_lit(fields, as_trait.as_ref(), type_name.as_ref())
+        }
+    }
+    TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
+    TExprKind::Field {
+        recv, field, ..
+    } => {
+        if Self::is_range_ty(&recv.ty) {
+            let values = self.lower_range_expr(recv)?;
+            return match field.as_str() {
+                "start" => Ok(values[0]),
+                "end" => Ok(values[1]),
+                "exclusive" => Ok(values[2]),
+                _ => Err(format!("jit field `{field}` on `Range`")),
+            };
+        }
+        let mut handle = self.lower_expr(recv)?;
+        if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
+            let host = match field.as_str() {
+                "message" => self.host.err_message,
+                "code" => self.host.err_code,
+                "cause" => self.host.err_cause,
+                _ => return Err(format!("jit field `{field}` on `Err`")),
+            };
+            return Ok(self.call_host(host, &[handle]));
+        }
+        let record_ty = match &recv.ty {
+            Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+                let (list, start, _) = self.unpack_view_mut(handle)?;
+                let line = self.b.ins().iconst(types::I32, 1);
+                handle = self.call_host(self.host.coll.list_get, &[list, start, line]);
+                self.emit_trap_check()?;
+                args[0].clone()
+            }
+            other => other.clone(),
+        };
+        // ProcessChild is an opaque resident handle, not a heap record.
+        // The host returns the child handle as the optional session
+        // payload when the child owns a PTY master; zero is None.
+        if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
+            && field == "terminal"
+        {
+            return Ok(self.call_host(self.host.process.child_terminal, &[handle]));
+        }
+        let type_name = record_type_key(&record_ty)
+            .or_else(|| self.method_struct.clone());
+        // GameFrame.input / .index — TIR may erase the frame param to Int
+        // inside spawn-lambda bodies; treat input/index on Int as GameFrame.
+        if matches!(field.as_str(), "input" | "index")
+            && (matches!(&record_ty, Type::Int)
+                || matches!(
+                    type_name.as_deref().or_else(|| match &record_ty {
+                        Type::Named(n) => Some(n.as_str()),
+                        _ => None,
+                    }),
+                    Some("GameFrame")
+                ))
+        {
+            if field == "input" {
+                return Ok(handle);
+            }
+            return Ok(self.call_host(self.host.game.frame_index, &[handle]));
+        }
+        // GameScene.assets / .input — identity projection onto the scene handle.
+        if matches!(
+            type_name.as_deref().or_else(|| match &record_ty {
+                Type::Named(n) => Some(n.as_str()),
+                _ => None,
+            }),
+            Some("GameScene")
+        ) && matches!(field.as_str(), "assets" | "input")
+        {
+            return Ok(handle);
+        }
+        // UiNode opaque slot — host getters (not a heap record).
+        if matches!(
+            type_name.as_deref().or_else(|| match &record_ty {
+                Type::Named(n) => Some(n.as_str()),
+                _ => None,
+            }),
+            Some("UiNode")
+        ) {
+            return match field.as_str() {
+                "label" => {
+                    Ok(self.call_host(self.host.ui.node_label, &[handle]))
+                }
+                "width" | "height" => {
+                    let which =
+                        self.b
+                            .ins()
+                            .iconst(types::I64, if field == "width" { 0 } else { 1 });
+                    Ok(self.call_host(self.host.ui.node_dim, &[handle, which]))
+                }
+                other => Err(format!("jit field `{other}` on `UiNode`")),
+            };
+        }
+        let type_name = type_name.ok_or_else(|| {
+            format!("jit field recv type: field `{field}` on {record_ty:?}")
+        })?;
+        if type_name == "HTTPShutdownReport" {
+            let field_id = match field.as_str() {
+                "accepted" => 0,
+                "overloaded" => 1,
+                "completed" => 2,
+                "cancelled" => 3,
+                other => {
+                    return Err(format!(
+                        "jit field `{other}` on `HTTPShutdownReport`"
+                    ));
+                }
+            };
+            let field_v = self.b.ins().iconst(types::I64, field_id);
+            let host = self.module.declare_func_in_func(
+                self.host.net_http.http_shutdown_report_field,
+                self.b.func,
+            );
+            let call = self.b.ins().call(host, &[handle, field_v]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        // Prefer TIR field type for ABI. Metadata on generic owners still
+        // has binder params (`Wrap.value: T`); using that picks
+        // `struct_get_i64` for a String slot (stored via `struct_set_str`)
+        // and yields handle 0 — often a stale compile-time string lit.
+        // Fall back to meta only when TIR left Int (CORE structs missing
+        // from `cx.struct_fields`).
+        let field_ty = if matches!(&expr.ty, Type::Int) {
+            self.meta
+                .struct_field_ty(&type_name, field)
+                .or_else(|| core_struct_field_type(&type_name, field))
+                .unwrap_or_else(|| expr.ty.clone())
+        } else {
+            expr.ty.clone()
+        };
+        self.lower_record_field(handle, &type_name, field, &field_ty)
+    }
+    TExprKind::MethodCall {
+        recv,
+        method,
+        type_args,
+        args,
+        ..
+    } => {
+        if method.name == "compare"
+            && args.len() == 1
+            && matches!(&recv.ty, Type::Int)
+        {
+            let left = self.lower_expr(recv)?;
+            let right = self.lower_call_arg(&args[0])?;
+            let equal = self.bool_from_icmp(IntCC::Equal, left, right);
+            let greater =
+                self.bool_from_icmp(IntCC::SignedGreaterThan, left, right);
+            let less_disc = self.b.ins().iconst(types::I64, 0);
+            let equal_disc = self.b.ins().iconst(types::I64, 1);
+            let greater_disc = self.b.ins().iconst(types::I64, 2);
+            let unequal =
+                self.b.ins().select(greater, greater_disc, less_disc);
+            return Ok(self.b.ins().select(equal, equal_disc, unequal));
+        }
+        if matches!(&recv.ty, Type::TraitObject(_)) {
+            return self.lower_trait_object_method(recv, method, args, &expr.ty);
+        }
+        if method.name == "apply"
+            && args.len() == 1
+            && record_type_key(&recv.ty).is_some_and(|base| {
+                self.meta
+                    .struct_layout(&format!("{base}.Patch"))
+                    .is_some()
+            })
+        {
+            return self.lower_patch_apply(recv, &args[0]);
+        }
+        if method.name == "merge"
+            && args.len() == 1
+            && record_type_key(&recv.ty)
+                .is_some_and(|name| name.ends_with(".Patch"))
+        {
+            return self.lower_patch_merge(recv, &args[0]);
+        }
+        // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a clean
+        // absence into a failure. One packed carrier (0 = absent), so
+        // presence/absence reuse the same test `lower_option_enum_match`
+        // uses; the report handle shares the I64 ABI with every `T`
+        // this covers.
+        if method.name == jet_foundation::Syntax::METHOD_OUTCOME_OR_ERR
+            && args.len() == 1
+        {
+            if let Type::Option(inner) = &recv.ty {
+                if self.meta.clif_ty(inner).or_else(|| clif_ty(inner))
+                    == Some(types::I64)
+                    && !matches!(inner.as_ref(), Type::IntN { .. })
+                {
+                    let packed = self.lower_expr(recv)?;
+                    let why = self.lower_call_arg(&args[0])?;
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let why = self.call_host(self.host.err_new, &[why, zero, zero]);
+                    let is_some =
+                        self.b.ins().icmp(IntCC::NotEqual, packed, zero);
+                    let ok_payload = self.unpack_option_payload(packed, inner)?;
+                    let ok_tag = self.b.ins().iconst(types::I8, 1);
+                    let err_tag = self.b.ins().iconst(types::I8, 0);
+                    let tag = self.b.ins().select(is_some, ok_tag, err_tag);
+                    let payload = self.b.ins().select(is_some, ok_payload, why);
+                    return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
+                }
+                return Err(format!("jit or_err payload type unsupported: {inner:?}"));
+            }
+        }
+        let key = self.method_key(&recv.ty, method, type_args)
+            .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
+        let func_id = self
+            .func_ids
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("jit missing method `{key}`"))?;
+        let mut arg_vals = vec![self.lower_expr(recv)?];
+        for a in args {
+            arg_vals.push(self.lower_call_arg(a)?);
+        }
+        let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+        let call = self.b.ins().call(func_ref, &arg_vals);
+        let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+        self.emit_trap_check()?;
+        Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+    }
+    TExprKind::DecodeUnder { segment, inner } => {
+        let result = self.lower_expr(inner)?;
+        let segment = self.lower_expr(segment)?;
+        let host = self.module.declare_func_in_func(
+            self.host.encoding.decode_error_under_segment,
+            self.b.func,
+        );
+        let call = self.b.ins().call(host, &[result, segment]);
+        Ok(self.b.inst_results(call)[0])
+    }
+    TExprKind::StaticCall {
+        owner,
+        owner_type,
+        method,
+        type_args,
+        args,
+        ..
+    } => {
+        if method.name == "diff" && args.len() == 2 {
+            if let TStaticOwner::User(base) = owner {
+                if self
+                    .meta
+                    .struct_layout(&format!("{base}.Patch"))
+                    .is_some()
+                {
+                    return self.lower_patch_diff(base, &args[0], &args[1]);
+                }
+            }
+        }
+        // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque handle.
+        let is_deque_new = method.name == "new"
+            && args.is_empty()
+            && matches!(
+                owner,
+                TStaticOwner::Prelude { path, .. }
+                    if path == "std::collections::VecDeque"
+                        || path.ends_with("::VecDeque")
+                        || path.ends_with(".VecDeque")
+            );
+        if is_deque_new {
+            return Ok(self.call_host(self.host.coll.deque_new, &[]));
+        }
+        // #1478: `Set.new()` → empty HashSet handle.
+        let is_set_new = method.name == "new"
+            && args.is_empty()
+            && matches!(
+                owner,
+                TStaticOwner::Prelude { path, .. }
+                    if path == "std::collections::HashSet"
+                        || path.ends_with("::HashSet")
+                        || path.ends_with(".HashSet")
+            );
+        if is_set_new {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.set_new, self.b.func);
+            let string_kind = matches!(
+                &expr.ty,
+                Type::Apply { name, args }
+                    if name == "Set"
+                        && args.first().is_some_and(|ty| matches!(ty, Type::String))
+            );
+            let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+            let call = self.b.ins().call(host_ref, &[kind]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        let is_bag_new = method.name == "new"
+            && args.is_empty()
+            && matches!(
+                owner,
+                TStaticOwner::Prelude { path, .. }
+                    if path == "std::collections::HashMap"
+                        || path.ends_with("::HashMap")
+                        || path.ends_with(".HashMap")
+            )
+            && matches!(&expr.ty, Type::Apply { name, .. } if name == "Bag");
+        if is_bag_new {
+            return Ok(self.call_host(self.host.coll.bag_new, &[]));
+        }
+        let prelude_path = match owner {
+            TStaticOwner::Prelude { path, .. } => Some(path.as_str()),
+            _ => None,
+        };
+        let is_cell_new = method.name == "new"
+            && args.len() == 1
+            && matches!(
+                prelude_path,
+                Some("jet_std::JetCell" | "jet_std::jet_cell::JetCell")
+            );
+        if is_cell_new {
+            let inner = Self::cell_inner(&expr.ty)
+                .ok_or_else(|| format!("jit Cell.new result type: {:?}", expr.ty))?
+                .clone();
+            let value = self.lower_call_arg(&args[0])?;
+            let raw = self.cell_pack_value(value, &inner)?;
+            let schema = self.cell_schema(&inner)?;
+            let cell = self.call_host(self.host.cell.new, &[raw, schema]);
+            self.emit_trap_check()?;
+            return Ok(cell);
+        }
+        let is_condition_new = method.name == "new"
+            && args.is_empty()
+            && (matches!(
+                prelude_path,
+                Some("jet_std::JetCondition" | "jet_std::jet_condition::JetCondition")
+            ) || matches!(
+                owner,
+                TStaticOwner::Prelude { path, .. }
+                    if path.contains("JetCondition")
+            ));
+        if is_condition_new {
+            let host = self.module.declare_func_in_func(
+                self.host.memory.condition_new,
+                self.b.func,
+            );
+            let call = self.b.ins().call(host, &[]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if method.name == "new" && args.is_empty() {
+            let host_id = match prelude_path {
+                Some(path) if path.ends_with("HashSet") => {
+                    Some(self.host.coll.set_new)
+                }
+                Some(path) if path.ends_with("BTreeSet") => {
+                    Some(self.host.coll.sorted_set_new)
+                }
+                Some(path) if path.ends_with("BinaryHeap") => {
+                    Some(self.host.coll.priority_queue_new)
+                }
+                Some(path) if path.ends_with("JetBitSet") => {
+                    Some(self.host.coll.bit_set_new)
+                }
+                Some(path) if path.ends_with("JetByteBuffer") => {
+                    Some(self.host.coll.byte_buffer_new)
+                }
+                _ => None,
+            };
+            if let Some(host_id) = host_id {
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = if matches!(
+                    prelude_path,
+                    Some(path) if path.ends_with("BTreeSet") || path.ends_with("HashSet")
+                ) {
                     let string_kind = matches!(
                         &expr.ty,
                         Type::Apply { name, args }
-                            if name == "Set"
+                            if (name == "Set"
+                                || name == jet_foundation::Syntax::TYPE_SORTED_SET)
                                 && args.first().is_some_and(|ty| matches!(ty, Type::String))
                     );
                     let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
-                    let call = self.b.ins().call(host_ref, &[kind]);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                let is_bag_new = method.name == "new"
-                    && args.is_empty()
-                    && matches!(
-                        owner,
-                        TStaticOwner::Prelude { path, .. }
-                            if path == "std::collections::HashMap"
-                                || path.ends_with("::HashMap")
-                                || path.ends_with(".HashMap")
-                    )
-                    && matches!(&expr.ty, Type::Apply { name, .. } if name == "Bag");
-                if is_bag_new {
-                    return Ok(self.call_host(self.host.coll.bag_new, &[]));
-                }
-                let prelude_path = match owner {
-                    TStaticOwner::Prelude { path, .. } => Some(path.as_str()),
-                    _ => None,
+                    self.b.ins().call(host_ref, &[kind])
+                } else {
+                    self.b.ins().call(host_ref, &[])
                 };
-                let is_cell_new = method.name == "new"
-                    && args.len() == 1
-                    && matches!(
-                        prelude_path,
-                        Some("jet_std::JetCell" | "jet_std::jet_cell::JetCell")
-                    );
-                if is_cell_new {
-                    let inner = Self::cell_inner(&expr.ty)
-                        .ok_or_else(|| format!("jit Cell.new result type: {:?}", expr.ty))?
-                        .clone();
-                    let value = self.lower_call_arg(&args[0])?;
-                    let raw = self.cell_pack_value(value, &inner)?;
-                    let schema = self.cell_schema(&inner)?;
-                    let cell = self.call_host(self.host.cell.new, &[raw, schema]);
-                    self.emit_trap_check()?;
-                    return Ok(cell);
+                return Ok(self.b.inst_results(call)[0]);
+            }
+        }
+        if method.name == "new"
+            && args.len() == 1
+            && prelude_path.is_some_and(|path| path.ends_with("JetCache"))
+        {
+            let capacity = self.lower_call_arg(&args[0])?;
+            return Ok(self.call_host(self.host.coll.lru_new, &[capacity]));
+        }
+        let is_pool_new = method.name == "new"
+            && args.is_empty()
+            && matches!(
+                owner,
+                TStaticOwner::Prelude { path, .. }
+                    if path.ends_with("JetPool") || path.ends_with("::JetPool")
+            );
+        if is_pool_new {
+            return Ok(self.call_host(self.host.memory.pool_new, &[]));
+        }
+        let is_shared_new = method.name == "new"
+            && args.len() == 1
+            && matches!(
+                owner,
+                TStaticOwner::Prelude { path, .. }
+                    if path.ends_with("JetShared") || path.ends_with("::JetShared")
+            );
+        if is_shared_new {
+            let value = self.lower_call_arg(&args[0])?;
+            return Ok(self.call_host(self.host.memory.shared_new, &[value]));
+        }
+        // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
+        let is_encoding_limits_safe = method.name == "safe"
+            && args.is_empty()
+            && match owner {
+                TStaticOwner::User(name) => name == "EncodingLimits",
+                TStaticOwner::Prelude { path, .. } => {
+                    path == "EncodingLimits"
+                        || path.ends_with("::EncodingLimits")
+                        || path.ends_with(".EncodingLimits")
                 }
-                let is_condition_new = method.name == "new"
-                    && args.is_empty()
-                    && (matches!(
-                        prelude_path,
-                        Some("jet_std::JetCondition" | "jet_std::jet_condition::JetCondition")
-                    ) || matches!(
-                        owner,
-                        TStaticOwner::Prelude { path, .. }
-                            if path.contains("JetCondition")
+            }
+            && owner_type
+                .as_ref()
+                .map(|t| matches!(t, Type::Named(n) if n == "EncodingLimits"))
+                .unwrap_or(true);
+        if is_encoding_limits_safe {
+            // Field order matches jet_std::EncodingLimits / sema core_types.
+            let n = self.b.ins().iconst(types::I64, 6);
+            let handle = self.call_host(self.host.struct_new, &[n]);
+            let set_i = self
+                .module
+                .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+            let fields = [
+                65536i64, // buffer_bytes
+                256,      // max_depth
+                16777216, // max_item_bytes
+                0,        // max_total_bytes = None
+                32,       // max_expansion_depth
+                8388608,  // max_expansion_bytes
+            ];
+            for (i, v) in fields.into_iter().enumerate() {
+                let idx = self.b.ins().iconst(types::I64, i as i64);
+                let val = self.b.ins().iconst(types::I64, v);
+                self.b.ins().call(set_i, &[handle, idx, val]);
+            }
+            return Ok(handle);
+        }
+        if let Some(path) = prelude_path {
+            if let Some(op) = http_nominal_static_op(path, &method.name, args.len()) {
+                if args.len() > 6 {
+                    return Err(format!(
+                        "jit HTTP nominal static `{path}.{}()` has too many arguments",
+                        method.name
                     ));
-                if is_condition_new {
-                    let host = self.module.declare_func_in_func(
-                        self.host.memory.condition_new,
-                        self.b.func,
-                    );
-                    let call = self.b.ins().call(host, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
                 }
-                if method.name == "new" && args.is_empty() {
-                    let host_id = match prelude_path {
-                        Some(path) if path.ends_with("HashSet") => {
-                            Some(self.host.coll.set_new)
-                        }
-                        Some(path) if path.ends_with("BTreeSet") => {
-                            Some(self.host.coll.sorted_set_new)
-                        }
-                        Some(path) if path.ends_with("BinaryHeap") => {
-                            Some(self.host.coll.priority_queue_new)
-                        }
-                        Some(path) if path.ends_with("JetBitSet") => {
-                            Some(self.host.coll.bit_set_new)
-                        }
-                        Some(path) if path.ends_with("JetByteBuffer") => {
-                            Some(self.host.coll.byte_buffer_new)
-                        }
-                        _ => None,
-                    };
-                    if let Some(host_id) = host_id {
-                        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                        let call = if matches!(
-                            prelude_path,
-                            Some(path) if path.ends_with("BTreeSet") || path.ends_with("HashSet")
-                        ) {
-                            let string_kind = matches!(
-                                &expr.ty,
-                                Type::Apply { name, args }
-                                    if (name == "Set"
-                                        || name == jet_foundation::Syntax::TYPE_SORTED_SET)
-                                        && args.first().is_some_and(|ty| matches!(ty, Type::String))
-                            );
-                            let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
-                            self.b.ins().call(host_ref, &[kind])
-                        } else {
-                            self.b.ins().call(host_ref, &[])
-                        };
-                        return Ok(self.b.inst_results(call)[0]);
-                    }
+                let mut arg_vals = Vec::with_capacity(7);
+                arg_vals.push(self.b.ins().iconst(types::I64, op));
+                for arg in args {
+                    arg_vals.push(self.lower_call_arg(arg)?);
                 }
-                if method.name == "new"
-                    && args.len() == 1
-                    && prelude_path.is_some_and(|path| path.ends_with("JetCache"))
-                {
-                    let capacity = self.lower_call_arg(&args[0])?;
-                    return Ok(self.call_host(self.host.coll.lru_new, &[capacity]));
+                while arg_vals.len() < 7 {
+                    arg_vals.push(self.b.ins().iconst(types::I64, 0));
                 }
-                let is_pool_new = method.name == "new"
-                    && args.is_empty()
-                    && matches!(
-                        owner,
-                        TStaticOwner::Prelude { path, .. }
-                            if path.ends_with("JetPool") || path.ends_with("::JetPool")
-                    );
-                if is_pool_new {
-                    return Ok(self.call_host(self.host.memory.pool_new, &[]));
-                }
-                let is_shared_new = method.name == "new"
-                    && args.len() == 1
-                    && matches!(
-                        owner,
-                        TStaticOwner::Prelude { path, .. }
-                            if path.ends_with("JetShared") || path.ends_with("::JetShared")
-                    );
-                if is_shared_new {
-                    let value = self.lower_call_arg(&args[0])?;
-                    return Ok(self.call_host(self.host.memory.shared_new, &[value]));
-                }
-                // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
-                let is_encoding_limits_safe = method.name == "safe"
-                    && args.is_empty()
-                    && match owner {
-                        TStaticOwner::User(name) => name == "EncodingLimits",
-                        TStaticOwner::Prelude { path, .. } => {
-                            path == "EncodingLimits"
-                                || path.ends_with("::EncodingLimits")
-                                || path.ends_with(".EncodingLimits")
-                        }
-                    }
-                    && owner_type
-                        .as_ref()
-                        .map(|t| matches!(t, Type::Named(n) if n == "EncodingLimits"))
-                        .unwrap_or(true);
-                if is_encoding_limits_safe {
-                    // Field order matches jet_std::EncodingLimits / sema core_types.
-                    let n = self.b.ins().iconst(types::I64, 6);
-                    let handle = self.call_host(self.host.struct_new, &[n]);
-                    let set_i = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                    let fields = [
-                        65536i64, // buffer_bytes
-                        256,      // max_depth
-                        16777216, // max_item_bytes
-                        0,        // max_total_bytes = None
-                        32,       // max_expansion_depth
-                        8388608,  // max_expansion_bytes
-                    ];
-                    for (i, v) in fields.into_iter().enumerate() {
-                        let idx = self.b.ins().iconst(types::I64, i as i64);
-                        let val = self.b.ins().iconst(types::I64, v);
-                        self.b.ins().call(set_i, &[handle, idx, val]);
-                    }
-                    return Ok(handle);
-                }
-                if let Some(path) = prelude_path {
-                    if let Some(op) = http_nominal_static_op(path, &method.name, args.len()) {
-                        if args.len() > 6 {
-                            return Err(format!(
-                                "jit HTTP nominal static `{path}.{}()` has too many arguments",
-                                method.name
-                            ));
-                        }
-                        let mut arg_vals = Vec::with_capacity(7);
-                        arg_vals.push(self.b.ins().iconst(types::I64, op));
-                        for arg in args {
-                            arg_vals.push(self.lower_call_arg(arg)?);
-                        }
-                        while arg_vals.len() < 7 {
-                            arg_vals.push(self.b.ins().iconst(types::I64, 0));
-                        }
-                        return Ok(self.call_host(
-                            self.host.net_http.http_nominal_static,
-                            &arg_vals,
-                        ));
-                    }
-                }
-                // D-EMAIL1: `email.Limits.safe()` — fixed defaults, no host.
-                let is_email_limits_safe = method.name == "safe"
-                    && args.is_empty()
-                    && match owner {
-                        TStaticOwner::User(name) => name == "Limits",
-                        TStaticOwner::Prelude { path, .. } => {
-                            path == "Limits"
-                                || path.ends_with("::Limits")
-                                || path.ends_with(".Limits")
-                                || path.contains("jet_email::Limits")
-                        }
-                    }
-                    && owner_type
-                        .as_ref()
-                        .map(|t| matches!(t, Type::Named(n) if n == "Limits"))
-                        .unwrap_or(true);
-                if is_email_limits_safe {
-                    let n = self.b.ins().iconst(types::I64, 6);
-                    let handle = self.call_host(self.host.struct_new, &[n]);
-                    let set_i = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                    let fields = [
-                        512i64,      // max_reply_line_bytes
-                        100,         // max_reply_lines
-                        100,         // max_capabilities
-                        100,         // max_recipients
-                        33_554_432,  // max_message_bytes
-                        4096,        // max_auth_challenge_bytes
-                    ];
-                    for (i, v) in fields.into_iter().enumerate() {
-                        let idx = self.b.ins().iconst(types::I64, i as i64);
-                        let val = self.b.ins().iconst(types::I64, v);
-                        self.b.ins().call(set_i, &[handle, idx, val]);
-                    }
-                    return Ok(handle);
-                }
-                // D-DATAFLOW1: `DataLimits.safe()` — nested EncodingLimits + max_* defaults.
-                let is_data_limits_safe = method.name == "safe"
-                    && args.is_empty()
-                    && match owner {
-                        TStaticOwner::User(name) => name == "DataLimits",
-                        TStaticOwner::Prelude { path, .. } => {
-                            path == "DataLimits"
-                                || path.ends_with("::DataLimits")
-                                || path.ends_with(".DataLimits")
-                        }
-                    }
-                    && owner_type
-                        .as_ref()
-                        .map(|t| matches!(t, Type::Named(n) if n == "DataLimits"))
-                        .unwrap_or(true);
-                if is_data_limits_safe {
-                    let n = self.b.ins().iconst(types::I64, 5);
-                    let handle = self.call_host(self.host.struct_new, &[n]);
-                    // encoding: EncodingLimits.safe() as nested struct handle
-                    let enc_n = self.b.ins().iconst(types::I64, 6);
-                    let enc = self.call_host(self.host.struct_new, &[enc_n]);
-                    let set_i = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                    let enc_fields = [
-                        65536i64, 256, 16777216, 0, 32, 8388608,
-                    ];
-                    for (i, v) in enc_fields.into_iter().enumerate() {
-                        let idx = self.b.ins().iconst(types::I64, i as i64);
-                        let val = self.b.ins().iconst(types::I64, v);
-                        self.b.ins().call(set_i, &[enc, idx, val]);
-                    }
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    self.b.ins().call(set_i, &[handle, zero, enc]);
-                    let data_fields = [100_000i64, 1_000_000, 1_000_000, 1_000_000];
-                    for (i, v) in data_fields.into_iter().enumerate() {
-                        let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
-                        let val = self.b.ins().iconst(types::I64, v);
-                        self.b.ins().call(set_i, &[handle, idx, val]);
-                    }
-                    return Ok(handle);
-                }
-                let key = Self::static_method_key(owner, owner_type.as_ref(), method, type_args)
-                    .ok_or_else(|| format!("jit static `{}::{}`", match owner {
-                        TStaticOwner::User(name) => name.as_str(),
-                        TStaticOwner::Prelude { path, .. } => path.as_str(),
-                    }, method.name))?;
-                let func_id = self
-                    .func_ids
-                    .get(&key)
-                    .copied()
-                    .ok_or_else(|| format!("jit missing static `{key}`"))?;
-                let arg_vals: Result<Vec<_>, _> =
-                    args.iter().map(|a| self.lower_call_arg(a)).collect();
-                let arg_vals = arg_vals?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &arg_vals);
-                let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                self.emit_trap_check()?;
-                Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+                return Ok(self.call_host(
+                    self.host.net_http.http_nominal_static,
+                    &arg_vals,
+                ));
             }
-            TExprKind::EnumLit {
-                enum_type,
-                variant,
-                payload,
-            } => {
-                let is_datatree =
-                    matches!(enum_type.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV");
-                match payload {
-                TEnumPayload::Unit => {
-                    let disc = self
-                        .meta
-                        .enum_variant_index(enum_type, variant)
-                        .or_else(|| match (enum_type.as_str(), variant.as_str()) {
-                            // Core enum — not always in program.enum_variants.
-                            ("ProcessStreamMode", "Stream") => Some(0),
-                            ("ProcessStreamMode", "Inherit") => Some(1),
-                            ("ProcessStreamMode", "Capture") => Some(2),
-                            ("TerminalMode", "Raw") => Some(0),
-                            ("TerminalMode", "Cooked") => Some(1),
-                            ("TextWidthAmbiguous", "Narrow") => Some(0),
-                            ("TextWidthAmbiguous", "Wide") => Some(1),
-                            ("TextWidthControls", "Zero") => Some(0),
-                            ("TextWidthControls", "Reject") => Some(1),
-                            ("SMTPSecurity", "StartTls") => Some(0),
-                            ("SMTPSecurity", "TLS") => Some(1),
-                            ("RecipientPolicy", "RequireAll") => Some(0),
-                            ("RecipientPolicy", "DeliverAccepted") => Some(1),
-                            ("TLSTrust", "System") => Some(0),
-                            ("Overflow", "Block") => Some(0),
-                            ("Overflow", "DropNewest") => Some(1),
-                            ("Overflow", "DropOldest") => Some(2),
-                            ("FailurePolicy", "StopFirst") => Some(0),
-                            ("FailurePolicy", "Collect") => Some(1),
-                            ("FailurePolicy", "Log") => Some(2),
-                            ("FailurePolicy", "Ignore") => Some(3),
-                            ("EventResult", "Handled") => Some(0),
-                            ("EventResult", "Ignored") => Some(1),
-                            ("HookOutcome", "Continue") => Some(0),
-                            ("HookOutcome", "Cancel") => Some(1),
-                            ("HookOutcome", "Fail") => Some(2),
-                            ("HookDecision", "Continue") => Some(0),
-                            ("HookDecision", "Transform") => Some(1),
-                            ("HookDecision", "Cancel") => Some(2),
-                            ("HookDecision", "Fail") => Some(3),
-                            ("DispatchState", "Delivered") => Some(0),
-                            ("DispatchState", "HandlerFailed") => Some(1),
-                            ("DispatchState", "DroppedNewest") => Some(2),
-                            ("DispatchState", "DroppedOldest") => Some(3),
-                            ("DispatchState", "Closed") => Some(4),
-                            ("DispatchState", "Cancelled") => Some(5),
-                            ("DispatchState", "DeadlineExceeded") => Some(6),
-                            ("HookPolicy", "FirstCancelElseTransform") => Some(0),
-                            _ => None,
-                        })
-                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
-                    if is_datatree {
-                        self.pack_datatree_enum(disc, None)
-                    } else {
-                        Ok(self.b.ins().iconst(types::I64, disc))
-                    }
-                }
-                TEnumPayload::Positional(values) if values.len() == 1 => {
-                    let disc = self
-                        .meta
-                        .enum_variant_index(enum_type, variant)
-                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
-                    let payload_ty = values[0].value.ty.clone();
-                    let payload = self.lower_expr(&values[0].value)?;
-                    if is_datatree {
-                        self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
-                    } else {
-                        self.pack_enum_scalar(disc, payload, &payload_ty)
-                    }
-                }
-                TEnumPayload::Positional(_) => Err("jit enum positional payload unsupported".to_string()),
-                TEnumPayload::Named(fields) => {
-                    let disc = self
-                        .meta
-                        .enum_variant_index(enum_type, variant)
-                        .or_else(|| match (enum_type.as_str(), variant.as_str()) {
-                            ("SMTPAuth", "Password") => Some(1),
-                            ("SMTPAuth", "None") => Some(0),
-                            ("TLSTrust", "SystemPlusCa") => Some(1),
-                            _ => None,
-                        })
-                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
-                    // Heap carrier: [disc, field0, field1, …] in source field order.
-                    let n = self.b.ins().iconst(types::I64, (fields.len() + 1) as i64);
-                    let handle = self.call_host(self.host.struct_new, &[n]);
-                    let set_i = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                    let set_f = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_f64, self.b.func);
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    let disc_v = self.b.ins().iconst(types::I64, disc);
-                    self.b.ins().call(set_i, &[handle, zero, disc_v]);
-                    for (i, (_name, arg)) in fields.iter().enumerate() {
-                        let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
-                        let payload = self.lower_expr(&arg.value)?;
-                        let abi_ty = self.erase_distinct_ty(&arg.value.ty);
-                        // Float-family values cross the heap carrier as F64.
-                        if matches!(&abi_ty, Type::Float | Type::Float32) {
-                            self.b.ins().call(set_f, &[handle, idx, payload]);
-                            continue;
-                        }
-                        let ty = self
-                            .meta
-                            .clif_ty(&abi_ty)
-                            .or_else(|| clif_ty(&abi_ty))
-                            .ok_or_else(|| {
-                                format!(
-                                    "jit enum named payload field unsupported: {:?}",
-                                    arg.value.ty
-                                )
-                            })?;
-                        let bits = match ty {
-                            ty if ty == types::I64 => payload,
-                            ty if ty == types::I8 => {
-                                self.b.ins().uextend(types::I64, payload)
-                            }
-                            ty if ty == types::I32 => {
-                                self.b.ins().sextend(types::I64, payload)
-                            }
-                            _ => {
-                                return Err(format!(
-                                    "jit enum named payload field unsupported: {:?}",
-                                    arg.value.ty
-                                ))
-                            }
-                        };
-                        self.b.ins().call(set_i, &[handle, idx, bits]);
-                    }
-                    Ok(handle)
+        }
+        // D-EMAIL1: `email.Limits.safe()` — fixed defaults, no host.
+        let is_email_limits_safe = method.name == "safe"
+            && args.is_empty()
+            && match owner {
+                TStaticOwner::User(name) => name == "Limits",
+                TStaticOwner::Prelude { path, .. } => {
+                    path == "Limits"
+                        || path.ends_with("::Limits")
+                        || path.ends_with(".Limits")
+                        || path.contains("jet_email::Limits")
                 }
             }
+            && owner_type
+                .as_ref()
+                .map(|t| matches!(t, Type::Named(n) if n == "Limits"))
+                .unwrap_or(true);
+        if is_email_limits_safe {
+            let n = self.b.ins().iconst(types::I64, 6);
+            let handle = self.call_host(self.host.struct_new, &[n]);
+            let set_i = self
+                .module
+                .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+            let fields = [
+                512i64,      // max_reply_line_bytes
+                100,         // max_reply_lines
+                100,         // max_capabilities
+                100,         // max_recipients
+                33_554_432,  // max_message_bytes
+                4096,        // max_auth_challenge_bytes
+            ];
+            for (i, v) in fields.into_iter().enumerate() {
+                let idx = self.b.ins().iconst(types::I64, i as i64);
+                let val = self.b.ins().iconst(types::I64, v);
+                self.b.ins().call(set_i, &[handle, idx, val]);
             }
-            TExprKind::Present(inner) => {
-                let v = self.lower_expr(inner)?;
-                self.pack_option_payload(v, &inner.ty)
-            }
-            TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::CtLit(value) => self.lower_ct_value(value),
-            TExprKind::Uninit => {
-                // D-UNINIT1 / GC promote: placeholder overwritten before read.
-                if let Type::FixedList { len, .. } = &expr.ty {
-                    let uninit_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_uninit, self.b.func);
-                    let len = i64::try_from(*len)
-                        .map_err(|_| "jit fixed-list length exceeds i64".to_string())?;
-                    let len = self.b.ins().iconst(types::I64, len);
-                    let call = self.b.ins().call(uninit_ref, &[len]);
-                    Ok(self.b.inst_results(call)[0])
-                } else {
-                    match self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)) {
-                        Some(ty) if ty == types::F64 => Ok(self.b.ins().f64const(0.0)),
-                        Some(ty) => Ok(self.b.ins().iconst(ty, 0)),
-                        None => Err(format!("jit uninit type unsupported: {:?}", expr.ty)),
-                    }
+            return Ok(handle);
+        }
+        // D-DATAFLOW1: `DataLimits.safe()` — nested EncodingLimits + max_* defaults.
+        let is_data_limits_safe = method.name == "safe"
+            && args.is_empty()
+            && match owner {
+                TStaticOwner::User(name) => name == "DataLimits",
+                TStaticOwner::Prelude { path, .. } => {
+                    path == "DataLimits"
+                        || path.ends_with("::DataLimits")
+                        || path.ends_with(".DataLimits")
                 }
             }
-            TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
-            TExprKind::SharedGuardValue { guard, .. } => {
-                let g = self.lower_expr(guard)?;
-                let host = self.module.declare_func_in_func(
-                    self.host.memory.shared_guard_value,
-                    self.b.func,
-                );
-                let call = self.b.ins().call(host, &[g]);
-                Ok(self.b.inst_results(call)[0])
+            && owner_type
+                .as_ref()
+                .map(|t| matches!(t, Type::Named(n) if n == "DataLimits"))
+                .unwrap_or(true);
+        if is_data_limits_safe {
+            let n = self.b.ins().iconst(types::I64, 5);
+            let handle = self.call_host(self.host.struct_new, &[n]);
+            // encoding: EncodingLimits.safe() as nested struct handle
+            let enc_n = self.b.ins().iconst(types::I64, 6);
+            let enc = self.call_host(self.host.struct_new, &[enc_n]);
+            let set_i = self
+                .module
+                .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+            let enc_fields = [
+                65536i64, 256, 16777216, 0, 32, 8388608,
+            ];
+            for (i, v) in enc_fields.into_iter().enumerate() {
+                let idx = self.b.ins().iconst(types::I64, i as i64);
+                let val = self.b.ins().iconst(types::I64, v);
+                self.b.ins().call(set_i, &[enc, idx, val]);
             }
-            TExprKind::SharedGuardMap { guard, .. } => {
-                // Projection path is compile-time; JIT keeps the same lease handle.
-                self.lower_expr(guard)
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().call(set_i, &[handle, zero, enc]);
+            let data_fields = [100_000i64, 1_000_000, 1_000_000, 1_000_000];
+            for (i, v) in data_fields.into_iter().enumerate() {
+                let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
+                let val = self.b.ins().iconst(types::I64, v);
+                self.b.ins().call(set_i, &[handle, idx, val]);
             }
-            TExprKind::SharedGuardSplit { guard, .. } => {
-                let g = self.lower_expr(guard)?;
-                // Two aliases of the same lease — match eval's split shape lightly.
-                let n = self.b.ins().iconst(types::I64, 2);
-                let tuple = self.call_host(self.host.struct_new, &[n]);
-                let set = self
-                    .module
-                    .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                let z = self.b.ins().iconst(types::I64, 0);
-                let one = self.b.ins().iconst(types::I64, 1);
-                self.b.ins().call(set, &[tuple, z, g]);
-                self.b.ins().call(set, &[tuple, one, g]);
-                Ok(tuple)
-            }
-            TExprKind::SharedGuardWait {
-                guard,
-                condition,
-                predicate,
-            } => {
-                let g = self.lower_expr(guard)?;
-                let cond = self.lower_expr(condition)?;
-                let header = self.b.create_block();
-                let body = self.b.create_block();
-                let done = self.b.create_block();
-                self.b.ins().jump(header, &[]);
-                self.b.switch_to_block(header);
-                // Seal after body re-enters (wait loop).
-                let value_host = self.module.declare_func_in_func(
-                    self.host.memory.shared_guard_value,
-                    self.b.func,
-                );
-                let vcall = self.b.ins().call(value_host, &[g]);
-                let payload = self.b.inst_results(vcall)[0];
-                let (ready, _) = self.lower_inline_lambda(predicate, payload)?;
-                let ready_i8 = if self.b.func.dfg.value_type(ready) == types::I8 {
-                    ready
-                } else {
-                    self.b.ins().ireduce(types::I8, ready)
-                };
-                self.b.ins().brif(ready_i8, done, &[], body, &[]);
-                self.b.switch_to_block(body);
-                self.b.seal_block(body);
-                let wait = self.module.declare_func_in_func(
-                    self.host.memory.shared_guard_wait_once,
-                    self.b.func,
-                );
-                self.b.ins().call(wait, &[g, cond]);
-                self.b.ins().jump(header, &[]);
-                self.b.seal_block(header);
-                self.b.switch_to_block(done);
-                self.b.seal_block(done);
-                // Result<(), String> Ok — empty ok payload.
-                let tag = self.b.ins().iconst(types::I8, 1);
-                let zero = self.b.ins().iconst(types::I64, 0);
-                Ok(self.call_host(self.host.result_new_i64, &[tag, zero]))
-            }
-            TExprKind::ConditionNotify { condition, all } => {
-                let c = self.lower_expr(condition)?;
-                let host_id = if *all {
-                    self.host.memory.condition_notify_all
-                } else {
-                    self.host.memory.condition_notify_one
-                };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                self.b.ins().call(host, &[c]);
-                Ok(self.b.ins().iconst(types::I8, 0))
-            }
-            TExprKind::DefaultLit => Err("jit default literal unsupported".to_string()),
-            TExprKind::ConstRef(name) => {
-                let value = self
-                    .meta
-                    .constant(name)
-                    .cloned()
-                    .or_else(|| {
-                        self.meta
-                            .int_constant(name)
-                            .map(jet_foundation::AST::CtValue::Int)
-                    })
-                    .ok_or_else(|| format!("jit const ref unknown: {name}"))?;
-                self.lower_ct_value(&value)
-            }
-            TExprKind::DataEntriesToMap(local) => {
-                let payload = self.load_local(local)?;
-                let map = self.call_host(self.host.encoding.object_entries_to_map, &[payload]);
-                self.emit_trap_check()?;
-                Ok(map)
-            }
-            TExprKind::PoolSlot {
-                pool,
-                id,
-                field,
-                ..
-            } => {
-                let elem_ty = match &pool.ty {
-                    Type::Apply { args, .. } if !args.is_empty() => Some(args[0].clone()),
+            return Ok(handle);
+        }
+        let key = Self::static_method_key(owner, owner_type.as_ref(), method, type_args)
+            .ok_or_else(|| format!("jit static `{}::{}`", match owner {
+                TStaticOwner::User(name) => name.as_str(),
+                TStaticOwner::Prelude { path, .. } => path.as_str(),
+            }, method.name))?;
+        let func_id = self
+            .func_ids
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("jit missing static `{key}`"))?;
+        let arg_vals: Result<Vec<_>, _> =
+            args.iter().map(|a| self.lower_call_arg(a)).collect();
+        let arg_vals = arg_vals?;
+        let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+        let call = self.b.ins().call(func_ref, &arg_vals);
+        let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+        self.emit_trap_check()?;
+        Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+    }
+    TExprKind::EnumLit {
+        enum_type,
+        variant,
+        payload,
+    } => {
+        let is_datatree =
+            matches!(enum_type.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV");
+        match payload {
+        TEnumPayload::Unit => {
+            let disc = self
+                .meta
+                .enum_variant_index(enum_type, variant)
+                .or_else(|| match (enum_type.as_str(), variant.as_str()) {
+                    // Core enum — not always in program.enum_variants.
+                    ("ProcessStreamMode", "Stream") => Some(0),
+                    ("ProcessStreamMode", "Inherit") => Some(1),
+                    ("ProcessStreamMode", "Capture") => Some(2),
+                    ("TerminalMode", "Raw") => Some(0),
+                    ("TerminalMode", "Cooked") => Some(1),
+                    ("TextWidthAmbiguous", "Narrow") => Some(0),
+                    ("TextWidthAmbiguous", "Wide") => Some(1),
+                    ("TextWidthControls", "Zero") => Some(0),
+                    ("TextWidthControls", "Reject") => Some(1),
+                    ("SMTPSecurity", "StartTls") => Some(0),
+                    ("SMTPSecurity", "TLS") => Some(1),
+                    ("RecipientPolicy", "RequireAll") => Some(0),
+                    ("RecipientPolicy", "DeliverAccepted") => Some(1),
+                    ("TLSTrust", "System") => Some(0),
+                    ("Overflow", "Block") => Some(0),
+                    ("Overflow", "DropNewest") => Some(1),
+                    ("Overflow", "DropOldest") => Some(2),
+                    ("FailurePolicy", "StopFirst") => Some(0),
+                    ("FailurePolicy", "Collect") => Some(1),
+                    ("FailurePolicy", "Log") => Some(2),
+                    ("FailurePolicy", "Ignore") => Some(3),
+                    ("EventResult", "Handled") => Some(0),
+                    ("EventResult", "Ignored") => Some(1),
+                    ("HookOutcome", "Continue") => Some(0),
+                    ("HookOutcome", "Cancel") => Some(1),
+                    ("HookOutcome", "Fail") => Some(2),
+                    ("HookDecision", "Continue") => Some(0),
+                    ("HookDecision", "Transform") => Some(1),
+                    ("HookDecision", "Cancel") => Some(2),
+                    ("HookDecision", "Fail") => Some(3),
+                    ("DispatchState", "Delivered") => Some(0),
+                    ("DispatchState", "HandlerFailed") => Some(1),
+                    ("DispatchState", "DroppedNewest") => Some(2),
+                    ("DispatchState", "DroppedOldest") => Some(3),
+                    ("DispatchState", "Closed") => Some(4),
+                    ("DispatchState", "Cancelled") => Some(5),
+                    ("DispatchState", "DeadlineExceeded") => Some(6),
+                    ("HookPolicy", "FirstCancelElseTransform") => Some(0),
                     _ => None,
-                };
-                let pool = self.lower_expr(pool)?;
-                let id = self.lower_expr(id)?;
-                let value = self.call_host(self.host.memory.pool_get, &[pool, id]);
-                self.emit_trap_check()?;
-                if let Some(field) = field {
-                    let elem_ty =
-                        elem_ty.ok_or_else(|| "jit Pool field element type".to_string())?;
-                    let type_name =
-                        record_type_key(&elem_ty).ok_or("jit Pool field record type")?;
-                    let field_ty = self
-                        .meta
-                        .struct_field_ty(&type_name, field)
-                        .unwrap_or_else(|| expr.ty.clone());
-                    self.lower_record_field(value, &type_name, field, &field_ty)
-                } else {
-                    Ok(value)
+                })
+                .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
+            if is_datatree {
+                self.pack_datatree_enum(disc, None)
+            } else {
+                Ok(self.b.ins().iconst(types::I64, disc))
+            }
+        }
+        TEnumPayload::Positional(values) if values.len() == 1 => {
+            let disc = self
+                .meta
+                .enum_variant_index(enum_type, variant)
+                .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
+            let payload_ty = values[0].value.ty.clone();
+            let payload = self.lower_expr(&values[0].value)?;
+            if is_datatree {
+                self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
+            } else {
+                self.pack_enum_scalar(disc, payload, &payload_ty)
+            }
+        }
+        TEnumPayload::Positional(_) => Err("jit enum positional payload unsupported".to_string()),
+        TEnumPayload::Named(fields) => {
+            let disc = self
+                .meta
+                .enum_variant_index(enum_type, variant)
+                .or_else(|| match (enum_type.as_str(), variant.as_str()) {
+                    ("SMTPAuth", "Password") => Some(1),
+                    ("SMTPAuth", "None") => Some(0),
+                    ("TLSTrust", "SystemPlusCa") => Some(1),
+                    _ => None,
+                })
+                .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
+            // Heap carrier: [disc, field0, field1, …] in source field order.
+            let n = self.b.ins().iconst(types::I64, (fields.len() + 1) as i64);
+            let handle = self.call_host(self.host.struct_new, &[n]);
+            let set_i = self
+                .module
+                .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+            let set_f = self
+                .module
+                .declare_func_in_func(self.host.struct_set_f64, self.b.func);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            let disc_v = self.b.ins().iconst(types::I64, disc);
+            self.b.ins().call(set_i, &[handle, zero, disc_v]);
+            for (i, (_name, arg)) in fields.iter().enumerate() {
+                let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
+                let payload = self.lower_expr(&arg.value)?;
+                let abi_ty = self.erase_distinct_ty(&arg.value.ty);
+                // Float-family values cross the heap carrier as F64.
+                if matches!(&abi_ty, Type::Float | Type::Float32) {
+                    self.b.ins().call(set_f, &[handle, idx, payload]);
+                    continue;
                 }
-            }
-            TExprKind::RangeCheckedCtor { .. } => {
-                Err("jit range-checked ctor unsupported".to_string())
-            }
-            TExprKind::DistinctCtor { arg, .. } => self.lower_expr(arg),
-            TExprKind::MathBuiltin {
-                type_name,
-                func,
-                args,
-            } => self.lower_math_dispatch(type_name, func, None, args, &expr.ty),
-            // D-BIGINT1 / D-DECIMAL1: precise numeric ctor/binop.
-            TExprKind::PreciseBuiltin {
-                type_name,
-                func,
-                args,
-            } if type_name == "BigInt" || type_name == "Decimal" || type_name == "Fraction" => {
-                let host_fn = match (type_name.as_str(), func.as_str()) {
-                    ("BigInt", "from_int") => self.host.num.bigint_from_int,
-                    ("BigInt", "from_str") => self.host.num.bigint_from_str,
-                    ("BigInt", "add") => self.host.num.bigint_add,
-                    ("BigInt", "sub") => self.host.num.bigint_sub,
-                    ("BigInt", "mul") => self.host.num.bigint_mul,
-                    ("BigInt", "to_string") => self.host.num.bigint_to_string,
-                    ("Decimal", "from_str") => self.host.num.decimal_from_str,
-                    ("Decimal", "add") => self.host.num.decimal_add,
-                    ("Decimal", "sub") => self.host.num.decimal_sub,
-                    ("Decimal", "mul") => self.host.num.decimal_mul,
-                    ("Decimal", "to_string") => self.host.num.decimal_to_string,
-                    ("Fraction", "add") => self.host.num.fraction_add,
-                    ("Fraction", "sub") => self.host.num.fraction_sub,
-                    ("Fraction", "mul") => self.host.num.fraction_mul,
-                    ("Fraction", "div") => self.host.num.fraction_div,
-                    ("Fraction", "equal") => self.host.num.fraction_equal,
-                    ("Fraction", "numerator") => self.host.num.fraction_numerator,
-                    ("Fraction", "denominator") => self.host.num.fraction_denominator,
-                    ("Fraction", "to_string") => self.host.num.fraction_to_string,
-                    ("Fraction", "to_float") => self.host.num.fraction_to_float,
-                    ("Fraction", "is_zero") => self.host.num.fraction_is_zero,
+                let ty = self
+                    .meta
+                    .clif_ty(&abi_ty)
+                    .or_else(|| clif_ty(&abi_ty))
+                    .ok_or_else(|| {
+                        format!(
+                            "jit enum named payload field unsupported: {:?}",
+                            arg.value.ty
+                        )
+                    })?;
+                let bits = match ty {
+                    ty if ty == types::I64 => payload,
+                    ty if ty == types::I8 => {
+                        self.b.ins().uextend(types::I64, payload)
+                    }
+                    ty if ty == types::I32 => {
+                        self.b.ins().sextend(types::I64, payload)
+                    }
                     _ => {
                         return Err(format!(
-                            "jit precise numeric builtin unsupported: {type_name}.{func}"
+                            "jit enum named payload field unsupported: {:?}",
+                            arg.value.ty
                         ))
                     }
                 };
-                let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
-                let arg_vals = arg_vals?;
-                let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
-                let call = self.b.ins().call(host_ref, &arg_vals);
-                let result = self.b.inst_results(call)[0];
-                if func == "from_str" || matches!(func.as_str(), "add" | "sub" | "mul" | "div")
-                    && type_name == "Fraction"
-                {
-                    self.emit_trap_check()?;
+                self.b.ins().call(set_i, &[handle, idx, bits]);
+            }
+            Ok(handle)
+        }
+    }
+    }
+    TExprKind::Present(inner) => {
+        let v = self.lower_expr(inner)?;
+        self.pack_option_payload(v, &inner.ty)
+    }
+    TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
+    TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
+    TExprKind::CtLit(value) => self.lower_ct_value(value),
+    TExprKind::Uninit => {
+        // D-UNINIT1 / GC promote: placeholder overwritten before read.
+        if let Type::FixedList { len, .. } = &expr.ty {
+            let uninit_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_uninit, self.b.func);
+            let len = i64::try_from(*len)
+                .map_err(|_| "jit fixed-list length exceeds i64".to_string())?;
+            let len = self.b.ins().iconst(types::I64, len);
+            let call = self.b.ins().call(uninit_ref, &[len]);
+            Ok(self.b.inst_results(call)[0])
+        } else {
+            match self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)) {
+                Some(ty) if ty == types::F64 => Ok(self.b.ins().f64const(0.0)),
+                Some(ty) => Ok(self.b.ins().iconst(ty, 0)),
+                None => Err(format!("jit uninit type unsupported: {:?}", expr.ty)),
+            }
+        }
+    }
+    TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
+    TExprKind::SharedGuardValue { guard, .. } => {
+        let g = self.lower_expr(guard)?;
+        let host = self.module.declare_func_in_func(
+            self.host.memory.shared_guard_value,
+            self.b.func,
+        );
+        let call = self.b.ins().call(host, &[g]);
+        Ok(self.b.inst_results(call)[0])
+    }
+    TExprKind::SharedGuardMap { guard, .. } => {
+        // Projection path is compile-time; JIT keeps the same lease handle.
+        self.lower_expr(guard)
+    }
+    TExprKind::SharedGuardSplit { guard, .. } => {
+        let g = self.lower_expr(guard)?;
+        // Two aliases of the same lease — match eval's split shape lightly.
+        let n = self.b.ins().iconst(types::I64, 2);
+        let tuple = self.call_host(self.host.struct_new, &[n]);
+        let set = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let z = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        self.b.ins().call(set, &[tuple, z, g]);
+        self.b.ins().call(set, &[tuple, one, g]);
+        Ok(tuple)
+    }
+    TExprKind::SharedGuardWait {
+        guard,
+        condition,
+        predicate,
+    } => {
+        let g = self.lower_expr(guard)?;
+        let cond = self.lower_expr(condition)?;
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.ins().jump(header, &[]);
+        self.b.switch_to_block(header);
+        // Seal after body re-enters (wait loop).
+        let value_host = self.module.declare_func_in_func(
+            self.host.memory.shared_guard_value,
+            self.b.func,
+        );
+        let vcall = self.b.ins().call(value_host, &[g]);
+        let payload = self.b.inst_results(vcall)[0];
+        let (ready, _) = self.lower_inline_lambda(predicate, payload)?;
+        let ready_i8 = if self.b.func.dfg.value_type(ready) == types::I8 {
+            ready
+        } else {
+            self.b.ins().ireduce(types::I8, ready)
+        };
+        self.b.ins().brif(ready_i8, done, &[], body, &[]);
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let wait = self.module.declare_func_in_func(
+            self.host.memory.shared_guard_wait_once,
+            self.b.func,
+        );
+        self.b.ins().call(wait, &[g, cond]);
+        self.b.ins().jump(header, &[]);
+        self.b.seal_block(header);
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        // Result<(), String> Ok — empty ok payload.
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        Ok(self.call_host(self.host.result_new_i64, &[tag, zero]))
+    }
+    TExprKind::ConditionNotify { condition, all } => {
+        let c = self.lower_expr(condition)?;
+        let host_id = if *all {
+            self.host.memory.condition_notify_all
+        } else {
+            self.host.memory.condition_notify_one
+        };
+        let host = self.module.declare_func_in_func(host_id, self.b.func);
+        self.b.ins().call(host, &[c]);
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+    TExprKind::DefaultLit => Err("jit default literal unsupported".to_string()),
+    TExprKind::ConstRef(name) => {
+        let value = self
+            .meta
+            .constant(name)
+            .cloned()
+            .or_else(|| {
+                self.meta
+                    .int_constant(name)
+                    .map(jet_foundation::AST::CtValue::Int)
+            })
+            .ok_or_else(|| format!("jit const ref unknown: {name}"))?;
+        self.lower_ct_value(&value)
+    }
+    TExprKind::DataEntriesToMap(local) => {
+        let payload = self.load_local(local)?;
+        let map = self.call_host(self.host.encoding.object_entries_to_map, &[payload]);
+        self.emit_trap_check()?;
+        Ok(map)
+    }
+    TExprKind::PoolSlot {
+        pool,
+        id,
+        field,
+        ..
+    } => {
+        let elem_ty = match &pool.ty {
+            Type::Apply { args, .. } if !args.is_empty() => Some(args[0].clone()),
+            _ => None,
+        };
+        let pool = self.lower_expr(pool)?;
+        let id = self.lower_expr(id)?;
+        let value = self.call_host(self.host.memory.pool_get, &[pool, id]);
+        self.emit_trap_check()?;
+        if let Some(field) = field {
+            let elem_ty =
+                elem_ty.ok_or_else(|| "jit Pool field element type".to_string())?;
+            let type_name =
+                record_type_key(&elem_ty).ok_or("jit Pool field record type")?;
+            let field_ty = self
+                .meta
+                .struct_field_ty(&type_name, field)
+                .unwrap_or_else(|| expr.ty.clone());
+            self.lower_record_field(value, &type_name, field, &field_ty)
+        } else {
+            Ok(value)
+        }
+    }
+    TExprKind::RangeCheckedCtor { .. } => {
+        Err("jit range-checked ctor unsupported".to_string())
+    }
+    TExprKind::DistinctCtor { arg, .. } => self.lower_expr(arg),
+    TExprKind::MathBuiltin {
+        type_name,
+        func,
+        args,
+    } => self.lower_math_dispatch(type_name, func, None, args, &expr.ty),
+    // D-BIGINT1 / D-DECIMAL1: precise numeric ctor/binop.
+    TExprKind::PreciseBuiltin {
+        type_name,
+        func,
+        args,
+    } if type_name == "BigInt" || type_name == "Decimal" || type_name == "Fraction" => {
+        let host_fn = match (type_name.as_str(), func.as_str()) {
+            ("BigInt", "from_int") => self.host.num.bigint_from_int,
+            ("BigInt", "from_str") => self.host.num.bigint_from_str,
+            ("BigInt", "add") => self.host.num.bigint_add,
+            ("BigInt", "sub") => self.host.num.bigint_sub,
+            ("BigInt", "mul") => self.host.num.bigint_mul,
+            ("BigInt", "to_string") => self.host.num.bigint_to_string,
+            ("Decimal", "from_str") => self.host.num.decimal_from_str,
+            ("Decimal", "add") => self.host.num.decimal_add,
+            ("Decimal", "sub") => self.host.num.decimal_sub,
+            ("Decimal", "mul") => self.host.num.decimal_mul,
+            ("Decimal", "to_string") => self.host.num.decimal_to_string,
+            ("Fraction", "add") => self.host.num.fraction_add,
+            ("Fraction", "sub") => self.host.num.fraction_sub,
+            ("Fraction", "mul") => self.host.num.fraction_mul,
+            ("Fraction", "div") => self.host.num.fraction_div,
+            ("Fraction", "equal") => self.host.num.fraction_equal,
+            ("Fraction", "numerator") => self.host.num.fraction_numerator,
+            ("Fraction", "denominator") => self.host.num.fraction_denominator,
+            ("Fraction", "to_string") => self.host.num.fraction_to_string,
+            ("Fraction", "to_float") => self.host.num.fraction_to_float,
+            ("Fraction", "is_zero") => self.host.num.fraction_is_zero,
+            _ => {
+                return Err(format!(
+                    "jit precise numeric builtin unsupported: {type_name}.{func}"
+                ))
+            }
+        };
+        let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
+        let arg_vals = arg_vals?;
+        let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
+        let call = self.b.ins().call(host_ref, &arg_vals);
+        let result = self.b.inst_results(call)[0];
+        if func == "from_str" || matches!(func.as_str(), "add" | "sub" | "mul" | "div")
+            && type_name == "Fraction"
+        {
+            self.emit_trap_check()?;
+        }
+        Ok(result)
+    }
+    TExprKind::PreciseBuiltin { .. } => {
+        Err("jit precise numeric builtin unsupported".to_string())
+    }
+    TExprKind::Drop(inner) => {
+        self.lower_expr(inner)?;
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+    TExprKind::AmbientInput { prompt } => {
+        let (has_prompt, prompt_v) = match prompt {
+            None => (
+                self.b.ins().iconst(types::I8, 0),
+                self.b.ins().iconst(types::I64, 0),
+            ),
+            Some(p) => (self.b.ins().iconst(types::I8, 1), self.lower_expr(p)?),
+        };
+        Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt_v]))
+    }
+    TExprKind::RequireStop {
+        kind,
+        loc,
+        always_stops,
+    } => {
+        let fail_block = self.b.create_block();
+        let cont = self.b.create_block();
+        let mut eq_msg: Option<(Value, Value)> = None;
+        if *always_stops {
+            self.b.ins().jump(fail_block, &[]);
+        } else {
+            match kind {
+                TIR::TRequireKind::Require { cond, .. } => {
+                    let ok = self.lower_expr(cond)?;
+                    let zero = self.b.ins().iconst(types::I8, 0);
+                    let is_true = self.b.ins().icmp(IntCC::NotEqual, ok, zero);
+                    self.b.ins().brif(is_true, cont, &[], fail_block, &[]);
                 }
-                Ok(result)
-            }
-            TExprKind::PreciseBuiltin { .. } => {
-                Err("jit precise numeric builtin unsupported".to_string())
-            }
-            TExprKind::Drop(inner) => {
-                self.lower_expr(inner)?;
-                Ok(self.b.ins().iconst(types::I8, 0))
-            }
-            TExprKind::AmbientInput { prompt } => {
-                let (has_prompt, prompt_v) = match prompt {
-                    None => (
-                        self.b.ins().iconst(types::I8, 0),
-                        self.b.ins().iconst(types::I64, 0),
-                    ),
-                    Some(p) => (self.b.ins().iconst(types::I8, 1), self.lower_expr(p)?),
-                };
-                Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt_v]))
-            }
-            TExprKind::RequireStop {
-                kind,
-                loc,
-                always_stops,
-            } => {
-                let fail_block = self.b.create_block();
-                let cont = self.b.create_block();
-                let mut eq_msg: Option<(Value, Value)> = None;
-                if *always_stops {
+                TIR::TRequireKind::RequireEq { left, right } => {
+                    let l = self.lower_expr(left)?;
+                    let r = self.lower_expr(right)?;
+                    eq_msg = Some((l, r));
+                    let eq = self.b.ins().icmp(IntCC::Equal, l, r);
+                    self.b.ins().brif(eq, cont, &[], fail_block, &[]);
+                }
+                TIR::TRequireKind::Panic { .. } => {
                     self.b.ins().jump(fail_block, &[]);
-                } else {
-                    match kind {
-                        TIR::TRequireKind::Require { cond, .. } => {
-                            let ok = self.lower_expr(cond)?;
-                            let zero = self.b.ins().iconst(types::I8, 0);
-                            let is_true = self.b.ins().icmp(IntCC::NotEqual, ok, zero);
-                            self.b.ins().brif(is_true, cont, &[], fail_block, &[]);
-                        }
-                        TIR::TRequireKind::RequireEq { left, right } => {
-                            let l = self.lower_expr(left)?;
-                            let r = self.lower_expr(right)?;
-                            eq_msg = Some((l, r));
-                            let eq = self.b.ins().icmp(IntCC::Equal, l, r);
-                            self.b.ins().brif(eq, cont, &[], fail_block, &[]);
-                        }
-                        TIR::TRequireKind::Panic { .. } => {
-                            self.b.ins().jump(fail_block, &[]);
-                        }
-                    }
                 }
-                self.b.switch_to_block(fail_block);
-                self.b.seal_block(fail_block);
-                let msg_val = match kind {
-                    TIR::TRequireKind::Require { msg: Some(msg), .. }
-                    | TIR::TRequireKind::Panic { msg } => self.lower_expr(msg)?,
-                    TIR::TRequireKind::Require { msg: None, .. } => {
-                        let h = self.runtime.heap.alloc_string("condition failed");
-                        self.b.ins().iconst(types::I64, h)
-                    }
-                    TIR::TRequireKind::RequireEq { .. } => {
-                        let _ = eq_msg;
-                        let h = self
-                            .runtime
-                            .heap
-                            .alloc_string("values are not equal");
-                        self.b.ins().iconst(types::I64, h)
-                    }
-                };
-                let loc_buf = self.call_host(self.host.str_begin, &[]);
-                let mut first = true;
-                for (name, place) in &loc.locals {
-                    let key = Self::local_key(place);
-                    let Some(var) = self.vars.get(&key).copied() else {
-                        continue;
-                    };
-                    let ty = self.var_tys.get(&key).cloned().unwrap_or(Type::Int);
-                    if !matches!(
-                        ty,
-                        Type::Int
-                            | Type::IntN { .. }
-                            | Type::Bool
-                            | Type::Float
-                            | Type::Float32
-                    ) {
-                        continue;
-                    }
-                    if !first {
-                        let sep = self.runtime.heap.alloc_string(", ");
-                        let sep_v = self.b.ins().iconst(types::I64, sep);
-                        let push_s = self
-                            .module
-                            .declare_func_in_func(self.host.str_push_str, self.b.func);
-                        self.b.ins().call(push_s, &[loc_buf, sep_v]);
-                    }
-                    first = false;
-                    let prefix = self.runtime.heap.alloc_string(format!("{name} = "));
-                    let prefix_v = self.b.ins().iconst(types::I64, prefix);
-                    let push_s = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_str, self.b.func);
-                    self.b.ins().call(push_s, &[loc_buf, prefix_v]);
-                    let val = self.b.use_var(var);
-                    match ty {
-                        Type::Float | Type::Float32 => {
-                            let push = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_f64, self.b.func);
-                            self.b.ins().call(push, &[loc_buf, val]);
-                        }
-                        Type::Bool => {
-                            let push = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_bool, self.b.func);
-                            self.b.ins().call(push, &[loc_buf, val]);
-                        }
-                        _ => {
-                            let push = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_i64, self.b.func);
-                            self.b.ins().call(push, &[loc_buf, val]);
-                        }
-                    }
-                }
-                let locals_val = loc_buf;
-                let file_h = self
+            }
+        }
+        self.b.switch_to_block(fail_block);
+        self.b.seal_block(fail_block);
+        let msg_val = match kind {
+            TIR::TRequireKind::Require { msg: Some(msg), .. }
+            | TIR::TRequireKind::Panic { msg } => self.lower_expr(msg)?,
+            TIR::TRequireKind::Require { msg: None, .. } => {
+                let h = self.runtime.heap.alloc_string("condition failed");
+                self.b.ins().iconst(types::I64, h)
+            }
+            TIR::TRequireKind::RequireEq { .. } => {
+                let _ = eq_msg;
+                let h = self
                     .runtime
                     .heap
-                    .alloc_string(Self::strip_rust_str_lit(&loc.file));
-                let fn_h = self
-                    .runtime
-                    .heap
-                    .alloc_string(Self::strip_rust_str_lit(&loc.fn_name));
-                let src_h = self
-                    .runtime
-                    .heap
-                    .alloc_string(Self::strip_rust_str_lit(&loc.src_line));
-                let host = self
+                    .alloc_string("values are not equal");
+                self.b.ins().iconst(types::I64, h)
+            }
+        };
+        let loc_buf = self.call_host(self.host.str_begin, &[]);
+        let mut first = true;
+        for (name, place) in &loc.locals {
+            let key = Self::local_key(place);
+            let Some(var) = self.vars.get(&key).copied() else {
+                continue;
+            };
+            let ty = self.var_tys.get(&key).cloned().unwrap_or(Type::Int);
+            if !matches!(
+                ty,
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Bool
+                    | Type::Float
+                    | Type::Float32
+            ) {
+                continue;
+            }
+            if !first {
+                let sep = self.runtime.heap.alloc_string(", ");
+                let sep_v = self.b.ins().iconst(types::I64, sep);
+                let push_s = self
                     .module
-                    .declare_func_in_func(self.host.rich_panic, self.b.func);
-                let file_v = self.b.ins().iconst(types::I64, file_h);
-                let line_v = self.b.ins().iconst(types::I64, i64::from(loc.line));
-                let fn_v = self.b.ins().iconst(types::I64, fn_h);
-                let src_v = self.b.ins().iconst(types::I64, src_h);
-                let col_v = self.b.ins().iconst(types::I64, i64::from(loc.col));
-                let caret_v = self.b.ins().iconst(types::I64, i64::from(loc.caret));
-                self.b.ins().call(
-                    host,
-                    &[file_v, line_v, fn_v, src_v, col_v, caret_v, msg_val, locals_val],
-                );
-                self.emit_trap_check()?;
-                self.b.ins().jump(cont, &[]);
-                self.b.switch_to_block(cont);
-                self.b.seal_block(cont);
-                Ok(self.b.ins().iconst(types::I8, 0))
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_s, &[loc_buf, sep_v]);
             }
-
-            TExprKind::LayoutCompare { op, lhs, rhs } => {
-                let l = self.lower_expr(lhs)?;
-                let r = self.lower_expr(rhs)?;
-                let host_id = match op {
-                    BinOp::Ge => self.host.layout.ge,
-                    BinOp::Le => self.host.layout.le,
-                    BinOp::Eq => self.host.layout.eq,
-                    _ => return Err(format!("jit layout compare unsupported op {op:?}")),
-                };
-                Ok(self.call_host(host_id, &[l, r]))
+            first = false;
+            let prefix = self.runtime.heap.alloc_string(format!("{name} = "));
+            let prefix_v = self.b.ins().iconst(types::I64, prefix);
+            let push_s = self
+                .module
+                .declare_func_in_func(self.host.str_push_str, self.b.func);
+            self.b.ins().call(push_s, &[loc_buf, prefix_v]);
+            let val = self.b.use_var(var);
+            match ty {
+                Type::Float | Type::Float32 => {
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_f64, self.b.func);
+                    self.b.ins().call(push, &[loc_buf, val]);
+                }
+                Type::Bool => {
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_bool, self.b.func);
+                    self.b.ins().call(push, &[loc_buf, val]);
+                }
+                _ => {
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_i64, self.b.func);
+                    self.b.ins().call(push, &[loc_buf, val]);
+                }
             }
-            TExprKind::LayoutLit { inner } => {
-                let v = self.lower_expr(inner)?;
-                let f = match self.b.func.dfg.value_type(v) {
-                    types::F64 => v,
-                    types::I64 => self.b.ins().fcvt_from_sint(types::F64, v),
+        }
+        let locals_val = loc_buf;
+        let file_h = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(&loc.file));
+        let fn_h = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(&loc.fn_name));
+        let src_h = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(&loc.src_line));
+        let host = self
+            .module
+            .declare_func_in_func(self.host.rich_panic, self.b.func);
+        let file_v = self.b.ins().iconst(types::I64, file_h);
+        let line_v = self.b.ins().iconst(types::I64, i64::from(loc.line));
+        let fn_v = self.b.ins().iconst(types::I64, fn_h);
+        let src_v = self.b.ins().iconst(types::I64, src_h);
+        let col_v = self.b.ins().iconst(types::I64, i64::from(loc.col));
+        let caret_v = self.b.ins().iconst(types::I64, i64::from(loc.caret));
+        self.b.ins().call(
+            host,
+            &[file_v, line_v, fn_v, src_v, col_v, caret_v, msg_val, locals_val],
+        );
+        self.emit_trap_check()?;
+        self.b.ins().jump(cont, &[]);
+        self.b.switch_to_block(cont);
+        self.b.seal_block(cont);
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+    
+    TExprKind::LayoutCompare { op, lhs, rhs } => {
+        let l = self.lower_expr(lhs)?;
+        let r = self.lower_expr(rhs)?;
+        let host_id = match op {
+            BinOp::Ge => self.host.layout.ge,
+            BinOp::Le => self.host.layout.le,
+            BinOp::Eq => self.host.layout.eq,
+            _ => return Err(format!("jit layout compare unsupported op {op:?}")),
+        };
+        Ok(self.call_host(host_id, &[l, r]))
+    }
+    TExprKind::LayoutLit { inner } => {
+        let v = self.lower_expr(inner)?;
+        let f = match self.b.func.dfg.value_type(v) {
+            types::F64 => v,
+            types::I64 => self.b.ins().fcvt_from_sint(types::F64, v),
+            other => {
+                return Err(format!("jit layout lit unsupported type {other:?}"))
+            }
+        };
+        Ok(self.call_host(self.host.layout.from_const, &[f]))
+    }
+    TExprKind::PtrFromAddr { addr, .. } => self.lower_expr(addr),
+    TExprKind::RawOf(inner) => {
+        if self.unsafe_depth == 0 {
+            return Err("jit raw pointer creation outside #Unsafe".to_string());
+        }
+        if matches!(
+            &inner.ty,
+            Type::Apply { name, args }
+                if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1
+        ) {
+            return self.lower_expr(inner);
+        }
+        let local = Self::raw_place_local(inner);
+        if let Some(local) = local {
+            let key = Self::local_key(local);
+            let var = self
+                .vars
+                .get(&key)
+                .copied()
+                .ok_or_else(|| format!("jit RawOf unknown local `{}`", local.name))?;
+            let clif = self.meta.clif_ty(&inner.ty).ok_or_else(|| {
+                format!("jit raw pointer payload unsupported: {:?}", inner.ty)
+            })?;
+            let slot = if let Some(slot) = self.raw_slots.get(&key).copied() {
+                slot
+            } else {
+                let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    u32::from(clif.bytes()),
+                    0,
+                ));
+                let value = self.b.use_var(var);
+                self.b.ins().stack_store(value, slot, 0);
+                self.raw_slots.insert(key, slot);
+                slot
+            };
+            let pointer = self.b.ins().stack_addr(
+                self.module.target_config().pointer_type(),
+                slot,
+                0,
+            );
+            self.real_address_values.insert(pointer);
+            return Ok(pointer);
+        }
+        let value = self.lower_expr(inner)?;
+        let clif = self
+            .meta
+            .clif_ty(&inner.ty)
+            .ok_or_else(|| format!("jit raw pointer payload unsupported: {:?}", inner.ty))?;
+        let size = u32::from(clif.bytes());
+        let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            size,
+            0,
+        ));
+        self.b.ins().stack_store(value, slot, 0);
+        Ok(self
+            .b
+            .ins()
+            .stack_addr(self.module.target_config().pointer_type(), slot, 0))
+    }
+    TExprKind::Deref(inner) => {
+        if self.unsafe_depth == 0 {
+            return Err("jit raw pointer dereference outside #Unsafe".to_string());
+        }
+        let pointer = self.lower_expr(inner)?;
+        // Same provenance rule as volatile_read (review bd15-rev): a
+        // trusted load may only see a pointer minted from a real stack
+        // slot. A synthetic place identity (field-place address_of)
+        // must decline to the deopt tier, where it is inert.
+        if !self.real_address_values.contains(&pointer) {
+            return Err("jit raw pointer dereference address unsupported".to_string());
+        }
+        let clif = self
+            .meta
+            .clif_ty(&expr.ty)
+            .ok_or_else(|| format!("jit raw pointer result unsupported: {:?}", expr.ty))?;
+        Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0))
+    }
+    TExprKind::AllocNew { .. } => {
+        Ok(self.call_host(self.host.memory.allocator_new, &[]))
+    }
+    TExprKind::JSONLit { variant, arg } => {
+        let disc = self
+            .meta
+            .enum_variant_index("DataTree", variant)
+            .ok_or_else(|| format!("jit JSON lit `DataTree::{variant}`"))?;
+        match arg.as_ref() {
+            None => self.pack_datatree_enum(disc, None),
+            Some(boxed) => {
+                let (expr, _) = boxed.as_ref();
+                // AOT emit special-cases Object(MapLit) into an ordered
+                // `vec![(k,v),…]`. Mirror that — do not route through
+                // Jet's key-sorted Map heap.
+                if variant == "Object" {
+                    return self.lower_datatree_object_payload(expr, disc);
+                }
+                let payload_ty = expr.ty.clone();
+                let payload = self.lower_expr(expr)?;
+                self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
+            }
+        }
+    }
+    TExprKind::DBValueLit { variant, arg } => {
+        let disc = match variant.as_str() {
+            "Null" => 0i64,
+            "Int" => 1,
+            "Float" => 2,
+            "Text" => 3,
+            "Bool" => 4,
+            _ => {
+                return Err(format!("jit DBValue lit `DBValue::{variant}`"))
+            }
+        };
+        match arg.as_ref() {
+            None => {
+                let disc_v = self.b.ins().iconst(types::I64, disc);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, zero]))
+            }
+            Some(boxed) => {
+                let (expr, _) = boxed.as_ref();
+                let payload_ty = expr.ty.clone();
+                let payload = self.lower_expr(expr)?;
+                let payload_bits = match self.meta.clif_ty(&payload_ty) {
+                    Some(types::F64) => self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        payload,
+                    ),
+                    Some(types::I8) => self.b.ins().uextend(types::I64, payload),
+                    Some(types::I32) => self.b.ins().sextend(types::I64, payload),
+                    Some(types::I64) => payload,
                     other => {
-                        return Err(format!("jit layout lit unsupported type {other:?}"))
+                        return Err(format!(
+                            "jit DBValue payload type unsupported: {payload_ty:?} ({other:?})"
+                        ))
                     }
                 };
-                Ok(self.call_host(self.host.layout.from_const, &[f]))
+                let disc_v = self.b.ins().iconst(types::I64, disc);
+                Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, payload_bits]))
             }
-            TExprKind::PtrFromAddr { addr, .. } => self.lower_expr(addr),
-            TExprKind::RawOf(inner) => {
-                if self.unsafe_depth == 0 {
-                    return Err("jit raw pointer creation outside #Unsafe".to_string());
-                }
-                if matches!(
-                    &inner.ty,
-                    Type::Apply { name, args }
-                        if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1
-                ) {
-                    return self.lower_expr(inner);
-                }
-                let local = Self::raw_place_local(inner);
-                if let Some(local) = local {
-                    let key = Self::local_key(local);
+        }
+    }
+    TExprKind::ListSpread { parts } => self.lower_list_spread(&expr.ty, parts),
+    TExprKind::ColumnarListLit { .. } => {
+        Err("jit columnar list literal unsupported".to_string())
+    }
+    TExprKind::ColumnarGather { .. } => Err("jit columnar gather unsupported".to_string()),
+    TExprKind::ColumnarColumnRead { .. } => {
+        Err("jit columnar column read unsupported".to_string())
+    }
+    TExprKind::IndexHook {
+        type_name,
+        base,
+        index,
+        ..
+    } => {
+        let key = format!("{type_name}::get");
+        let func_id = self
+            .func_ids
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("jit missing method `{key}`"))?;
+        let recv = self.lower_expr(base)?;
+        let index = self.lower_expr(index)?;
+        let packed = self.call_host(func_id, &[recv, index]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let missing = self.b.ins().icmp(IntCC::Equal, packed, zero);
+        let ok = self.b.create_block();
+        let fail = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(missing, fail, &[], ok, &[]);
+        self.b.switch_to_block(fail);
+        self.b.seal_block(fail);
+        let message = self.b.ins().iconst(types::I64, 0);
+        let trap = self
+            .module
+            .declare_func_in_func(self.host.trap_panic, self.b.func);
+        self.b.ins().call(trap, &[message]);
+        self.b.ins().jump(merge, &[zero]);
+        self.b.switch_to_block(ok);
+        self.b.seal_block(ok);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let value = self.b.ins().isub(packed, one);
+        self.b.ins().jump(merge, &[value]);
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        self.emit_trap_check()?;
+        Ok(self.b.block_params(merge)[0])
+    }
+    TExprKind::MathLaneIndex {
+        lane_ty,
+        base,
+        index,
+        ..
+    } => {
+        let recv = self.lower_expr(base)?;
+        let idx = self.lower_expr(index)?;
+        let idx_bits = match self.meta.clif_ty(&index.ty) {
+            Some(t) if t == types::I64 => idx,
+            Some(t) if t.bits() < 64 => self.b.ins().sextend(types::I64, idx),
+            _ => idx,
+        };
+        self.lower_math_host_call(lane_ty, "lane", &[recv, idx_bits], &expr.ty)
+    }
+    TExprKind::MathSwizzleRead {
+        type_name,
+        recv,
+        lanes,
+    } => {
+        let recv_v = self.lower_expr(recv)?;
+        let mut arg_vals = vec![recv_v];
+        for &lane in lanes {
+            arg_vals.push(self.b.ins().iconst(types::I64, i64::from(lane)));
+        }
+        self.lower_math_host_call(type_name, "swizzle_read", &arg_vals, &expr.ty)
+    }
+    TExprKind::MaterializeView(inner) => self.lower_expr(inner),
+    TExprKind::FnFieldCall { recv, field, args } => {
+        let handle = self.lower_expr(recv)?;
+        let type_name = record_type_key(&recv.ty).ok_or("jit fn-field receiver type")?;
+        let fn_ty = self
+            .meta
+            .struct_field_ty(&type_name, field)
+            .ok_or_else(|| format!("jit fn-field `{field}` on `{type_name}`"))?;
+        let callee = self.lower_record_field(handle, &type_name, field, &fn_ty)?;
+        self.lower_fn_call(callee, &fn_ty, args)
+    }
+    // Card #1440: sema proved this dispatch arm dead (E0307). Reuse the
+    // rich-panic trap so a compiler bug surfaces loudly, exactly like
+    // the Todo hole below — no input can reach it.
+    TExprKind::Unreachable { line } => {
+        let msg = format!("unreachable: exhaustive dispatch at ?:{line} (sema-proved, E0307)");
+        let msg_h = self.runtime.heap.alloc_string(msg);
+        let msg_v = self.b.ins().iconst(types::I64, msg_h);
+        let empty = self.runtime.heap.alloc_string(String::new());
+        let empty_v = self.b.ins().iconst(types::I64, empty);
+        let host = self
+            .module
+            .declare_func_in_func(self.host.rich_panic, self.b.func);
+        let line_v = self.b.ins().iconst(types::I64, *line as i64);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let caret = self.b.ins().iconst(types::I64, 5);
+        self.b.ins().call(
+            host,
+            &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
+        );
+        self.emit_trap_check()?;
+        Ok(self.b.ins().iconst(types::I64, 0))
+    }
+    TExprKind::Todo { line, expected_type } => {
+        let msg = format!("#Todo at ?:{line} — expected {expected_type}");
+        let msg_h = self.runtime.heap.alloc_string(msg);
+        let msg_v = self.b.ins().iconst(types::I64, msg_h);
+        let empty = self.runtime.heap.alloc_string(String::new());
+        let empty_v = self.b.ins().iconst(types::I64, empty);
+        let host = self
+            .module
+            .declare_func_in_func(self.host.rich_panic, self.b.func);
+        let line_v = self.b.ins().iconst(types::I64, *line as i64);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let caret = self.b.ins().iconst(types::I64, 5);
+        self.b.ins().call(
+            host,
+            &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
+        );
+        self.emit_trap_check()?;
+        Ok(self.b.ins().iconst(types::I64, 0))
+    }
+    TExprKind::DistinctRaw(inner) => self.lower_expr(inner),
+    TExprKind::Ok(inner) => self.result_new(true, inner),
+    TExprKind::Err(inner) => self.result_new(false, inner),
+    TExprKind::Try {
+        inner,
+        convert,
+        file,
+        line,
+        fn_name,
+    } => self.lower_try(inner, convert, file, *line, fn_name),
+    TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
+    TExprKind::Lambda(lam) => {
+        let id = super::functions_compile::lower_callable_lambda(
+            self.module,
+            self.host,
+            self.meta,
+            lam,
+            self.func_ids,
+            self.spawn_func_ids,
+            self.spawn_lambdas,
+            self.spawn_site,
+            self.runtime,
+        )?;
+        let func_ref = self.module.declare_func_in_func(id, self.b.func);
+        let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
+        if lam.captures.is_empty() {
+            return Ok(fn_addr);
+        }
+        if lam.arc
+            || matches!(
+                &expr.ty,
+                Type::Named(name) if name == "HTTPHandler"
+            )
+        {
+            // Prefer host-side packing for the common single-capture
+            // middleware shape (`owned :: ~next`); JIT list_push was
+            // arriving empty at bind time on the serve thread.
+            if lam.captures.len() == 1 {
+                let (outer, _place, _ty) = &lam.captures[0];
+                let key = TIR::local_place(outer);
+                let var = self
+                    .vars
+                    .get(&key)
+                    .copied()
+                    .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
+                let cap0 = self.b.use_var(var);
+                let host = self.module.declare_func_in_func(
+                    self.host.net_http.http_handler_bind1,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[fn_addr, cap0]);
+                Ok(self.b.inst_results(call)[0])
+            } else {
+                let env = self.call_host(self.host.coll.list_new, &[]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                for (outer, _place, _ty) in &lam.captures {
+                    let key = TIR::local_place(outer);
                     let var = self
                         .vars
                         .get(&key)
                         .copied()
-                        .ok_or_else(|| format!("jit RawOf unknown local `{}`", local.name))?;
-                    let clif = self.meta.clif_ty(&inner.ty).ok_or_else(|| {
-                        format!("jit raw pointer payload unsupported: {:?}", inner.ty)
-                    })?;
-                    let slot = if let Some(slot) = self.raw_slots.get(&key).copied() {
-                        slot
-                    } else {
-                        let slot = self.b.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            u32::from(clif.bytes()),
-                            0,
-                        ));
-                        let value = self.b.use_var(var);
-                        self.b.ins().stack_store(value, slot, 0);
-                        self.raw_slots.insert(key, slot);
-                        slot
-                    };
-                    let pointer = self.b.ins().stack_addr(
-                        self.module.target_config().pointer_type(),
-                        slot,
-                        0,
-                    );
-                    self.real_address_values.insert(pointer);
-                    return Ok(pointer);
+                        .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
+                    let val = self.b.use_var(var);
+                    self.b.ins().call(push, &[env, val]);
                 }
-                let value = self.lower_expr(inner)?;
-                let clif = self
-                    .meta
-                    .clif_ty(&inner.ty)
-                    .ok_or_else(|| format!("jit raw pointer payload unsupported: {:?}", inner.ty))?;
-                let size = u32::from(clif.bytes());
-                let slot = self.b.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    size,
-                    0,
-                ));
-                self.b.ins().stack_store(value, slot, 0);
-                Ok(self
-                    .b
-                    .ins()
-                    .stack_addr(self.module.target_config().pointer_type(), slot, 0))
-            }
-            TExprKind::Deref(inner) => {
-                if self.unsafe_depth == 0 {
-                    return Err("jit raw pointer dereference outside #Unsafe".to_string());
-                }
-                let pointer = self.lower_expr(inner)?;
-                // Same provenance rule as volatile_read (review bd15-rev): a
-                // trusted load may only see a pointer minted from a real stack
-                // slot. A synthetic place identity (field-place address_of)
-                // must decline to the deopt tier, where it is inert.
-                if !self.real_address_values.contains(&pointer) {
-                    return Err("jit raw pointer dereference address unsupported".to_string());
-                }
-                let clif = self
-                    .meta
-                    .clif_ty(&expr.ty)
-                    .ok_or_else(|| format!("jit raw pointer result unsupported: {:?}", expr.ty))?;
-                Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0))
-            }
-            TExprKind::AllocNew { .. } => {
-                Ok(self.call_host(self.host.memory.allocator_new, &[]))
-            }
-            TExprKind::JSONLit { variant, arg } => {
-                let disc = self
-                    .meta
-                    .enum_variant_index("DataTree", variant)
-                    .ok_or_else(|| format!("jit JSON lit `DataTree::{variant}`"))?;
-                match arg.as_ref() {
-                    None => self.pack_datatree_enum(disc, None),
-                    Some(boxed) => {
-                        let (expr, _) = boxed.as_ref();
-                        // AOT emit special-cases Object(MapLit) into an ordered
-                        // `vec![(k,v),…]`. Mirror that — do not route through
-                        // Jet's key-sorted Map heap.
-                        if variant == "Object" {
-                            return self.lower_datatree_object_payload(expr, disc);
-                        }
-                        let payload_ty = expr.ty.clone();
-                        let payload = self.lower_expr(expr)?;
-                        self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
-                    }
-                }
-            }
-            TExprKind::DBValueLit { variant, arg } => {
-                let disc = match variant.as_str() {
-                    "Null" => 0i64,
-                    "Int" => 1,
-                    "Float" => 2,
-                    "Text" => 3,
-                    "Bool" => 4,
-                    _ => {
-                        return Err(format!("jit DBValue lit `DBValue::{variant}`"))
-                    }
-                };
-                match arg.as_ref() {
-                    None => {
-                        let disc_v = self.b.ins().iconst(types::I64, disc);
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, zero]))
-                    }
-                    Some(boxed) => {
-                        let (expr, _) = boxed.as_ref();
-                        let payload_ty = expr.ty.clone();
-                        let payload = self.lower_expr(expr)?;
-                        let payload_bits = match self.meta.clif_ty(&payload_ty) {
-                            Some(types::F64) => self.b.ins().bitcast(
-                                types::I64,
-                                Self::scalar_bitcast_memflags(),
-                                payload,
-                            ),
-                            Some(types::I8) => self.b.ins().uextend(types::I64, payload),
-                            Some(types::I32) => self.b.ins().sextend(types::I64, payload),
-                            Some(types::I64) => payload,
-                            other => {
-                                return Err(format!(
-                                    "jit DBValue payload type unsupported: {payload_ty:?} ({other:?})"
-                                ))
-                            }
-                        };
-                        let disc_v = self.b.ins().iconst(types::I64, disc);
-                        Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, payload_bits]))
-                    }
-                }
-            }
-            TExprKind::ListSpread { parts } => self.lower_list_spread(&expr.ty, parts),
-            TExprKind::ColumnarListLit { .. } => {
-                Err("jit columnar list literal unsupported".to_string())
-            }
-            TExprKind::ColumnarGather { .. } => Err("jit columnar gather unsupported".to_string()),
-            TExprKind::ColumnarColumnRead { .. } => {
-                Err("jit columnar column read unsupported".to_string())
-            }
-            TExprKind::IndexHook {
-                type_name,
-                base,
-                index,
-                ..
-            } => {
-                let key = format!("{type_name}::get");
-                let func_id = self
-                    .func_ids
-                    .get(&key)
-                    .copied()
-                    .ok_or_else(|| format!("jit missing method `{key}`"))?;
-                let recv = self.lower_expr(base)?;
-                let index = self.lower_expr(index)?;
-                let packed = self.call_host(func_id, &[recv, index]);
-                let zero = self.b.ins().iconst(types::I64, 0);
-                let missing = self.b.ins().icmp(IntCC::Equal, packed, zero);
-                let ok = self.b.create_block();
-                let fail = self.b.create_block();
-                let merge = self.b.create_block();
-                self.b.append_block_param(merge, types::I64);
-                self.b.ins().brif(missing, fail, &[], ok, &[]);
-                self.b.switch_to_block(fail);
-                self.b.seal_block(fail);
-                let message = self.b.ins().iconst(types::I64, 0);
-                let trap = self
-                    .module
-                    .declare_func_in_func(self.host.trap_panic, self.b.func);
-                self.b.ins().call(trap, &[message]);
-                self.b.ins().jump(merge, &[zero]);
-                self.b.switch_to_block(ok);
-                self.b.seal_block(ok);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let value = self.b.ins().isub(packed, one);
-                self.b.ins().jump(merge, &[value]);
-                self.b.switch_to_block(merge);
-                self.b.seal_block(merge);
-                self.emit_trap_check()?;
-                Ok(self.b.block_params(merge)[0])
-            }
-            TExprKind::MathLaneIndex {
-                lane_ty,
-                base,
-                index,
-                ..
-            } => {
-                let recv = self.lower_expr(base)?;
-                let idx = self.lower_expr(index)?;
-                let idx_bits = match self.meta.clif_ty(&index.ty) {
-                    Some(t) if t == types::I64 => idx,
-                    Some(t) if t.bits() < 64 => self.b.ins().sextend(types::I64, idx),
-                    _ => idx,
-                };
-                self.lower_math_host_call(lane_ty, "lane", &[recv, idx_bits], &expr.ty)
-            }
-            TExprKind::MathSwizzleRead {
-                type_name,
-                recv,
-                lanes,
-            } => {
-                let recv_v = self.lower_expr(recv)?;
-                let mut arg_vals = vec![recv_v];
-                for &lane in lanes {
-                    arg_vals.push(self.b.ins().iconst(types::I64, i64::from(lane)));
-                }
-                self.lower_math_host_call(type_name, "swizzle_read", &arg_vals, &expr.ty)
-            }
-            TExprKind::MaterializeView(inner) => self.lower_expr(inner),
-            TExprKind::FnFieldCall { recv, field, args } => {
-                let handle = self.lower_expr(recv)?;
-                let type_name = record_type_key(&recv.ty).ok_or("jit fn-field receiver type")?;
-                let fn_ty = self
-                    .meta
-                    .struct_field_ty(&type_name, field)
-                    .ok_or_else(|| format!("jit fn-field `{field}` on `{type_name}`"))?;
-                let callee = self.lower_record_field(handle, &type_name, field, &fn_ty)?;
-                self.lower_fn_call(callee, &fn_ty, args)
-            }
-            // Card #1440: sema proved this dispatch arm dead (E0307). Reuse the
-            // rich-panic trap so a compiler bug surfaces loudly, exactly like
-            // the Todo hole below — no input can reach it.
-            TExprKind::Unreachable { line } => {
-                let msg = format!("unreachable: exhaustive dispatch at ?:{line} (sema-proved, E0307)");
-                let msg_h = self.runtime.heap.alloc_string(msg);
-                let msg_v = self.b.ins().iconst(types::I64, msg_h);
-                let empty = self.runtime.heap.alloc_string(String::new());
-                let empty_v = self.b.ins().iconst(types::I64, empty);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.rich_panic, self.b.func);
-                let line_v = self.b.ins().iconst(types::I64, *line as i64);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let caret = self.b.ins().iconst(types::I64, 5);
-                self.b.ins().call(
-                    host,
-                    &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
+                let host = self.module.declare_func_in_func(
+                    self.host.net_http.http_handler_bind,
+                    self.b.func,
                 );
-                self.emit_trap_check()?;
-                Ok(self.b.ins().iconst(types::I64, 0))
-            }
-            TExprKind::Todo { line, expected_type } => {
-                let msg = format!("#Todo at ?:{line} — expected {expected_type}");
-                let msg_h = self.runtime.heap.alloc_string(msg);
-                let msg_v = self.b.ins().iconst(types::I64, msg_h);
-                let empty = self.runtime.heap.alloc_string(String::new());
-                let empty_v = self.b.ins().iconst(types::I64, empty);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.rich_panic, self.b.func);
-                let line_v = self.b.ins().iconst(types::I64, *line as i64);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let caret = self.b.ins().iconst(types::I64, 5);
-                self.b.ins().call(
-                    host,
-                    &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
-                );
-                self.emit_trap_check()?;
-                Ok(self.b.ins().iconst(types::I64, 0))
-            }
-            TExprKind::DistinctRaw(inner) => self.lower_expr(inner),
-            TExprKind::Ok(inner) => self.result_new(true, inner),
-            TExprKind::Err(inner) => self.result_new(false, inner),
-            TExprKind::Try {
-                inner,
-                convert,
-                file,
-                line,
-                fn_name,
-            } => self.lower_try(inner, convert, file, *line, fn_name),
-            TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
-            TExprKind::Lambda(lam) => {
-                let id = super::functions_compile::lower_callable_lambda(
-                    self.module,
-                    self.host,
-                    self.meta,
-                    lam,
-                    self.func_ids,
-                    self.spawn_func_ids,
-                    self.spawn_lambdas,
-                    self.spawn_site,
-                    self.runtime,
-                )?;
-                let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
-                if lam.captures.is_empty() {
-                    return Ok(fn_addr);
-                }
-                if lam.arc
-                    || matches!(
-                        &expr.ty,
-                        Type::Named(name) if name == "HTTPHandler"
-                    )
-                {
-                    // Prefer host-side packing for the common single-capture
-                    // middleware shape (`owned :: ~next`); JIT list_push was
-                    // arriving empty at bind time on the serve thread.
-                    if lam.captures.len() == 1 {
-                        let (outer, _place, _ty) = &lam.captures[0];
-                        let key = TIR::local_place(outer);
-                        let var = self
-                            .vars
-                            .get(&key)
-                            .copied()
-                            .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
-                        let cap0 = self.b.use_var(var);
-                        let host = self.module.declare_func_in_func(
-                            self.host.net_http.http_handler_bind1,
-                            self.b.func,
-                        );
-                        let call = self.b.ins().call(host, &[fn_addr, cap0]);
-                        Ok(self.b.inst_results(call)[0])
-                    } else {
-                        let env = self.call_host(self.host.coll.list_new, &[]);
-                        let push = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_push, self.b.func);
-                        for (outer, _place, _ty) in &lam.captures {
-                            let key = TIR::local_place(outer);
-                            let var = self
-                                .vars
-                                .get(&key)
-                                .copied()
-                                .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
-                            let val = self.b.use_var(var);
-                            self.b.ins().call(push, &[env, val]);
-                        }
-                        let host = self.module.declare_func_in_func(
-                            self.host.net_http.http_handler_bind,
-                            self.b.func,
-                        );
-                        let call = self.b.ins().call(host, &[fn_addr, env]);
-                        Ok(self.b.inst_results(call)[0])
-                    }
-                } else {
-                    Err("jit callable captures unsupported".to_string())
-                }
-            }
-            TExprKind::HostBorrowCallback { .. } => {
-                Err("jit borrowed callback adapter unsupported".to_string())
-            }
-            TExprKind::PatternMatches { subj, pattern } => {
-                let value = self.lower_expr(subj)?;
-                let enum_name = pattern
-                    .enum_type
-                    .as_deref()
-                    .or_else(|| user_type_name(&subj.ty));
-                self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)
-            }
-            TExprKind::OptionLift2 { f, a, b } => {
-                self.lower_option_lift2(f, a, b, &expr.ty)
-            }
-            TExprKind::ClosureMethod { recv, op, args } => {
-                self.lower_closure_method(recv, op, args)
-            }
-            TExprKind::NumericMethod { recv, op } => self.lower_numeric_method(recv, op),
-            TExprKind::DistinctConvert {
-                arg,
-                op,
-                range,
-                fallible,
-                ..
-            } => {
-                let converted = self.lower_numeric_method(arg, op)?;
-                let Some((lo, hi)) = range else {
-                    return Ok(converted);
-                };
-                if !*fallible {
-                    return Ok(converted);
-                }
-                let lo = self.b.ins().iconst(types::I64, *lo);
-                let hi = self.b.ins().iconst(types::I64, *hi);
-                let fallible = matches!(
-                    op,
-                    TNumericOp::TryFrom { .. }
-                        | TNumericOp::FloatToInt { .. }
-                        | TNumericOp::FloatNarrow { .. }
-                );
-                let host = if fallible {
-                    self.host.distinct_range_result
-                } else {
-                    self.host.distinct_range
-                };
-                Ok(self.call_host(host, &[converted, lo, hi]))
-            }
-            TExprKind::UnitConvert {
-                arg,
-                scale,
-                offset,
-                rounding,
-                fallible,
-                ..
-            } => {
-                let value = self.lower_expr(arg)?;
-                let ratios = [
-                    scale.num.to_string(),
-                    scale.den.to_string(),
-                    offset.num.to_string(),
-                    offset.den.to_string(),
-                ]
-                .map(|ratio| self.runtime.heap.alloc_string(ratio))
-                .map(|id| self.b.ins().iconst(types::I64, id));
-                let mut call_args = vec![value, ratios[0], ratios[1], ratios[2], ratios[3]];
-                let host = if let Some((mode, digits)) = rounding {
-                    call_args.push(self.b.ins().iconst(types::I64, *mode as i64));
-                    call_args.push(self.lower_expr(digits)?);
-                    self.host.unit_convert_rounded
-                } else if *fallible {
-                    self.host.unit_convert_exact
-                } else {
-                    self.host.unit_convert_implicit
-                };
-                let host = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(host, &call_args);
-                if !*fallible {
-                    self.emit_trap_check()?;
-                }
+                let call = self.b.ins().call(host, &[fn_addr, env]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TExprKind::OverflowOpt {
-                prefix,
-                op,
-                lhs,
-                rhs,
-            } => {
-                let (signed, bits) = match &lhs.ty {
-                    Type::IntN { signed, bits } => (*signed, *bits),
-                    Type::Int => (true, 64),
-                    _ => {
-                        return Err(
-                            "jit overflow opt-out needs fixed-width integers".to_string()
-                        )
-                    }
-                };
-                let op = match *op {
-                    "add" => BinOp::Add,
-                    "sub" => BinOp::Sub,
-                    "mul" => BinOp::Mul,
-                    "div" => BinOp::Div,
-                    _ => return Err("jit overflow opt-out operator unsupported".to_string()),
-                };
-                let mode = match prefix.as_str() {
-                    "wrapping" => INTN_MODE_WRAPPING,
-                    "saturating" => INTN_MODE_SATURATING,
-                    "checked" => INTN_MODE_CHECKED,
-                    _ => return Err("jit overflow opt-out mode unsupported".to_string()),
-                };
-                let left = self.lower_expr(lhs)?;
-                let right = self.lower_expr(rhs)?;
-                let right_signed =
-                    !matches!(&rhs.ty, Type::IntN { signed: false, .. });
-                self.lower_intn_values(
-                    op,
-                    mode,
-                    left,
-                    right,
-                    signed,
-                    bits,
-                    right_signed,
-                )
-            }
-            TExprKind::FnValue { kind } => match kind {
-                TFnValueKind::NamedFn {
-                    name: Some(name), ..
-                } => {
-                    let id = self
-                        .func_ids
-                        .get(name)
-                        .copied()
-                        .ok_or_else(|| format!("jit fn value unknown function `{name}`"))?;
-                    let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                    Ok(self.b.ins().func_addr(types::I64, func_ref))
-                }
-                TFnValueKind::NamedFn { name: None, .. } => {
-                    Err("jit rendered fn coercion unsupported".to_string())
-                }
-                TFnValueKind::Call { callee, args } => {
-                    let fn_ty = callee.ty.clone();
-                    let value = self.lower_expr(callee)?;
-                    if matches!(
-                        &callee.kind,
-                        TExprKind::FnValue {
-                            kind: TFnValueKind::Interrupt { .. }
-                        }
-                    ) {
-                        self.lower_interrupt_fn_call(value, &fn_ty, args)
-                    } else {
-                        self.lower_fn_call(value, &fn_ty, args)
-                    }
-                }
-                TFnValueKind::Interrupt { .. } => {
-                    self.lower_interrupt_callback_value(expr)
-                }
-            },
-            TExprKind::ModuleCall { form, args, .. } => match form {
-                TModuleCallForm::InlineMangled { mangled } => {
-                    let func_id = self.func_ids.get(mangled).copied()
-                        .ok_or_else(|| "jit module call unsupported".to_string())?;
-                    let arg_vals: Result<Vec<_>, _> = args.iter().map(|arg| self.lower_call_arg(arg)).collect();
-                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                    let call = self.b.ins().call(func_ref, &arg_vals?);
-                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                    self.emit_trap_check()?;
-                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
-                }
-                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
-                    let key = format!("{rust_mod}::{rust_fn}");
-                    let func_id = self
-                        .func_ids
-                        .get(&key)
-                        .copied()
-                        .ok_or_else(|| format!("jit file-module call target missing `{key}`"))?;
-                    let arg_vals: Result<Vec<_>, _> =
-                        args.iter().map(|arg| self.lower_call_arg(arg)).collect();
-                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                    let call = self.b.ins().call(func_ref, &arg_vals?);
-                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                    self.emit_trap_check()?;
-                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
-                }
-            },
-            TExprKind::ExternCall { wrapper, args } => {
-                let wid = self.runtime.heap.alloc_string(wrapper.clone());
-                let wrapper_v = self.b.ins().iconst(types::I64, wid);
-                let list = self.call_host(self.host.coll.list_new, &[]);
-                let push = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
-                for arg in args {
-                    let mut v = self.lower_expr(&arg.value)?;
-                    if arg.clone {
-                        // Strings: clone for Read non-scalars, matching AOT.
-                        if matches!(arg.value.ty, Type::String) {
-                            v = self.call_host(self.host.str_clone, &[v]);
-                        }
-                    }
-                    let bits = match self.meta.clif_ty(&arg.value.ty) {
-                        Some(t) if t == types::F64 => self.b.ins().bitcast(
-                            types::I64,
-                            Self::scalar_bitcast_memflags(),
-                            v,
-                        ),
-                        _ => v,
-                    };
-                    self.b.ins().call(push, &[list, bits]);
-                }
-                let result = self.call_host(self.host.ffi.call, &[wrapper_v, list]);
-                self.emit_trap_check()?;
-                match &expr.ty {
-                    Type::Float | Type::Float32 => Ok(self.b.ins().bitcast(
-                        types::F64,
-                        Self::scalar_bitcast_memflags(),
-                        result,
-                    )),
-                    _ => Ok(result),
-                }
-            }
-            TExprKind::Close(inner) => {
-                let handle = self.lower_expr(inner)?;
-                let host = match &inner.ty {
-                    Type::Named(n) if n == "FileWriter" => Some(self.host.io.file_writer_close),
-                    Type::Named(n) if n == "FileReader" => Some(self.host.io.file_reader_close),
-                    Type::Apply { name, args } if name == "Resource" && args.len() == 1 => {
-                        match &args[0] {
-                            Type::Named(n) if n == "FileWriter" => {
-                                Some(self.host.io.file_writer_close)
-                            }
-                            Type::Named(n) if n == "FileReader" => {
-                                Some(self.host.io.file_reader_close)
-                            }
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(fid) = host {
-                    let host_ref = self.module.declare_func_in_func(fid, self.b.func);
-                    self.b.ins().call(host_ref, &[handle]);
-                } else if let Some(key) = self.method_key(
-                    &inner.ty,
-                    &TMethodRef::bare("close"),
-                    &[],
-                ) {
-                    // User/stdlib `Close.close(^self)` (e.g. resource_close.jet).
-                    if let Some(&fid) = self.func_ids.get(&key) {
-                        let func_ref = self.module.declare_func_in_func(fid, self.b.func);
-                        self.b.ins().call(func_ref, &[handle]);
-                        self.emit_trap_check()?;
-                    }
-                }
-                Ok(self.b.ins().iconst(types::I8, 0))
-            }
-            TExprKind::ResourceNew(inner) => self.lower_expr(inner),
-            TExprKind::ResourceTake(name) => {
-                // `ResourceTake` already carries `rust_name_of` (mangled place).
-                // Re-applying `local_place` double-mangles and misses the Let binding.
-                let var = self
-                    .vars
-                    .get(name)
-                    .copied()
-                    .ok_or_else(|| format!("jit resource take unknown local `{name}`"))?;
-                Ok(self.b.use_var(var))
-            }
+        } else {
+            Err("jit callable captures unsupported".to_string())
         }
     }
+    TExprKind::HostBorrowCallback { .. } => {
+        Err("jit borrowed callback adapter unsupported".to_string())
+    }
+    TExprKind::PatternMatches { subj, pattern } => {
+        let value = self.lower_expr(subj)?;
+        let enum_name = pattern
+            .enum_type
+            .as_deref()
+            .or_else(|| user_type_name(&subj.ty));
+        self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)
+    }
+    TExprKind::OptionLift2 { f, a, b } => {
+        self.lower_option_lift2(f, a, b, &expr.ty)
+    }
+    TExprKind::ClosureMethod { recv, op, args } => {
+        self.lower_closure_method(recv, op, args)
+    }
+    TExprKind::NumericMethod { recv, op } => self.lower_numeric_method(recv, op),
+    TExprKind::DistinctConvert {
+        arg,
+        op,
+        range,
+        fallible,
+        ..
+    } => {
+        let converted = self.lower_numeric_method(arg, op)?;
+        let Some((lo, hi)) = range else {
+            return Ok(converted);
+        };
+        if !*fallible {
+            return Ok(converted);
+        }
+        let lo = self.b.ins().iconst(types::I64, *lo);
+        let hi = self.b.ins().iconst(types::I64, *hi);
+        let fallible = matches!(
+            op,
+            TNumericOp::TryFrom { .. }
+                | TNumericOp::FloatToInt { .. }
+                | TNumericOp::FloatNarrow { .. }
+        );
+        let host = if fallible {
+            self.host.distinct_range_result
+        } else {
+            self.host.distinct_range
+        };
+        Ok(self.call_host(host, &[converted, lo, hi]))
+    }
+    TExprKind::UnitConvert {
+        arg,
+        scale,
+        offset,
+        rounding,
+        fallible,
+        ..
+    } => {
+        let value = self.lower_expr(arg)?;
+        let ratios = [
+            scale.num.to_string(),
+            scale.den.to_string(),
+            offset.num.to_string(),
+            offset.den.to_string(),
+        ]
+        .map(|ratio| self.runtime.heap.alloc_string(ratio))
+        .map(|id| self.b.ins().iconst(types::I64, id));
+        let mut call_args = vec![value, ratios[0], ratios[1], ratios[2], ratios[3]];
+        let host = if let Some((mode, digits)) = rounding {
+            call_args.push(self.b.ins().iconst(types::I64, *mode as i64));
+            call_args.push(self.lower_expr(digits)?);
+            self.host.unit_convert_rounded
+        } else if *fallible {
+            self.host.unit_convert_exact
+        } else {
+            self.host.unit_convert_implicit
+        };
+        let host = self.module.declare_func_in_func(host, self.b.func);
+        let call = self.b.ins().call(host, &call_args);
+        if !*fallible {
+            self.emit_trap_check()?;
+        }
+        Ok(self.b.inst_results(call)[0])
+    }
+    TExprKind::OverflowOpt {
+        prefix,
+        op,
+        lhs,
+        rhs,
+    } => {
+        let (signed, bits) = match &lhs.ty {
+            Type::IntN { signed, bits } => (*signed, *bits),
+            Type::Int => (true, 64),
+            _ => {
+                return Err(
+                    "jit overflow opt-out needs fixed-width integers".to_string()
+                )
+            }
+        };
+        let op = match *op {
+            "add" => BinOp::Add,
+            "sub" => BinOp::Sub,
+            "mul" => BinOp::Mul,
+            "div" => BinOp::Div,
+            _ => return Err("jit overflow opt-out operator unsupported".to_string()),
+        };
+        let mode = match prefix.as_str() {
+            "wrapping" => INTN_MODE_WRAPPING,
+            "saturating" => INTN_MODE_SATURATING,
+            "checked" => INTN_MODE_CHECKED,
+            _ => return Err("jit overflow opt-out mode unsupported".to_string()),
+        };
+        let left = self.lower_expr(lhs)?;
+        let right = self.lower_expr(rhs)?;
+        let right_signed =
+            !matches!(&rhs.ty, Type::IntN { signed: false, .. });
+        self.lower_intn_values(
+            op,
+            mode,
+            left,
+            right,
+            signed,
+            bits,
+            right_signed,
+        )
+    }
+    TExprKind::FnValue { kind } => match kind {
+        TFnValueKind::NamedFn {
+            name: Some(name), ..
+        } => {
+            let id = self
+                .func_ids
+                .get(name)
+                .copied()
+                .ok_or_else(|| format!("jit fn value unknown function `{name}`"))?;
+            let func_ref = self.module.declare_func_in_func(id, self.b.func);
+            Ok(self.b.ins().func_addr(types::I64, func_ref))
+        }
+        TFnValueKind::NamedFn { name: None, .. } => {
+            Err("jit rendered fn coercion unsupported".to_string())
+        }
+        TFnValueKind::Call { callee, args } => {
+            let fn_ty = callee.ty.clone();
+            let value = self.lower_expr(callee)?;
+            if matches!(
+                &callee.kind,
+                TExprKind::FnValue {
+                    kind: TFnValueKind::Interrupt { .. }
+                }
+            ) {
+                self.lower_interrupt_fn_call(value, &fn_ty, args)
+            } else {
+                self.lower_fn_call(value, &fn_ty, args)
+            }
+        }
+        TFnValueKind::Interrupt { .. } => {
+            self.lower_interrupt_callback_value(expr)
+        }
+    },
+    TExprKind::ModuleCall { form, args, .. } => match form {
+        TModuleCallForm::InlineMangled { mangled } => {
+            let func_id = self.func_ids.get(mangled).copied()
+                .ok_or_else(|| "jit module call unsupported".to_string())?;
+            let arg_vals: Result<Vec<_>, _> = args.iter().map(|arg| self.lower_call_arg(arg)).collect();
+            let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+            let call = self.b.ins().call(func_ref, &arg_vals?);
+            let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+            self.emit_trap_check()?;
+            Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+        }
+        TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+            let key = format!("{rust_mod}::{rust_fn}");
+            let func_id = self
+                .func_ids
+                .get(&key)
+                .copied()
+                .ok_or_else(|| format!("jit file-module call target missing `{key}`"))?;
+            let arg_vals: Result<Vec<_>, _> =
+                args.iter().map(|arg| self.lower_call_arg(arg)).collect();
+            let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+            let call = self.b.ins().call(func_ref, &arg_vals?);
+            let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+            self.emit_trap_check()?;
+            Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+        }
+    },
+    TExprKind::ExternCall { wrapper, args } => {
+        let wid = self.runtime.heap.alloc_string(wrapper.clone());
+        let wrapper_v = self.b.ins().iconst(types::I64, wid);
+        let list = self.call_host(self.host.coll.list_new, &[]);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        for arg in args {
+            let mut v = self.lower_expr(&arg.value)?;
+            if arg.clone {
+                // Strings: clone for Read non-scalars, matching AOT.
+                if matches!(arg.value.ty, Type::String) {
+                    v = self.call_host(self.host.str_clone, &[v]);
+                }
+            }
+            let bits = match self.meta.clif_ty(&arg.value.ty) {
+                Some(t) if t == types::F64 => self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    v,
+                ),
+                _ => v,
+            };
+            self.b.ins().call(push, &[list, bits]);
+        }
+        let result = self.call_host(self.host.ffi.call, &[wrapper_v, list]);
+        self.emit_trap_check()?;
+        match &expr.ty {
+            Type::Float | Type::Float32 => Ok(self.b.ins().bitcast(
+                types::F64,
+                Self::scalar_bitcast_memflags(),
+                result,
+            )),
+            _ => Ok(result),
+        }
+    }
+    TExprKind::Close(inner) => {
+        let handle = self.lower_expr(inner)?;
+        let host = match &inner.ty {
+            Type::Named(n) if n == "FileWriter" => Some(self.host.io.file_writer_close),
+            Type::Named(n) if n == "FileReader" => Some(self.host.io.file_reader_close),
+            Type::Apply { name, args } if name == "Resource" && args.len() == 1 => {
+                match &args[0] {
+                    Type::Named(n) if n == "FileWriter" => {
+                        Some(self.host.io.file_writer_close)
+                    }
+                    Type::Named(n) if n == "FileReader" => {
+                        Some(self.host.io.file_reader_close)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if let Some(fid) = host {
+            let host_ref = self.module.declare_func_in_func(fid, self.b.func);
+            self.b.ins().call(host_ref, &[handle]);
+        } else if let Some(key) = self.method_key(
+            &inner.ty,
+            &TMethodRef::bare("close"),
+            &[],
+        ) {
+            // User/stdlib `Close.close(^self)` (e.g. resource_close.jet).
+            if let Some(&fid) = self.func_ids.get(&key) {
+                let func_ref = self.module.declare_func_in_func(fid, self.b.func);
+                self.b.ins().call(func_ref, &[handle]);
+                self.emit_trap_check()?;
+            }
+        }
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+    TExprKind::ResourceNew(inner) => self.lower_expr(inner),
+    TExprKind::ResourceTake(name) => {
+        // `ResourceTake` already carries `rust_name_of` (mangled place).
+        // Re-applying `local_place` double-mangles and misses the Let binding.
+        let var = self
+            .vars
+            .get(name)
+            .copied()
+            .ok_or_else(|| format!("jit resource take unknown local `{name}`"))?;
+        Ok(self.b.use_var(var))
+    } } }
 
     /// `if result == { .Ok(_) -> …; .Err(_) -> … }` on Result handles.
     fn lower_option_enum_match(
@@ -16496,10 +16883,11 @@ impl LowerCtx<'_, '_> {
             TNumericOp::FloatNarrow { .. } => {
                 Ok(self.call_host(self.host.numeric_float_narrow, &[value]))
             }
-            TNumericOp::Origin(origin) => {
-                let _ = value; // AOT: let _ = recv
-                let text = origin.as_deref().unwrap_or("untracked");
-                let h = self.runtime.heap.alloc_string(text.to_string());
+            TNumericOp::Origin { origin } => {
+                // TIR already materialized the payload; evaluate the receiver
+                // for side effects, matching AOT's `let _ = recv`.
+                let _ = value;
+                let h = self.runtime.heap.alloc_string(origin.clone());
                 Ok(self.b.ins().iconst(types::I64, h))
             },
         }
@@ -16693,6 +17081,8 @@ impl LowerCtx<'_, '_> {
         if matches!(inner, Type::IntN { .. }) {
             return Ok(self.call_host(self.host.result_get_i64, &[packed]));
         }
+        // Packed Option payload: preserve the resident adapter's wrapping_sub(1)
+        // rule for the one-based carrier.
         let one = self.b.ins().iconst(types::I64, 1);
         let bits = self.b.ins().isub(packed, one);
         match clif_ty(inner) {
@@ -19969,7 +20359,8 @@ impl LowerCtx<'_, '_> {
                         Type::String => 1,
                         Type::IntN { signed: true, .. } => 2,
                         Type::IntN { signed: false, .. } => 3,
-                        Type::Float | Type::Float32 => 4,
+                        Type::Float => 4,
+                        Type::Float32 => 7,
                         _ => 0,
                     };
                     let flag = self
@@ -22928,6 +23319,9 @@ impl LowerCtx<'_, '_> {
 }
 
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
+    if let Some(fields) = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name) {
+        return fields.iter().position(|(name, _)| *name == field);
+    }
     let fields: &[&str] = match type_name {
         "Err" => &["message", "code", "cause"],
         "Range" => &["start", "end", "exclusive"],
@@ -23022,6 +23416,19 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         _ => return None,
     };
     fields.iter().position(|f| *f == field)
+}
+
+fn core_debug_layout(type_name: &str) -> Option<(Vec<String>, Vec<Type>)> {
+    let fields = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name)?;
+    let names = fields
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect::<Vec<_>>();
+    let types = names
+        .iter()
+        .map(|name| core_struct_field_type(type_name, name))
+        .collect::<Option<Vec<_>>>()?;
+    Some((names, types))
 }
 
 fn structured_record_field_place(place: &TPlace) -> Option<(&TLocal, &str)> {

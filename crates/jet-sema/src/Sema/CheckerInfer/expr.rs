@@ -2967,14 +2967,26 @@ impl<'a> Checker<'a> {
             }
         }
         let idx_ty = self.infer(index)?;
+        // D-QUAL4: user tags are transparent facts, so a tag around a refined
+        // distinct integer must not hide the interval proof from fixed-list
+        // indexing. Preserve compiler-owned tags; some carry nominal or
+        // access policy that is not a user refinement.
+        let mut index_value_ty = &idx_ty;
+        while let Type::Tagged {
+            marker: crate::AST::TagMarker::User(_),
+            inner,
+        } = index_value_ty
+        {
+            index_value_ty = inner.as_ref();
+        }
         match &base_ty {
             Type::List(inner) => {
                 *kind = IndexKind::List;
-                if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
                     return Some(Type::List(inner.clone()));
                 }
-                if idx_ty != Type::Int {
+                if index_value_ty != &Type::Int {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -2992,8 +3004,8 @@ impl<'a> Checker<'a> {
             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
             Type::FixedList { elem, len, .. } => {
                 *kind = IndexKind::List;
-                if idx_ty != Type::Int {
-                    if let Type::Named(name) = &idx_ty {
+                if index_value_ty != &Type::Int {
+                    if let Type::Named(name) = index_value_ty {
                         if let Some((lo, hi)) = self.registry.distinct_range(name) {
                             let base_is_int =
                                 matches!(self.registry.distinct_base(name), Some(Type::Int));

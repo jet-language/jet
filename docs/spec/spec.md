@@ -2643,11 +2643,11 @@ The current slice records a root `sw/bin` package closure, hangar/cache facts,
 systemd service/timer/socket units plus target wants, users/groups, filesystems and swap,
 networkd/firewall/wireless facts, Limine + CachyOS boot facts, first-party
 systemd init closure with `/sbin/init`, kernel firmware/driver facts, desktop/display-manager facts,
-terminal login facts with serial/virtual getty units and user home/profile
-projection,
+terminal login facts with serial/virtual getty units and user home and
+generation projection,
 NixOS/flake-parts/Home Manager import through `jet os import <flake-or-dir>`
 with semantic `jetos-import-facts.json` input and audited facts-only fallback,
-per-user generation profiles under `users/`, Flatpak exact reconcile plans,
+per-user generations under `users/`, Flatpak exact reconcile plans,
 permission overrides, undeclared-app removal, and AppImage runtime integration under
 `flatpak/`/`appimage/`, performance profile, sysctl, zram, sched-ext scheduler, initrd, and
 bootloader tuning proof under `performance/`, option priority
@@ -2797,11 +2797,11 @@ as `jet os vm prove`, writes one host proof per scenario host, then records
 assertion method facts, host generations, disks, and proof artifact paths.
 
 `jetos user plan|build|switch|rollback|prove <name>` is the standalone
-per-user path. It selects a `user.<name>` or `users.<name>` profile from
+per-user path. It selects a `user.<name>` or `users.<name>` generation from
 `config.jet`, renders the same `users/<name>/profile.json` artifact used by
 `jet os switch`, and builds/activates/proves it through normal named
 generations rather than a separate hidden state store. The generated
-`jetos-user-apply <name>` command applies that profile to a home directory:
+`jetos-user-apply <name>` command applies that generation to a home directory:
 projects declared files, links package binaries into `.jetos/profile/bin`,
 writes user service units under `.config/systemd/user`, and records
 `.jetos/proof/user-<name>.json`.

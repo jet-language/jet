@@ -19,7 +19,7 @@ use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::timeout_nanos;
-use crate::Codegen::TIR::lower::tracked_float_origin;
+use crate::Codegen::TIR::lower::tracked_float_slot;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
@@ -29,6 +29,7 @@ use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
@@ -821,7 +822,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             if cx.debug_linemap {
                 out.push(TStmt::LineMarker(view.candidate.line));
             }
-            let candidate = view.candidate;
+            let mut candidate = view.candidate;
             let elem_ty = match tir_recv_jet_ty(&candidate.owner, env) {
                 Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(*elem),
                 _ => None,
@@ -830,6 +831,10 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 TLocal::user(&candidate.name).through_ref()
             } else {
                 TLocal::user(&candidate.name)
+            };
+            let slot = match candidate.origin.take() {
+                Some(origin) => slot.with_origin(origin),
+                None => slot,
             };
             env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
@@ -895,6 +900,7 @@ struct SplitViewCandidate {
     owner_key: String,
     name: String,
     ty: Option<Type>,
+    origin: Option<TBindingOrigin>,
     start: i64,
     end: i64,
     single: bool,
@@ -1034,6 +1040,10 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
         owner_key,
         name: binding.name.clone(),
         ty: binding.ty.clone(),
+        origin: binding
+            .ty
+            .as_ref()
+            .and_then(|ty| crate::Codegen::TIR::lower::tracked_float_origin(binding, ty)),
         start,
         end,
         single,
@@ -1510,6 +1520,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 } else {
                     TLocal::user(&b.name).as_uninit_scalar()
                 };
+                let slot = tracked_float_slot(b, ty, slot);
                 env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
@@ -1530,7 +1541,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
             if b.arena_view {
                 let init = lower_expr(&b.init, cx, env);
-                env.bind(&b.name, TLocal::user(&b.name).through_ref(), b.ty.clone());
+                let slot = tracked_float_slot(
+                    b,
+                    b.ty.as_ref().unwrap_or(&init.ty),
+                    TLocal::user(&b.name).through_ref(),
+                );
+                env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1558,6 +1574,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     } else {
                         TLocal::user(&b.name).through_ref()
                     };
+                    let slot = tracked_float_slot(
+                        b,
+                        b.ty.as_ref().unwrap_or(&init.ty),
+                        slot,
+                    );
                     env.bind(&b.name, slot, b.ty.clone());
                     return TStmt::Let {
                         name: b.name.clone(),
@@ -1639,7 +1660,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             .unwrap_or(TExprKind::DefaultLit)
                     }),
                 };
-                env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
+                let slot = tracked_float_slot(
+                    b,
+                    b.ty.as_ref().unwrap_or(&init.ty),
+                    TLocal::user(&b.name),
+                );
+                env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1808,7 +1834,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     b.gc_promotion.is_some() || b.gc_transferred,
                 )
             };
-            let track_origin = tracked_float_origin(b, &ty, cx);
             let binding_name = if is_resource {
                 crate::Syntax::generated_name(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
@@ -1819,10 +1844,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             } else {
                 TLocal::user(&binding_name)
             };
+            let slot = tracked_float_slot(b, &ty, slot);
             env.bind(&b.name, slot, Some(ty));
-            if let Some(origin) = &track_origin {
-                env.mark_tracked_float(&b.name, origin.clone());
-            }
             if b.gc_promotion.is_some() || b.gc_transferred {
                 env.mark_gc(&b.name);
             }

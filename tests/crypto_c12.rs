@@ -69,11 +69,8 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         .filter(|diagnostic| diagnostic.severity == Severity::Error)
         .collect();
     assert!(errors.is_empty(), "typed crypto must type-check: {errors:?}");
-    assert_eq!(
-        jet_jit::try_compile_bundle(&bundle),
-        Err("run: jit result status unsupported".to_string()),
-        "resident JIT boundary changed; either prove native coverage or update the exact gap"
-    );
+    jet_jit::try_compile_bundle(&bundle)
+        .expect("typed crypto must compile natively in the resident JIT");
 
     let (aot_code, aot_stdout, aot_stderr) =
         build_and_run("jet_crypto_c12", "typed_crypto", &source);

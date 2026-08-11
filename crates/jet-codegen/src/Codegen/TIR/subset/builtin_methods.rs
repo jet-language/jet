@@ -516,9 +516,6 @@ pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumeri
     if let "is_nan" | "is_infinite" | "is_finite" = method {
         return Some(TNumericOp::Predicate(method.to_string()));
     }
-    if method == "origin" {
-        return Some(TNumericOp::Origin(None));
-    }
     // Integer bit-population queries → `((recv).{method}() as i64)`.
     if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
         let width = match src_name {

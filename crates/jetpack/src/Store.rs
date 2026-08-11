@@ -2342,7 +2342,7 @@ pub(crate) fn commit_profile_generation_root(
 }
 
 /// Opaque receipt for a durable generation owned by a consumer outside the
-/// package/profile engines. The consumer controls only its own stable key;
+/// package-generation engines. The consumer controls only its own stable key;
 /// lifecycle kind, producer, incarnation, and witness matching stay here.
 pub(crate) struct PreparedExternalConsumerRoot {
     id: Lifecycle::RootId,
@@ -2743,7 +2743,7 @@ pub(crate) fn reconcile_profile_generation_root(
             || root.phase == Lifecycle::RootPhase::Tombstoned
         {
             return Err(std::io::Error::other(
-                "profile generation root disagrees with immutable metadata",
+                "generation root disagrees with immutable metadata",
             ));
         }
         if root.phase == Lifecycle::RootPhase::Committed {
