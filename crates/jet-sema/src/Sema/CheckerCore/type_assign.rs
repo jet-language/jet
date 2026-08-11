@@ -336,6 +336,7 @@ impl<'a> Checker<'a> {
                         self.check_declared_type_rules(&substitute_type(target, &subst), span);
                         return;
                     }
+                    let (import_ns, lookup_name) = self.struct_type_name_parts(name);
                     let is_core_generic = matches!(
                         name.as_str(),
                         "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
@@ -404,12 +405,21 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     let imported_owner = self.modules.and_then(|modules| {
-                        self.imports.values().copied().find(|&idx| {
-                            modules[idx].registry.contains(name) && self.type_is_pub_in(idx, name)
-                        })
+                        if let Some(alias) = import_ns {
+                            let idx = *self.imports.get(alias)?;
+                            (modules[idx].registry.contains(lookup_name)
+                                && self.type_is_pub_in(idx, lookup_name))
+                                .then_some(idx)
+                        } else {
+                            self.imports.values().copied().find(|&idx| {
+                                modules[idx].registry.contains(lookup_name)
+                                    && self.type_is_pub_in(idx, lookup_name)
+                            })
+                        }
                     });
+                    let local_owner = import_ns.is_none() && self.registry.contains(lookup_name);
                     if !is_core_generic
-                        && !self.registry.contains(name)
+                        && !local_owner
                         && imported_owner.is_none()
                     {
                         self.diags.push(Diagnostic::error(
@@ -424,8 +434,8 @@ impl<'a> Checker<'a> {
                         let expected = self
                             .trait_reg
                             .struct_params
-                            .get(name)
-                            .or_else(|| self.trait_reg.enum_params.get(name))
+                            .get(lookup_name)
+                            .or_else(|| self.trait_reg.enum_params.get(lookup_name))
                             .cloned()
                             .or_else(|| {
                                 imported_owner.and_then(|idx| {
@@ -433,8 +443,8 @@ impl<'a> Checker<'a> {
                                         modules[idx]
                                             .trait_reg
                                             .struct_params
-                                            .get(name)
-                                            .or_else(|| modules[idx].trait_reg.enum_params.get(name))
+                                            .get(lookup_name)
+                                            .or_else(|| modules[idx].trait_reg.enum_params.get(lookup_name))
                                             .cloned()
                                     })
                                 })

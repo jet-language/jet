@@ -122,44 +122,43 @@
         install_comptime_bridge();
         let lowered = lower_after_sema(
             r#"
-$narrow :: F32.{16777217.0}
-$wide :: 2.5
-$label :: "ready"
-
 fn run() {
-    print(narrow)
-    print(wide)
-    print(label)
+    $narrow :: F32.{16777217.0}
+    $wide :: 2.5
+    $label :: "ready"
+
+    print($narrow)
+    print($wide)
+    print($label)
 }
 "#,
             "run",
         );
-        let printed: Vec<_> = lowered
+        // Marked uses lower as `CtLit`; the exact scalar literal nodes are the
+        // sema-baked initializers of the local comptime bindings.
+        let literals: Vec<_> = lowered
             .body
             .iter()
             .filter_map(|stmt| match stmt {
-                TStmt::ExprStmt(TExpr {
-                    kind: TExprKind::Print(value),
-                    ..
-                }) => Some(value.as_ref()),
+                TStmt::Let { init, .. } => Some(init),
                 _ => None,
             })
             .collect();
 
-        assert_eq!(printed.len(), 3);
-        assert_eq!(printed[0].ty, Type::Float32);
+        assert_eq!(literals.len(), 3);
+        assert_eq!(literals[0].ty, Type::Float32);
         assert!(matches!(
-            printed[0].kind,
+            literals[0].kind,
             TExprKind::FloatLit(value) if value == 16_777_216.0
         ));
-        assert_eq!(printed[1].ty, Type::Float);
+        assert_eq!(literals[1].ty, Type::Float);
         assert!(matches!(
-            printed[1].kind,
+            literals[1].kind,
             TExprKind::FloatLit(value) if value == 2.5
         ));
-        assert_eq!(printed[2].ty, Type::String);
+        assert_eq!(literals[2].ty, Type::String);
         assert!(matches!(
-            &printed[2].kind,
+            &literals[2].kind,
             TExprKind::StrLit(parts)
                 if matches!(parts.as_slice(), [TStrPart::Lit(text)] if text == "ready")
         ));
@@ -441,9 +440,9 @@ fn mk() {
 
     #[test]
     fn covers_unsafe_fn_with_ptr_ops() {
-        // c109 Phase 18: a `#Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
+        // c109 Phase 18: a `#Unsafe("reason") fn` (S58) is covered — it lowers to `unsafe fn`, and
         // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) => Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+        let src = "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) => Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
         assert!(covers_with_mem(src, "read_reg"));
     }
 
@@ -451,7 +450,7 @@ fn mk() {
     fn covers_unsafe_block_and_address_of() {
         // c109 Phase 18: a `#Unsafe("…") { … }` audited region + `mem.address_of` (the
         // inert address cast, legal outside unsafe) are covered.
-        let src = "use core.mem\nfn run() {\n cell: Int :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        let src = "use core.mem\nfn run() {\n cell :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
         assert!(covers_with_mem(src, "run"));
     }
 
@@ -564,13 +563,13 @@ fn mk() {
 
     #[test]
     fn covers_range_loop() {
-        let src = "fn f() {\n loop n; 1..3 {\n print(n)\n }\n}\n";
+        let src = "fn f() {\n loop n, 1..3 {\n print(n)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_range_loop_with_step() {
-        let src = "fn f() {\n loop n; 0..10; 2 {\n print(n)\n }\n}\n";
+        let src = "fn f() {\n loop n, 0..10, 2 {\n print(n)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -582,21 +581,21 @@ fn mk() {
 
     #[test]
     fn covers_while_form() {
-        let src = "fn f() {\n x :: 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
+        let src = "fn f() {\n x :: 0\n loop x < 3 {\n x = (x + 1)\n }\n print(x)\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_labeled_loops() {
-        let src = "fn f() {\n outer :: loop {\n loop n; 1..3 {\n if (n == 2) {\n break(outer)\n }\n }\n break\n }\n}\n";
+        let src = "fn f() {\n outer :: loop {\n loop n, 1..3 {\n if (n == 2) {\n break(outer)\n }\n }\n break\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_collection_loop_over_literal() {
-        // c109 Phase 5: `loop x; [list literal]` (ForKind::In) is now covered
+        // c109 Phase 5: `loop x, [list literal]` (ForKind::In) is now covered
         // (was deferred to this phase through Phase 4).
-        let src = "fn f() {\n loop x; [1, 2, 3] {\n print(x)\n }\n}\n";
+        let src = "fn f() {\n loop x, [1, 2, 3] {\n print(x)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -605,21 +604,21 @@ fn mk() {
     #[test]
     fn covers_enum_unit_match() {
         // A unit-variant enum, an enum literal, and an exhaustive variant match.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) => Light {\n if light == {\n Red -> { return Light.Yellow }\n Yellow -> { return Light.Green }\n Green -> { return Light.Red }\n }\n}\n";
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) => Light {\n if light == {\n .Red -> { return Light.Yellow }\n .Yellow -> { return Light.Green }\n .Green -> { return Light.Red }\n }\n}\n";
         assert!(covers(src, "next"));
     }
 
     #[test]
     fn covers_enum_payload_or_and_wildcard() {
         // Scalar-payload enum, or-pattern with a shared binding, and a wildcard slot.
-        let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) => String {\n if c == {\n Active(id) | Reconnecting(id) -> { return \"live:{id}\" }\n Idle(_) -> { return \"idle\" }\n Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
+        let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) => String {\n if c == {\n .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }\n .Idle(_) -> { return \"idle\" }\n .Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
         assert!(covers(src, "d"));
     }
 
     #[test]
     fn covers_enum_payload_range_pattern() {
         // A range pattern in a payload slot (guard-emitted) plus a wildcard slot.
-        let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) => String {\n if r == {\n Good(200..299) -> { return \"ok\" }\n Good(_) -> { return \"other\" }\n Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
+        let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) => String {\n if r == {\n .Good(200..299) -> { return \"ok\" }\n .Good(_) -> { return \"other\" }\n .Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
         assert!(covers(src, "classify"));
     }
 
@@ -635,17 +634,17 @@ fn mk() {
         // c109 (B1): a pattern switch over a NON-IDENT subject routes through the
         // exhaustive-match / fallible-match path (the subject is matched by source-text
         // equality, not just an ident name). A call subject with unit-variant arms:
-        let variant = "enum Light { Red Green Yellow }\nfn pick() => Light { return Light.Red }\nfn classify() => Int {\n if pick() == {\n Red -> { return 1 }\n Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
+        let variant = "enum Light { Red Green Yellow }\nfn pick() => Light { return Light.Red }\nfn classify() => Int {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
         assert!(covers(variant, "classify"));
         // A field-access subject with a payload-binding (optional) arm:
-        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) => Int {\n if h.val == {\n Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) => Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
         assert!(covers(payload, "f"));
     }
 
     #[test]
     fn covers_enum_local_and_literal_in_main() {
         // An enum-typed local bound from a literal, passed to a covered helper.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) => String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) => String {\n if l == {\n .Red -> { return \"r\" }\n .Yellow -> { return \"y\" }\n .Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
         assert!(covers(src, "run"));
     }
 
@@ -654,7 +653,7 @@ fn mk() {
         // c109 Phase 16: a String-payload enum. The literal's borrowed-payload
         // `.clone()` and pattern bindings are reproduced as total facts
         // (`emit_boxed_enum_arg`), so the match + getter route through the TIR.
-        let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) => String {\n if m == {\n Text(s) -> { return s }\n Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
+        let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) => String {\n if m == {\n .Text(s) -> { return s }\n .Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
         assert!(covers(src, "show"));
     }
 
@@ -663,7 +662,7 @@ fn mk() {
         // c109 Phase 16: a self-referential (boxed) enum. The `Box::new(…)` at
         // construction and the auto-deref at pattern/field sites are total facts
         // (`TEnumArg.boxed`), so a covered traversal routes through the TIR.
-        let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) => Int {\n if t == {\n Leaf(n) -> { return n }\n Node(inner) -> { return 1 }\n }\n return 0\n}\n";
+        let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) => Int {\n if t == {\n .Leaf(n) -> { return n }\n .Node(inner) -> { return 1 }\n }\n return 0\n}\n";
         assert!(covers(src, "depth"));
     }
 
@@ -685,7 +684,7 @@ fn mk() {
         // struct value flows through the variant construction + pattern binding
         // without a clone/box decision the subset can't make (the value's own move/
         // clone facts live in its sub-expression).
-        let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) => Int {\n if s == {\n Dot(p) -> { return p.x }\n Line(n) -> { return n }\n }\n return 0\n}\n";
+        let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) => Int {\n if s == {\n .Dot(p) -> { return p.x }\n .Line(n) -> { return n }\n }\n return 0\n}\n";
         assert!(covers(src, "area"));
     }
 
@@ -701,12 +700,11 @@ fn mk() {
     #[test]
     fn rejects_range_switch_over_non_ident_subject() {
         // D-IF3: a value+range mixed switch (shape D) lowers each range head to
-        // `subject >= lo && subject <= hi`, so the subject must be a scalar ident
-        // local for the emitted condition to type-check. A NON-IDENT subject (a
-        // call) with a range arm is excluded from the subset (stays on the AST
-        // path), even though the value arm alone would be fine.
+        // `subject >= lo && subject <= hi`. The shared switch subject may be a
+        // non-ident expression: it is evaluated once, then reused by each arm.
+        // This call subject therefore remains in the covered mixed-switch subset.
         let src = "fn pick() => Int { return 5 }\nfn f() => String {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
-        assert!(!covers(src, "f"));
+        assert!(covers(src, "f"));
     }
 
     // c109 Phase 5: collections. (Index/slice/index-assign coverage needs the
@@ -734,26 +732,26 @@ fn mk() {
 
     #[test]
     fn covers_single_binding_iteration() {
-        // `loop x; <list>` over a list-typed param is now covered (Phase 5).
-        let src = "fn f(xs: [Int]) {\n loop x; xs {\n print(x)\n }\n}\n";
+        // `loop x, <list>` over a list-typed param is now covered (Phase 5).
+        let src = "fn f(xs: [Int]) {\n loop x, xs {\n print(x)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_two_binding_map_iteration() {
-        // `loop k, v; <map>` (the two-binding map form) is covered.
-        let src = "fn f(m: [String: Int]) {\n loop k, v; m {\n print(\"{k}={v}\")\n }\n}\n";
+        // `loop (k, v), <map>` (the two-binding map form) is covered.
+        let src = "fn f(m: [String: Int]) {\n loop (k, v), m {\n print(\"{k}={v}\")\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_method_call_collection_iteration() {
-        // c109 Phase 22: `loop c; s.chars()` (char iteration) and `loop x in
+        // c109 Phase 22: `loop c, s.chars()` (char iteration) and `loop x in
         // s.split(…)` (the `.iter().cloned()` default) are now reproduced from
         // `emit_for_in`'s method-call branches.
-        let chars = "fn f(s: String) {\n loop c; s.chars() {\n print(c)\n }\n}\n";
+        let chars = "fn f(s: String) {\n loop c, s.chars() {\n print(c)\n }\n}\n";
         assert!(covers(chars, "f"));
-        let split = "fn f(s: String) {\n loop w; s.split(\",\") {\n print(w)\n }\n}\n";
+        let split = "fn f(s: String) {\n loop w, s.split(\",\") {\n print(w)\n }\n}\n";
         assert!(covers(split, "f"));
     }
 
@@ -769,9 +767,9 @@ fn mk() {
 
     #[test]
     fn covers_user_enum_variant_if_let_condition() {
-        // c109 (B4): `if m == Ping(n) { … } else { … }` over a covered user enum lowers
+        // c109 (B4): `if m == .Ping(n) { … } else { … }` over a covered user enum lowers
         // to `if let user_Msg::user_Ping(user_n) = m`. Single-payload variant (one bind).
-        let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) => Int {\n if m == Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
+        let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) => Int {\n if m == .Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -931,7 +929,7 @@ fn mk() {
     #[test]
     fn covers_enum_instance_method() {
         // A `when self` match in an enum method body is covered.
-        let src = "enum Dir {\n North\n South\n fn code(self) => Int {\n if self == {\n North -> { return 0 }\n South -> { return 1 }\n }\n }\n}\n";
+        let src = "enum Dir {\n North\n South\n fn code(self) => Int {\n if self == {\n .North -> { return 0 }\n .South -> { return 1 }\n }\n }\n}\n";
         assert!(covers_method(src, "Dir", "code"));
     }
 
@@ -1315,7 +1313,7 @@ fn greet() => String { return input() }
         // c109 Phase 26: ALL three free-call arg conventions route — `Read` (`&(…)`),
         // `Move` (`take`-marked), and `Mutate` (`mut place` → `&mut (…)`).
         assert!(covers(
-            "fn bump(n: &Int) { n += 1 }\nfn f() { s: Int := 1\nbump(&s) }",
+            "fn bump(n: &Int) { n += 1 }\nfn f() { s := 1\nbump(&s) }",
             "f"
         ));
         assert!(covers(
@@ -1669,7 +1667,7 @@ fn consume(ch: Receiver<Int>) => Int {
         // sema-independent construction.
         let src = "\
 fn build() => DataTree {
-    items: [DataTree] := []
+    items := []
     items.push(DataTree.Text(\"jet\"))
     items.push(DataTree.Bool(true))
     items.push(DataTree.Null)
@@ -1684,7 +1682,7 @@ fn build() => DataTree {
         // A `DataTree` param + list value type + `DataTree.Array` construction.
         let src = "\
 fn wrap(x: DataTree) => DataTree {
-    items: [DataTree] := []
+    items := []
     items.push(x)
     return DataTree.Array(items)
 }
@@ -1732,15 +1730,19 @@ fn mk(k: Kind) => Query {
 
     #[test]
     fn covers_comptime_const_in_interpolation() {
-        // c109 Phase 24: a comptime const inlines its value at the use site
-        // (`cx.consts`), so a fn interpolating a const routes.
+        install_comptime_bridge();
+        // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
+        // value into the interpolation operand, so this needs the full sema pass.
         let src = "\
 $header :: \"<html>\"
 fn wrap(s: String) => String {
-    return \"{header}: {s}\"
+    return \"{$header}: {s}\"
+}
+fn run() {
+    wrap(\"body\")
 }
 ";
-        assert!(covers(src, "wrap"));
+        assert!(covers_after_sema(src, "wrap"));
     }
 
     #[test]
@@ -1752,8 +1754,8 @@ fn wrap(s: String) => String {
         // full sema pass, hence `covers_after_sema`.
         let src = "\
 fn build() => [Int] {
-    xs: [Int] := []
-    loop i; 1..3 {
+    xs := []
+    loop i, 1..3 {
         xs.push(i * 10)
     }
     return xs
@@ -1802,10 +1804,11 @@ struct PR {
     note: String?
 }
 fn mk(p: String) => PR {
-    return PR.{file_path: p, note: None}
+    return PR.{file_path: ~p, note: None}
 }
+fn run() {}
 ";
-        assert!(covers(src, "mk"));
+        assert!(covers_after_sema(src, "mk"));
     }
 
     #[test]
@@ -1968,12 +1971,12 @@ struct Tree {
     child: Tree?
 }
 fn first_child(t: Tree) => Int {
-    kid: Tree? :: t.child
+    kid :: t.child
     if kid == {
-        Val(c) -> {
+        .Val(c) -> {
             return c.value
         }
-        None -> {
+        .None -> {
             return 0
         }
     }
@@ -2062,11 +2065,12 @@ fn run() {
     #[test]
     fn covers_field_read_and_eq_on_inlined_comptime_values() {
         // c109: a FIELD READ off a comptime-const struct value (`$pair_value ::
-        // Pair{…}`; then `pair_value.left`) and an `==` against a comptime-const enum value
-        // (`$light_value :: Light.Green`; then `light_value == Light.Green`). The const inlines to
+        // Pair{…}`; then `$pair_value.left`) and an `==` against a comptime-const enum value
+        // (`$light_value :: Light.Green`; then `$light_value == Light.Green`). The const inlines to
         // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
         // inlined struct / comparing the inlined enum is byte-identical to the AST path.
         // The Field gate now admits a non-local comptime-const receiver.
+        install_comptime_bridge();
         let src = r#"
 struct Pair {
     left: Int
@@ -2082,9 +2086,9 @@ $pair_value :: Pair.{left: 7, right: "seven"}
 $light_value :: Light.Green
 
 fn run() {
-    print("{pair_value.left}")
-    print("{pair_value.right}")
-    print("{light_value == Light.Green}")
+    print("{$pair_value.left}")
+    print("{$pair_value.right}")
+    print("{$light_value == Light.Green}")
 }
 "#;
         assert!(
@@ -2106,7 +2110,7 @@ enum Wrapper {
 }
 fn run() {
     w :: Wrapper.Some(42)
-    if w == Some(_) {
+    if w == .Some(_) {
         print(\"has value\")
     }
 }
