@@ -4029,18 +4029,27 @@ pub(crate) fn lower_method_call(
     // on the AST side, where `recv_type` is always `Some` for these).
     if let Some(numeric_name) = recv_type {
         if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
-            if let Some(op) = resolve_numeric_op(method, numeric_name) {
-                let op = match op {
-                    TNumericOp::Origin(_) => TNumericOp::Origin(match receiver {
-                        Expr::Ident(name, _) => env.tracked_float_origin(name),
-                        _ => None,
-                    }),
-                    other => other,
-                };
+            // `origin` needs the lowered receiver's binding metadata, so complete
+            // that payload here instead of letting a tier rediscover it.
+            let resolved_op = resolve_numeric_op(method, numeric_name);
+            if method == "origin" || resolved_op.is_some() {
                 let mut recv_t = lower_expr(receiver, cx, env);
                 // Sema's width is authoritative — Call/OrFallback lowering can
                 // fall back to Unit/Int and would silently widen bit queries.
                 recv_t.ty = recv_ty.clone();
+                let op = match resolved_op {
+                    Some(op) => op,
+                    None => TNumericOp::Origin {
+                        origin: recv_t
+                            .binding_origin()
+                            .map(|origin| {
+                                crate::Codegen::TIR::lower::render_tracked_float_origin(
+                                    origin, cx,
+                                )
+                            })
+                            .unwrap_or_else(|| "untracked".to_string()),
+                    },
+                };
                 let result_ty = builtin_result_ty(method, args.len(), Some(&recv_ty));
                 return TExpr {
                     ty: result_ty,

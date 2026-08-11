@@ -5935,9 +5935,7 @@ impl<'a> EvalCtx<'a> {
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }
-            TNumericOp::Origin(origin) => Ok(CtValue::Str(
-                origin.clone().unwrap_or_else(|| "untracked".to_string()),
-            )),
+            TNumericOp::Origin { origin } => Ok(CtValue::Str(origin.clone())),
             TNumericOp::CastAs { dst_rust } => {
                 // Match AOT `(({recv}) as {dst_rust})` / JIT CastAs lowering:
                 // int→float and F32↔F64 must change the CtFloat width tag so
