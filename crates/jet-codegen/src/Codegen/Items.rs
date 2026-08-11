@@ -34,6 +34,22 @@ fn enum_has_view_payload(cx: &Cx, e: &EnumDef) -> bool {
     })
 }
 
+fn nominal_shape_types(cx: &Cx, type_name: &str) -> Vec<Type> {
+    if let Some(fields) = cx.struct_fields.get(type_name) {
+        return fields.iter().map(|(_, ty)| ty.clone()).collect();
+    }
+    cx.enum_variants
+        .get(type_name)
+        .into_iter()
+        .flat_map(|variants| variants.iter())
+        .flat_map(|(_, payload)| match payload {
+            VariantPayload::Unit => Vec::new(),
+            VariantPayload::Single(ty, _) => vec![ty.clone()],
+            VariantPayload::Named(fields) => fields.iter().map(|field| field.ty.clone()).collect(),
+        })
+        .collect()
+}
+
 fn distinct_has_derive(d: &DistinctDef, name: &str) -> bool {
     d.derives.iter().any(|(derive, _)| derive == name)
 }
@@ -64,8 +80,14 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         .fields
         .iter()
         .any(|field| cx.type_contains_mutable_view(&field.ty));
+    let clone_shape: Vec<Type> = s
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_none())
+        .map(|field| field.ty.clone())
+        .collect();
     let clone_extra = if !s.type_params.is_empty() && cx.cloneable.contains(&s.name) {
-        Generics::rust_extra_clone_bounds(&s.type_params)
+        Generics::rust_extra_clone_bounds_for_types(&s.type_params, &clone_shape)
     } else {
         HashMap::new()
     };
@@ -1644,8 +1666,9 @@ pub(crate) fn emit_type_impl(
         };
     }
     let tp_use = Generics::type_param_rust_list(type_params);
+    let clone_shape = nominal_shape_types(cx, type_name);
     let impl_bounds = if cx.cloneable.contains(type_name) {
-        Generics::rust_extra_clone_bounds(type_params)
+        Generics::rust_extra_clone_bounds_for_types(type_params, &clone_shape)
     } else {
         std::collections::HashMap::new()
     };
@@ -1689,21 +1712,58 @@ pub(crate) fn emit_trait_impl(
     out: &mut String,
 ) {
     let tp_use = Generics::type_param_rust_list(type_params);
-    let tp_impl = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) {
-        let mut extra: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
+    let lowered_methods: Vec<_> = block
+        .methods
+        .iter()
+        .map(|method| {
+            if !TIR::tir_covers_trait_method(method, type_name, cx, &block.trait_name) {
+                jet_foundation::ice!(
+                    None,
+                    "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+                    method.name
+                );
+            }
+            TIR::lower_trait_method(method, type_name, cx, &block.trait_name)
+        })
+        .collect();
+    let mut extra: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if cx.cloneable.contains(type_name) {
+        let clone_shape = struct_def
+            .map(|definition| {
+                definition
+                    .fields
+                    .iter()
+                    .filter(|field| field.computed.is_none())
+                    .map(|field| field.ty.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| nominal_shape_types(cx, type_name));
+        for (name, bounds) in
+            Generics::rust_extra_clone_bounds_for_types(type_params, &clone_shape)
+        {
+            extra.entry(name).or_default().extend(bounds);
+        }
+    }
+    let param_names: std::collections::HashSet<&str> =
+        type_params.iter().map(|param| param.name.as_str()).collect();
+    for method in &lowered_methods {
+        let mut mentions = std::collections::HashSet::new();
+        for ty in &method.clone_types {
+            Generics::collect_type_param_mentions(ty, &param_names, &mut mentions);
+        }
+        for name in mentions {
+            extra.entry(name).or_default().push("Clone".to_string());
+        }
+    }
+    if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) {
         if let Some(wire) = cx.serde_wire_params.get(type_name) {
             for name in wire {
                 extra.entry(name.clone()).or_default().push(block.trait_name.clone());
             }
         }
-        for (name, bounds) in Generics::rust_extra_clone_bounds(type_params) {
-            extra.entry(name).or_default().extend(bounds);
-        }
-        Generics::rust_type_param_list(type_params, &extra)
-    } else {
-        Generics::rust_type_param_list(type_params, &std::collections::HashMap::new())
-    };
+    }
+    let tp_impl = Generics::rust_type_param_list(type_params, &extra);
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
@@ -1719,8 +1779,8 @@ pub(crate) fn emit_trait_impl(
             Traits::rust_type_name(ty)
         ));
     }
-    for m in &block.methods {
-        emit_trait_method(cx, &block.trait_name, type_name, m, out, 1);
+    for method in &lowered_methods {
+        TIR::emit_tir_func(method, cx, out);
     }
     // R11/D-SERDE2: built-in Decode derives are now ordinary Jet trait
     // impls. Keep the migration override attached to that impl instead of the
@@ -1854,7 +1914,19 @@ pub(crate) fn emit_external_trait_impl(
                 extra.entry(name.clone()).or_default().push(trait_name.to_string());
             }
         }
-        for (name, bounds) in Generics::rust_extra_clone_bounds(codec_params) {
+        let clone_shape = struct_def
+            .map(|definition| {
+                definition
+                    .fields
+                    .iter()
+                    .filter(|field| field.computed.is_none())
+                    .map(|field| field.ty.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for (name, bounds) in
+            Generics::rust_extra_clone_bounds_for_types(codec_params, &clone_shape)
+        {
             extra.entry(name).or_default().extend(bounds);
         }
         Generics::rust_type_param_list(codec_params, &extra)

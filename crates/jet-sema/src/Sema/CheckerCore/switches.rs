@@ -218,6 +218,23 @@ impl<'a> Checker<'a> {
                 self.diags
                     .push(crate::Sema::Registration::already_defined(name, name_span));
             }
+            self.record_optional_flow_narrow(name, name_span, inner);
+        }
+
+        /// Carry a proven Optional complement on the path that continues at
+        /// the current scope depth. Unlike a condition binding, this fact is
+        /// not a child-scope declaration and therefore survives the guard's
+        /// join until a later branch proves that it is no longer common.
+        pub(crate) fn record_optional_flow_narrow(
+            &mut self,
+            name: &str,
+            name_span: Span,
+            inner: Type,
+        ) {
+            if name == "_" {
+                return;
+            }
+            let depth = self.scope_depth();
             self.flow.narrow.set_at(
                 name,
                 depth,
@@ -358,6 +375,28 @@ impl<'a> Checker<'a> {
                     HashMap::new()
                 }
             }
+        }
+
+        /// D-FLOWTYPE1: facts for the path on which a single guard is false.
+        /// The caller joins this path with the arm paths through `FlowFacts`, so
+        /// the rule is about control flow, not about a particular statement
+        /// spelling. Complex boolean complements stay unknown unless their
+        /// fact can be proved without inventing an unsafe narrowing.
+        pub(crate) fn complement_condition_bindings(
+            &self,
+            conditions: &[Expr],
+        ) -> HashMap<String, Type> {
+            let mut bindings = HashMap::new();
+            for condition in conditions {
+                let Some((name, _, _)) = atomic_absent_optional_subject(condition) else {
+                    continue;
+                };
+                let Some(inner) = self.flow_narrowable_optional_inner(&name) else {
+                    continue;
+                };
+                bindings.insert(name, inner);
+            }
+            bindings
         }
     
         /// One pattern arm's contribution to the covered set — shared by the
@@ -597,11 +636,18 @@ impl<'a> Checker<'a> {
             else_body: &mut Option<Vec<Stmt>>,
             span: Span,
         ) {
-            // D-FLOWTYPE1: a statement `if x == None { ... } else { ... }`
-            // has the same present-value path as the value-position form.
-            // Normalize the condition and swap the branches at the root so
-            // the ordinary condition-binding path narrows the present arm.
-            if arms.len() == 1 && else_body.is_some() {
+            let original_conditions = arms
+                .iter()
+                .map(|arm| arm.cond.clone())
+                .collect::<Vec<_>>();
+            let mut reordered_optional_guard = false;
+            let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
+            // Normalize a single optional absence guard to the equivalent
+            // Present test so TIR carries the same proven value that sema
+            // checks. The branch swap preserves source evaluation order: only
+            // the mutually exclusive bodies change places, while the guard is
+            // evaluated once at the same point.
+            if subjectless_guard && arms.len() == 1 && else_body.is_some() {
                 self.rewrite_optional_flow_ne_none(&mut arms[0].cond);
                 if let Some((name, name_span, cond_span)) =
                     atomic_absent_optional_subject(&arms[0].cond)
@@ -620,36 +666,7 @@ impl<'a> Checker<'a> {
                             },
                             span: cond_span,
                         };
-                    }
-                }
-            }
-            let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
-            // D-FLOWTYPE1=A: statement `if x == None { … } else { … }` uses
-            // the same canonical Present-pattern fact as value `if`. Swap the
-            // two branches before checking so the proven unwrap is retained in
-            // the AST/TIR path; a sema-only narrowed scope would leave codegen
-            // with the original Optional value.
-            if subjectless_guard && arms.len() == 1 {
-                self.rewrite_optional_flow_ne_none(&mut arms[0].cond);
-                if let Some((name, name_span, cond_span)) =
-                    atomic_absent_optional_subject(&arms[0].cond)
-                {
-                    if else_body.is_some()
-                        && self.flow_narrowable_optional_inner(&name).is_some()
-                    {
-                        let original_else = else_body.take().expect("checked above");
-                        let original_then = std::mem::replace(&mut arms[0].body, Vec::new());
-                        arms[0].body = original_else;
-                        *else_body = Some(original_then);
-                        arms[0].cond = Expr::PatternTest {
-                            subject: Box::new(Expr::Ident(name.clone(), name_span)),
-                            pattern: Pattern::Present {
-                                binding: name,
-                                binding_span: name_span,
-                                span: cond_span,
-                            },
-                            span: cond_span,
-                        };
+                        reordered_optional_guard = true;
                     }
                 }
             } else {
@@ -921,22 +938,31 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            let else_narrow = else_body.as_ref().and_then(|_| {
-                arms.iter().find_map(|arm| {
-                    let (name, name_span, cond_span) =
-                        atomic_absent_optional_subject(&arm.cond)?;
-                    let inner = self.flow_narrowable_optional_inner(&name)?;
-                    Some((name, name_span, cond_span, inner))
-                })
-            });
             if let Some(body) = else_body {
                 self.flow = outside_table.clone();
-                if let Some((name, _name_span, cond_span, inner)) = else_narrow {
+                let complement = if reordered_optional_guard {
+                    HashMap::new()
+                } else {
+                    self.complement_condition_bindings(&original_conditions)
+                };
+                if !complement.is_empty() {
                     self.push_scope();
-                    let restore_moved = self.declare_condition_binding(&name, cond_span, inner);
+                    let mut restore_moved = Vec::new();
+                    let fact_span = original_conditions
+                        .iter()
+                        .find(|condition| atomic_absent_optional_subject(condition).is_some())
+                        .map(|condition| condition.span())
+                        .unwrap_or(span);
+                    for (name, ty) in complement {
+                        if let Some(restored) =
+                            self.declare_condition_binding(&name, fact_span, ty)
+                        {
+                            restore_moved.push(restored);
+                        }
+                    }
                     self.check_block(body, true);
                     self.pop_scope();
-                    if let Some((name, at)) = restore_moved {
+                    for (name, at) in restore_moved {
                         self.flow.moved.set(&name, at);
                     }
                 } else {
@@ -945,7 +971,27 @@ impl<'a> Checker<'a> {
                 paths.push(self.flow.clone());
             } else if can_skip_every_arm {
                 // Skipping every arm is itself a path through here.
-                paths.push(outside_table.clone());
+                let all_arm_paths_exit = !paths.is_empty()
+                    && paths.iter().all(|path| !path.reachable);
+                let mut fallthrough = outside_table.clone();
+                if all_arm_paths_exit {
+                    let complement = self.complement_condition_bindings(&original_conditions);
+                    if !complement.is_empty() {
+                        self.flow = fallthrough;
+                        let fact_span = original_conditions
+                            .iter()
+                            .find(|condition| {
+                                atomic_absent_optional_subject(condition).is_some()
+                            })
+                            .map(|condition| condition.span())
+                            .unwrap_or(span);
+                        for (name, ty) in complement {
+                            self.record_optional_flow_narrow(&name, fact_span, ty);
+                        }
+                        fallthrough = self.flow.clone();
+                    }
+                }
+                paths.push(fallthrough);
             }
             // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
             // on one arm and not another. `Moved::join` is a union (keeps
@@ -964,6 +1010,7 @@ impl<'a> Checker<'a> {
                     }
                     let moved_paths = paths
                         .iter()
+                        .filter(|path| path.reachable)
                         .map(|path| path.moved.contains(name))
                         .collect::<Vec<_>>();
                     if moved_paths.iter().any(|moved| *moved)

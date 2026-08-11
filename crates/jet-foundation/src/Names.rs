@@ -106,6 +106,17 @@ impl NameLedger {
         self.module(module).map(|module| module.alias.as_str())
     }
 
+    /// One stable namespace identity for a loaded source module.
+    ///
+    /// The loader alias is a Rust-name projection and can be renamed or
+    /// disambiguated when two packages contain the same leaf.  It is not a
+    /// nominal identity.  Package scope plus the stable source path is the
+    /// semantic namespace instead.
+    pub fn module_identity(&self, module: usize) -> Option<String> {
+        self.module(module)
+            .map(|module| format!("{}::{}", module.package, module.path))
+    }
+
     pub fn declare(
         &mut self,
         module: usize,
@@ -136,9 +147,27 @@ impl NameLedger {
         self.declaration(module, name).map(|declaration| declaration.path.as_str())
     }
 
+    /// Canonical identity for a nominal declared in one loaded module.
+    ///
+    /// Every semantic nominal crossing a module boundary uses this form.  It
+    /// contains package scope and source path, so equal leaf names in sibling
+    /// modules or different packages cannot compare equal merely because a
+    /// loader alias happens to match.
+    pub fn nominal_identity(&self, module: usize, name: &str) -> Option<String> {
+        self.module_identity(module)
+            .map(|module| format!("{module}::{name}"))
+    }
+
+    /// Return the owner module for a canonical nominal identity.
+    pub fn nominal_module(&self, identity: &str) -> Option<usize> {
+        let (namespace, _) = identity.rsplit_once("::")?;
+        self.modules.iter().find_map(|(module, facts)| {
+            (format!("{}::{}", facts.package, facts.path) == namespace).then_some(*module)
+        })
+    }
+
     pub fn semantic_identity(&self, module: usize, name: &str) -> Option<String> {
-        self.module_alias(module)
-            .map(|alias| format!("{alias}::{name}"))
+        self.nominal_identity(module, name)
     }
 
     pub fn record_alias(

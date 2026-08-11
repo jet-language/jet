@@ -1843,7 +1843,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
-                let qualified = crate::Codegen::TIR::imported_type_name(alias, type_name);
+                let qualified = cx.foreign_type_identity(alias, type_name).unwrap_or_else(|| {
+                    jet_foundation::ice!(
+                        None,
+                        "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
+                    )
+                });
                 return TExpr {
                     ty: if type_args.is_empty() {
                         Type::Named(qualified)
@@ -2029,9 +2034,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            let resolved_name = crate::Codegen::TIR::imported_alias_for_foreign_type(cx, type_name)
-                .map(|alias| crate::Codegen::TIR::imported_type_name(&alias, type_name))
-                .unwrap_or_else(|| type_name.clone());
+            let resolved_name = if cx.struct_fields.contains_key(type_name) {
+                type_name.clone()
+            } else {
+                cx.foreign_type_identity("", type_name).unwrap_or_else(|| {
+                    jet_foundation::ice!(
+                        None,
+                        "unqualified struct literal `{type_name}` has no canonical nominal identity (I3)"
+                    )
+                })
+            };
             let resolved_ty = if type_args.is_empty() {
                 Type::Named(resolved_name.clone())
             } else {

@@ -371,6 +371,17 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     cx,
                 ) && fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
+            // The bare imported form is admitted only when its leaf resolves to one
+            // canonical foreign identity. Ambiguous leaves stay out of the subset.
+            if import_ns.is_none()
+                && !core_email_struct
+                && !core_cbor_struct
+                && !core_encoding_struct
+                && !core_xml_struct
+                && foreign_struct_lit_in_subset(type_name, type_args, None, cx)
+            {
+                return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+            }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`
             // → the turbofish `user_Pair::<T> { … }`). The base must be a covered struct
             // and every type arg covered/type-var (`is_covered_generic_struct_ty`). The
@@ -385,17 +396,6 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 ) {
                     return false;
                 }
-                return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
-            }
-            // c109: an UNqualified cross-module FOREIGN struct literal (`Note { … }` with
-            // no `import_ns` — sema resolves the bare imported type, no `use` of the type
-            // needed). The AST `emit_struct_lit` plain branch now prefixes the foreign
-            // module (`{root}user_<mod>::user_<Note>`) via `user_type_apply_rust`,
-            // reproduced at lowering. Cover it when the type is a registered foreign type
-            // (`cx.foreign_types`); the field VALUES are checked in-subset below. (A
-            // foreign type is NOT a `is_covered_struct_ty` — its fields live in another
-            // module — so this needs its own admission.)
-            if foreign_type_module(type_name, cx).is_some() {
                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
             // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse) — the

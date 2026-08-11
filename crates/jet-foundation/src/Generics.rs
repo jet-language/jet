@@ -713,23 +713,77 @@ pub fn e0909(chain: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// Extra Rust `Clone` bounds for every type parameter (list indexing, derived struct copies).
-pub fn rust_extra_clone_bounds(params: &[TypeParam]) -> HashMap<String, Vec<String>> {
-    params
-        .iter()
-        .map(|p| {
-            let bounds = if p
-                .bounds
-                .iter()
-                .any(|b| matches!(b.as_str(), IO_READER | IO_WRITER))
-            {
-                Vec::new()
-            } else {
-                vec!["Clone".to_string()]
-            };
-            (p.name.clone(), bounds)
-        })
+/// Extra Rust `Clone` bounds for the type parameters that a nominal shape
+/// actually reaches. The walk is recursive, so `Outer<List<Inner<T>>>`
+/// constrains `T` without constraining a phantom parameter. The decision is
+/// structural; it never guesses from a library trait name. Function pointers
+/// and shared handles clone their representation without cloning their payload
+/// type, so their nested type arguments do not create a Rust bound.
+pub fn rust_extra_clone_bounds_for_types(
+    params: &[TypeParam],
+    types: &[Type],
+) -> HashMap<String, Vec<String>> {
+    let param_names: HashSet<&str> = params.iter().map(|param| param.name.as_str()).collect();
+    let mut required = HashSet::new();
+    for ty in types {
+        collect_clone_type_param_mentions(ty, &param_names, &mut required);
+    }
+    required
+        .into_iter()
+        .map(|name| (name, vec!["Clone".to_string()]))
         .collect()
+}
+
+/// Collect type parameters whose values must themselves implement `Clone` for
+/// the enclosing Rust value to clone. This follows representation composition,
+/// not source names: ordinary containers and nominal applications recurse,
+/// while a function pointer or a shared handle clones its own handle/pointer.
+pub fn collect_clone_type_param_mentions(
+    ty: &Type,
+    param_names: &HashSet<&str>,
+    out: &mut HashSet<String>,
+) {
+    match ty {
+        Type::Named(n) => {
+            if param_names.contains(n.as_str()) {
+                out.insert(n.clone());
+            }
+        }
+        Type::Shared(_) | Type::Fn { .. } | Type::TraitObject(_) | Type::ComputeDim(_) => {}
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::Quantity { base: inner, .. } => {
+            collect_clone_type_param_mentions(inner, param_names, out)
+        }
+        Type::Union(members) => {
+            for member in members {
+                collect_clone_type_param_mentions(member, param_names, out);
+            }
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            collect_clone_type_param_mentions(key, param_names, out);
+            collect_clone_type_param_mentions(value, param_names, out);
+        }
+        Type::Apply { args, .. } => {
+            for arg in args {
+                collect_clone_type_param_mentions(arg, param_names, out);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                collect_clone_type_param_mentions(field, param_names, out);
+            }
+        }
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => {}
+    }
 }
 
 /// Extra Rust `JetShow` bounds for generic `JetShow` impls.
@@ -801,6 +855,7 @@ pub fn collect_type_param_mentions(
                 collect_type_param_mentions(r, param_names, out);
             }
         }
+        Type::Quantity { base, .. } => collect_type_param_mentions(base, param_names, out),
         _ => {}
     }
 }

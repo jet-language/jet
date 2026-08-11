@@ -46,55 +46,6 @@ fn is_core_view_generic(ty: &Type) -> bool {
 }
 
 impl<'a> Checker<'a> {
-    /// One nominal identity rule for local and imported user types. An imported
-    /// expression carries `alias.Type`, while a declared signature carries the
-    /// bare `Type`; they are equal only when both names resolve to the same
-    /// owning module. The same rule is used by return checking below so a raw
-    /// `Type` inequality cannot reintroduce E0113 after this check succeeds.
-    pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
-        match (want, got) {
-            (Type::Named(want), Type::Named(got)) => {
-                let (want_ns, want_name) = self.struct_type_name_parts(want);
-                let (got_ns, got_name) = self.struct_type_name_parts(got);
-                want_name == got_name
-                    && matches!(
-                        (
-                            self.struct_owner_module(want_name, want_ns),
-                            self.struct_owner_module(got_name, got_ns),
-                        ),
-                        (Some(want_mod), Some(got_mod)) if want_mod == got_mod
-                    )
-            }
-            (
-                Type::Apply {
-                    name: want_name,
-                    args: want_args,
-                },
-                Type::Apply {
-                    name: got_name,
-                    args: got_args,
-                },
-            ) => {
-                let (want_ns, want_name) = self.struct_type_name_parts(want_name);
-                let (got_ns, got_name) = self.struct_type_name_parts(got_name);
-                want_name == got_name
-                    && want_args.len() == got_args.len()
-                    && matches!(
-                        (
-                            self.struct_owner_module(want_name, want_ns),
-                            self.struct_owner_module(got_name, got_ns),
-                        ),
-                        (Some(want_mod), Some(got_mod)) if want_mod == got_mod
-                    )
-                    && want_args
-                        .iter()
-                        .zip(got_args)
-                        .all(|(want, got)| want == got || self.nominal_type_identity(want, got))
-            }
-            _ => false,
-        }
-    }
-
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             self.warn_soft_public_declared_type(ty, span);
             self.check_declared_type_rules(ty, span);
@@ -251,6 +202,16 @@ impl<'a> Checker<'a> {
                     if self.registry.contains(n) {
                         return;
                     }
+                    // Canonical imported nominals are already resolved. Keep the
+                    // fully-qualified identity through validation; only the leaf
+                    // is projected for the owning module's registry lookup.
+                    if let Some((namespace, leaf)) = n.rsplit_once("::") {
+                        if let Some(owner) = self.struct_owner_module(leaf, Some(namespace)) {
+                            if owner == self.module_idx || self.type_is_pub_in(owner, leaf) {
+                                return;
+                            }
+                        }
+                    }
                     if let Some((module, leaf)) = n.split_once('.') {
                         if let (Some(modules), Some(&index)) =
                             (self.modules, self.imports.get(module))
@@ -267,8 +228,15 @@ impl<'a> Checker<'a> {
                         let found = self
                             .imports
                             .values()
-                            .any(|&idx| mods[idx].registry.contains(n) && self.type_is_pub_in(idx, n));
-                        if found {
+                            .copied()
+                            .filter(|&idx| {
+                                mods[idx].registry.contains(n) && self.type_is_pub_in(idx, n)
+                            })
+                            .collect::<std::collections::HashSet<_>>();
+                        // A bare imported leaf is a source lookup convenience only when it
+                        // has one visible owner. Keeping it unresolved when two modules export
+                        // the same leaf would create a second, collision-prone nominal identity.
+                        if found.len() == 1 && self.struct_owner_module(n, None).is_some() {
                             return;
                         }
                     }
@@ -294,14 +262,23 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 Type::Apply { name, args } => {
-                    if name == "Any" {
+                    let (lookup_name, canonical_owner) = name
+                        .rsplit_once("::")
+                        .map_or((name.as_str(), None), |(_namespace, leaf)| {
+                            (leaf, self.name_ledger.nominal_module(name))
+                        });
+                    if lookup_name == "Any" {
                         self.diags.push(no_any_type(span));
                         for arg in args {
                             self.check_declared_type_rules(arg, span);
                         }
                         return;
                     }
-                    if let Some((params, target)) = self.registry.type_alias(&name) {
+                    let local_alias = canonical_owner.is_none()
+                        && !name.contains("::")
+                        && !name.contains('.');
+                    if local_alias {
+                        if let Some((params, target)) = self.registry.type_alias(lookup_name) {
                         if params.len() != args.len() {
                             self.diags.push(Diagnostic::error(
                                 "E0119",
@@ -335,10 +312,15 @@ impl<'a> Checker<'a> {
                             .collect();
                         self.check_declared_type_rules(&substitute_type(target, &subst), span);
                         return;
+                        }
                     }
-                    let is_core_generic = matches!(
-                        name.as_str(),
-                        "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
+                    let unqualified_core = canonical_owner.is_none()
+                        && !name.contains("::")
+                        && !name.contains('.');
+                    let is_core_generic = unqualified_core
+                        && matches!(
+                            lookup_name,
+                            "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
                             // D-COLLBREADTH1=A: Set<T> and Deque<T>.
                             | "Set" | "Bag" | "Deque"
                             // D-ITERTOOLS1=A: expanded generic collection handles.
@@ -364,9 +346,10 @@ impl<'a> Checker<'a> {
                             | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
                             | Syntax::TYPE_SHARED_WEAK
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
-                    ) || is_core_view_generic(ty);
-                    if matches!(name.as_str(), "Vec" | "Matrix") {
-                        let expected = if name == "Vec" { 1 } else { 2 };
+                        )
+                        || (unqualified_core && is_core_view_generic(ty));
+                    if is_core_generic && matches!(lookup_name, "Vec" | "Matrix") {
+                        let expected = if lookup_name == "Vec" { 1 } else { 2 };
                         if args.len() != expected
                             || args
                                 .iter()
@@ -379,7 +362,7 @@ impl<'a> Checker<'a> {
                                     if expected == 1 { "" } else { "s" }
                                 ),
                                 "compute aliases carry fixed dimensions that sema checks before codegen".to_string(),
-                                if name == "Vec" {
+                                if lookup_name == "Vec" {
                                     "write `Vec<N>` with one non-negative integer".to_string()
                                 } else {
                                     "write `Matrix<M, N>` with two non-negative integers".to_string()
@@ -389,7 +372,8 @@ impl<'a> Checker<'a> {
                         }
                         return;
                     }
-                    if name == "ExpiringSecret"
+                    if is_core_generic
+                        && lookup_name == "ExpiringSecret"
                         && (args.len() != 1
                             || !args.first().is_some_and(
                                 crate::Sema::Diagnostics::is_expiring_secret_member_type,
@@ -403,42 +387,75 @@ impl<'a> Checker<'a> {
                             Some(span),
                         ));
                     }
-                    let imported_owner = self.modules.and_then(|modules| {
-                        self.imports.values().copied().find(|&idx| {
-                            modules[idx].registry.contains(name) && self.type_is_pub_in(idx, name)
-                        })
-                    });
+                    let explicit_import_owner = name
+                        .rsplit_once('.')
+                        .and_then(|(namespace, leaf)| {
+                            self.struct_owner_module(leaf, Some(namespace))
+                        });
+                    let mut imported_owners = std::collections::HashSet::new();
+                    if let Some(owner) = canonical_owner {
+                        if owner != self.module_idx
+                            && self
+                                .modules
+                                .is_some_and(|modules| modules[owner].registry.contains(lookup_name))
+                            && self.type_is_pub_in(owner, lookup_name)
+                        {
+                            imported_owners.insert(owner);
+                        }
+                    } else if let Some(owner) = explicit_import_owner {
+                        if owner != self.module_idx && self.type_is_pub_in(owner, lookup_name) {
+                            imported_owners.insert(owner);
+                        }
+                    } else if let Some(modules) = self.modules {
+                        for &idx in self.imports.values() {
+                            if modules[idx].registry.contains(lookup_name)
+                                && self.type_is_pub_in(idx, lookup_name)
+                            {
+                                imported_owners.insert(idx);
+                            }
+                        }
+                    }
+                    let imported_owner = (imported_owners.len() == 1)
+                        .then(|| *imported_owners.iter().next().unwrap());
+                    let local_type = self.registry.contains(lookup_name)
+                        && match canonical_owner {
+                            Some(owner) => owner == self.module_idx,
+                            None => !name.contains("::") && !name.contains('.'),
+                        };
                     if !is_core_generic
-                        && !self.registry.contains(name)
+                        && !local_type
                         && imported_owner.is_none()
                     {
                         self.diags.push(Diagnostic::error(
                             "E0119",
-                            format!("there's no type called `{}`", name),
+                        format!("there's no type called `{}`", name),
                             "generic types must name a struct or enum you defined".to_string(),
                             "check the spelling, or define the type first".to_string(),
                             Some(span),
                         ));
                     }
                     if !is_core_generic {
-                        let expected = self
-                            .trait_reg
-                            .struct_params
-                            .get(name)
-                            .or_else(|| self.trait_reg.enum_params.get(name))
-                            .cloned()
-                            .or_else(|| {
-                                imported_owner.and_then(|idx| {
-                                    self.modules.and_then(|modules| {
-                                        modules[idx]
-                                            .trait_reg
-                                            .struct_params
-                                            .get(name)
-                                            .or_else(|| modules[idx].trait_reg.enum_params.get(name))
-                                            .cloned()
-                                    })
+                        let expected_owner = canonical_owner
+                            .or(imported_owner)
+                            .or(local_type.then_some(self.module_idx));
+                        let expected = expected_owner.and_then(|idx| {
+                            if idx == self.module_idx {
+                                self.trait_reg
+                                    .struct_params
+                                    .get(lookup_name)
+                                    .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+                                    .cloned()
+                            } else {
+                                self.modules.and_then(|modules| {
+                                    modules[idx]
+                                        .trait_reg
+                                        .struct_params
+                                        .get(lookup_name)
+                                        .or_else(|| modules[idx].trait_reg.enum_params.get(lookup_name))
+                                        .cloned()
                                 })
-                            });
+                            }
+                        });
                         if let Some(params) = expected {
                             if params.len() != args.len() {
                                 self.diags.push(Diagnostic::error(
@@ -478,7 +495,7 @@ impl<'a> Checker<'a> {
                         // D-MEM-VIEWRET1: `View<str>` is the named string-view
                         // spelling. `str` is not a free-standing type — only
                         // this View argument slot may name it.
-                        if name == "View"
+                        if lookup_name == "View"
                             && matches!(arg, Type::Named(inner) if inner == "str")
                         {
                             continue;
@@ -645,14 +662,7 @@ impl<'a> Checker<'a> {
         /// Returns true when a diagnostic was emitted (the mismatch is already
         /// reported); callers may add a context-specific error otherwise.
         ///
-        /// File-module imports can spell one struct both as a bare name (the
-        /// type in an imported function signature) and as `alias.Name` (a
-        /// qualified constructor). Compare those spellings by their owning
-        /// module before the structural mismatch paths run.
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
-            if want != got && self.nominal_type_identity(want, got) {
-                return false;
-            }
             if want == got {
                 if !Type::obligations_satisfy(want, got) {
                     self.diags.push(Diagnostic::error(
@@ -670,9 +680,6 @@ impl<'a> Checker<'a> {
                     return true;
                 }
                 return false;
-            }
-            if self.same_struct_type_identity(want, got) {
-                return true;
             }
             if let (
                 Type::Fn {
@@ -808,208 +815,6 @@ impl<'a> Checker<'a> {
             false
         }
 
-        fn same_struct_type_identity(&self, want: &Type, got: &Type) -> bool {
-            if want == got {
-                return true;
-            }
-            match (want, got) {
-                (Type::Named(want_name), Type::Named(got_name)) => {
-                    self.same_struct_name_identity(want_name, got_name)
-                }
-                (
-                    Type::Apply {
-                        name: want_name,
-                        args: want_args,
-                    },
-                    Type::Apply {
-                        name: got_name,
-                        args: got_args,
-                    },
-                ) => {
-                    want_args.len() == got_args.len()
-                        && self.same_struct_name_identity(want_name, got_name)
-                        && want_args
-                            .iter()
-                            .zip(got_args)
-                            .all(|(want, got)| self.same_struct_type_identity(want, got))
-                }
-                (Type::List(want), Type::List(got))
-                | (Type::Shared(want), Type::Shared(got))
-                | (Type::Option(want), Type::Option(got)) => {
-                    self.same_struct_type_identity(want, got)
-                }
-                (
-                    Type::Result {
-                        ok: want_ok,
-                        err: want_err,
-                    },
-                    Type::Result {
-                        ok: got_ok,
-                        err: got_err,
-                    },
-                ) => {
-                    self.same_struct_type_identity(want_ok, got_ok)
-                        && self.same_struct_type_identity(want_err, got_err)
-                }
-                (
-                    Type::Map {
-                        key: want_key,
-                        value: want_value,
-                        ..
-                    },
-                    Type::Map {
-                        key: got_key,
-                        value: got_value,
-                        ..
-                    },
-                ) => {
-                    self.same_struct_type_identity(want_key, got_key)
-                        && self.same_struct_type_identity(want_value, got_value)
-                }
-                (
-                    Type::FixedList {
-                        elem: want_elem,
-                        len: want_len,
-                        len_symbol: want_symbol,
-                    },
-                    Type::FixedList {
-                        elem: got_elem,
-                        len: got_len,
-                        len_symbol: got_symbol,
-                    },
-                ) => {
-                    want_len == got_len
-                        && want_symbol == got_symbol
-                        && self.same_struct_type_identity(want_elem, got_elem)
-                }
-                (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {
-                    want_fields.len() == got_fields.len()
-                        && want_fields.iter().zip(got_fields).all(
-                            |((want_name, want), (got_name, got))| {
-                                want_name == got_name
-                                    && self.same_struct_type_identity(want, got)
-                            },
-                        )
-                }
-                (Type::Union(want_members), Type::Union(got_members)) => {
-                    if want_members.len() != got_members.len() {
-                        return false;
-                    }
-                    let mut matched = vec![false; got_members.len()];
-                    for want_member in want_members {
-                        let Some(index) = got_members.iter().enumerate().position(
-                            |(index, got_member)| {
-                                !matched[index]
-                                    && self.same_struct_type_identity(want_member, got_member)
-                            },
-                        ) else {
-                            return false;
-                        };
-                        matched[index] = true;
-                    }
-                    true
-                }
-                (
-                    Type::Fn {
-                        params: want_params,
-                        ret: want_ret,
-                        param_contract: want_contract,
-                        ..
-                    },
-                    Type::Fn {
-                        params: got_params,
-                        ret: got_ret,
-                        param_contract: got_contract,
-                        ..
-                    },
-                ) => {
-                    want_contract == got_contract
-                        && want_params.len() == got_params.len()
-                        && want_params
-                            .iter()
-                            .zip(got_params)
-                            .all(|(want, got)| self.same_struct_type_identity(want, got))
-                        && match (want_ret, got_ret) {
-                            (None, None) => true,
-                            (Some(want), Some(got)) => {
-                                self.same_struct_type_identity(want, got)
-                            }
-                            _ => false,
-                        }
-                }
-                (
-                    Type::Tagged {
-                        marker: want_marker,
-                        inner: want_inner,
-                    },
-                    Type::Tagged {
-                        marker: got_marker,
-                        inner: got_inner,
-                    },
-                ) if matches!(
-                    want_marker,
-                    crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
-                ) && matches!(
-                    got_marker,
-                    crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
-                ) => {
-                    want_marker == got_marker
-                        && self.same_struct_type_identity(want_inner, got_inner)
-                }
-                (Type::Tagged { marker, inner }, got)
-                    if !matches!(
-                        marker,
-                        crate::AST::TagMarker::Internal(
-                            crate::AST::InternalTag::CoreCryptoNominal
-                        )
-                    ) =>
-                {
-                    self.same_struct_type_identity(inner, got)
-                }
-                (want, Type::Tagged { marker, inner })
-                    if !matches!(
-                        marker,
-                        crate::AST::TagMarker::Internal(
-                            crate::AST::InternalTag::CoreCryptoNominal
-                        )
-                    ) =>
-                {
-                    self.same_struct_type_identity(want, inner)
-                }
-                (
-                    Type::Quantity {
-                        base: want_base,
-                        dimension: want_dimension,
-                    },
-                    Type::Quantity {
-                        base: got_base,
-                        dimension: got_dimension,
-                    },
-                ) => {
-                    want_dimension == got_dimension
-                        && self.same_struct_type_identity(want_base, got_base)
-                }
-                _ => false,
-            }
-        }
-
-        fn same_struct_name_identity(&self, want: &str, got: &str) -> bool {
-            let identity = |name: &str| {
-                let (import_ns, type_name) = name
-                    .rsplit_once('.')
-                    .map_or((None, name), |(alias, leaf)| (Some(alias), leaf));
-                let owner = self.struct_owner_module(type_name, import_ns)?;
-                self.struct_fields_of(owner, type_name)
-                    .map(|_| (owner, type_name.to_owned()))
-            };
-            match (identity(want), identity(got)) {
-                (Some((want_owner, want_name)), Some((got_owner, got_name))) => {
-                    want_owner == got_owner && want_name == got_name
-                }
-                _ => false,
-            }
-        }
-    
         pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {
             self.diags.push(Diagnostic::error(
                 "E0108",

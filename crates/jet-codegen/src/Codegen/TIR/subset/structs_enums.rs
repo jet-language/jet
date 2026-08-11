@@ -70,7 +70,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     // clones a by-ref subject regardless of `cx.cloneable`) is valid. The construction
     // side has no reachable cross-module literal syntax (`note.NoteType.User` is E0107),
     // so a foreign enum is only ever MATCHED / passed, never constructed in another module.
-    let is_foreign = cx.foreign_types.contains_key(name);
+    let is_foreign = super::types::foreign_type_module(name, cx).is_some();
     let Some(variants) = cx.enum_variants.get(name) else {
         return false;
     };
@@ -184,10 +184,7 @@ pub(crate) fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Named(name) = ty else {
         return false;
     };
-    // Sema may retain the import alias on a resolved foreign nominal. The
-    // coverage table stores imported shapes by leaf, while the foreign-value
-    // predicate owns the alias check; use that one identity rule here too.
-    if name.rsplit_once('.').is_some() || cx.foreign_types.contains_key(name) {
+    if super::types::foreign_type_module(name, cx).is_some() {
         return is_covered_foreign_value_ty(ty, cx);
     }
     struct_is_covered(name, cx, &mut HashSet::new())
@@ -210,7 +207,7 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
         crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
-        || cx.foreign_types.contains_key(name)
+        || super::types::foreign_type_module(name, cx).is_some()
         || net_handle_rust_type(name).is_some()
         || is_type_var
         || struct_is_generic(name, cx)
@@ -274,7 +271,7 @@ pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>)
         crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
-        || cx.foreign_types.contains_key(name)
+        || super::types::foreign_type_module(name, cx).is_some()
         || net_handle_rust_type(name).is_some()
         || is_type_var
     {

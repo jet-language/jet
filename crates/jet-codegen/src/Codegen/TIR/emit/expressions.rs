@@ -2216,23 +2216,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Type::Apply { name, args } if !args.is_empty() => {
                     let head = match cx.foreign_types.get(name) {
                         Some(rust_mod) => {
-                            let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                            let leaf = crate::Codegen::nominal_leaf(name);
                             format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(leaf))
                         }
                         None => {
-                            if let Some((alias, leaf)) = name.split_once('.') {
-                                cx.import_mods.get(alias).map_or_else(
-                                    || user_type_rust(name),
-                                    |rust_mod| {
-                                        format!(
-                                            "{}{}::{}",
-                                            cx.root_prefix,
-                                            rust_mod,
-                                            user_type_rust(leaf)
-                                        )
-                                    },
-                                )
-                            } else if matches!(name.as_str(), "DkimConfig" | "SMTPConfig") {
+                            if matches!(name.as_str(), "DkimConfig" | "SMTPConfig") {
                                 format!("{}jet_email::{}", cx.root_prefix, name)
                             } else {
                                 user_type_rust(name)

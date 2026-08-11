@@ -725,7 +725,12 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
         return format!("{}JetServiceError::{}", cx.root_prefix, variant);
     }
     let type_prefix = match cx.foreign_types.get(type_name) {
-        Some(rust_mod) => format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(type_name)),
+        Some(rust_mod) => format!(
+            "{}{}::{}",
+            cx.root_prefix,
+            rust_mod,
+            user_type_rust(crate::Codegen::nominal_leaf(type_name))
+        ),
         None => user_type_rust(type_name),
     };
     format!("{}::{}", type_prefix, mangle_variant(variant))
