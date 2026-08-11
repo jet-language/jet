@@ -371,7 +371,10 @@ fn sql_bind_generated_project_executes_typed_fields() {
         "jet inspect bind sql schema.sql --type User",
         r#"
 fn run() {
-    user :: User.{ id: 7, name: "Ada", active: true, born: .None, opened: .None, created: .None, data: [U8].{ U8.{65}, U8.{66} } }
+    bytes := [U8].{}
+    bytes.push(U8.{65})
+    bytes.push(U8.{66})
+    user :: User.{ id: 7, name: "Ada", active: true, born: .None, opened: .None, created: .None, data: bytes }
     print(user.id)
     print(user.name)
     print(user.active)
@@ -545,7 +548,11 @@ fn proto_bind_generated_project_executes_typed_fields() {
         "jet inspect bind proto repo.proto --type Repo",
         r#"
 fn run() {
-    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: [U8].{ U8.{74}, U8.{101}, U8.{116} }, created: .None, ttl: .None }
+    payload := [U8].{}
+    payload.push(U8.{74})
+    payload.push(U8.{101})
+    payload.push(U8.{116})
+    repo :: Repo.{ name: "jet", stars: 4, active: true, payload: payload, created: .None, ttl: .None }
     print(repo.name)
     print(repo.stars)
     print(repo.active)
