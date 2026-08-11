@@ -402,7 +402,7 @@ fn sql_bind_generated_project_executes_typed_fields() {
 use core.encoding.json as json
 
 fn run() {
-    canonical := "{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-01-02\",\"opened\":\"03:04:05\",\"created\":\"2024-01-02T03:04:05Z\",\"price\":\"12.34\",\"data\":[65,66]}"
+    canonical := "{{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-01-02\",\"opened\":\"03:04:05\",\"created\":\"2024-01-02T03:04:05Z\",\"price\":\"12.34\",\"data\":[65,66]}}"
     wire := json.parse(canonical) ?? panic("parse")
     user := wire.decode<User>() ?? panic("decode")
     encoded := user.encode()
@@ -467,7 +467,10 @@ fn run() {
             r#"struct Catalog {
     #Rename("$content") content: DataTree"#,
             r#"struct CatalogBook {
-    #Rename("$content") content: DataTree"#,
+    #Rename("@id") id: String
+    #Rename("$content") content: DataTree
+    title: String
+}"#,
             "book: CatalogBook",
             "#Rename(\"@id\") id: String",
             "title: String",
@@ -644,7 +647,7 @@ fn proto_bind_generated_project_executes_typed_fields() {
 use core.encoding.json as json
 
 fn run() {
-    canonical := "{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-01-02T03:04:05Z\",\"ttl\":7000000000}"
+    canonical := "{{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-01-02T03:04:05Z\",\"ttl\":7000000000}}"
     wire := json.parse(canonical) ?? panic("parse")
     repo := wire.decode<Repo>() ?? panic("decode")
     encoded := repo.encode()
