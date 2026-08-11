@@ -7,6 +7,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPanicLoc;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Diagnostics::Span;
+use std::collections::HashMap;
 
 pub(crate) const RESOURCE_CLEANUP_MARKER: &str = "__JET_RESOURCE_CLEANUP__";
 /// A stream send that observes a closed consumer returns from the generator
@@ -29,6 +30,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         split_view_handles: env.split_view_handles.clone(),
         cloned_types: env.cloned_types.clone(),
         send_fn_locals: env.send_fn_locals.clone(),
+        binder_refs: HashMap::new(),
     }
 }
 

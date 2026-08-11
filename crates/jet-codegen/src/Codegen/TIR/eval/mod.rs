@@ -2313,6 +2313,20 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                         .map(|parameter| (parameter.call_label().to_string(), parameter.zone))
                         .collect()
                 }),
+                call_metadata: Some(crate::AST::FunctionCallMetadata {
+                    names: function.params.iter().map(|parameter| parameter.name.clone()).collect(),
+                    defaults: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.default.as_deref().cloned())
+                        .collect(),
+                    variadic: function.params.iter().map(|parameter| parameter.variadic).collect(),
+                    conventions: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.convention)
+                        .collect(),
+                }),
             },
         );
     }
