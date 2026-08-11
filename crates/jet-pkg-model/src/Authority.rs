@@ -790,11 +790,10 @@ impl AuthorityResolver {
         if !canonical.starts_with(&self.root) {
             return Err(AuthorityError::Escapes(directory.path.clone()));
         }
-        let relative = canonical
-            .strip_prefix(&self.root)
-            .map_err(|_| AuthorityError::Escapes(canonical))?
-            .to_string_lossy()
-            .replace(std::path::MAIN_SEPARATOR, "/");
+        let relative = match canonical.strip_prefix(&self.root) {
+            Ok(relative) => relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"),
+            Err(_) => return Err(AuthorityError::Escapes(canonical)),
+        };
         Ok(if relative.is_empty() {
             ".".to_string()
         } else {
