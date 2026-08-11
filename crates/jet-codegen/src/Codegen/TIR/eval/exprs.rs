@@ -1,5 +1,6 @@
 //! Exhaustive TExprKind evaluation (#777).
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
@@ -739,6 +740,94 @@ fn ambient_http_json_decode_error(span: crate::Diagnostics::Span) -> Result<CtVa
         span,
     )
     .unwrap_or_else(|| Err(unsupported("HTTP JSON decode error adapter", span)))
+}
+
+struct EvalExprWorklistCache {
+    values: HashMap<usize, VecDeque<CtValue>>,
+}
+
+thread_local! {
+    static EVAL_EXPR_WORKLIST_CACHE: RefCell<Vec<EvalExprWorklistCache>> =
+        RefCell::new(Vec::new());
+}
+
+fn eval_expr_key(expr: &TExpr) -> usize {
+    expr as *const TExpr as usize
+}
+
+fn eval_expr_cache_begin() {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .push(EvalExprWorklistCache { values: HashMap::new() });
+    });
+}
+
+fn eval_expr_cache_end() {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache.borrow_mut().pop();
+    });
+}
+
+fn eval_expr_cache_take(expr: &TExpr) -> Option<CtValue> {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let current = cache.last_mut()?;
+        let key = eval_expr_key(expr);
+        let (value, empty) = {
+            let values = current.values.get_mut(&key)?;
+            let value = values.pop_front();
+            (value, values.is_empty())
+        };
+        if empty {
+            current.values.remove(&key);
+        }
+        value
+    })
+}
+
+fn eval_expr_cache_put(expr: &TExpr, value: CtValue) {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .last_mut()
+            .expect("expression worklist cache is not active")
+            .values
+            .entry(eval_expr_key(expr))
+            .or_default()
+            .push_back(value);
+    });
+}
+
+/// These are the strict children on the evaluator's hot recursive spine. They
+/// are scheduled in source order by `eval_expr_worklist`; lazy/control-flow
+/// nodes deliberately remain opaque and retain their existing evaluator logic.
+fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
+    match &expr.kind {
+        TExprKind::Binary { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::Unary { operand, .. } => vec![operand.as_ref()],
+        TExprKind::BuiltinMethod { recv, op, args }
+            if !matches!(
+                op,
+                crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
+                    | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
+                    | crate::Codegen::TIR::TBuiltinOp::SplitWrite { .. }
+                    | crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite
+            ) => std::iter::once(recv.as_ref())
+                .chain(args.iter())
+                .collect(),
+        TExprKind::BuiltinMethod { .. } => Vec::new(),
+        _ => Vec::new(),
+    }
+}
+
+enum EvalExprWork<'a> {
+    Enter(&'a TExpr),
+    Build {
+        original: &'a TExpr,
+        leaf: &'a TExpr,
+    },
+    Leave(usize),
 }
 
 fn datatree_kind(value: &CtValue) -> &'static str {
@@ -1835,26 +1924,84 @@ impl<'a> EvalCtx<'a> {
         expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        self.enter_source_nesting()?;
-        let mut expr = expr;
-        let mut transparent_depth = 0;
-        while let TExprKind::Clone(inner) = &expr.kind {
-            if let Err(diagnostic) = self.enter_source_nesting() {
-                for _ in 0..=transparent_depth {
-                    self.leave_source_nesting();
+        if let Some(value) = eval_expr_cache_take(expr) {
+            return Ok(value);
+        }
+        self.eval_expr_worklist(expr, scope)
+    }
+
+    fn eval_expr_worklist(
+        &mut self,
+        root: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        eval_expr_cache_begin();
+        let mut entered = 0usize;
+        let mut work = vec![EvalExprWork::Enter(root)];
+        let result = (|| -> Result<(), Diagnostic> {
+            while let Some(task) = work.pop() {
+                match task {
+                    EvalExprWork::Enter(expr) => {
+                        self.enter_source_nesting()?;
+                        entered += 1;
+
+                        let mut leaf = expr;
+                        let mut transparent_depth = 0;
+                        while let TExprKind::Clone(inner) = &leaf.kind {
+                            self.enter_source_nesting()?;
+                            entered += 1;
+                            transparent_depth += 1;
+                            leaf = inner;
+                        }
+
+                        if !matches!(
+                            &leaf.kind,
+                            TExprKind::CoreCall { .. }
+                                | TExprKind::ListLit(_)
+                                | TExprKind::OrFallback { .. }
+                        ) {
+                            // `eval_expr_inner` charges before it descends. Do
+                            // that at Enter so queued children retain the same
+                            // fuel and diagnostic order as the old call path.
+                            self.burn()?;
+                        }
+
+                        work.push(EvalExprWork::Leave(transparent_depth + 1));
+                        work.push(EvalExprWork::Build {
+                            original: expr,
+                            leaf,
+                        });
+                        for child in eval_expr_children(leaf).into_iter().rev() {
+                            work.push(EvalExprWork::Enter(child));
+                        }
+                    }
+                    EvalExprWork::Build { original, leaf } => {
+                        let value = match self.eval_expr_special(leaf, scope) {
+                            Some(result) => result,
+                            None => self.eval_expr_inner(leaf, scope, false),
+                        }?;
+                        eval_expr_cache_put(original, value);
+                    }
+                    EvalExprWork::Leave(count) => {
+                        for _ in 0..count {
+                            self.leave_source_nesting();
+                            entered -= 1;
+                        }
+                    }
                 }
-                return Err(diagnostic);
             }
-            transparent_depth += 1;
-            expr = inner;
-        }
-        let result = match self.eval_expr_special(expr, scope) {
-            Some(result) => result,
-            None => self.eval_expr_inner(expr, scope),
-        };
-        for _ in 0..=transparent_depth {
+            Ok(())
+        })();
+        while entered > 0 {
             self.leave_source_nesting();
+            entered -= 1;
         }
+        let result = result.and_then(|()| {
+            eval_expr_cache_take(root).ok_or_else(|| {
+                unreachable!("TIR expression worklist lost its root value")
+            })
+        });
+        eval_expr_cache_end();
         result
     }
 
@@ -2339,8 +2486,11 @@ impl<'a> EvalCtx<'a> {
         &mut self,
         expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
+        charge: bool,
     ) -> Result<CtValue, Diagnostic> {
-        self.burn()?;
+        if charge {
+            self.burn()?;
+        }
         match &expr.kind {
             TExprKind::IntLit(n, _) => Ok(CtValue::Int(*n)),
             TExprKind::FloatLit(v) => {
