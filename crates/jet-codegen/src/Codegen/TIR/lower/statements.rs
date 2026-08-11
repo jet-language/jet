@@ -1339,6 +1339,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }),
                 };
                 env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
+                if let Some(origin) = tracked_float_origin(b, &init.ty, cx) {
+                    env.mark_tracked_float(&b.name, origin);
+                }
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",

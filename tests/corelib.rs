@@ -11465,6 +11465,10 @@ fn option_zip_and_lift2_combinators() {
         &dir,
         "option_combinators",
         r#"
+fn missing_float() => Float? {
+    return None
+}
+
 fn run() {
     both_a :: Val(2.0)
     both_b :: Val(5.0)
@@ -11472,12 +11476,12 @@ fn run() {
     print(Option.lift2((x, y) => x * y, both_a, both_b))
 
     a_only :: Val(2.0)
-    b_missing ::  None 
+    b_missing :: missing_float()
     print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, a_only, b_missing))
 
-    both_missing_a ::  None 
-    both_missing_b ::  None 
+    both_missing_a :: missing_float()
+    both_missing_b :: missing_float()
     print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
 }
