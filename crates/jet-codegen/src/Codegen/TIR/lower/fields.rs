@@ -3,7 +3,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Syntax;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub(crate) fn imported_type_name(owner: &str, leaf: &str) -> String {
     format!("{owner}::{leaf}")
@@ -277,7 +277,7 @@ pub(crate) fn register_imported_struct_shapes(
                     qualify_imported_type(bundle, target, &owner, &field.ty),
                 )
             })
-            .collect();
+            .collect::<Vec<(String, Type)>>();
         cx.type_names.insert(qualified.clone());
         cx.foreign_types.insert(qualified.clone(), rust_mod.clone());
         cx.struct_fields.insert(qualified.clone(), fields.clone());

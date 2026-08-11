@@ -2501,7 +2501,7 @@ fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String,
                     .fields
                     .iter()
                     .map(|f| (f.name.clone(), f.redact))
-                    .collect();
+                    .collect::<Vec<(String, bool)>>();
                 for key in struct_metadata_keys(bundle, module_idx, &s.name) {
                     out.insert(key, fields.clone());
                 }
@@ -2522,7 +2522,7 @@ fn collect_struct_field_types(
                     .fields
                     .iter()
                     .map(|f| (f.name.clone(), f.ty.clone()))
-                    .collect();
+                    .collect::<Vec<(String, crate::AST::Type)>>();
                 for key in struct_metadata_keys(bundle, module_idx, &s.name) {
                     out.insert(key, fields.clone());
                 }

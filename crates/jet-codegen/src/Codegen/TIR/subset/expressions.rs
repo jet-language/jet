@@ -6,7 +6,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::arg_conv_in_subset;
 use crate::Codegen::TIR::enum_is_covered;
-use crate::Codegen::TIR::{foreign_struct_lit_in_subset, foreign_type_module};
+use crate::Codegen::TIR::foreign_struct_lit_in_subset;
 use crate::Codegen::TIR::is_covered_generic_struct_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::is_numeric_bounds_const;
