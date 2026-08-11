@@ -583,8 +583,26 @@ impl<'a> Parser<'a> {
         let save = self.pos;
         let save_diags = self.diags.len();
         if let Some(pattern) = self.try_pattern_rhs()? {
-            // Only a pattern if it consumed up to the `->`; otherwise it was an
-            // ordinary value — rewind and re-parse as the value grammar.
+            // A pattern may be followed by a Boolean guard before the arm
+            // arrow (`.Key(key) && key == "b" -> ...`). Keep the pattern as a
+            // PatternTest so sema can put its payload bindings in scope while
+            // checking the guard. Without this branch the fallback value
+            // grammar turns the head into `subject == .Key(key)`, which loses
+            // the binding and makes the guard's name look undefined.
+            let pattern_cond = || Expr::PatternTest {
+                subject: Box::new(pat_subject.clone()),
+                pattern: pattern.clone(),
+                span: pat_span(&pattern),
+            };
+            let combine = |parts: Vec<Expr>, binop: BinOp| {
+                parts
+                    .into_iter()
+                    .reduce(|a, b| {
+                        let span = Span::new(a.span().start, b.span().end);
+                        Expr::Binary(binop, Box::new(a), Box::new(b), span)
+                    })
+                    .expect("pattern guard has at least one condition")
+            };
             if matches!(self.peek().kind, TokKind::Arrow) {
                 let span = pat_span(&pattern);
                 if op != BinOp::Eq {
@@ -606,11 +624,45 @@ impl<'a> Parser<'a> {
                     // (and a later `else`) can still parse.
                     return Ok(Expr::Bool(false, span));
                 }
-                return Ok(Expr::PatternTest {
-                    subject: Box::new(pat_subject.clone()),
-                    pattern,
-                    span,
-                });
+                return Ok(pattern_cond());
+            }
+            if matches!(self.peek().kind, TokKind::AndAnd | TokKind::OrOr) {
+                let span = pat_span(&pattern);
+                if op != BinOp::Eq {
+                    self.diags.push(Diagnostic::error(
+                        "E0366",
+                        format!(
+                            "pattern arms need `==` — this table uses `{}`",
+                            op.spell()
+                        ),
+                        "structural patterns compare by shape under `if subject == { … }` only"
+                            .to_string(),
+                        format!(
+                            "write `{} subject == {{ … }}` for pattern arms, or use a Bool head",
+                            Syntax::KW_IF
+                        ),
+                        Some(span),
+                    ));
+                    return Ok(Expr::Bool(false, span));
+                }
+                // Match the normal arm grammar's precedence: `&&` binds more
+                // tightly than `||`, with the pattern as the first operand.
+                let mut and_parts = vec![pattern_cond()];
+                while matches!(self.peek().kind, TokKind::AndAnd) {
+                    self.bump();
+                    and_parts.push(self.parse_arm_bool_operand(subject, op)?);
+                }
+                let mut or_parts = vec![combine(and_parts, BinOp::And)];
+                while matches!(self.peek().kind, TokKind::OrOr) {
+                    self.bump();
+                    let mut and_parts = vec![self.parse_arm_bool_operand(subject, op)?];
+                    while matches!(self.peek().kind, TokKind::AndAnd) {
+                        self.bump();
+                        and_parts.push(self.parse_arm_bool_operand(subject, op)?);
+                    }
+                    or_parts.push(combine(and_parts, BinOp::And));
+                }
+                return Ok(combine(or_parts, BinOp::Or));
             }
             self.pos = save;
             self.diags.truncate(save_diags);

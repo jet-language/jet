@@ -2340,7 +2340,12 @@ list is **E0120** and points back at these methods.
 Structured concurrency uses a scoped `task.group` (D-CONC-SPAWN1=D, respelling
 D-TASKSCOPE1=A). Inside `task.group g { … }`, the bare `task expression` or
 `task { … }` spawns a child owned by the innermost active group. Unjoined
-handles at scope exit are cancelled and joined before the block returns.
+handles at scope exit are cancelled and joined before the block returns. The
+scope-exit join is cleanup, not another cancellable wait point: once the group
+has requested cancellation, it drains every child even if the owning task is
+already unwinding. A child with no wait point can therefore finish its current
+work before the caller continues. The cleanup preserves the first child
+failure for the group's own propagation path.
 
 `TaskGroup` may also be written as a direct parameter of a named function
 (D-TASKGROUP-PARAM1=A). This lets a lexical group flow down the call stack:
@@ -2396,6 +2401,13 @@ earlier:
 | `task.any { e1, e2, … } => T` | The first **completion** wins, including errors. |
 | `[Task<T>].join_all()` / `.wait_all()` | Both methods consume the list and return results in list order. They use the same fail-fast rule as `task.all`: a failure cancels remaining siblings. |
 | `[Task<T>].cancel_all()` | The method borrows the list and requests cancellation for every task. It does not select a winner or loser and does not wait. Each task unwinds at its next wait point under D-CANCELMODEL1. |
+
+When two branches are observed with the same scheduler completion sequence,
+`all`, `race`, and `any` break the tie by source order inside the task literal:
+the lower branch index wins. The scheduler completion sequence is the primary
+key, so distinct sequence values still follow completion order. Near-simultaneous
+wall-clock completion is deterministic only when the scheduler assigns the
+same sequence; source order is the deterministic tie-break in that case.
 
 `.join_all()` and `.wait_all()` therefore cancel remaining siblings and fail
 fast like `task.all`; `.cancel_all()` is explicit cancellation of every task,
@@ -2631,11 +2643,11 @@ The current slice records a root `sw/bin` package closure, hangar/cache facts,
 systemd service/timer/socket units plus target wants, users/groups, filesystems and swap,
 networkd/firewall/wireless facts, Limine + CachyOS boot facts, first-party
 systemd init closure with `/sbin/init`, kernel firmware/driver facts, desktop/display-manager facts,
-terminal login facts with serial/virtual getty units and user home/profile
-projection,
+terminal login facts with serial/virtual getty units and user home and
+generation projection,
 NixOS/flake-parts/Home Manager import through `jet os import <flake-or-dir>`
 with semantic `jetos-import-facts.json` input and audited facts-only fallback,
-per-user generation profiles under `users/`, Flatpak exact reconcile plans,
+per-user generations under `users/`, Flatpak exact reconcile plans,
 permission overrides, undeclared-app removal, and AppImage runtime integration under
 `flatpak/`/`appimage/`, performance profile, sysctl, zram, sched-ext scheduler, initrd, and
 bootloader tuning proof under `performance/`, option priority
@@ -2785,11 +2797,11 @@ as `jet os vm prove`, writes one host proof per scenario host, then records
 assertion method facts, host generations, disks, and proof artifact paths.
 
 `jetos user plan|build|switch|rollback|prove <name>` is the standalone
-per-user path. It selects a `user.<name>` or `users.<name>` profile from
+per-user path. It selects a `user.<name>` or `users.<name>` generation from
 `config.jet`, renders the same `users/<name>/profile.json` artifact used by
 `jet os switch`, and builds/activates/proves it through normal named
 generations rather than a separate hidden state store. The generated
-`jetos-user-apply <name>` command applies that profile to a home directory:
+`jetos-user-apply <name>` command applies that generation to a home directory:
 projects declared files, links package binaries into `.jetos/profile/bin`,
 writes user service units under `.config/systemd/user`, and records
 `.jetos/proof/user-<name>.json`.

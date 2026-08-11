@@ -2318,6 +2318,15 @@ impl<T> JetSchedulerJoin<T> {
         // D-CANCELMODEL1=C: join is a wait point. If the joining task is already
         // cancelled, unwind here before blocking.
         jet_task_wait_point_cancel_check();
+        self.join_for_cleanup()
+    }
+
+    /// Drain a child during lexical task-group cleanup.
+    ///
+    /// Cleanup has already made the cancellation decision for every child. It
+    /// must drain each child even when the parent is cancelled, or the parent's
+    /// cancellation would interrupt its own Drop and leave a child running.
+    pub fn join_for_cleanup(self) -> JetOutcome<T, JetTaskFailure> {
         match self.rx.recv() {
             Ok(JetSchedulerResult::Value(v)) => Ok(v),
             Ok(failure) => Err(jet_scheduler_task_failure(failure)),

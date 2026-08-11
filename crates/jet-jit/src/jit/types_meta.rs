@@ -17,6 +17,33 @@ static EMPTY_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(Vec::new);
 // two-field variant; every other variant carries a single String id.
 static SERVICE_RECEIPT_RETAINED_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::String, Type::Int]);
+static IO_CONTEXT_PAYLOAD: LazyLock<Vec<Type>> =
+    LazyLock::new(|| vec![Type::Named("IOContext".into())]);
+static IO_OPERATION_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    [
+        "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+});
+static IO_ERROR_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    [
+        "InvalidInput",
+        "NotFound",
+        "PermissionDenied",
+        "TimedOut",
+        "Cancelled",
+        "Closed",
+        "Protocol",
+        "Other",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+});
+static IO_OPERATION_NAME: LazyLock<String> = LazyLock::new(|| "IOOperation".to_string());
+static IO_ERROR_NAME: LazyLock<String> = LazyLock::new(|| "IOError".to_string());
 
 /// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
 /// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
@@ -40,12 +67,16 @@ pub(crate) fn install_struct_redact(bundle: &ProgramBundle) {
     STRUCT_REDACT.with(|slot| *slot.borrow_mut() = map);
 }
 
-/// Whether field `idx` of `type_name` is `#[Redact]`. `None` = no metadata installed.
+/// Whether field `idx` of `type_name` is redacted. `None` = no metadata available.
 pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool> {
-    STRUCT_REDACT.with(|slot| {
+    let user_metadata = STRUCT_REDACT.with(|slot| {
         slot.borrow()
             .get(type_name)
             .and_then(|flags| flags.get(idx).copied())
+    });
+    user_metadata.or_else(|| {
+        jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name)
+            .and_then(|fields| fields.get(idx).map(|(_, redacted)| *redacted))
     })
 }
 
@@ -188,6 +219,9 @@ pub(crate) fn clif_ty_with_distinct(
     {
         return Some(types::I64);
     }
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "IOContext" | "IOOperation" | "IOError")) {
+        return Some(types::I64);
+    }
     if matches!(&ty, Type::Shared(_))
         || matches!(&ty, Type::Apply { name, .. }
             if matches!(
@@ -201,7 +235,7 @@ pub(crate) fn clif_ty_with_distinct(
                     | "SortedSet"
                     | "PriorityQueue"
                     | "Cache"
-            ))
+            ) || name == jet_foundation::Syntax::TYPE_SHARED_GUARD)
     {
         return Some(types::I64);
     }
@@ -427,6 +461,9 @@ impl<'a> JitMeta<'a> {
         if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return Some(datatree_payload(variant));
         }
+        if enum_name == "DataEvent" {
+            return Some(data_event_payload(variant));
+        }
         if enum_name == "ServiceReceipt" {
             return Some(match variant {
                 "Retained" => SERVICE_RECEIPT_RETAINED_PAYLOAD.as_slice(),
@@ -435,6 +472,16 @@ impl<'a> JitMeta<'a> {
                 }
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
+        }
+        if enum_name == "IOError" {
+            return Some(match variant {
+                "InvalidInput" | "NotFound" | "PermissionDenied" | "TimedOut" | "Cancelled"
+                | "Closed" | "Protocol" | "Other" => IO_CONTEXT_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
+        if enum_name == "IOOperation" {
+            return Some(EMPTY_PAYLOAD.as_slice());
         }
         if enum_name == "Key" {
             return Some(key_payload(variant));
@@ -588,6 +635,19 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        if enum_name == "IOOperation" {
+            return match variant {
+                "Read" => Some(0),
+                "Write" => Some(1),
+                "Flush" => Some(2),
+                "Connect" => Some(3),
+                "Accept" => Some(4),
+                "Close" => Some(5),
+                "Resolve" => Some(6),
+                "Codec" => Some(7),
+                _ => None,
+            };
+        }
         if enum_name == jet_foundation::Syntax::TYPE_TERMINAL_MODE {
             return match variant {
                 "Raw" => Some(0),
@@ -595,7 +655,8 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
-        // Prelude `IOError` order (Open.rs) — not always registered on JitProgram.
+        // Prelude `IOError` order (Open.rs); enum_names supplies fallback
+        // metadata when the core enum is absent from JitProgram.
         if enum_name == "IOError" {
             return match variant {
                 "InvalidInput" => Some(0),
@@ -815,6 +876,8 @@ impl<'a> JitMeta<'a> {
                 | "EventResult"
                 | "DispatchState"
                 | "ServiceReceipt"
+                | "IOOperation"
+                | "IOError"
         ) || self.enum_variants.contains_key(name)
     }
 
@@ -822,7 +885,7 @@ impl<'a> JitMeta<'a> {
     /// unit, `Int`, `String` handle, or another packed enum. Excludes F64-heap /
     /// multi-payload.
     pub(crate) fn enum_packed_showable(&self, name: &str) -> bool {
-        let Some(variants) = self.enum_variants.get(name) else {
+        let Some(variants) = self.enum_variant_names(name) else {
             return false;
         };
         for variant in variants {
@@ -834,7 +897,10 @@ impl<'a> JitMeta<'a> {
                 [] => {}
                 [Type::Int] => {}
                 [Type::String] => {}
-                [Type::Named(inner)] if self.is_enum(inner) => {}
+                [Type::Named(inner)]
+                    if self.is_enum(inner)
+                        || jet_foundation::StructuralDebug::jet_debug_field_metadata(inner)
+                            .is_some() => {}
                 _ => return false,
             }
         }
@@ -842,17 +908,29 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn enum_variant_names(&self, name: &str) -> Option<&[String]> {
-        self.enum_variants.get(name).map(|v| v.as_slice())
+        self.enum_variants.get(name).map(|v| v.as_slice()).or_else(|| {
+            match name {
+                "IOOperation" => Some(IO_OPERATION_VARIANTS.as_slice()),
+                "IOError" => Some(IO_ERROR_VARIANTS.as_slice()),
+                _ => None,
+            }
+        })
     }
 
     pub(crate) fn enum_names(&self) -> impl Iterator<Item = &String> {
-        self.enum_variants.keys()
+        self.enum_variants
+            .keys()
+            .chain((!self.enum_variants.contains_key("IOOperation")).then_some(&*IO_OPERATION_NAME))
+            .chain((!self.enum_variants.contains_key("IOError")).then_some(&*IO_ERROR_NAME))
     }
 
 }
 
 /// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
+    if let Some(fields) = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name) {
+        return fields.iter().position(|(name, _)| *name == field);
+    }
     let fields: &[&str] = match type_name {
         "Err" => &["message", "code", "cause"],
         // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
@@ -967,6 +1045,13 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 /// user struct); recover the real type so JIT field/print/ABI stay total.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
     match type_name {
+        "IOContext" => match field {
+            "operation" => Some(Type::Named("IOOperation".into())),
+            "resource" => Some(Type::Option(Box::new(Type::String))),
+            "os_code" => Some(Type::Option(Box::new(Type::Int))),
+            "cause" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        },
         // No `Point` — collides with user Int Point examples (library, etc.).
         "Size" => match field {
             "width" | "height" => Some(Type::Float),
@@ -1188,6 +1273,25 @@ fn key_payload(variant: &str) -> &'static [Type] {
     match variant {
         "Char" | "Ctrl" => CHAR.as_slice(),
         "F" => INT.as_slice(),
+        _ => &[],
+    }
+}
+
+fn data_event_payload(variant: &str) -> &'static [Type] {
+    use std::sync::LazyLock;
+    static BOOL: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Bool]);
+    static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
+    static FLOAT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Float]);
+    static STRING: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::String]);
+    static BYTES: LazyLock<[Type; 1]> = LazyLock::new(|| {
+        [Type::List(Box::new(Type::Int))]
+    });
+    match variant {
+        "Bool" => BOOL.as_slice(),
+        "Int" => INT.as_slice(),
+        "Float" => FLOAT.as_slice(),
+        "Text" | "Key" => STRING.as_slice(),
+        "Bytes" => BYTES.as_slice(),
         _ => &[],
     }
 }

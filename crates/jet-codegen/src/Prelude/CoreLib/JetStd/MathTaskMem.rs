@@ -238,7 +238,7 @@
 
     trait JetTaskGroupChild: Send + Sync {
         fn cancel(&self);
-        fn join(&self);
+        fn join(&self) -> Result<(), super::JetTaskFailure>;
     }
 
     impl<T: Send + 'static> JetTaskGroupChild for JetTaskState<T> {
@@ -248,9 +248,11 @@
             }
         }
 
-        fn join(&self) {
+        fn join(&self) -> Result<(), super::JetTaskFailure> {
             if let Some(handle) = self.handle.lock().unwrap().take() {
-                let _ = handle.join();
+                handle.join_for_cleanup().map(|_| ())
+            } else {
+                Ok(())
             }
         }
     }
@@ -351,8 +353,12 @@
         }
 
         pub fn close(&self) {
-            self.children
-                .close_with(|child| child.cancel(), |child| child.join());
+            if let Err(failure) = self
+                .children
+                .close_with(|child| child.cancel(), |child| child.join())
+            {
+                jet_task_outcome_unwrap::<()>(Err(failure));
+            }
         }
     }
 
@@ -552,9 +558,7 @@
     ) -> T {
         let reason = match outcome {
             Ok(value) => return value,
-            Err(super::JetTaskFailure::Panicked(reason)) => reason,
-            Err(super::JetTaskFailure::Cancelled) => "task cancelled".to_string(),
-            Err(super::JetTaskFailure::DeadlineBlown) => "task deadline exceeded".to_string(),
+            Err(failure) => failure.message(),
         };
         if super::jet_scheduler_panic_should_unwind() {
             panic!("{reason}");

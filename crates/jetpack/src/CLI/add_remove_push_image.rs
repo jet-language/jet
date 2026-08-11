@@ -608,8 +608,8 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
                     .map(|fact| format!("{prefix}:omitted:{fact}")),
             );
         }
-        if !plan.profiles.is_empty() {
-            projection.omitted.push("environment.profiles".to_string());
+        if !plan.presets.is_empty() {
+            projection.omitted.push("environment.presets".to_string());
         }
     } else {
         projection

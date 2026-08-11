@@ -160,6 +160,8 @@ pub(crate) struct JitRuntime {
     pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
     pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
     pub(crate) conditions: Vec<std::sync::Arc<Memory::ConditionState>>,
+    pub(crate) shared_guard_permits:
+        std::collections::HashMap<i64, std::sync::Arc<Memory::shared_protocol::JetSharedPermit>>,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
@@ -218,6 +220,10 @@ impl JitRuntime {
     /// Record a runtime panic. Keeps the first message (the unwind branch may
     /// re-enter trap sites with dummy values before the epilogue is reached).
     pub(crate) fn set_trap(&mut self, msg: &str) {
+        if Concurrency::in_scheduler_task() {
+            Concurrency::set_task_trap(msg);
+            return;
+        }
         if self.trapped.is_none() {
             self.trapped = Some(msg.to_string());
         }
@@ -300,6 +306,9 @@ pub(crate) const INTN_MODE_CHECKED: i64 = 3;
 /// Reads the resident runtime's trapped flag from JIT code. `1` = a trap is
 /// pending (branch to epilogue); `0` = keep going.
 extern "C" fn jet_jit_is_trapped() -> i64 {
+    if Concurrency::in_scheduler_task() {
+        return i64::from(Concurrency::task_trap_pending());
+    }
     Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
 }
 

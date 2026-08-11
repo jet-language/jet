@@ -1062,7 +1062,7 @@ fn os_switch_activates_and_sets_current() {
         user_profile.contains("\"kind\":\"jetos.user-generation\"")
             && user_profile.contains("\"user\":\"nate\"")
             && user_profile.contains("\"syncthing\""),
-        "user profile: {user_profile}"
+        "user generation: {user_profile}"
     );
     assert!(
         generation
@@ -1094,7 +1094,7 @@ fn os_switch_activates_and_sets_current() {
     );
     assert!(
         user_home.join(".jetos/profile/bin/hello").exists(),
-        "expected per-user package profile link"
+        "expected per-user package generation link"
     );
     assert!(
         user_home
@@ -2340,7 +2340,7 @@ fn jetos_user_commands_use_same_generation_engine() {
         root.path
             .join("systems/generations/user-gen/users/nate/profile.json")
             .is_file(),
-        "expected user profile artifact"
+        "expected user generation artifact"
     );
 
     let proof = jetos()

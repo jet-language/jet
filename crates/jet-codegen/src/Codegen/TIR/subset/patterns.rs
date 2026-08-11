@@ -155,6 +155,45 @@ pub(crate) fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Optio
     }
 }
 
+/// A variant-pattern arm with a boolean guard (`.Item(value) && value > 0`).
+/// The pattern must be the first term so its payload bindings are available to
+/// the remaining guard terms. The lowering reuses `lower_if_cond`, which already
+/// preserves that short-circuit binding scope.
+pub(crate) fn arm_guarded_variant_pattern(
+    cx: &Cx,
+    cond: &Expr,
+    subject: &Expr,
+) -> Option<Pattern> {
+    let Expr::Binary(BinOp::And, left, _, _) = cond else {
+        return None;
+    };
+    let mut first = left.as_ref();
+    while let Expr::Binary(BinOp::And, nested_left, _, _) = first {
+        first = nested_left.as_ref();
+    }
+    arm_variant_pattern(cx, first, subject)
+}
+
+/// `DataEvent` is a prelude enum whose variants are not entered in the ordinary
+/// user-variant owner table. Keep its surface list here for subset admission;
+/// lowering resolves the concrete enum from the subject's typed TIR expression.
+pub(crate) fn is_data_event_variant(variant: &str) -> bool {
+    matches!(
+        variant,
+        "Null"
+            | "Bool"
+            | "Int"
+            | "Float"
+            | "Text"
+            | "Bytes"
+            | "ArrayStart"
+            | "ArrayEnd"
+            | "ObjectStart"
+            | "Key"
+            | "ObjectEnd"
+    )
+}
+
 /// True for a `Variant` pattern or an `Or` whose every alternative is a `Variant`.
 /// Excludes optional/result patterns (Present/Absent/Ok/Err) — out of Phase 4.
 pub(crate) fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {

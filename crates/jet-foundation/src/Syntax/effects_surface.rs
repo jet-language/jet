@@ -184,6 +184,10 @@ pub const SELECT_WAIT_METHOD: &str = "wait";
 
 /// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
 pub const METHOD_TASK_WAIT: &str = "wait";
+/// Compiler-private consuming join used by task-group scope cleanup. Unlike
+/// user `.join()`, it unwraps `TaskFailure` so a child panic cannot vanish when
+/// the generated cleanup expression's value is discarded.
+pub const METHOD_TASK_SCOPE_JOIN: &str = "\0jet.task.scope_join";
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 pub const METHOD_TASK_PAUSE: &str = "pause";
 /// D-COROUTINE1=A: clear the paused marker in the control plane.
@@ -626,7 +630,7 @@ pub const ENV_EXPORT_VERB: &str = "export";
 pub const ENV_TEST_VERB: &str = "test";
 /// D-ENV-FILES1=A: plan and apply the managed-file graph for the active env.
 pub const ENV_SYNC_VERB: &str = "sync";
-/// D-ENV-PROFILE1=C: disclose the selected profile and typed environment facts.
+/// D-ENV-PROFILE1=C: disclose the selected preset and typed environment facts.
 pub const ENV_INFO_VERB: &str = "info";
 /// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
 /// auto-activation (and drop any active env) in the current shell.
@@ -689,7 +693,7 @@ pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";
 
-/// D-JPK-PROFILE1=D: source-backed package profile inspection and generation
+/// D-JPK-PROFILE1=D: source-backed package generation inspection and generation
 /// commands. The first delivery slice exposes `plan`; switching and history
 /// are owned by the dependent profile cards.
 pub const PROFILE_SUBCOMMAND: &str = "profile";

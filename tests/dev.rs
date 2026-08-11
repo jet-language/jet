@@ -2909,12 +2909,8 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
     }
 }
 
-fn run_cranelift_resident_outcome(src: &str, tag: &str) -> RunOutcome {
-    let p = std::env::temp_dir().join(format!("jet_jit_resident_{tag}.jet"));
-    fs::create_dir_all(p.parent().unwrap()).unwrap();
-    fs::write(&p, src).unwrap();
-    let shown = p.to_string_lossy().to_string();
-    let bundle = checked_bundle_from_path(&shown);
+fn run_cranelift_resident_file_outcome(file: &str, tag: &str) -> RunOutcome {
+    let bundle = checked_bundle_from_path(file);
     jet_jit::run_resident_strict_for_test(&bundle)
         .unwrap_or_else(|reason| panic!("`{tag}` resident JIT failed: {reason}"))
 }
@@ -2922,14 +2918,22 @@ fn run_cranelift_resident_outcome(src: &str, tag: &str) -> RunOutcome {
 /// Run one resident-JIT fixture on the same bounded stack used by the dev
 /// battery. A successful interpreter result is not resident-JIT evidence.
 fn run_cranelift_resident(src: &str, tag: &str) -> ProgramOutput {
-    let src = src.to_owned();
+    let p = std::env::temp_dir().join(format!("jet_jit_resident_{tag}.jet"));
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, src).unwrap();
+    let shown = p.to_string_lossy().to_string();
+    run_cranelift_resident_file(&shown, tag)
+}
+
+fn run_cranelift_resident_file(file: &str, tag: &str) -> ProgramOutput {
+    let file = file.to_owned();
     let tag = tag.to_owned();
     std::thread::Builder::new()
         .name(format!("resident-{tag}"))
         .stack_size(DEV_BATTERY_STACK)
         .spawn(move || {
             jet_jit::reset_jit_trace_for_test();
-            let outcome = run_cranelift_resident_outcome(&src, &tag);
+            let outcome = run_cranelift_resident_file_outcome(&file, &tag);
             assert!(
                 jet_jit::jit_executed_for_test(),
                 "`{tag}` must execute resident Cranelift"
@@ -8525,14 +8529,14 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
 fn run() {
     (sender, ch) := tasks.channel<Int>()
     (ack_sender, ack) := tasks.channel<Int>()
-    slow := tasks.spawn(() => {
+    slow := task {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
                    ack_sender.send(1)
                }
                print(99)
-       })
+       }
     slow.cancel()
     sender.send(42)
     ack.receive() ?? panic("closed")
@@ -8554,11 +8558,11 @@ fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
     (sender, ch) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    slow :: task {
         ready_sender.send(1)
         ch.receive() ?? panic("closed")
         print(99)
-    })
+    }
     ready.receive() ?? panic("closed")
     slow.cancel()
     sender.send(42)
@@ -8576,11 +8580,11 @@ fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
 use core.time as time
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    slow :: task {
         ready_sender.send(1)
         time.sleep(200)
         print(99)
-    })
+    }
     ready.receive() ?? panic("closed")
     slow.cancel()
 }
@@ -8598,11 +8602,11 @@ fn run() {
     task.group g {
         (ready_sender, ready) :: tasks.channel<Int>()
         (_sender, ch) :: tasks.channel<Int>()
-        slow :: tasks.spawn(() => {
+        slow :: task {
             ready_sender.send(1)
             g.select().recv(ch).wait()
             print(99)
-        })
+        }
         ready.receive() ?? panic("closed")
         slow.cancel()
     }
@@ -8618,9 +8622,9 @@ fn cranelift_wait_failures_return_compiler_diagnostics_not_process_exit() {
     let join_cancelled = r#"use core.tasks as tasks
 use core.time as time
 fn run() {
-    child :: tasks.spawn(() => {
+    child :: task {
         time.sleep(200)
-    })
+    }
     child.cancel()
     child.join()
 }
@@ -9814,17 +9818,20 @@ fn run() {
 
 #[test]
 fn tracked_float_origin_matches_aot_in_default_dev() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
     let dir = common::unique_tmp("jet_float_binding_origin_dev");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("float_binding_origin.jet");
     fs::write(
         &file,
-        "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n",
+        "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();
     let expected_stdout = format!(
-        "tracked `speed` at {shown}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n"
+        "tracked `speed` at {shown}:2:12: #Track speed :: 3.5\ntracked `speed` at {shown}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n"
     );
     let aot = compiled_binary_output(
         &dir,
@@ -9833,6 +9840,7 @@ fn tracked_float_origin_matches_aot_in_default_dev() {
         "float_binding_origin",
         &shown,
     );
+    let resident = run_cranelift_resident_file(&shown, "float_binding_origin");
     let dev = match dev_iteration_with_timeout("float_binding_origin", &shown, false) {
         RunOutcome::Ran {
             stdout,
@@ -9843,7 +9851,18 @@ fn tracked_float_origin_matches_aot_in_default_dev() {
     };
 
     assert_eq!(aot, ProgramOutput::ran(expected_stdout, String::new(), 0));
+    assert_eq!(resident, aot);
     assert_eq!(dev, aot);
+
+    let interpreted = match dev_iteration_with_timeout("float_binding_origin", &shown, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter failed Float origin: {diags:?}"),
+    };
+    assert_eq!(interpreted, aot);
     let _ = fs::remove_dir_all(&dir);
 }
 

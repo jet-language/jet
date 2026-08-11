@@ -3,12 +3,18 @@
 use super::Concurrency;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering, compiler_fence};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::Duration;
+
+pub(crate) mod shared_protocol {
+    include!("../../jet-codegen/src/Prelude/SharedProtocol.rs");
+}
 
 static SHARED_TRANSACTION_SERIAL: Mutex<()> = Mutex::new(());
 
 thread_local! {
     static SHARED_TRANSACTIONS: std::cell::RefCell<Vec<SharedTransaction>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static SHARED_ACTIVE_PERMITS:
+        std::cell::RefCell<Vec<(i64, Arc<shared_protocol::JetSharedPermit>)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
@@ -24,23 +30,22 @@ struct SharedTransactionEntry {
     record: bool,
 }
 
-struct SharedLockGuard(Vec<Arc<SharedState>>);
+struct SharedLockGuard(Vec<Arc<shared_protocol::JetSharedPermit>>);
 
 impl SharedLockGuard {
     fn acquire(entries: &[SharedTransactionEntry]) -> Self {
-        let mut locked = Vec::with_capacity(entries.len());
-        for entry in entries {
-            entry.shared.lock();
-            locked.push(Arc::clone(&entry.shared));
-        }
-        Self(locked)
+        let protocols = entries
+            .iter()
+            .map(|entry| Arc::clone(&entry.shared.protocol))
+            .collect();
+        Self(shared_protocol::jet_shared_acquire_ordered(protocols))
     }
 }
 
 impl Drop for SharedLockGuard {
     fn drop(&mut self) {
-        for shared in self.0.iter().rev() {
-            shared.unlock();
+        for permit in self.0.iter().rev() {
+            permit.release();
         }
     }
 }
@@ -62,37 +67,62 @@ pub(crate) struct PoolState {
 }
 
 pub(crate) struct SharedState {
-    locked: AtomicBool,
+    pub(crate) protocol: Arc<shared_protocol::JetSharedProtocol>,
     value: AtomicI64,
 }
 
 pub(crate) struct ConditionState {
-    lock: Mutex<()>,
-    wake: Condvar,
+    pub(crate) protocol: Arc<shared_protocol::JetConditionProtocol>,
 }
 
 impl ConditionState {
     fn new() -> Self {
         Self {
-            lock: Mutex::new(()),
-            wake: Condvar::new(),
+            protocol: shared_protocol::JetConditionProtocol::new(),
         }
     }
 
     fn notify_one(&self) {
-        self.wake.notify_one();
+        self.protocol.notify_one();
     }
 
     fn notify_all(&self) {
-        self.wake.notify_all();
+        self.protocol.notify_all();
+    }
+}
+
+struct JitConditionWaiter {
+    notified: AtomicBool,
+    lock: Mutex<()>,
+    wake: Condvar,
+}
+
+impl JitConditionWaiter {
+    fn new() -> Self {
+        Self {
+            notified: AtomicBool::new(false),
+            lock: Mutex::new(()),
+            wake: Condvar::new(),
+        }
+    }
+}
+
+impl shared_protocol::JetConditionWaiter for JitConditionWaiter {
+    fn park(&self) -> Result<(), ()> {
+        let mut guard = self.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        while !self.notified.swap(false, Ordering::Acquire) {
+            guard = self
+                .wake
+                .wait(guard)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        Ok(())
     }
 
-    fn wait_once(&self) {
-        let guard = self.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _ = self
-            .wake
-            .wait_timeout(guard, Duration::from_millis(10))
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    fn wake(&self) {
+        let _guard = self.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.notified.store(true, Ordering::Release);
+        self.wake.notify_one();
     }
 }
 
@@ -143,23 +173,9 @@ mod tests {
 impl SharedState {
     fn new(value: i64) -> Self {
         Self {
-            locked: AtomicBool::new(false),
+            protocol: shared_protocol::JetSharedProtocol::new(),
             value: AtomicI64::new(value),
         }
-    }
-
-    fn lock(&self) {
-        while self
-            .locked
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            std::thread::yield_now();
-        }
-    }
-
-    fn unlock(&self) {
-        self.locked.store(false, Ordering::Release);
     }
 }
 
@@ -184,12 +200,29 @@ fn guard_shared_handle(rt: &crate::JitRuntime, guard: i64) -> Option<i64> {
     (handle != 0).then_some(handle)
 }
 
-fn pack_shared_guard(rt: &mut crate::JitRuntime, shared_handle: i64, value: i64, editable: i64) -> i64 {
+fn pack_shared_guard(
+    rt: &mut crate::JitRuntime,
+    shared_handle: i64,
+    value: i64,
+    editable: i64,
+    permit: Arc<shared_protocol::JetSharedPermit>,
+) -> i64 {
     let guard = rt.heap.alloc_record(3);
     let _ = rt.heap.record_set_int(guard, GUARD_SHARED, shared_handle);
     let _ = rt.heap.record_set_int(guard, GUARD_VALUE, value);
     let _ = rt.heap.record_set_int(guard, GUARD_EDITABLE, editable);
+    rt.shared_guard_permits.insert(guard, permit);
     guard
+}
+
+fn take_active_shared_permit(handle: i64) -> Option<Arc<shared_protocol::JetSharedPermit>> {
+    SHARED_ACTIVE_PERMITS.with(|permits| {
+        let mut permits = permits.borrow_mut();
+        permits
+            .iter()
+            .rposition(|(active_handle, _)| *active_handle == handle)
+            .map(|index| permits.swap_remove(index).1)
+    })
 }
 
 fn pack_id(index: usize, generation: u32) -> i64 {
@@ -329,25 +362,27 @@ extern "C" fn jet_jit_shared_new(value: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_shared_begin(handle: i64) -> i64 {
+extern "C" fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
     };
-    shared.lock();
-    shared.value.load(Ordering::Relaxed)
+    let Some(permit) = shared.protocol.acquire(editable != 0, || false) else {
+        return 0;
+    };
+    let value = shared.value.load(Ordering::Acquire);
+    SHARED_ACTIVE_PERMITS.with(|permits| permits.borrow_mut().push((handle, permit)));
+    value
 }
 
 extern "C" fn jet_jit_shared_end_read(handle: i64) {
-    if let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) {
-        shared.unlock();
-    }
+    drop(take_active_shared_permit(handle));
 }
 
 extern "C" fn jet_jit_shared_end_write(handle: i64, value: i64) {
     if let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) {
-        shared.value.store(value, Ordering::Relaxed);
-        shared.unlock();
+        shared.value.store(value, Ordering::Release);
     }
+    drop(take_active_shared_permit(handle));
 }
 
 /// D-SHARED-CYCLE1=C: weak handle is the same slot index; upgrade packs
@@ -400,9 +435,19 @@ extern "C" fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
     };
-    shared.lock();
-    let value = shared.value.load(Ordering::Relaxed);
-    Concurrency::with_runtime_mut(|rt| pack_shared_guard(rt, handle, value, i64::from(editable != 0)))
+    let Some(permit) = shared.protocol.acquire(editable != 0, || false) else {
+        return 0;
+    };
+    let value = shared.value.load(Ordering::Acquire);
+    Concurrency::with_runtime_mut(|rt| {
+        pack_shared_guard(
+            rt,
+            handle,
+            value,
+            i64::from(editable != 0),
+            permit,
+        )
+    })
 }
 
 extern "C" fn jet_jit_shared_guard_value(guard: i64) -> i64 {
@@ -419,49 +464,70 @@ extern "C" fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
             return;
         };
         if let Some(shared) = shared(rt, shared_handle) {
-            shared.value.store(value, Ordering::Relaxed);
+            shared.value.store(value, Ordering::Release);
         }
     });
 }
 
 extern "C" fn jet_jit_shared_guard_end(guard: i64) {
-    Concurrency::with_runtime_mut(|rt| {
+    let Some((shared, value, editable, permit)) = Concurrency::with_runtime_mut(|rt| {
         let Some(shared_handle) = guard_shared_handle(rt, guard) else {
-            return;
+            return None;
         };
         let value = rt.heap.record_get_int(guard, GUARD_VALUE).unwrap_or(0);
         let editable = rt.heap.record_get_int(guard, GUARD_EDITABLE).unwrap_or(0) != 0;
         let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
-        if let Some(shared) = shared(rt, shared_handle) {
-            if editable {
-                shared.value.store(value, Ordering::Relaxed);
-            }
-            shared.unlock();
+        Some((
+            shared(rt, shared_handle),
+            value,
+            editable,
+            rt.shared_guard_permits.remove(&guard),
+        ))
+    }) else {
+        return;
+    };
+    if let Some(shared) = shared {
+        if editable {
+            shared.value.store(value, Ordering::Release);
         }
-    });
+    }
+    drop(permit);
 }
 
 extern "C" fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) {
-    let Some((shared_handle, condition)) = Concurrency::with_runtime_mut(|rt| {
-        let shared_handle = guard_shared_handle(rt, guard)?;
+    let Some((permit, condition)) = Concurrency::with_runtime_mut(|rt| {
+        guard_shared_handle(rt, guard)?;
         let condition = condition(rt, condition_handle)?;
-        Some((shared_handle, condition))
+        let permit = rt.shared_guard_permits.get(&guard)?.clone();
+        Some((permit, condition))
     }) else {
         Concurrency::with_runtime_mut(|rt| {
             rt.set_trap("SharedGuard wait on an invalid or released guard");
         });
         return;
     };
-    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, shared_handle)) else {
+    let waiter = Arc::new(JitConditionWaiter::new());
+    if shared_protocol::jet_shared_condition_wait_once(
+        &permit,
+        &condition.protocol,
+        waiter,
+    )
+    .is_err()
+    {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedGuard wait was cancelled");
+        });
+        return;
+    }
+    let Some(fresh) = Concurrency::with_runtime_mut(|rt| {
+        let shared_handle = guard_shared_handle(rt, guard)?;
+        Some(shared(rt, shared_handle)?.value.load(Ordering::Acquire))
+    }) else {
         Concurrency::with_runtime_mut(|rt| {
             rt.set_trap("SharedGuard wait: shared handle is closed or invalid");
         });
         return;
     };
-    shared.unlock();
-    condition.wait_once();
-    shared.lock();
-    let fresh = shared.value.load(Ordering::Relaxed);
     Concurrency::with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_int(guard, GUARD_VALUE, fresh);
     });
@@ -470,8 +536,9 @@ extern "C" fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) 
 extern "C" fn jet_jit_shared_txn_begin() {
     SHARED_TRANSACTIONS.with(|transactions| {
         let serial = transactions.borrow().is_empty().then(|| {
-            // ponytail: replace this global serialization only when measured
-            // transaction throughput justifies a versioned retry protocol.
+            // Transaction payloads are staged as resident arena values. Keep
+            // their existing serial staging boundary; the actual Shared lock
+            // and canonical multi-handle ordering are still Prelude permits.
             SHARED_TRANSACTION_SERIAL
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -682,7 +749,7 @@ host_fns! {
     pool_remove: "jet_jit_pool_remove" => jet_jit_pool_remove: binary;
     pool_ids: "jet_jit_pool_ids" => jet_jit_pool_ids: unary;
     shared_new: "jet_jit_shared_new" => jet_jit_shared_new: unary;
-    shared_begin: "jet_jit_shared_begin" => jet_jit_shared_begin: unary;
+    shared_begin: "jet_jit_shared_begin" => jet_jit_shared_begin: binary;
     shared_end_read: "jet_jit_shared_end_read" => jet_jit_shared_end_read: unary_void;
     shared_end_write: "jet_jit_shared_end_write" => jet_jit_shared_end_write: binary_void;
     shared_downgrade: "jet_jit_shared_downgrade" => jet_jit_shared_downgrade: unary;
@@ -705,8 +772,3 @@ host_fns! {
     expiring_get: "jet_jit_expiring_get" => jet_jit_expiring_get: binary;
     expiring_is_valid: "jet_jit_expiring_is_valid" => jet_jit_expiring_is_valid: binary_i8;
 }
-
-
-
-
-

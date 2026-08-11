@@ -675,7 +675,10 @@ pub(crate) fn method_call_in_subset(
     // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
     // `task`-produced. Tried after the collection builtins so a
     // list/map/string method can't be misclaimed.
-    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+    if recv_type.is_none()
+        && (is_concurrency_method_name(method, args.len())
+            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
+    {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()

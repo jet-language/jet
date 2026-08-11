@@ -804,7 +804,7 @@ pub(super) fn eval_handle(
         THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
         THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
         THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),
-        THandleOp::TaskJoin => match recv {
+        THandleOp::TaskJoin | THandleOp::TaskScopeJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()
                 .find_map(|(name, value)| (name == "value").then(|| value.clone()))

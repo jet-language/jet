@@ -2671,6 +2671,31 @@ fn check_bundle_opts_for_output_inner(
                 for (orig, alias_opt) in items {
                     let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
+                    let file_module_target = states[target_idx]
+                        .imports
+                        .get(orig.as_str())
+                        .copied()
+                        .filter(|_| {
+                            name_ledger
+                                .declaration(target_idx, orig)
+                                .is_some_and(|declaration| declaration.kind == "file_module")
+                        });
+                    if let Some(file_module_target) = file_module_target {
+                        if !is_pub {
+                            diags.push(Diagnostic::error(
+                                "E0609",
+                                format!("`{}` is private in module `{}`", orig, module_alias),
+                                "only public modules can be brought into scope with `use`".to_string(),
+                                format!("add `pub` before `module {}` in the imported file", orig),
+                                Some(*module_alias_span),
+                            ));
+                        } else {
+                            states[idx]
+                                .imports
+                                .insert(local.to_string(), file_module_target);
+                        }
+                        continue;
+                    }
                     let exists = states[target_idx].funcs.contains_key(orig.as_str());
                     if !exists {
                         diags.push(Diagnostic::error(
@@ -3120,7 +3145,7 @@ fn check_bundle_opts_for_output_inner(
         }
     }
     match mode {
-        CompileMode::Test if entry.tests.is_empty()
+        CompileMode::Test if !states.iter().any(|state| !state.tests.is_empty())
             && !bundle.modules[bundle.entry].items.iter().any(|item| {
                 matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
             }) => {

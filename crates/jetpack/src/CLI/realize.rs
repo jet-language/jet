@@ -585,7 +585,7 @@ pub(super) struct RunPlan {
     /// surface. `jet env`/`jet dev` trust-gate on this and validate the names
     /// exist before entering the environment.
     pub(super) secrets: Vec<String>,
-    /// Typed lifecycle, profile, and language-pack facts shared by activation,
+    /// Typed lifecycle, preset, and language-pack facts shared by activation,
     /// lifecycle hooks, and service commands.
     pub(super) environment: ModuleEval::EnvironmentFacts,
 }
@@ -598,8 +598,8 @@ pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
 
 pub(super) fn load_project_plan_with_selections(
     theme: &Theme,
-    requested_profile: Option<&str>,
-    requested_environment_profile: Option<&str>,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> Result<RunPlan, i32> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let dir = project_env_root(&cwd);
@@ -632,17 +632,17 @@ pub(super) fn load_project_plan_with_selections(
             &src,
             &dir,
             toml_table,
-            requested_profile,
-            requested_environment_profile,
+            requested_preset,
+            requested_environment,
         );
     }
 
-    if let Some(name) = requested_environment_profile {
+    if let Some(name) = requested_environment {
         theme.error_coded(
             "E1337",
             &format!("environment module `{name}` is not declared"),
             "the explicit selector applies to typed `env.<name>` modules",
-            "use a typed env.jet module or omit `--env-profile`",
+            "select a declared `env.<name>` module with `--env <name>`, or omit `--env`",
         );
         return Err(2);
     }
@@ -675,14 +675,14 @@ fn typed_plan_with_defaults(
     src: &str,
     dir: &Path,
     toml_defaults: RefSpec::SourceTable,
-    requested_profile: Option<&str>,
-    requested_environment_profile: Option<&str>,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let plan = ModuleEval::evaluate_env_with_profiles(
+    let plan = ModuleEval::evaluate_env_with_selections(
         src,
         dir,
-        requested_profile,
-        requested_environment_profile,
+        requested_preset,
+        requested_environment,
     )
     .map_err(|d| {
         eprint!(
@@ -718,12 +718,12 @@ fn typed_plan_with_defaults(
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
     let selected_preset = plan.selected_preset;
-    // `evaluate_env_with_profiles` already expanded the typed selections. Keep
+    // `evaluate_env_with_selections` already expanded the typed selections. Keep
     // that exact graph fact through realization; re-expanding here could make
     // planning, trust, and activation disagree if the catalog changes.
     let language_expansion = plan.language_expansion;
-    if let Some(profile) = &selected_preset {
-        for package in &profile.packages {
+    if let Some(preset) = &selected_preset {
+        for package in &preset.packages {
             if !package_refs.iter().any(|existing| existing == package) {
                 package_refs.push(package.clone());
             }
@@ -770,7 +770,7 @@ fn typed_plan_with_defaults(
             source_files: plan.source_files,
             dev_services: plan.dev_services,
             lifecycle: plan.lifecycle,
-            profiles: plan.profiles,
+            presets: plan.presets,
             languages: language_expansion.selections.clone(),
             selected_preset,
             language_expansion: language_expansion.clone(),

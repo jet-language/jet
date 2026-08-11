@@ -11,7 +11,9 @@ use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
 use crate::Codegen::TIR::arm_bin_match_pattern;
+use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
+use crate::Codegen::TIR::is_data_event_variant;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::enum_is_covered;
@@ -475,6 +477,20 @@ pub(crate) fn if_cond_in_subset(
             span: _,
         } = pattern
         {
+            // DataEvent is a prelude enum and therefore has no user-variant
+            // owner entries. Its single-payload and unit patterns are still
+            // fully represented by the typed if-let lowering.
+            if !cx.variant_owner.contains_key(variant) && is_data_event_variant(variant) {
+                if bindings.is_empty() || matches!(bindings.first(), Some(PatSlot::Wildcard)) {
+                    return Some(Vec::new());
+                }
+                if bindings.len() == 1 {
+                    if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
+                        return Some(vec![name.clone()]);
+                    }
+                }
+                return None;
+            }
             if is_json_variant(variant)
                 && bindings.len() == 1
                 && matches!(bindings[0], PatSlot::Bind { .. })
@@ -621,6 +637,44 @@ pub(crate) fn switch_in_subset(
             let mut else_locals = locals.clone();
             body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
         });
+    }
+    // Shape A-GUARD: a variant-pattern switch with boolean guards on one or more
+    // arms. Lowering uses the ordinary TIfCond conjunction path, so payload names
+    // are bound only after the variant test and remain available to the guard and
+    // that arm's body. Restrict the shape to an explicit else: a guard can make an
+    // otherwise exhaustive enum table fall through, and the AST requires that
+    // residual behavior to be represented explicitly.
+    let has_guarded_variant = arms
+        .iter()
+        .any(|a| arm_guarded_variant_pattern(cx, &a.cond, subject).is_some());
+    if else_body.is_some()
+        && has_guarded_variant
+        && arms.iter().all(|a| {
+            arm_variant_pattern(cx, &a.cond, subject).is_some()
+                || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
+        })
+    {
+        for arm in arms {
+            let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
+                return false;
+            };
+            let mut body_locals = locals.clone();
+            body_locals.extend(bindings);
+            if !arm
+                .body
+                .iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        let Some(body) = else_body else {
+            unreachable!("guarded variant shape requires else");
+        };
+        let mut else_locals = locals.clone();
+        return body
+            .iter()
+            .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals));
     }
     // Shape A: all arms are variant patterns (exhaustive enum match).
     if arms

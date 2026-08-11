@@ -100,6 +100,11 @@ test('milestone filter narrows to one milestone and sorts unassigned last', () =
   assert.equal(cardMatches(closed, { milestone: 'e3-ul4' }), false);
   assert.equal(cardMatches(closed, { milestone: 'e3-ul4', showClosed: true }), true);
 
+  // A frozen card still counts toward its milestone's total, so the drill-down
+  // must show it — otherwise the milestone points at a card nobody can see.
+  const parked = card(24, 'frozen', 'frozen', { milestoneId: 'e3-ul4' });
+  assert.equal(cardMatches(parked, { milestone: 'e3-ul4' }), true);
+
   const sorted = sortCards([none, other, inMile], { col: 'milestone', dir: 'asc' });
   assert.deepEqual(sorted.map(c => c.num), [20, 21, 22]);
 });
