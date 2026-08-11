@@ -296,9 +296,7 @@ mod tests {
         fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
         assert_eq!(project_root(&nested), package);
         assert_eq!(workspace_root(&nested), root);
-        assert!(WorkspaceFile::load(&root)
-            .expect("arbitrary authority source should load")
-            .is_ok());
+        assert!(WorkspaceFile::load(&root).is_none());
         assert!(load_workspace(&root).is_none());
         let _ = fs::remove_dir_all(root);
     }

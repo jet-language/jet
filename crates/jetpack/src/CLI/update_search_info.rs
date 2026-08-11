@@ -288,7 +288,7 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
 
 fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
-    let Some(result) = WorkspaceFile::load(&dir) else {
+    let Some(source) = WorkspaceFile::resolve_workspace_source(&dir) else {
         theme.error_coded(
             "E1274",
             &format!("no overlay policy for `{query}`"),
@@ -296,6 +296,10 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
             "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.",
         );
         return 2;
+    };
+    let result = match source {
+        Ok(source) => WorkspaceFile::evaluate_source(&source.source, &dir, source.role),
+        Err(diagnostic) => Err(diagnostic),
     };
     let plan = match result {
         Ok(plan) => plan,

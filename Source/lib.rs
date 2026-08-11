@@ -173,16 +173,13 @@ fn check_workspace_file(file: &str) -> Option<Vec<Diagnostic>> {
     let path = absolute_source_path(file);
     let root = path.parent().unwrap_or(std::path::Path::new("."));
     match jetpack::WorkspaceFile::resolve_workspace_source(root)? {
-        Ok(source) if source.path == path => match jetpack::WorkspaceFile::load(root) {
-            Some(Ok(_)) => Some(Vec::new()),
-            Some(Err(diagnostic)) => Some(vec![diagnostic]),
-            None => Some(vec![Diagnostic::error(
-                "E3503",
-                format!("workspace source `{}` disappeared", path.display()),
-                "workspace authority changed while the source was being checked".to_string(),
-                "restore the workspace declaration before checking this file".to_string(),
-                None,
-            )]),
+        Ok(source) if source.path == path => match jetpack::WorkspaceFile::evaluate_source(
+            &source.source,
+            root,
+            source.role,
+        ) {
+            Ok(_) => Some(Vec::new()),
+            Err(diagnostic) => Some(vec![diagnostic]),
         },
         Ok(_) => None,
         Err(diagnostic) => Some(vec![diagnostic]),

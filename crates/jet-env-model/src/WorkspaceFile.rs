@@ -39,8 +39,8 @@ pub use jet_pkg_model::WorkspacePlan::{
 // Load / evaluate
 // ──────────────────────────────────────────────
 
-/// Load and evaluate the workspace/index authority from `dir`. Returns `None`
-/// when no file declares one (not an error — a plain project has no boundary).
+/// Load and evaluate the canonical workspace index from `dir`. Returns `None`
+/// when no file declares an index (an authority-only source is not an index).
 /// Returns `Err(diagnostic)` when a declaring file exists but is malformed.
 ///
 /// D-JPK-FILENAME2=B (A2): `module workspace { … }` is discovered by
@@ -49,7 +49,11 @@ pub use jet_pkg_model::WorkspacePlan::{
 pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
     let source = resolve_workspace_source(dir)?;
     Some(match source {
-        Ok(source) => evaluate_source(&source.source, dir, source.role),
+        Ok(source) => match evaluate_source(&source.source, dir, source.role) {
+            Ok(plan) if source.role == WorkspaceSourceRole::Index => Ok(plan),
+            Ok(_) => return None,
+            Err(diagnostic) => Err(diagnostic),
+        },
         Err(diagnostic) => Err(diagnostic),
     })
 }
@@ -221,8 +225,9 @@ fn evaluate_with_role(
             eval_members_expr(expr, src, base_dir, &funcs, &extern_names, &globals)?;
         comptime_inputs.extend(inputs);
         for (rel_path, span) in paths {
-            validate_member_path(&rel_path, base_dir, &members, Some(span))?;
-            let member = resolve_member(&rel_path, base_dir);
+            let (name, canonical_path) =
+                validate_member_path(&rel_path, base_dir, &members, Some(span))?;
+            let member = resolve_member(&rel_path, name, canonical_path);
             members.push(member);
         }
     }
@@ -242,7 +247,7 @@ fn validate_member_path(
     base_dir: &Path,
     members: &[WorkspaceMember],
     span: Option<Span>,
-) -> Result<(), Diagnostic> {
+) -> Result<(String, String), Diagnostic> {
     let raw = Path::new(rel_path);
     if raw.is_absolute()
         || raw
@@ -314,10 +319,55 @@ fn validate_member_path(
             ));
         }
     }
-    let path = package_file(&abs).expect("package file checked above");
+    let path = package_file(&abs).ok_or_else(|| {
+        Diagnostic::error(
+            "E1334",
+            format!("workspace member `{rel_path}` Package metadata disappeared"),
+            "workspace membership must validate the complete member manifest before accepting it".to_string(),
+            "restore the member manifest and try again".to_string(),
+            span,
+        )
+    })?;
+    let is_package_file = path.file_name().and_then(|name| name.to_str())
+        == Some(Syntax::PACKAGE_FILE);
     // Diagnostics use the same physical identity as membership validation.
     // This removes harmless `./` spelling from the reported manifest path.
-    let path = path.canonicalize().unwrap_or(path);
+    let path = path.canonicalize().map_err(|error| {
+        Diagnostic::error(
+            "E1334",
+            format!("couldn't resolve workspace member `{rel_path}` Package file: {error}"),
+            "workspace membership must know the real Package file before accepting it".to_string(),
+            "fix the member manifest path or its symlink and try again".to_string(),
+            span,
+        )
+    })?;
+    if !path.starts_with(&root) {
+        return Err(Diagnostic::error(
+            "E1322",
+            format!("workspace member `{rel_path}` Package file resolves outside the workspace root"),
+            "member metadata follows the real path, including symlinks; an escaping target is not a workspace member".to_string(),
+            "move the Package file under the workspace root or remove the escaping symlink".to_string(),
+            span,
+        ));
+    }
+    let metadata = std::fs::metadata(&path).map_err(|error| {
+        Diagnostic::error(
+            "E1334",
+            format!("couldn't inspect workspace member `{rel_path}` Package file: {error}"),
+            "workspace membership must validate a regular Package file before accepting it".to_string(),
+            "restore the member manifest and try again".to_string(),
+            span,
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(Diagnostic::error(
+            "E1334",
+            format!("workspace member `{rel_path}` Package metadata is not a regular file"),
+            "workspace membership cannot read a directory or special file as Package metadata".to_string(),
+            "replace the member metadata with a regular `package.jet` or `pkg.jet` file".to_string(),
+            span,
+        ));
+    }
     let text = std::fs::read_to_string(&path).map_err(|error| {
         Diagnostic::error(
             "E1334",
@@ -327,11 +377,9 @@ fn validate_member_path(
             span,
         )
     })?;
-    let has_members = if path.file_name().and_then(|name| name.to_str())
-        == Some(Syntax::PACKAGE_FILE)
-    {
+    let (has_members, name) = if is_package_file {
         match PackageFacts::parse_uncomposed(&text, path.display().to_string()) {
-            Ok(facts) => !facts.members.is_empty(),
+            Ok(facts) => (!facts.members.is_empty(), facts.name),
             Err(error) => {
                 return Err(Diagnostic::error(
                     "E1334",
@@ -343,7 +391,19 @@ fn validate_member_path(
             }
         }
     } else {
-        text.lines().any(|line| line.trim_start().starts_with("members:"))
+        let name = legacy_package_name(&text).ok_or_else(|| {
+            Diagnostic::error(
+                "E1334",
+                format!("workspace member `{rel_path}` has an invalid Package file"),
+                "the migration-era `pkg.jet` must contain a non-empty `name:` field".to_string(),
+                "fix the member's `pkg.jet` fields before adding it to the workspace".to_string(),
+                span,
+            )
+        })?;
+        (
+            text.lines().any(|line| line.trim_start().starts_with("members:")),
+            name,
+        )
     };
     if has_members {
         return Err(Diagnostic::error(
@@ -363,7 +423,6 @@ fn validate_member_path(
             span,
         ));
     }
-    let name = resolve_member(rel_path, base_dir).name;
     if members.iter().any(|member| member.name == name) {
         return Err(Diagnostic::error(
             "E1325",
@@ -373,7 +432,25 @@ fn validate_member_path(
             span,
         ));
     }
-    Ok(())
+    let canonical_path = real
+        .strip_prefix(&root)
+        .map_err(|_| {
+            Diagnostic::error(
+                "E1322",
+                format!("workspace member `{rel_path}` has no relative identity"),
+                "workspace membership must keep the member's physical identity below the workspace root".to_string(),
+                "move the member under the workspace root or remove the escaping symlink".to_string(),
+                span,
+            )
+        })?
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    let canonical_path = if canonical_path.is_empty() {
+        ".".to_string()
+    } else {
+        canonical_path
+    };
+    Ok((name, canonical_path))
 }
 
 // ──────────────────────────────────────────────
@@ -593,35 +670,8 @@ fn find_package_dirs(
 // Member resolution
 // ──────────────────────────────────────────────
 
-/// Resolve a member package: read its Package source to get the package name.
-/// Falls back to the directory basename when no manifest exists.
-fn resolve_member(rel_path: &str, base_dir: &Path) -> WorkspaceMember {
-    let abs = base_dir.join(rel_path);
-    let name = read_package_name(&abs)
-        .or_else(|| {
-            PathBuf::from(rel_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| rel_path.to_string());
-    let canonical_path = abs
-        .canonicalize()
-        .ok()
-        .and_then(|path| {
-            base_dir.canonicalize().ok().and_then(|root| {
-                path.strip_prefix(root).ok().map(|relative| {
-                    let relative = relative
-                        .to_string_lossy()
-                        .replace(std::path::MAIN_SEPARATOR, "/");
-                    if relative.is_empty() {
-                        ".".to_string()
-                    } else {
-                        relative
-                    }
-                })
-            })
-        })
-        .unwrap_or_default();
+/// Resolve a member package after its metadata has been validated.
+fn resolve_member(rel_path: &str, name: String, canonical_path: String) -> WorkspaceMember {
     WorkspaceMember {
         name,
         path: rel_path.to_string(),
@@ -629,17 +679,8 @@ fn resolve_member(rel_path: &str, base_dir: &Path) -> WorkspaceMember {
     }
 }
 
-/// Try to read the package name from a Package source in `dir`. Uses the simple
-/// text-level package name parser — no full evaluation needed.
-fn read_package_name(dir: &Path) -> Option<String> {
-    let manifest_path = package_file(dir)?;
-
-    let src = std::fs::read_to_string(&manifest_path).ok()?;
-    if manifest_path.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE) {
-        if let Ok(facts) = PackageFacts::parse_uncomposed(&src, manifest_path.display().to_string()) {
-            return Some(facts.name);
-        }
-    }
+/// Read a package name from the migration-era `pkg.jet` text shape.
+fn legacy_package_name(src: &str) -> Option<String> {
     // Fast heuristic: find `package: { name: "…" }` or `name: "…"`.
     // This avoids a full parse for the common case.
     for line in src.lines() {
@@ -655,14 +696,15 @@ fn read_package_name(dir: &Path) -> Option<String> {
 }
 
 fn package_file(dir: &Path) -> Option<PathBuf> {
-    let canonical = dir.join(Syntax::PACKAGE_FILE);
-    if canonical.is_file() {
-        Some(canonical)
-    } else if dir.join(Syntax::PAYLOAD_FILE).is_file() {
-        Some(dir.join(Syntax::PAYLOAD_FILE))
-    } else {
-        None
+    for name in [Syntax::PACKAGE_FILE, Syntax::PAYLOAD_FILE] {
+        let path = dir.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => return Some(path),
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Some(path),
+            Err(_) => {}
+        }
     }
+    None
 }
 
 fn has_package_file(dir: &Path) -> bool {
@@ -826,6 +868,42 @@ module workspace {
     }
 
     #[test]
+    fn malformed_member_metadata_is_not_replaced_by_path_name() {
+        let tmp = tempdir("member-malformed-metadata");
+        let package = tmp.join("packages/app");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join(Syntax::PAYLOAD_FILE), "not package metadata\n").unwrap();
+        let error = evaluate(
+            "module workspace { members: [\"./packages/app\"] }\n",
+            &tmp,
+        )
+        .expect_err("malformed member metadata must be surfaced");
+        assert_eq!(error.code, "E1334");
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn member_symlink_cannot_escape_workspace_root() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempdir("member-symlink-escape");
+        let outside = tempdir("member-symlink-target");
+        std::fs::write(outside.join(Syntax::PACKAGE_FILE), "name: \"outside\"\n").unwrap();
+        std::fs::create_dir_all(tmp.join("packages")).unwrap();
+        symlink(&outside, tmp.join("packages/escape")).unwrap();
+
+        let error = evaluate(
+            "module workspace { members: [\"./packages/escape\"] }\n",
+            &tmp,
+        )
+        .expect_err("an escaping member symlink must be rejected");
+        assert_eq!(error.code, "E1322");
+        std::fs::remove_dir_all(tmp).ok();
+        std::fs::remove_dir_all(outside).ok();
+    }
+
+    #[test]
     fn members_references_sibling_comptime_const() {
         // Slice A: a `members:` expression can name a top-level `comptime`
         // binding declared in the same file — not just inline literals.
@@ -945,6 +1023,49 @@ module workspace {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn find_does_not_skip_unreadable_member_metadata() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempdir("workspace-find-bad-metadata");
+        let package = tmp.join("packages/app");
+        std::fs::create_dir_all(&package).unwrap();
+        symlink("missing-package.jet", package.join(Syntax::PACKAGE_FILE)).unwrap();
+
+        let error = evaluate(
+            "module workspace { members: find(\"./packages\") }\n",
+            &tmp,
+        )
+        .expect_err("find must surface unreadable member metadata");
+        assert_eq!(error.code, "E1334");
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_metadata_must_be_regular_and_not_symlinked() {
+        use std::os::unix::fs::symlink;
+
+        let symlinked = tempdir("workspace-source-symlink");
+        let target = symlinked.join("workspace-source.txt");
+        std::fs::write(&target, "module workspace { members: [] }\n").unwrap();
+        symlink(&target, symlinked.join(Syntax::WORKSPACE_FILE)).unwrap();
+        let error = load(&symlinked)
+            .expect("the symlinked metadata must be surfaced")
+            .expect_err("symlinked workspace metadata must fail closed");
+        assert_eq!(error.code, "E1239");
+        std::fs::remove_dir_all(symlinked).ok();
+
+        let nonregular = tempdir("workspace-source-directory");
+        std::fs::create_dir(nonregular.join(Syntax::WORKSPACE_FILE)).unwrap();
+        let error = load(&nonregular)
+            .expect("the non-regular metadata must be surfaced")
+            .expect_err("non-regular workspace metadata must fail closed");
+        assert_eq!(error.code, "E1239");
+        std::fs::remove_dir_all(nonregular).ok();
+    }
+
     fn tempdir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -991,10 +1112,7 @@ module workspace {
             "module workspace { policy: .{ deny: #(Exec) } }\n",
         )
         .unwrap();
-        let plan = load(&dir)
-            .expect("declaration should be discovered")
-            .expect("should evaluate clean");
-        assert!(plan.members.is_empty());
+        assert!(load(&dir).is_none(), "authority metadata is not the index");
 
         // An arbitrary authority cannot repair a malformed reserved index.
         std::fs::write(dir.join(Syntax::WORKSPACE_FILE), "module env {}\n").unwrap();
@@ -1025,10 +1143,7 @@ module workspace {
             "module workspace { policy: .{ deny: #(FS) } }\n",
         )
         .unwrap();
-        let plan = load(&dir)
-            .expect("pkg.jet declaration should be discovered")
-            .expect("should evaluate clean");
-        assert!(plan.members.is_empty());
+        assert!(load(&dir).is_none(), "authority metadata is not the index");
     }
 
     #[test]

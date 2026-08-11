@@ -949,15 +949,14 @@ fn parse_bool(raw: &str) -> Result<bool, OverlayError> {
 }
 
 fn parse_allow_unfree(body: &str) -> Result<Vec<String>, OverlayError> {
-    let Some((_, rest)) = body.split_once("policy.allowUnfree") else {
+    let fields = top_level_policy_fields(body)?;
+    let Some(value) = fields
+        .into_iter()
+        .find_map(|(name, value)| (name == "allowUnfree").then_some(value))
+    else {
         return Ok(Vec::new());
     };
-    let Some((_, value)) = rest.split_once(':') else {
-        return Err(OverlayError::Malformed(
-            "`policy.allowUnfree` needs `:`".to_string(),
-        ));
-    };
-    parse_string_list(value.lines().next().unwrap_or(value))
+    parse_string_list(&value)
 }
 
 fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
@@ -971,11 +970,12 @@ fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
 }
 
 fn reject_unsupported_policy_fields(body: &str) -> Result<(), OverlayError> {
-    if find_word_outside(body, "policy.allow", 0).is_some() {
-        return Err(OverlayError::UnsupportedPolicy(
-            "workspace `policy.allow` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"
-                .to_string(),
-        ));
+    for (name, _) in top_level_policy_fields(body)? {
+        if name != "allowUnfree" {
+            return Err(OverlayError::UnsupportedPolicy(format!(
+                "workspace `policy.{name}` is unsupported; use `policy.allowUnfree`, `policy.deny`, or subject-scoped `policy.grants`"
+            )));
+        }
     }
     let Some(policy_body) = named_block(body, Syntax::MANIFEST_BLOCK_POLICY)? else {
         return Ok(());
@@ -987,6 +987,44 @@ fn reject_unsupported_policy_fields(body: &str) -> Result<(), OverlayError> {
         ));
     }
     Ok(())
+}
+
+fn top_level_policy_fields(body: &str) -> Result<Vec<(String, String)>, OverlayError> {
+    let mut fields = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut pos = 0;
+    while let Some(at) = find_word_outside(body, "policy", pos) {
+        let after = at + "policy".len();
+        if code_depth_at(body, at) != Some(0) {
+            pos = after;
+            continue;
+        }
+        let rest = body[after..].trim_start();
+        let Some(rest) = rest.strip_prefix('.') else {
+            pos = after;
+            continue;
+        };
+        let Some((name, after_name)) = read_ident(rest) else {
+            return Err(OverlayError::Malformed(
+                "workspace policy metadata needs a field name after `policy.`".to_string(),
+            ));
+        };
+        if !seen.insert(name.clone()) {
+            return Err(OverlayError::Malformed(format!(
+                "workspace `policy.{name}` appears more than once"
+            )));
+        }
+        let rest = after_name.trim_start();
+        let Some(value) = rest.strip_prefix(':') else {
+            return Err(OverlayError::Malformed(format!(
+                "`policy.{name}` needs `:`"
+            )));
+        };
+        let value = value.lines().next().unwrap_or(value).trim().to_string();
+        fields.push((name, value));
+        pos = body.len() - after_name.len();
+    }
+    Ok(fields)
 }
 
 fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayError> {
@@ -1008,6 +1046,7 @@ fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayE
             )
         })?;
     let mut grants = Vec::new();
+    let mut subjects = BTreeSet::new();
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
         let Some((subject, effects)) = split_top_level_colon(entry) else {
@@ -1020,6 +1059,11 @@ fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayE
             return Err(OverlayError::Malformed(
                 "`policy.grants` package names cannot be empty".to_string(),
             ));
+        }
+        if !subjects.insert(subject.clone()) {
+            return Err(OverlayError::Malformed(format!(
+                "`policy.grants` package `{subject}` appears more than once"
+            )));
         }
         let effects = parse_effect_tuple(effects.trim(), "policy.grants")?;
         grants.push((subject, effects));
@@ -1059,6 +1103,7 @@ fn parse_effect_tuple(raw: &str, field: &str) -> Result<Vec<String>, OverlayErro
 
 fn named_block(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
     let mut pos = 0;
+    let mut found = None;
     while let Some(rel) = body[pos..].find(name) {
         let at = pos + rel;
         let after = at + name.len();
@@ -1073,14 +1118,28 @@ fn named_block(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
                 let rest = rest.trim_start();
                 if let Some(rest) = rest.strip_prefix('.') {
                     if let Some(inner) = rest.trim_start().strip_prefix('{') {
-                        return balanced_policy_body(inner).map(Some);
+                        let policy_body = balanced_policy_body(inner)?;
+                        if found.is_some() {
+                            return Err(OverlayError::Malformed(format!(
+                                "workspace `{name}` block appears more than once"
+                            )));
+                        }
+                        found = Some(policy_body);
+                    } else {
+                        return Err(OverlayError::Malformed(format!(
+                            "workspace `{name}` must be a record"
+                        )));
                     }
+                } else {
+                    return Err(OverlayError::Malformed(format!(
+                        "workspace `{name}` must be a record"
+                    )));
                 }
             }
         }
         pos = after;
     }
-    Ok(None)
+    Ok(found)
 }
 
 fn code_depth_at(source: &str, stop: usize) -> Option<i32> {
@@ -1139,17 +1198,38 @@ fn balanced_policy_body(source: &str) -> Result<String, OverlayError> {
 }
 
 fn exact_field_value(body: &str, field: &str) -> Result<Option<String>, OverlayError> {
+    let mut seen = BTreeSet::new();
+    let mut value = None;
     for entry in top_level_commas(body) {
         let entry = entry.trim();
-        if let Some((name, value)) = split_top_level_colon(entry) {
-            if name.trim() == field {
-                return Ok(Some(value.trim().to_string()));
+        let Some((name, field_value)) = split_top_level_colon(entry) else {
+            let name = entry.split_whitespace().next().unwrap_or_default();
+            if name.is_empty() {
+                continue;
             }
-        } else if entry.split_whitespace().next() == Some(field) {
-            return Err(OverlayError::Malformed(format!("`policy.{field}` needs `:`")));
+            return Err(OverlayError::Malformed(format!("`policy.{name}` needs `:`")));
+        };
+        let name = name.trim();
+        if !matches!(
+            name,
+            Syntax::EFFECTS_FIELD_DENY
+                | Syntax::MANIFEST_BLOCK_GRANTS
+                | Syntax::EFFECTS_FIELD_ALLOW
+        ) {
+            return Err(OverlayError::UnsupportedPolicy(format!(
+                "workspace `policy.{name}` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"
+            )));
+        }
+        if !seen.insert(name.to_string()) {
+            return Err(OverlayError::Malformed(format!(
+                "workspace `policy.{name}` appears more than once"
+            )));
+        }
+        if name == field {
+            value = Some(field_value.trim().to_string());
         }
     }
-    Ok(None)
+    Ok(value)
 }
 
 fn split_top_level_colon(value: &str) -> Option<(&str, &str)> {
@@ -1872,7 +1952,7 @@ mod tests {
         let policy = parse_workspace_policy(r#"
 module workspace {
     policy_note: .{ deny: #(Exec) }
-    policy: .{ trust: .{ note: "deny: #(FS)" }, Deny: #(Net), deny: #(Exec, FS) }
+    policy: .{ deny: #(Exec, FS) }
 }
 "#).unwrap();
         assert_eq!(policy.build_deny, vec!["Exec", "FS"]);
@@ -1916,6 +1996,23 @@ module workspace {
         ] {
             let error = parse_workspace_policy(source).unwrap_err();
             assert!(matches!(error, OverlayError::UnsupportedPolicy(_)));
+        }
+    }
+
+    #[test]
+    fn workspace_policy_fields_fail_closed() {
+        for source in [
+            "module workspace { policy: .{ deny: #(Exec), unknown: #(FS) } }",
+            "module workspace { policy.unknown: #(FS) }",
+            "module workspace { policy.allowUnfree: [\"a\"]\n policy.allowUnfree: [\"b\"] }",
+            "module workspace { policy: .{ deny: #(Exec), deny: #(FS) } }",
+            "module workspace { policy: .{ deny: #(Exec) } policy: .{ grants: .{ \"app\": #(FS) } } }",
+            "module workspace { policy: .{ grants: .{ \"app\": #(FS), \"app\": #(Net) } } }",
+        ] {
+            assert!(
+                parse_workspace_policy(source).is_err(),
+                "authority policy metadata must reject `{source}`"
+            );
         }
     }
 

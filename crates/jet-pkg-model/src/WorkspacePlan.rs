@@ -120,6 +120,28 @@ pub fn resolve_workspace_source(dir: &Path) -> Option<Result<WorkspaceSource, Di
         {
             continue;
         }
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return Some(Err(Diagnostic::error(
+                    "E1239",
+                    format!("couldn't inspect workspace source `{}`", path.display()),
+                    format!("the workspace metadata is present but unavailable: {error}"),
+                    "restore read access to the workspace metadata before resolving its authority"
+                        .to_string(),
+                    None,
+                )))
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Some(Err(Diagnostic::error(
+                "E1239",
+                format!("workspace source `{}` is not a regular file", path.display()),
+                "workspace metadata cannot be read through a symlink or from a non-regular file".to_string(),
+                "replace the workspace metadata with a regular file in the workspace root".to_string(),
+                None,
+            )));
+        }
         let source = match std::fs::read_to_string(&path) {
             Ok(source) => source,
             Err(error) => {

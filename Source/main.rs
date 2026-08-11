@@ -2734,7 +2734,14 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
         }
     }
     let workspace = jetpack::WorkspaceFile::load(cwd);
-    if workspace_source.is_some() && workspace.is_none() {
+    let canonical_workspace = workspace_source.as_ref().is_some_and(|source| {
+        matches!(
+            source,
+            Ok(source)
+                if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
+        )
+    });
+    if canonical_workspace && workspace.is_none() {
         let diagnostic = Diagnostic::error(
             "E3503",
             format!("workspace source in `{}` disappeared", cwd.display()),

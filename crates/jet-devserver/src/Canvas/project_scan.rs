@@ -152,6 +152,22 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
 fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {
     let mut dir = start.to_path_buf();
     loop {
+        if let Some(Ok(source)) = jet_env_model::WorkspaceFile::resolve_workspace_source(&dir) {
+            if source.role == jet_env_model::WorkspaceFile::WorkspaceSourceRole::Authority {
+                return match jet_env_model::WorkspaceFile::load(&dir) {
+                    Some(Err(_)) => Some(WorkspaceBoundary {
+                        root: dir,
+                        member_root: None,
+                        malformed: true,
+                    }),
+                    _ => Some(WorkspaceBoundary {
+                        root: dir,
+                        member_root: None,
+                        malformed: false,
+                    }),
+                };
+            }
+        }
         match jet_env_model::WorkspaceFile::load(&dir) {
             Some(Ok(plan)) => {
                 let member_root = matching_member_root(&dir, start, &plan);
