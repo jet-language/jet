@@ -231,7 +231,7 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
 }
 
 #[test]
-fn profile_plan_uses_the_production_source_backed_resolver() {
+fn package_generation_plan_uses_the_production_source_backed_resolver() {
     let project = Scratch::new("profile-plan");
     fs::write(
         project.join("env.jet"),
@@ -265,7 +265,7 @@ module profile.dev {
 }
 
 #[test]
-fn profile_plan_reports_inheritance_cycles() {
+fn package_generation_plan_reports_inheritance_cycles() {
     let project = Scratch::new("profile-plan-cycle");
     fs::write(
         project.join("env.jet"),
@@ -2174,6 +2174,28 @@ fn retired_profile_flag_teaches_preset() {
 }
 
 #[test]
+fn retired_environment_flag_teaches_env() {
+    let project = Scratch::new("retired-environment-flag");
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev {\n    packages: [nixpkgs.ripgrep]\n}\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--env-profile", "full", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1342"), "stderr: {stderr}");
+    assert!(stderr.contains("`--env <name>`"), "stderr: {stderr}");
+    assert!(
+        !output.status.success(),
+        "the retired spelling must not select an environment module"
+    );
+}
+
+#[test]
 fn env_info_json_discloses_selected_preset_and_language_projection() {
     let project = Scratch::new("env-info-composition");
     fs::write(
@@ -2232,7 +2254,7 @@ module env.full {
     assert!(stdout.contains("\"variables\":[{\"name\":\"MODE\""), "stdout: {stdout}");
 
     let full = jetpack()
-        .args(["enter", "info", "--json", "--no-color", "--env-profile", "full"])
+        .args(["enter", "info", "--json", "--no-color", "--env", "full"])
         .current_dir(&project.path)
         .env("HOSTNAME", "epoch5-host")
         .env("USER", "epoch5-user")
@@ -2256,7 +2278,7 @@ module env.full {
     assert!(!full_stdout.contains("\"ripgrep@nixpkgs\""), "stdout: {full_stdout}");
 
     let missing = jetpack()
-        .args(["enter", "info", "--no-color", "--env-profile", "missing"])
+        .args(["enter", "info", "--no-color", "--env", "missing"])
         .current_dir(&project.path)
         .env("HOSTNAME", "epoch5-host")
         .env("USER", "epoch5-user")
