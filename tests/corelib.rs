@@ -27,15 +27,9 @@ mod dns_resolver_policy {
 }
 
 mod email_native {
-    fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        for (index, byte) in data.iter().enumerate() {
-            out[index % 32] = out[index % 32].wrapping_mul(31).wrapping_add(*byte);
-        }
-        out
-    }
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Email.rs");
 }
 

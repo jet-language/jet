@@ -916,7 +916,8 @@ mod net_tls_close_tests {
     }
 
     mod smtp_adapter {
-        include!("../../jet-foundation/src/Outcome.rs");
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
         include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
     }
