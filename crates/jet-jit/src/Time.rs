@@ -8,6 +8,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
+    include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 

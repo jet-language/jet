@@ -14,7 +14,7 @@ mod duration_kernel {
 }
 
 mod time_kernel {
-    include!("../../../Prelude/Core/Time.rs");
+    include!("../../../Prelude/Core/TimeMonotonic.rs");
 }
 
 fn handle_op_name(op: &THandleOp) -> String {

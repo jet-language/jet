@@ -94,6 +94,7 @@ mod sketch_kernel {
 }
 
 mod time_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
