@@ -185,6 +185,25 @@ fn assert_generated_project(
         expected_stdout,
         "default `jet run` output did not use generated {format} fields"
     );
+    let default_trace = String::from_utf8_lossy(&jit_run.stderr);
+    assert!(
+        default_trace
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "default `jet run` did not execute generated {format} project natively:\n{default_trace}"
+    );
+    assert!(
+        !default_trace.contains("tier0 interp"),
+        "default `jet run` interpreted or deopted generated {format} project:\n{default_trace}"
+    );
+    assert!(
+        !default_trace.contains("deopt"),
+        "default `jet run` deoptimized generated {format} project:\n{default_trace}"
+    );
+    assert!(
+        !default_trace.contains("fallback"),
+        "default `jet run` used a fallback for generated {format} project:\n{default_trace}"
+    );
     let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "--trace-tiers", "--interpret", "main.jet"])
         .current_dir(&dir)
@@ -198,10 +217,24 @@ fn assert_generated_project(
         expected_stdout,
         "forced interpreter output did not use generated {format} fields"
     );
+    let interpreter_trace = String::from_utf8_lossy(&interpreter_run.stderr);
     assert!(
-        !String::from_utf8_lossy(&interpreter_run.stderr).contains("tier1 native"),
-        "forced interpreter unexpectedly used resident JIT:\n{}",
-        String::from_utf8_lossy(&interpreter_run.stderr)
+        interpreter_trace
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier0 interp")),
+        "forced `jet run --interpret` did not execute generated {format} project in tier0:\n{interpreter_trace}"
+    );
+    assert!(
+        !interpreter_trace.contains("tier1 native"),
+        "forced interpreter unexpectedly used resident JIT:\n{interpreter_trace}"
+    );
+    assert!(
+        !interpreter_trace.contains("deopt"),
+        "forced interpreter used deopt for generated {format} project:\n{interpreter_trace}"
+    );
+    assert!(
+        !interpreter_trace.contains("fallback"),
+        "forced interpreter used a fallback for generated {format} project:\n{interpreter_trace}"
     );
     let _ = fs::remove_dir_all(dir);
 }

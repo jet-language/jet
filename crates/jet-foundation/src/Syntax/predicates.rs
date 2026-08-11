@@ -579,7 +579,7 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
 
 #[cfg(test)]
 mod generated_name_tests {
-    use super::{generated_name, generated_path, generated_suffix};
+    use super::{generated_name, generated_path, generated_suffix, is_reserved_generated_name};
 
     #[test]
     fn generated_names_have_one_machine_prefix() {
@@ -589,5 +589,12 @@ mod generated_name_tests {
         assert_eq!(generated_path("__jet_grades__curve"), "__jet_grades__curve");
         assert_eq!(generated_path("__jet_grades.curve"), "__jet_grades__curve");
         assert_eq!(generated_suffix("__jet_run"), "run");
+    }
+
+    #[test]
+    fn canonical_core_names_are_reserved_for_generated_names() {
+        for name in ["Decimal", "Duration", "Date", "LocalDate", "LocalTime", "JSONError"] {
+            assert!(is_reserved_generated_name(name), "unreserved canonical Core name `{name}`");
+        }
     }
 }
