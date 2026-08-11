@@ -30,8 +30,8 @@ mod Types;
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{
-    evaluate_env, evaluate_env_with_environment_profile, evaluate_env_with_profile,
-    evaluate_env_with_profiles, evaluate_package_profile, is_module_surface,
+    evaluate_env, evaluate_env_with_environment, evaluate_env_with_preset,
+    evaluate_env_with_selections, evaluate_package_profile, is_module_surface,
 };
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
@@ -140,7 +140,7 @@ module dev {
     }
 
     #[test]
-    fn selects_one_environment_profile_and_discloses_its_provenance() {
+    fn selects_one_environment_module_and_discloses_its_provenance() {
         let source = r#"
 module dev {
     env.dev: Env.{ packages: [default.ripgrep], prompt: "dev" }
@@ -156,14 +156,14 @@ module full {
         assert_eq!(default_plan.active_environment_provenance, vec!["dev"]);
 
         let full_plan =
-            evaluate_env_with_environment_profile(source, &base_dir(), Some("full")).unwrap();
+            evaluate_env_with_environment(source, &base_dir(), Some("full")).unwrap();
         assert_eq!(full_plan.active_environment.as_deref(), Some("full"));
         assert_eq!(full_plan.package_refs, vec!["fd@default"]);
         assert_eq!(full_plan.prompt.as_deref(), Some("full"));
         assert_eq!(full_plan.active_environment_provenance, vec!["full"]);
 
-        let error = evaluate_env_with_environment_profile(source, &base_dir(), Some("missing"))
-            .expect_err("unknown environment profile must not fall through to another profile");
+        let error = evaluate_env_with_environment(source, &base_dir(), Some("missing"))
+            .expect_err("unknown environment module must not fall through to another module");
         assert_eq!(error.code, "E1337");
     }
 
@@ -208,7 +208,7 @@ module profile.b { extends: ["a"] }
     }
 
     #[test]
-    fn explicit_profile_selection_ignores_a_cyclic_ambient_match() {
+    fn explicit_preset_selection_ignores_a_cyclic_ambient_match() {
         let hostname = std::env::var("HOSTNAME").unwrap_or_default();
         let source = format!(
             r#"
@@ -221,9 +221,9 @@ module env.dev {{
 }}
 "#
         );
-        let plan = evaluate_env_with_profile(&source, &base_dir(), Some("explicit")).unwrap();
+        let plan = evaluate_env_with_preset(&source, &base_dir(), Some("explicit")).unwrap();
         assert_eq!(
-            plan.selected_preset.as_ref().map(|profile| profile.name.as_str()),
+            plan.selected_preset.as_ref().map(|preset| preset.name.as_str()),
             Some("explicit")
         );
         assert!(plan.package_refs.contains(&"git@nixpkgs".to_string()));

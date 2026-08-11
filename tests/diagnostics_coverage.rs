@@ -209,7 +209,7 @@ fn snapshot_codes() -> BTreeSet<String> {
 
     // Legacy runtime assertions outside this card remain accepted until their
     // owning cards migrate them. #343 coverage below uses committed artifacts;
-    // none of E0966-E0978/E1203/E1207/E1801/E3208/E3302/E3402/L2101 depends
+    // none of E0966-E0978/E1203/E1207/E1801/E3302/E3402/L2101 depends
     // on this compatibility scan.
     let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
     if let Ok(entries) = fs::read_dir(&tests_dir) {
@@ -817,11 +817,9 @@ fn registered_unimplemented_codes_are_expected() {
         "E3002", // E2-M12 error propagation trace — runtime
         "E3005", // D-PREPOST1 #Pre/#Post contract failure — runtime (jet_contract_fail in generated code), not a compile Diagnostic
         "E3104", // retired by universal consuming close; use-after-close is E0121
-        "E3208", // emitted via eprintln! in CmdDevTools.rs
         "L2501", // reserved (path-normalisation issue noted in spec)
         "L2701", // E2-M9 — staged
         "L2801", // E2-M10 — staged
-        "L2901", // E2-M11 — staged
         "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
         "E0951", // retired by D-META-EFFECT1 c3: redirected to E3401
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed

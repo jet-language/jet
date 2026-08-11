@@ -629,9 +629,9 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
         TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
         TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
-        TNumericOp::Origin(origin) => format!(
+        TNumericOp::Origin { origin } => format!(
             "{{ let _ = ({recv}); {:?}.to_string() }}",
-            origin.as_deref().unwrap_or("untracked")
+            origin
         ),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
         TNumericOp::CheckedIntToFloat {
@@ -1998,8 +1998,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // lowering; emit only formats, reproducing `emit_builtin_method`'s numeric arms
         // + numeric conversion arms byte-for-byte.
         TExprKind::NumericMethod { recv, op } => {
-            let recv = emit_tir_expr(recv, cx);
-            emit_numeric_op(&recv, op, cx)
+            let rendered_recv = emit_tir_expr(recv, cx);
+            emit_numeric_op(&rendered_recv, op, cx)
         }
         // c109 Phase 28: an overflow opt-out builtin. `prefix`/`op` were resolved at
         // lowering; reproduce `emit_call`'s `(ls).{name}_{suffix}(rs)` byte-for-byte.
@@ -2487,8 +2487,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             format!("{}::{}(vec![{}])", prefix, variant, pairs)
                         } else {
                             format!(
-                                "{}::{}(({}).into_iter().collect())",
-                                prefix, variant, arg_str
+                                "{}::{}({}jet_map_into_entries({}))",
+                                prefix,
+                                variant,
+                                cx.root_prefix,
+                                arg_str,
                             )
                         }
                     } else {

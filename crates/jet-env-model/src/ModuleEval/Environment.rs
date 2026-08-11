@@ -549,16 +549,16 @@ pub struct PresetSpec {
 pub struct ResolvedPreset {
     pub name: String,
     /// Ambient selection before inheritance expansion. Explicit CLI selection
-    /// chooses one profile; ambient hostname and user matches may merge.
+    /// chooses one preset; ambient hostname and user matches may merge.
     pub selected_presets: Vec<String>,
     pub applied: Vec<String>,
     pub packages: Vec<String>,
     pub variables: BTreeMap<String, String>,
 }
 
-/// D-JPK-PROFILE1=D: one source-backed package-profile declaration. This is
+/// D-JPK-PROFILE1=D: one source-backed package-generation declaration. This is
 /// deliberately separate from `PresetSpec`, which is the environment-shell
-/// profile surface and may select host/user variables.
+/// preset surface and may select host/user variables.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageProfileSpec {
     pub name: String,
@@ -572,15 +572,15 @@ pub struct PackageProfileSpec {
     pub sources: Vec<String>,
 }
 
-/// One package ref after profile composition. `declared_by` keeps source
-/// profile identity when equal package facts are de-duplicated.
+/// One package ref after generation composition. `declared_by` keeps source
+/// generation identity when equal package facts are de-duplicated.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageProfilePackage {
     pub raw: String,
     pub declared_by: Vec<String>,
 }
 
-/// D-JPK-PROFILE1=D: one resolved profile view. It is still source-backed;
+/// D-JPK-PROFILE1=D: one resolved generation view. It is still source-backed;
 /// generation publication and activation consume this exact object later.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResolvedPackageProfile {
@@ -605,7 +605,7 @@ pub struct PackageProfileFact {
     pub declared_by: Vec<String>,
 }
 
-/// The read-only, source-backed profile plan. Realization and activation may
+/// The read-only, source-backed generation plan. Realization and activation may
 /// consume this plan later; they must not reconstruct package identity from
 /// the display string.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -647,9 +647,9 @@ pub enum PackageProfileError {
 impl std::fmt::Display for PackageProfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Missing(name) => write!(f, "package profile '{name}' does not exist"),
-            Self::Cycle(names) => write!(f, "package profile inheritance cycle: {}", names.join(" -> ")),
-            Self::Conflict { name } => write!(f, "package profile fact '{name}' conflicts"),
+            Self::Missing(name) => write!(f, "package generation '{name}' does not exist"),
+            Self::Cycle(names) => write!(f, "package generation inheritance cycle: {}", names.join(" -> ")),
+            Self::Conflict { name } => write!(f, "package generation fact '{name}' conflicts"),
         }
     }
 }
@@ -658,24 +658,24 @@ impl std::error::Error for PackageProfileError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PresetSet {
-    pub profiles: BTreeMap<String, PresetSpec>,
+    pub presets: BTreeMap<String, PresetSpec>,
 }
 
 impl PresetSet {
-    pub fn insert(&mut self, profile: PresetSpec) -> Result<(), PresetError> {
-        self.insert_checked(profile)
+    pub fn insert(&mut self, preset: PresetSpec) -> Result<(), PresetError> {
+        self.insert_checked(preset)
     }
 
-    pub fn insert_checked(&mut self, profile: PresetSpec) -> Result<(), PresetError> {
-        if let Some(existing) = self.profiles.get(&profile.name) {
-            if existing != &profile {
+    pub fn insert_checked(&mut self, preset: PresetSpec) -> Result<(), PresetError> {
+        if let Some(existing) = self.presets.get(&preset.name) {
+            if existing != &preset {
                 return Err(PresetError::Conflict {
-                    name: profile.name,
+                    name: preset.name,
                 });
             }
             return Ok(());
         }
-        self.profiles.insert(profile.name.clone(), profile);
+        self.presets.insert(preset.name.clone(), preset);
         Ok(())
     }
 
@@ -706,30 +706,30 @@ impl PresetSet {
         self.auto_select_many(hostname, user).into_iter().next()
     }
 
-    /// Select ambient profiles in deterministic priority order. All hostname
+    /// Select ambient presets in deterministic priority order. All hostname
     /// matches merge before all user matches; `default` is the last resort.
     pub fn auto_select_many(&self, hostname: &str, user: &str) -> Vec<String> {
         let mut selected = self
-            .profiles
+            .presets
             .values()
-            .filter(|profile| {
-                profile
+            .filter(|preset| {
+                preset
                     .hostname
                     .as_deref()
                     .is_some_and(|candidate| candidate == hostname)
             })
-            .map(|profile| profile.name.clone())
+            .map(|preset| preset.name.clone())
             .collect::<Vec<_>>();
         for name in self
-            .profiles
+            .presets
             .values()
-            .filter(|profile| {
-                profile
+            .filter(|preset| {
+                preset
                     .user
                     .as_deref()
                     .is_some_and(|candidate| candidate == user)
             })
-            .map(|profile| profile.name.clone())
+            .map(|preset| preset.name.clone())
         {
             if !selected.iter().any(|existing| existing == &name) {
                 selected.push(name);
@@ -739,7 +739,7 @@ impl PresetSet {
             return selected;
         }
 
-        if self.profiles.contains_key("default") {
+        if self.presets.contains_key("default") {
             return vec!["default".to_string()];
         }
         Vec::new()
@@ -757,23 +757,23 @@ impl PresetSet {
             cycle.push(name.to_string());
             return Err(PresetError::Cycle(cycle));
         }
-        let profile = self
-            .profiles
+        let preset = self
+            .presets
             .get(name)
             .ok_or_else(|| PresetError::Missing(name.to_string()))?;
         stack.push(name.to_string());
-        for parent in &profile.extends {
+        for parent in &preset.extends {
             self.resolve_into(parent, stack, resolved)?;
         }
         if !resolved.applied.iter().any(|item| item == name) {
             resolved.applied.push(name.to_string());
         }
-        for package in &profile.packages {
+        for package in &preset.packages {
             if !resolved.packages.iter().any(|item| item == package) {
                 resolved.packages.push(package.clone());
             }
         }
-        for (key, value) in &profile.variables {
+        for (key, value) in &preset.variables {
             if let Some(existing) = resolved.variables.get(key) {
                 if existing != value {
                     return Err(PresetError::Conflict {
@@ -789,8 +789,8 @@ impl PresetSet {
     }
 }
 
-/// One resolver for source-backed package profiles. JetOS/user composition,
-/// tool projections, and package-profile commands use this same data shape.
+/// One resolver for source-backed package generations. JetOS/user composition,
+/// tool projections, and package-generation commands use this same data shape.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageProfileSet {
     pub profiles: BTreeMap<String, PackageProfileSpec>,
@@ -1780,9 +1780,9 @@ impl EnvironmentLifecycle {
 }
 
 pub fn presets_from_value(value: &CtValue) -> Result<Vec<PresetSpec>, String> {
-    profile_entries(value)?
+    preset_entries(value)?
         .into_iter()
-        .map(|(name, value)| profile_from_value(name, value))
+        .map(|(name, value)| preset_from_value(name, value))
         .collect()
 }
 
@@ -2098,20 +2098,20 @@ fn list_strings_checked(value: &CtValue) -> Result<Vec<String>, String> {
         .collect()
 }
 
-fn profile_entries(value: &CtValue) -> Result<Vec<(String, CtValue)>, String> {
+fn preset_entries(value: &CtValue) -> Result<Vec<(String, CtValue)>, String> {
     match value {
         CtValue::Map(values) => values
             .iter()
             .map(|(key, value)| match key {
                 CtKey::Str(name) if !name.trim().is_empty() => Ok((name.clone(), value.clone())),
-                _ => Err("profile maps need non-empty string names".to_string()),
+                _ => Err("preset maps need non-empty string names".to_string()),
             })
             .collect(),
         CtValue::Struct { fields, .. } => fields
             .iter()
             .map(|(name, value)| {
                 if name.trim().is_empty() {
-                    Err("profile records need non-empty names".to_string())
+                    Err("preset records need non-empty names".to_string())
                 } else {
                     Ok((name.clone(), value.clone()))
                 }
@@ -2120,46 +2120,46 @@ fn profile_entries(value: &CtValue) -> Result<Vec<(String, CtValue)>, String> {
         CtValue::List(values) => values
             .iter()
             .map(|value| {
-                let fields = checked_struct_fields_named(value, "profile")?;
+                let fields = checked_struct_fields_named(value, "preset")?;
                 let name = fields
                     .get("name")
                     .and_then(string_value)
                     .filter(|name| !name.trim().is_empty())
-                    .ok_or_else(|| "profile list entries need a non-empty `name`".to_string())?;
+                    .ok_or_else(|| "preset list entries need a non-empty `name`".to_string())?;
                 Ok((name, value.clone()))
             })
             .collect(),
-        _ => Err("profiles must be a map, record, or list of named Profile records".to_string()),
+        _ => Err("presets must be a map, record, or list of named preset records".to_string()),
     }
 }
 
-fn profile_from_value(name: String, value: CtValue) -> Result<PresetSpec, String> {
-    let fields = checked_struct_fields_named(&value, "profile")?;
+fn preset_from_value(name: String, value: CtValue) -> Result<PresetSpec, String> {
+    let fields = checked_struct_fields_named(&value, "preset")?;
     let declared_name = fields.get("name").and_then(string_value);
     if let Some(declared_name) = declared_name.as_deref() {
         if declared_name != name {
             return Err(format!(
-                "profile map key `{name}` conflicts with its `name: {declared_name}` field"
+                "preset map key `{name}` conflicts with its `name: {declared_name}` field"
             ));
         }
     }
     let extends = fields
         .get("extends")
-        .map(|value| list_strings_named(value, "profile.extends"))
+        .map(|value| list_strings_named(value, "preset.extends"))
         .transpose()?
         .unwrap_or_default();
     let packages = fields
         .get("packages")
-        .map(|value| list_strings_named(value, "profile.packages"))
+        .map(|value| list_strings_named(value, "preset.packages"))
         .transpose()?
         .unwrap_or_default();
     let variables = fields
         .get("variables")
-        .map(|value| string_map_named(value, "profile.variables"))
+        .map(|value| string_map_named(value, "preset.variables"))
         .transpose()?
         .unwrap_or_default();
-    let hostname = optional_string_named(&fields, "hostname", "profile.hostname")?;
-    let user = optional_string_named(&fields, "user", "profile.user")?;
+    let hostname = optional_string_named(&fields, "hostname", "preset.hostname")?;
+    let user = optional_string_named(&fields, "user", "preset.user")?;
     Ok(PresetSpec {
         name,
         extends,
@@ -2498,7 +2498,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_resolution_is_parent_first_and_deduplicated() {
+    fn preset_resolution_is_parent_first_and_deduplicated() {
         let mut set = PresetSet::default();
         set.insert(PresetSpec {
             name: "base".to_string(),
@@ -2517,7 +2517,7 @@ mod tests {
     }
 
     #[test]
-    fn ambient_hostname_profiles_merge_before_user_profiles() {
+    fn ambient_hostname_presets_merge_before_user_presets() {
         let mut set = PresetSet::default();
         set.insert(PresetSpec {
             name: "host".to_string(),
@@ -2547,7 +2547,7 @@ mod tests {
     }
 
     #[test]
-    fn ambient_profile_variable_conflicts_are_rejected() {
+    fn ambient_preset_variable_conflicts_are_rejected() {
         let mut set = PresetSet::default();
         set.insert(PresetSpec {
             name: "host".to_string(),
@@ -2593,7 +2593,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_cycles_are_rejected() {
+    fn preset_cycles_are_rejected() {
         let mut set = PresetSet::default();
         set.insert(PresetSpec {
             name: "a".to_string(),

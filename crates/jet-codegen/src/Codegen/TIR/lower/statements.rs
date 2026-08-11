@@ -19,7 +19,7 @@ use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::timeout_nanos;
-use crate::Codegen::TIR::lower::tracked_float_origin;
+use crate::Codegen::TIR::lower::tracked_float_slot;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
@@ -29,6 +29,7 @@ use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
@@ -94,21 +95,34 @@ fn bake_comptime_value_with_type(
 }
 
 fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
-    match expr {
-        Expr::Ident(name, _) => Some(name),
-        Expr::Paren(inner, _) => interrupt_callback_ident(inner),
-        _ => None,
+    let mut expr = expr;
+    loop {
+        match expr {
+            Expr::Ident(name, _) => return Some(name),
+            Expr::Paren(inner, _) => expr = inner,
+            _ => return None,
+        }
     }
 }
 
 fn is_core_os_receiver(expr: &Expr, cx: &Cx) -> bool {
-    match expr {
-        Expr::Ident(alias, _) => cx
-            .any_core_import_module(alias)
-            .is_some_and(|module| module == "core.os"),
-        Expr::Field(base, leaf, _) => leaf == "os" && is_core_os_receiver(base, cx),
-        _ => false,
+    let mut expr = expr;
+    loop {
+        match expr {
+            Expr::Ident(alias, _) => {
+                return cx
+                    .any_core_import_module(alias)
+                    .is_some_and(|module| module == "core.os");
+            }
+            Expr::Field(base, leaf, _) if leaf == "os" => expr = base,
+            _ => return false,
+        }
     }
+}
+
+enum InterruptScanTask<'a> {
+    Expr(&'a Expr),
+    Stmts(&'a [Stmt]),
 }
 
 fn collect_interrupt_callback_names_expr(
@@ -116,274 +130,297 @@ fn collect_interrupt_callback_names_expr(
     cx: &Cx,
     names: &mut HashSet<String>,
 ) {
-    match expr {
-        Expr::MethodCall {
-            receiver,
-            method,
-            args,
-            ..
-        } => {
-            if method == "on_interrupt" && is_core_os_receiver(receiver, cx) {
-                if let Some(name) = args.first().and_then(|arg| interrupt_callback_ident(&arg.expr)) {
-                    names.insert(name.to_string());
-                }
-            }
-            collect_interrupt_callback_names_expr(receiver, cx, names);
-            for arg in args {
-                collect_interrupt_callback_names_expr(&arg.expr, cx, names);
-            }
-        }
-        Expr::Call(call) => {
-            for arg in &call.args {
-                collect_interrupt_callback_names_expr(&arg.expr, cx, names);
-            }
-        }
-        Expr::CallValue { callee, args, .. } => {
-            collect_interrupt_callback_names_expr(callee, cx, names);
-            for arg in args {
-                collect_interrupt_callback_names_expr(&arg.expr, cx, names);
-            }
-        }
-        // A normal lambda is its own function boundary. Its body gets one scan
-        // when that lambda is lowered; descending here would make the
-        // enclosing function scan the nested function and reintroduce the old
-        // per-statement-list walk. Collecting/result loops are the exception:
-        // sema lowers those immediately-called lambdas as inline blocks in the
-        // current function, so their callback uses belong to this scan.
-        Expr::Lambda(lam) => {
-            if lam.meta.collecting_loop || lam.meta.result_loop {
-                match &lam.body {
-                    crate::AST::LambdaBody::Expr(body) => {
-                        collect_interrupt_callback_names_expr(body, cx, names)
-                    }
-                    crate::AST::LambdaBody::Block(body) => {
-                        collect_interrupt_callback_names(body, cx, names)
-                    }
-                }
-            }
-        }
-        Expr::Paren(inner, _)
-        | Expr::Unary(_, inner, _)
-        | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _)
-        | Expr::Place(inner, _, _)
-        | Expr::Tainted(inner, _, _)
-        | Expr::Present(inner, _)
-        | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _)
-        | Expr::Spread(inner, _)
-        | Expr::IncDec { operand: inner, .. } => {
-            collect_interrupt_callback_names_expr(inner, cx, names)
-        }
-        Expr::Binary(_, left, right, _) => {
-            collect_interrupt_callback_names_expr(left, cx, names);
-            collect_interrupt_callback_names_expr(right, cx, names);
-        }
-        Expr::CompareChain { operands, .. } => {
-            for operand in operands {
-                collect_interrupt_callback_names_expr(operand, cx, names);
-            }
-        }
-        Expr::ListLit(items, _) => {
-            for item in items {
-                collect_interrupt_callback_names_expr(item, cx, names);
-            }
-        }
-        Expr::MemberSpread { base, .. } => {
-            collect_interrupt_callback_names_expr(base, cx, names)
-        }
-        Expr::MapLit(entries, _) => {
-            for (key, value) in entries {
-                collect_interrupt_callback_names_expr(key, cx, names);
-                collect_interrupt_callback_names_expr(value, cx, names);
-            }
-        }
-        Expr::Index { base, index, .. } => {
-            collect_interrupt_callback_names_expr(base, cx, names);
-            collect_interrupt_callback_names_expr(index, cx, names);
-        }
-        Expr::Slice {
-            base,
-            start,
-            end,
-            range,
-            ..
-        } => {
-            collect_interrupt_callback_names_expr(base, cx, names);
-            collect_interrupt_callback_names_expr(start, cx, names);
-            collect_interrupt_callback_names_expr(end, cx, names);
-            if let Some(range) = range {
-                collect_interrupt_callback_names_expr(range, cx, names);
-            }
-        }
-        Expr::Range { start, end, .. } => {
-            collect_interrupt_callback_names_expr(start, cx, names);
-            collect_interrupt_callback_names_expr(end, cx, names);
-        }
-        Expr::Field(base, _, _) => collect_interrupt_callback_names_expr(base, cx, names),
-        Expr::OptField { base, .. } => collect_interrupt_callback_names_expr(base, cx, names),
-        Expr::StructLit { fields, .. } => {
-            for (_, _, value) in fields {
-                collect_interrupt_callback_names_expr(value, cx, names);
-            }
-        }
-        Expr::TypedLit { body, .. } => body.for_each_expr(|value| {
-            collect_interrupt_callback_names_expr(value, cx, names)
-        }),
-        Expr::EnumLit { args, .. } => {
-            for arg in args {
-                match arg {
-                    crate::AST::EnumLitArg::Positional(value)
-                    | crate::AST::EnumLitArg::Named { expr: value, .. } => {
-                        collect_interrupt_callback_names_expr(value, cx, names)
-                    }
-                }
-            }
-        }
-        Expr::Str(parts, _) => {
-            for part in parts {
-                if let crate::AST::StrPart::Interp(value, _) = part {
-                    collect_interrupt_callback_names_expr(value, cx, names);
-                }
-            }
-        }
-        Expr::PatternTest { subject, .. } => {
-            collect_interrupt_callback_names_expr(subject, cx, names)
-        }
-        Expr::If {
-            cond,
-            then_body,
-            then_value,
-            else_body,
-            else_value,
-            ..
-        } => {
-            collect_interrupt_callback_names_expr(cond, cx, names);
-            collect_interrupt_callback_names(then_body, cx, names);
-            collect_interrupt_callback_names_expr(then_value, cx, names);
-            collect_interrupt_callback_names(else_body, cx, names);
-            collect_interrupt_callback_names_expr(else_value, cx, names);
-        }
-        Expr::TupleLit(fields, _, _) => {
-            for (_, value) in fields {
-                collect_interrupt_callback_names_expr(value, cx, names);
-            }
-        }
-        Expr::PtrFromAddr { addr, .. } => collect_interrupt_callback_names_expr(addr, cx, names),
-        Expr::OrFallback { value, .. } => collect_interrupt_callback_names_expr(value, cx, names),
-        _ => {}
-    }
+    collect_interrupt_callback_scan(InterruptScanTask::Expr(expr), cx, names);
 }
 
 fn collect_interrupt_callback_names(stmts: &[Stmt], cx: &Cx, names: &mut HashSet<String>) {
-    let mut pending = vec![stmts];
-    while let Some(stmts) = pending.pop() {
-        for stmt in stmts {
-            match stmt {
-                Stmt::Expr(expr) => collect_interrupt_callback_names_expr(expr, cx, names),
-                Stmt::Val(binding) => {
-                    collect_interrupt_callback_names_expr(&binding.init, cx, names)
-                }
-                Stmt::Assign { value, .. } => {
-                    collect_interrupt_callback_names_expr(value, cx, names)
-                }
-                Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
-                    collect_interrupt_callback_names_expr(value, cx, names)
-                }
-                Stmt::While { cond, body, .. } => {
-                    collect_interrupt_callback_names_expr(cond, cx, names);
-                    pending.push(body);
-                }
-                Stmt::For { kind, body, .. } => {
-                    if let ForKind::In { collection, step } = kind {
-                        collect_interrupt_callback_names_expr(collection, cx, names);
-                        if let Some(step) = step {
-                            collect_interrupt_callback_names_expr(step, cx, names);
+    collect_interrupt_callback_scan(InterruptScanTask::Stmts(stmts), cx, names);
+}
+
+fn collect_interrupt_callback_scan(
+    root: InterruptScanTask<'_>,
+    cx: &Cx,
+    names: &mut HashSet<String>,
+) {
+    let mut pending = vec![root];
+    while let Some(task) = pending.pop() {
+        match task {
+            InterruptScanTask::Expr(expr) => match expr {
+                Expr::MethodCall {
+                    receiver,
+                    method,
+                    args,
+                    ..
+                } => {
+                    if method == "on_interrupt" && is_core_os_receiver(receiver, cx) {
+                        if let Some(name) = args
+                            .first()
+                            .and_then(|arg| interrupt_callback_ident(&arg.expr))
+                        {
+                            names.insert(name.to_string());
                         }
                     }
-                    pending.push(body);
+                    for arg in args.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(&arg.expr));
+                    }
+                    pending.push(InterruptScanTask::Expr(receiver));
                 }
-                Stmt::Switch {
-                    subject,
-                    arms,
-                    else_body,
+                Expr::Call(call) => {
+                    for arg in call.args.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(&arg.expr));
+                    }
+                }
+                Expr::CallValue { callee, args, .. } => {
+                    for arg in args.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(&arg.expr));
+                    }
+                    pending.push(InterruptScanTask::Expr(callee));
+                }
+                // A normal lambda is its own function boundary. Its body gets one scan
+                // when that lambda is lowered; collecting/result loops are inline blocks
+                // in the current function and therefore remain part of this scan.
+                Expr::Lambda(lam)
+                    if lam.meta.collecting_loop || lam.meta.result_loop => match &lam.body {
+                    crate::AST::LambdaBody::Expr(body) => {
+                        pending.push(InterruptScanTask::Expr(body));
+                    }
+                    crate::AST::LambdaBody::Block(body) => {
+                        pending.push(InterruptScanTask::Stmts(body));
+                    }
+                },
+                Expr::Lambda(_) => {}
+                Expr::Paren(inner, _)
+                | Expr::Unary(_, inner, _)
+                | Expr::Deref(inner, _)
+                | Expr::RawOf(inner, _)
+                | Expr::Copy(inner, _)
+                | Expr::Place(inner, _, _)
+                | Expr::Tainted(inner, _, _)
+                | Expr::Present(inner, _)
+                | Expr::Ok(inner, _)
+                | Expr::Err(inner, _)
+                | Expr::Try(inner, _, _)
+                | Expr::Spread(inner, _)
+                | Expr::IncDec { operand: inner, .. } => {
+                    pending.push(InterruptScanTask::Expr(inner));
+                }
+                Expr::Binary(_, left, right, _) => {
+                    pending.push(InterruptScanTask::Expr(right));
+                    pending.push(InterruptScanTask::Expr(left));
+                }
+                Expr::CompareChain { operands, .. } => {
+                    for operand in operands.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(operand));
+                    }
+                }
+                Expr::ListLit(items, _) => {
+                    for item in items.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(item));
+                    }
+                }
+                Expr::MemberSpread { base, .. } => {
+                    pending.push(InterruptScanTask::Expr(base));
+                }
+                Expr::MapLit(entries, _) => {
+                    for (key, value) in entries.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(value));
+                        pending.push(InterruptScanTask::Expr(key));
+                    }
+                }
+                Expr::Index { base, index, .. } => {
+                    pending.push(InterruptScanTask::Expr(index));
+                    pending.push(InterruptScanTask::Expr(base));
+                }
+                Expr::Slice {
+                    base,
+                    start,
+                    end,
+                    range,
                     ..
                 } => {
-                    collect_interrupt_callback_names_expr(subject, cx, names);
-                    for arm in arms {
-                        collect_interrupt_callback_names_expr(&arm.cond, cx, names);
-                        pending.push(&arm.body);
+                    if let Some(range) = range {
+                        pending.push(InterruptScanTask::Expr(range));
                     }
-                    if let Some(body) = else_body {
-                        pending.push(body);
+                    pending.push(InterruptScanTask::Expr(end));
+                    pending.push(InterruptScanTask::Expr(start));
+                    pending.push(InterruptScanTask::Expr(base));
+                }
+                Expr::Range { start, end, .. } => {
+                    pending.push(InterruptScanTask::Expr(end));
+                    pending.push(InterruptScanTask::Expr(start));
+                }
+                Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
+                    pending.push(InterruptScanTask::Expr(base));
+                }
+                Expr::StructLit { fields, .. } => {
+                    for (_, _, value) in fields.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(value));
                     }
                 }
-                Stmt::Loop { body, .. }
-                | Stmt::Unsafe { body, .. }
-                | Stmt::Impure { body, .. }
-                | Stmt::Reactive { body, .. }
-                | Stmt::Shield { body, .. }
-                | Stmt::Switched { body, .. }
-                | Stmt::Region { body, .. }
-                | Stmt::Policy { body, .. }
-                | Stmt::TaskGroup { body, .. }
-                | Stmt::Layout { body, .. }
-                | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
-                | Stmt::ContextBlock { body, .. }
-                | Stmt::Live { body, .. }
-                | Stmt::AssumeDet { body, .. }
-                | Stmt::Transact { body, .. }
-                | Stmt::ComptimeBlock { body, .. } => pending.push(body),
-                Stmt::CountedLoop {
-                    init,
-                    cond,
-                    step,
-                    body,
-                    ..
-                } => {
-                    collect_interrupt_callback_names_expr(&init.init, cx, names);
-                    collect_interrupt_callback_names_expr(cond, cx, names);
-                    if let Some(step) = step {
-                        pending.push(std::slice::from_ref(step.as_ref()));
+                Expr::TypedLit { body, .. } => {
+                    let mut values = Vec::new();
+                    body.for_each_expr(|value| values.push(value));
+                    for value in values.into_iter().rev() {
+                        pending.push(InterruptScanTask::Expr(value));
                     }
-                    pending.push(body);
                 }
-                Stmt::ComptimeIf {
+                Expr::EnumLit { args, .. } => {
+                    for arg in args.iter().rev() {
+                        let value = match arg {
+                            crate::AST::EnumLitArg::Positional(value)
+                            | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                        };
+                        pending.push(InterruptScanTask::Expr(value));
+                    }
+                }
+                Expr::Str(parts, _) => {
+                    for part in parts.iter().rev() {
+                        if let crate::AST::StrPart::Interp(value, _) = part {
+                            pending.push(InterruptScanTask::Expr(value));
+                        }
+                    }
+                }
+                Expr::PatternTest { subject, .. } => {
+                    pending.push(InterruptScanTask::Expr(subject));
+                }
+                Expr::If {
                     cond,
                     then_body,
+                    then_value,
                     else_body,
+                    else_value,
                     ..
                 } => {
-                    collect_interrupt_callback_names_expr(cond, cx, names);
-                    pending.push(then_body);
-                    if let Some(body) = else_body {
-                        pending.push(body);
+                    pending.push(InterruptScanTask::Expr(else_value));
+                    pending.push(InterruptScanTask::Stmts(else_body));
+                    pending.push(InterruptScanTask::Expr(then_value));
+                    pending.push(InterruptScanTask::Stmts(then_body));
+                    pending.push(InterruptScanTask::Expr(cond));
+                }
+                Expr::TupleLit(fields, _, _) => {
+                    for (_, value) in fields.iter().rev() {
+                        pending.push(InterruptScanTask::Expr(value));
                     }
                 }
-                Stmt::ScopeMember { args, body, .. } => {
-                    for arg in args {
-                        collect_interrupt_callback_names_expr(arg, cx, names);
-                    }
-                    pending.push(body);
+                Expr::PtrFromAddr { addr, .. } => {
+                    pending.push(InterruptScanTask::Expr(addr));
                 }
-                Stmt::ComptimeSwitch {
-                    subject,
-                    arms,
-                    else_body,
-                    ..
-                } => {
-                    collect_interrupt_callback_names_expr(subject, cx, names);
-                    for arm in arms {
-                        pending.push(&arm.body);
-                    }
-                    if let Some(body) = else_body {
-                        pending.push(body);
-                    }
+                Expr::OrFallback { value, .. } => {
+                    pending.push(InterruptScanTask::Expr(value));
                 }
                 _ => {}
+            },
+            InterruptScanTask::Stmts(stmts) => {
+                for stmt in stmts.iter().rev() {
+                    match stmt {
+                        Stmt::Expr(expr) => pending.push(InterruptScanTask::Expr(expr)),
+                        Stmt::Val(binding) => {
+                            pending.push(InterruptScanTask::Expr(&binding.init));
+                        }
+                        Stmt::Assign { value, .. } => {
+                            pending.push(InterruptScanTask::Expr(value));
+                        }
+                        Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
+                            pending.push(InterruptScanTask::Expr(value));
+                        }
+                        Stmt::While { cond, body, .. } => {
+                            pending.push(InterruptScanTask::Stmts(body));
+                            pending.push(InterruptScanTask::Expr(cond));
+                        }
+                        Stmt::For { kind, body, .. } => {
+                            pending.push(InterruptScanTask::Stmts(body));
+                            if let ForKind::In { collection, step } = kind {
+                                if let Some(step) = step {
+                                    pending.push(InterruptScanTask::Expr(step));
+                                }
+                                pending.push(InterruptScanTask::Expr(collection));
+                            }
+                        }
+                        Stmt::Switch {
+                            subject,
+                            arms,
+                            else_body,
+                            ..
+                        } => {
+                            if let Some(body) = else_body {
+                                pending.push(InterruptScanTask::Stmts(body));
+                            }
+                            for arm in arms.iter().rev() {
+                                pending.push(InterruptScanTask::Stmts(&arm.body));
+                                pending.push(InterruptScanTask::Expr(&arm.cond));
+                            }
+                            pending.push(InterruptScanTask::Expr(subject));
+                        }
+                        Stmt::Loop { body, .. }
+                        | Stmt::Unsafe { body, .. }
+                        | Stmt::Impure { body, .. }
+                        | Stmt::Reactive { body, .. }
+                        | Stmt::Shield { body, .. }
+                        | Stmt::Switched { body, .. }
+                        | Stmt::Region { body, .. }
+                        | Stmt::Policy { body, .. }
+                        | Stmt::TaskGroup { body, .. }
+                        | Stmt::Layout { body, .. }
+                        | Stmt::Caps { body, .. }
+                        | Stmt::Grant { body, .. }
+                        | Stmt::ContextBlock { body, .. }
+                        | Stmt::Live { body, .. }
+                        | Stmt::AssumeDet { body, .. }
+                        | Stmt::Transact { body, .. }
+                        | Stmt::ComptimeBlock { body, .. } => {
+                            pending.push(InterruptScanTask::Stmts(body));
+                        }
+                        Stmt::CountedLoop {
+                            init,
+                            cond,
+                            step,
+                            body,
+                            ..
+                        } => {
+                            pending.push(InterruptScanTask::Stmts(body));
+                            if let Some(step) = step {
+                                pending.push(InterruptScanTask::Stmts(
+                                    std::slice::from_ref(step.as_ref()),
+                                ));
+                            }
+                            pending.push(InterruptScanTask::Expr(cond));
+                            pending.push(InterruptScanTask::Expr(&init.init));
+                        }
+                        Stmt::ComptimeIf {
+                            cond,
+                            then_body,
+                            else_body,
+                            ..
+                        } => {
+                            if let Some(body) = else_body {
+                                pending.push(InterruptScanTask::Stmts(body));
+                            }
+                            pending.push(InterruptScanTask::Stmts(then_body));
+                            pending.push(InterruptScanTask::Expr(cond));
+                        }
+                        Stmt::ScopeMember { args, body, .. } => {
+                            pending.push(InterruptScanTask::Stmts(body));
+                            for arg in args.iter().rev() {
+                                pending.push(InterruptScanTask::Expr(arg));
+                            }
+                        }
+                        Stmt::ComptimeSwitch {
+                            subject,
+                            arms,
+                            else_body,
+                            ..
+                        } => {
+                            if let Some(body) = else_body {
+                                pending.push(InterruptScanTask::Stmts(body));
+                            }
+                            for arm in arms.iter().rev() {
+                                pending.push(InterruptScanTask::Stmts(&arm.body));
+                            }
+                            pending.push(InterruptScanTask::Expr(subject));
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -676,7 +713,7 @@ impl<'a> LowerBlock<'a> {
                     self.out.push(TStmt::LineMarker(view.candidate.line));
                 }
             }
-            let candidate = view.candidate;
+            let mut candidate = view.candidate;
             let elem_ty = match tir_recv_jet_ty(&candidate.owner, &self.env) {
                 Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(*elem),
                 _ => None,
@@ -685,6 +722,10 @@ impl<'a> LowerBlock<'a> {
                 TLocal::user(&candidate.name).through_ref()
             } else {
                 TLocal::user(&candidate.name)
+            };
+            let slot = match candidate.origin.take() {
+                Some(origin) => slot.with_origin(origin),
+                None => slot,
             };
             self.env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
@@ -833,6 +874,7 @@ struct SplitViewCandidate {
     owner_key: String,
     name: String,
     ty: Option<Type>,
+    origin: Option<TBindingOrigin>,
     start: i64,
     end: i64,
     single: bool,
@@ -862,36 +904,63 @@ struct SplitRegion {
 }
 
 fn const_place_bound(expr: &Expr) -> Option<i64> {
-    match expr {
-        Expr::Int(value, ..) => Some(*value),
-        Expr::Unary(UnOp::Neg, inner, _) => const_place_bound(inner)?.checked_neg(),
-        Expr::Paren(inner, _) => const_place_bound(inner),
-        _ => None,
+    let mut expr = expr;
+    let mut negations = 0usize;
+    let mut value = loop {
+        match expr {
+            Expr::Int(value, ..) => break *value,
+            Expr::Unary(UnOp::Neg, inner, _) => {
+                negations += 1;
+                expr = inner;
+            }
+            Expr::Paren(inner, _) => expr = inner,
+            _ => return None,
+        }
+    };
+    for _ in 0..negations {
+        value = value.checked_neg()?;
     }
+    Some(value)
 }
 
 fn split_owner_key(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Ident(name, _) => Some(format!("name:{name}")),
-        Expr::Field(base, field, _) => {
-            Some(format!("{}.field:{field}", split_owner_key(base)?))
+    let mut expr = expr;
+    let mut suffixes = Vec::new();
+    let mut root = None;
+    loop {
+        match expr {
+            Expr::Ident(name, _) => {
+                root = Some(format!("name:{name}"));
+                break;
+            }
+            Expr::Field(base, field, _) => {
+                suffixes.push(format!(".field:{field}"));
+                expr = base;
+            }
+            Expr::Index { base, index, .. } => {
+                suffixes.push(format!(".index:{}", const_place_bound(index)?));
+                expr = base;
+            }
+            Expr::Paren(inner, _) | Expr::Place(inner, _, _) => expr = inner,
+            _ => return None,
         }
-        Expr::Index { base, index, .. } => Some(format!(
-            "{}.index:{}",
-            split_owner_key(base)?,
-            const_place_bound(index)?
-        )),
-        Expr::Paren(inner, _) | Expr::Place(inner, _, _) => split_owner_key(inner),
-        _ => None,
     }
+    let mut key = root?;
+    for suffix in suffixes.into_iter().rev() {
+        key.push_str(&suffix);
+    }
+    Some(key)
 }
 
 fn split_owner_root(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Ident(name, _) => Some(name.clone()),
-        Expr::Field(base, _, _) | Expr::Index { base, .. } => split_owner_root(base),
-        Expr::Paren(inner, _) | Expr::Place(inner, _, _) => split_owner_root(inner),
-        _ => None,
+    let mut expr = expr;
+    loop {
+        match expr {
+            Expr::Ident(name, _) => return Some(name.clone()),
+            Expr::Field(base, _, _) | Expr::Index { base, .. } => expr = base,
+            Expr::Paren(inner, _) | Expr::Place(inner, _, _) => expr = inner,
+            _ => return None,
+        }
     }
 }
 
@@ -972,6 +1041,10 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
         owner_key,
         name: binding.name.clone(),
         ty: binding.ty.clone(),
+        origin: binding
+            .ty
+            .as_ref()
+            .and_then(|ty| crate::Codegen::TIR::lower::tracked_float_origin(binding, ty)),
         start,
         end,
         single,
@@ -1456,6 +1529,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 } else {
                     TLocal::user(&b.name).as_uninit_scalar()
                 };
+                let slot = tracked_float_slot(b, ty, slot);
                 env.bind(&b.name, slot, b.ty.clone());
                 ready_return!(TStmt::Let {
                     name: b.name.clone(),
@@ -1476,7 +1550,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
             if b.arena_view {
                 let init = lower_expr(&b.init, cx, env);
-                env.bind(&b.name, TLocal::user(&b.name).through_ref(), b.ty.clone());
+                let slot = tracked_float_slot(
+                    b,
+                    b.ty.as_ref().unwrap_or(&init.ty),
+                    TLocal::user(&b.name).through_ref(),
+                );
+                env.bind(&b.name, slot, b.ty.clone());
                 ready_return!(TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1504,6 +1583,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     } else {
                         TLocal::user(&b.name).through_ref()
                     };
+                    let slot = tracked_float_slot(
+                        b,
+                        b.ty.as_ref().unwrap_or(&init.ty),
+                        slot,
+                    );
                     env.bind(&b.name, slot, b.ty.clone());
                     ready_return!(TStmt::Let {
                         name: b.name.clone(),
@@ -1585,7 +1669,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             .unwrap_or(TExprKind::DefaultLit)
                     }),
                 };
-                env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
+                let slot = tracked_float_slot(
+                    b,
+                    b.ty.as_ref().unwrap_or(&init.ty),
+                    TLocal::user(&b.name),
+                );
+                env.bind(&b.name, slot, b.ty.clone());
                 ready_return!(TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
@@ -1754,7 +1843,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     b.gc_promotion.is_some() || b.gc_transferred,
                 )
             };
-            let track_origin = tracked_float_origin(b, &ty, cx);
             let binding_name = if is_resource {
                 crate::Syntax::generated_name(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
@@ -1765,10 +1853,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             } else {
                 TLocal::user(&binding_name)
             };
+            let slot = tracked_float_slot(b, &ty, slot);
             env.bind(&b.name, slot, Some(ty));
-            if let Some(origin) = &track_origin {
-                env.mark_tracked_float(&b.name, origin.clone());
-            }
             if b.gc_promotion.is_some() || b.gc_transferred {
                 env.mark_gc(&b.name);
             }

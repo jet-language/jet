@@ -32,6 +32,7 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TPatternPosition;
@@ -63,21 +64,42 @@ fn encoding_reader_method(ty: &Type) -> Option<TForInMethod> {
     }
 }
 
-pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
+pub(super) fn tracked_float_origin(
+    b: &crate::AST::Binding,
+    ty: &Type,
+) -> Option<TBindingOrigin> {
     if !b.track() || !matches!(ty, Type::Float) {
         return None;
     }
-    let (line, col) = crate::Diagnostics::span_line_col(&cx.src, b.name_span.start);
+    Some(TBindingOrigin {
+        name: b.name.clone(),
+        span: b.name_span,
+    })
+}
+
+pub(super) fn tracked_float_slot(
+    b: &crate::AST::Binding,
+    ty: &Type,
+    slot: TLocal,
+) -> TLocal {
+    match tracked_float_origin(b, ty) {
+        Some(origin) => slot.with_origin(origin),
+        None => slot,
+    }
+}
+
+pub(super) fn render_tracked_float_origin(origin: &TBindingOrigin, cx: &Cx) -> String {
+    let (line, col) = crate::Diagnostics::span_line_col(&cx.src, origin.span.start);
     let snippet = cx
         .src
         .lines()
         .nth(line.saturating_sub(1))
         .unwrap_or("")
         .trim();
-    Some(format!(
+    format!(
         "tracked `{}` at {}:{}:{}: {}",
-        b.name, cx.file, line, col, snippet
-    ))
+        origin.name, cx.file, line, col, snippet
+    )
 }
 
 pub(super) fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Option<String> {
@@ -251,18 +273,24 @@ pub(super) fn lower_binding_free_variant_pattern_test(
 }
 
 fn pattern_subject_is_borrowed(subject: &Expr, env: &LowerEnv) -> bool {
-    match subject {
-        Expr::Ident(name, _) => env.is_borrowed(name),
-        Expr::Field(base, _, _) => pattern_subject_is_borrowed(base, env),
-        _ => false,
+    let mut subject = subject;
+    loop {
+        match subject {
+            Expr::Ident(name, _) => return env.is_borrowed(name),
+            Expr::Field(base, _, _) => subject = base,
+            _ => return false,
+        }
     }
 }
 
 fn pattern_subject_is_owned_self(subject: &Expr, env: &LowerEnv) -> bool {
-    match subject {
-        Expr::Ident(name, _) => name == Syntax::KW_SELF && !env.is_borrowed(name),
-        Expr::Field(base, _, _) => pattern_subject_is_owned_self(base, env),
-        _ => false,
+    let mut subject = subject;
+    loop {
+        match subject {
+            Expr::Ident(name, _) => return name == Syntax::KW_SELF && !env.is_borrowed(name),
+            Expr::Field(base, _, _) => subject = base,
+            _ => return false,
+        }
     }
 }
 

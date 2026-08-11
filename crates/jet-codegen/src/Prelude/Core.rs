@@ -946,6 +946,21 @@ impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
     }
 }
 
+fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
+    match std::sync::Arc::try_unwrap(m.0) {
+        Ok(map) => {
+            let mut entries = Vec::with_capacity(map.len());
+            entries.extend(map);
+            entries
+        }
+        Err(shared) => {
+            let mut entries = Vec::with_capacity(shared.len());
+            entries.extend(shared.iter().map(|(k, v)| (k.clone(), v.clone())));
+            entries
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum JetRemoveBy {
     Val,

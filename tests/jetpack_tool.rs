@@ -796,3 +796,90 @@ fn tool_install_task_collision_is_e1297_snapshot() {
             .exists()
     );
 }
+
+#[test]
+fn test_runs_unimported_sibling_jet_tests_and_propagates_failure() {
+    let project = Scratch::new("test-project");
+    let root = Scratch::new("test-root");
+    fs::write(
+        project.join("package.jet"),
+        "name: \"test_project\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("main.jet"),
+        "#Test(\"entry test\") {\n    require(true)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("sibling_test.jet"),
+        "#Test(\"unimported sibling test\") {\n    require(false)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "use jetpack as pkg\npub fn shell() => [JSON] = [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_project@local\"]), pkg.prompt(\"test\")]\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["test", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "jetpack test must report the failing test\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("unimported sibling test") || stderr.contains("unimported sibling test"),
+        "test name missing from output:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("FAIL") || stderr.contains("FAIL"),
+        "failure missing from output:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_check_only_package_without_run_jet_collects_package_tests() {
+    let project = Scratch::new("test-check-only-project");
+    let root = Scratch::new("test-check-only-root");
+    fs::write(
+        project.join("package.jet"),
+        "name: \"test_check_only\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("check.jet"),
+        "#Test(\"check-only package\") {\n    require(true)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "use jetpack as pkg\npub fn shell() => [JSON] = [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_check_only@local\"]), pkg.prompt(\"test\")]\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["test", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "check-only package test failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("check-only package") || stderr.contains("check-only package"),
+        "check-only package test missing from output:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}

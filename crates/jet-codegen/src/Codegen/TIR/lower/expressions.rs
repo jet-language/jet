@@ -211,6 +211,100 @@ fn strip_expr_parens(mut expr: &Expr) -> &Expr {
     expr
 }
 
+fn lower_list_lit(elems: &[Expr], cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let has_spread = elems.iter().any(|e| matches!(e, Expr::Spread(..)));
+    if has_spread {
+        let mut parts = Vec::new();
+        for e in elems {
+            match e {
+                Expr::Spread(inner, _) => {
+                    parts.push(ListSpreadPart::Spread(lower_expr(inner, cx, env)));
+                }
+                other => {
+                    parts.push(ListSpreadPart::Elem(lower_expr(other, cx, env)));
+                }
+            }
+        }
+        let elem_ty = parts
+            .iter()
+            .find_map(|p| match p {
+                ListSpreadPart::Elem(t) => Some(t.ty.clone()),
+                ListSpreadPart::Spread(t) => match &t.ty {
+                    Type::List(inner) => Some((**inner).clone()),
+                    _ => Some(t.ty.clone()),
+                },
+            })
+            .unwrap_or(Type::Int);
+        return TExpr {
+            ty: Type::List(Box::new(elem_ty)),
+            kind: TExprKind::ListSpread { parts },
+        };
+    }
+    let telems: Vec<TExpr> = elems.iter().map(|e| lower_expr(e, cx, env)).collect();
+    let elem_ty = telems.first().map(|e| e.ty.clone()).unwrap_or(Type::Int);
+    if let Some(columns_ty) = cx.columnar_list_type(&elem_ty) {
+        return TExpr {
+            ty: Type::List(Box::new(elem_ty)),
+            kind: TExprKind::ColumnarListLit {
+                columns_ty,
+                elems: telems,
+            },
+        };
+    }
+    TExpr {
+        ty: Type::List(Box::new(elem_ty)),
+        kind: TExprKind::ListLit(telems),
+    }
+}
+
+fn lower_or_fallback(
+    value: &Expr,
+    fallback: &OrFallback,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let value_t = lower_expr(value, cx, env);
+    let result_ty = match &value_t.ty {
+        Type::Option(inner) => (**inner).clone(),
+        Type::Result { ok, .. } => (**ok).clone(),
+        other => other.clone(),
+    };
+    let tfallback = match fallback {
+        OrFallback::Value(e) => TOrFallback::Value(Box::new(lower_expr(e, cx, env))),
+        OrFallback::Return(None, _) => TOrFallback::Return(None),
+        OrFallback::Return(Some(e), _) => {
+            TOrFallback::Return(Some(Box::new(lower_expr(e, cx, env))))
+        }
+        OrFallback::Panic { name_span, args } => {
+            let (kind, loc) = lower_panic_stop(name_span, args, cx, env);
+            let TRequireKind::Panic { msg } = kind else { unreachable!() };
+            TOrFallback::Panic { msg, loc }
+        }
+        OrFallback::Break(_) => TOrFallback::Break,
+        OrFallback::Continue(_) => TOrFallback::Continue,
+        OrFallback::BreakLabel(name, _) => TOrFallback::BreakLabel(name.clone()),
+        OrFallback::ContinueLabel(name, _) => TOrFallback::ContinueLabel(name.clone()),
+    };
+    TExpr {
+        ty: result_ty,
+        kind: TExprKind::OrFallback {
+            value: Box::new(value_t),
+            fallback: tfallback,
+        },
+    }
+}
+
+fn lower_expr_node(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    match e {
+        Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
+        Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
+        Expr::OrFallback {
+            value, fallback, ..
+        } => lower_or_fallback(value, fallback, cx, env),
+        _ => lower_expr_inner(e, cx, env),
+    }
+}
+
 fn expr_cache_begin() -> bool {
     EXPR_WORKLIST_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -265,11 +359,10 @@ fn expr_cache_put(expr: &Expr, value: TExpr) {
     });
 }
 
-/// Return the children whose lowering is plain expression lowering. Calls and typed
-/// literals stay opaque here because their lowering applies argument conventions or
-/// rewrites the AST before descending. They still call this same heap-scheduled entry
-/// point for each child they actually consume; their remaining source nesting is
-/// bounded by the repository's shared E1403 limit.
+/// Return the children whose lowering is plain expression lowering. Contextual
+/// call arguments that are lambdas stay opaque so `lower_one_call_arg` can apply
+/// the expected function type; every other child goes through this same heap-
+/// scheduled entry point.
 fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Str(parts, _) => parts
@@ -312,11 +405,11 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             range,
             ..
         } => {
-            let mut children = vec![base.as_ref(), start.as_ref(), end.as_ref()];
             if let Some(range) = range {
-                children.push(range.as_ref());
+                vec![base.as_ref(), range.as_ref()]
+            } else {
+                vec![base.as_ref(), start.as_ref(), end.as_ref()]
             }
-            children
         }
         Expr::Range { start, end, .. } => vec![start.as_ref(), end.as_ref()],
         Expr::Binary(_, left, right, _) => vec![left.as_ref(), right.as_ref()],
@@ -359,6 +452,41 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             })
             .collect(),
         Expr::PatternTest { subject, .. } => vec![subject.as_ref()],
+        Expr::Call(call) => call
+            .args
+            .iter()
+            .filter_map(|arg| (!matches!(&arg.expr, Expr::Lambda(_))).then_some(&arg.expr))
+            .collect(),
+        Expr::CallValue { callee, args, .. } => {
+            let mut children = Vec::with_capacity(args.len() + 1);
+            children.push(callee.as_ref());
+            children.extend(
+                args.iter()
+                    .filter_map(|arg| (!matches!(&arg.expr, Expr::Lambda(_))).then_some(&arg.expr)),
+            );
+            children
+        }
+        Expr::MethodCall { .. } => {
+            let mut calls = Vec::new();
+            let mut cursor = expr;
+            while let Expr::MethodCall { receiver, args, .. } = cursor {
+                calls.push(args);
+                cursor = receiver;
+            }
+            let mut children = vec![cursor];
+            for args in calls.into_iter().rev() {
+                children.extend(
+                    args.iter()
+                        .filter_map(|arg| (!matches!(&arg.expr, Expr::Lambda(_))).then_some(&arg.expr)),
+                );
+            }
+            children
+        }
+        Expr::TypedLit { body, .. } => {
+            let mut children = Vec::new();
+            body.for_each_expr(|value| children.push(value));
+            children
+        }
         Expr::OrFallback { value, fallback, .. } => {
             let mut children = vec![value.as_ref()];
             match fallback {
@@ -374,12 +502,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             }
             children
         }
-        Expr::If { .. }
-        | Expr::Call(_)
-        | Expr::MethodCall { .. }
-        | Expr::CallValue { .. }
-        | Expr::Lambda(_)
-        | Expr::TypedLit { .. } => Vec::new(),
+        Expr::If { .. } | Expr::Lambda(_) => Vec::new(),
         Expr::TupleLit(fields, _, _) => fields.iter().map(|(_, value)| value).collect(),
         Expr::PtrFromAddr { addr, .. } => vec![addr.as_ref()],
         Expr::Paren(inner, _) => vec![inner.as_ref()],
@@ -424,7 +547,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 }
             }
             ExprWork::Build(expr) => {
-                expr_cache_put(expr, lower_expr_inner(expr, cx, env));
+                expr_cache_put(expr, lower_expr_node(expr, cx, env));
             }
         }
     }
@@ -2750,52 +2873,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // is `[E]` with `E` taken from the first element; an empty `[]` has no
         // element to read, so its element type is unresolved (`Int` placeholder),
         // but the emitted `vec![]` is type-inferred by Rust from the binding context.
-        Expr::ListLit(elems, _span) => {
-            let has_spread = elems.iter().any(|e| matches!(e, Expr::Spread(..)));
-            if has_spread {
-                let mut parts = Vec::new();
-                for e in elems {
-                    match e {
-                        Expr::Spread(inner, _) => {
-                            parts.push(ListSpreadPart::Spread(lower_expr(inner, cx, env)));
-                        }
-                        other => {
-                            parts.push(ListSpreadPart::Elem(lower_expr(other, cx, env)));
-                        }
-                    }
-                }
-                let elem_ty = parts
-                    .iter()
-                    .find_map(|p| match p {
-                        ListSpreadPart::Elem(t) => Some(t.ty.clone()),
-                        ListSpreadPart::Spread(t) => match &t.ty {
-                            Type::List(inner) => Some((**inner).clone()),
-                            _ => Some(t.ty.clone()),
-                        },
-                    })
-                    .unwrap_or(Type::Int);
-                return TExpr {
-                    ty: Type::List(Box::new(elem_ty)),
-                    kind: TExprKind::ListSpread { parts },
-                };
-            }
-            let telems: Vec<TExpr> = elems.iter().map(|e| lower_expr(e, cx, env)).collect();
-            let elem_ty = telems.first().map(|e| e.ty.clone()).unwrap_or(Type::Int);
-            // D-SOA1: a list of a columnar struct builds via `from_aos`.
-            if let Some(columns_ty) = cx.columnar_list_type(&elem_ty) {
-                return TExpr {
-                    ty: Type::List(Box::new(elem_ty)),
-                    kind: TExprKind::ColumnarListLit {
-                        columns_ty,
-                        elems: telems,
-                    },
-                };
-            }
-            TExpr {
-                ty: Type::List(Box::new(elem_ty)),
-                kind: TExprKind::ListLit(telems),
-            }
-        }
+        Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
         // c109 Phase 23: a named-tuple literal → a generated `JetTup_<hash>` struct
         // literal. The gate guaranteed `ty` is `Some(Type::Tuple)`. Reproduce
         // `emit_expr`'s `TupleLit` arm: the CANONICAL field order + struct name come
@@ -3215,41 +3293,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // so the value type alone gives the payload type. Mirrors `emit_or_fallback`.
         Expr::OrFallback {
             value, fallback, ..
-        } => {
-            let value_t = lower_expr(value, cx, env);
-            let result_ty = match &value_t.ty {
-                Type::Option(inner) => (**inner).clone(),
-                Type::Result { ok, .. } => (**ok).clone(),
-                other => other.clone(),
-            };
-            let tfallback = match fallback {
-                OrFallback::Value(e) => TOrFallback::Value(Box::new(lower_expr(e, cx, env))),
-                OrFallback::Return(None, _) => TOrFallback::Return(None),
-                OrFallback::Return(Some(e), _) => {
-                    TOrFallback::Return(Some(Box::new(lower_expr(e, cx, env))))
-                }
-                // c109 Phase 15: the `panic(…)` form — render the whole
-                // `{ jet_panic_rich(…); }` statement string at lowering, byte-for-byte
-                // `emit_panic_stop`/`safe_locals_expr`, so emit reads nothing from
-                // `cx.src`/`cx.current_fn`.
-                OrFallback::Panic { name_span, args } => {
-                    let (kind, loc) = lower_panic_stop(name_span, args, cx, env);
-                    let TRequireKind::Panic { msg } = kind else { unreachable!() };
-                    TOrFallback::Panic { msg, loc }
-                }
-                OrFallback::Break(_) => TOrFallback::Break,
-                OrFallback::Continue(_) => TOrFallback::Continue,
-                OrFallback::BreakLabel(name, _) => TOrFallback::BreakLabel(name.clone()),
-                OrFallback::ContinueLabel(name, _) => TOrFallback::ContinueLabel(name.clone()),
-            };
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::OrFallback {
-                    value: Box::new(value_t),
-                    fallback: tfallback,
-                },
-            }
-        }
+        } => lower_or_fallback(value, fallback, cx, env),
         // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
         // (from sema): true → `.and_then`, false → `.map`. The result type is `T?`;
         // resolving the inner field type here is not load-bearing (emit only formats
@@ -3488,13 +3532,15 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
 /// materialize the owned value at this semantic boundary.
 pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     fn reads_borrowed_place(e: &Expr, env: &LowerEnv) -> bool {
-        match e {
-            Expr::Ident(name, _) => env.is_borrowed(name),
-            Expr::Field(base, _, _) | Expr::Index { base, .. } => {
-                reads_borrowed_place(base, env)
+        let mut current = e;
+        loop {
+            match current {
+                Expr::Ident(name, _) => return env.is_borrowed(name),
+                Expr::Field(base, _, _)
+                | Expr::Index { base, .. }
+                | Expr::Paren(base, _) => current = base,
+                _ => return false,
             }
-            Expr::Paren(inner, _) => reads_borrowed_place(inner, env),
-            _ => false,
         }
     }
 

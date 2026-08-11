@@ -13,8 +13,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use crate::JSON::JSONValue;
-
 /// Compute the bind hash for a header + cflags pair (Phase 3 invalidation).
 /// The hash is SHA-256(header_src || "\0" || cflags_str) rendered as 64 hex digits.
 /// `cflags` is a space-joined list of flags; pass `""` when there are none.
@@ -68,6 +66,7 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
     let mut bound = Vec::new();
     let mut skipped = Vec::new();
     let mut lines = String::new();
+    let mut used_names = BTreeSet::new();
 
     for decl in split_declarations(&cleaned) {
         let decl = decl.trim();
@@ -75,7 +74,7 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
             continue;
         }
         match parse_prototype(decl) {
-            Some(proto) => match render_binding(&proto) {
+            Some(proto) => match render_binding(&proto, &mut used_names) {
                 Ok(line) => {
                     bound.push(proto.name.clone());
                     lines.push_str("    ");
@@ -95,7 +94,12 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
         ));
     }
 
-    let source = format!("#Bindgen module c.{}.__bindgen__ {{\n{}}}\n", lib, lines);
+    let module_lib = crate::Syntax::sanitize_generated_name(
+        lib,
+        crate::Syntax::NameCase::Snake,
+        "library",
+    );
+    let source = format!("#Bindgen module c.{}.__bindgen__ {{\n{}}}\n", module_lib, lines);
     Ok(BindResult {
         source,
         bound,
@@ -260,12 +264,21 @@ fn split_params(src: &str) -> Option<Vec<String>> {
 
 /// Render one prototype as a Jet `#Bindgen` line, or Err(reason) if a type in it
 /// isn't bindable in this subset.
-fn render_binding(p: &Proto) -> Result<String, String> {
+fn render_binding(p: &Proto, used_names: &mut BTreeSet<String>) -> Result<String, String> {
     let ret_jet = match map_return_type(&p.ret) {
         Ok(t) => t,
         Err(e) => return Err(e),
     };
+    let function_name = unique_name(
+        used_names,
+        &crate::Syntax::sanitize_generated_name(
+            &p.name,
+            crate::Syntax::NameCase::Snake,
+            "function",
+        ),
+    );
     let mut params = Vec::new();
+    let mut used_param_names = BTreeSet::new();
     for (idx, raw) in p.params.iter().enumerate() {
         let raw = raw.trim();
         if raw == "..." {
@@ -273,12 +286,27 @@ fn render_binding(p: &Proto) -> Result<String, String> {
         }
         let (ty, name) = split_param_type_and_name(raw, idx);
         let jet_ty = map_type(&ty).ok_or_else(|| format!("type `{}` isn't bindable", ty.trim()))?;
+        let name = unique_name(
+            &mut used_param_names,
+            &crate::Syntax::sanitize_generated_name(&name, crate::Syntax::NameCase::Snake, "arg"),
+        );
         params.push(format!("{}: {}", name, jet_ty));
     }
     let params_str = params.join(", ");
     let line = match ret_jet {
-        Some(r) => format!("fn {}({}) => {} = \"{}\";", p.name, params_str, r, p.name),
-        None => format!("fn {}({}) = \"{}\";", p.name, params_str, p.name),
+        Some(r) => format!(
+            "fn {}({}) => {} = {};",
+            function_name,
+            params_str,
+            r,
+            crate::JSON::quote(&p.name)
+        ),
+        None => format!(
+            "fn {}({}) = {};",
+            function_name,
+            params_str,
+            crate::JSON::quote(&p.name)
+        ),
     };
     Ok(line)
 }
@@ -475,107 +503,12 @@ fn unique_name(used: &mut BTreeSet<String>, preferred: &str) -> String {
     }
 }
 
-fn is_jet_keyword(name: &str) -> bool {
-    matches!(
-        name,
-        "as"
-            | "break"
-            | "const"
-            | "continue"
-            | "distinct"
-            | "else"
-            | "enum"
-            | "false"
-            | "fn"
-            | "for"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "match"
-            | "module"
-            | "None"
-            | "ok"
-            | "pub"
-            | "return"
-            | "state"
-            | "struct"
-            | "trait"
-            | "true"
-            | "type"
-            | "use"
-            | "where"
-            | "while"
-            | "Self"
-            | "self"
-            | "Some"
-            | "Ok"
-            | "Err"
-    )
-}
-
 fn sanitize_field_name(wire_name: &str) -> String {
-    let source = wire_name
-        .strip_prefix('@')
-        .or_else(|| wire_name.strip_prefix('$'))
-        .unwrap_or(wire_name);
-    let mut out = String::new();
-    let mut previous_was_lower_or_digit = false;
-    for ch in source.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            if ch.is_ascii_uppercase() && previous_was_lower_or_digit && !out.ends_with('_') {
-                out.push('_');
-            }
-            out.push(ch.to_ascii_lowercase());
-            previous_was_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
-        } else {
-            if !out.ends_with('_') {
-                out.push('_');
-            }
-            previous_was_lower_or_digit = false;
-        }
-    }
-    while out.ends_with('_') {
-        out.pop();
-    }
-    if out.is_empty() {
-        out.push_str("field");
-    }
-    if out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-        out.insert_str(0, "field_");
-    }
-    if is_jet_keyword(&out) || out.starts_with("__") {
-        out.push_str("_field");
-    }
-    out
+    crate::Syntax::sanitize_generated_name(wire_name, crate::Syntax::NameCase::Snake, "field")
 }
 
 fn sanitize_type_name(raw: &str) -> String {
-    let mut out = String::new();
-    let mut upper_next = true;
-    for ch in raw.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if upper_next {
-                out.push(ch.to_ascii_uppercase());
-                upper_next = false;
-            } else {
-                out.push(ch);
-            }
-        } else {
-            upper_next = true;
-        }
-    }
-    if out.is_empty() {
-        out.push_str("Schema");
-    }
-    if out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-        out.insert_str(0, "Type");
-    }
-    if is_jet_keyword(&out) {
-        out.push_str("Type");
-    }
-    out
+    crate::Syntax::sanitize_generated_name(raw, crate::Syntax::NameCase::Pascal, "Schema")
 }
 
 fn pascal_name(raw: &str) -> String {
@@ -594,38 +527,311 @@ fn input_stem_type_name(input_path: &str) -> String {
     sanitize_type_name(stem)
 }
 
+/// Binding keeps the original numeric spelling. It distinguishes an exact
+/// integer lexeme from a decimal or exponent lexeme without asking a binary
+/// floating-point representation to carry the schema's precision.
+#[derive(Debug)]
+enum JsonBindValue {
+    Null,
+    Bool(bool),
+    Number { lexeme: String },
+    String(String),
+    Array(Vec<JsonBindValue>),
+    Object(BTreeMap<String, JsonBindValue>),
+}
+
+struct JsonBindParser {
+    chars: Vec<char>,
+    pos: usize,
+}
+
+impl JsonBindParser {
+    fn new(input: &str) -> Self {
+        Self {
+            chars: input.chars().collect(),
+            pos: 0,
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    fn starts_with(&self, text: &str) -> bool {
+        text.chars()
+            .enumerate()
+            .all(|(offset, ch)| self.chars.get(self.pos + offset) == Some(&ch))
+    }
+
+    fn skip_space(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.pos += 1;
+        }
+    }
+
+    fn expect(&mut self, expected: char) -> Result<(), String> {
+        if self.peek() == Some(expected) {
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(format!("expected `{expected}`"))
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<String, String> {
+        self.expect('"')?;
+        let mut value = String::new();
+        while let Some(ch) = self.peek() {
+            self.pos += 1;
+            match ch {
+                '"' => return Ok(value),
+                '\\' => {
+                    let escape = self
+                        .peek()
+                        .ok_or_else(|| "JSON escape is incomplete".to_string())?;
+                    self.pos += 1;
+                    match escape {
+                        '"' => value.push('"'),
+                        '\\' => value.push('\\'),
+                        '/' => value.push('/'),
+                        'b' => value.push('\u{0008}'),
+                        'f' => value.push('\u{000c}'),
+                        'n' => value.push('\n'),
+                        'r' => value.push('\r'),
+                        't' => value.push('\t'),
+                        'u' => {
+                            let first = self.hex_quad()?;
+                            if (0xD800..=0xDBFF).contains(&first) {
+                                if self.peek() != Some('\\') {
+                                    return Err("JSON high surrogate is not followed by a low surrogate".to_string());
+                                }
+                                self.pos += 1;
+                                if self.peek() != Some('u') {
+                                    return Err("JSON surrogate pair is malformed".to_string());
+                                }
+                                self.pos += 1;
+                                let second = self.hex_quad()?;
+                                if !(0xDC00..=0xDFFF).contains(&second) {
+                                    return Err("JSON surrogate pair has an invalid low surrogate".to_string());
+                                }
+                                let codepoint = 0x1_0000
+                                    + ((first - 0xD800) << 10)
+                                    + (second - 0xDC00);
+                                value.push(
+                                    char::from_u32(codepoint)
+                                        .ok_or_else(|| "JSON unicode escape is invalid".to_string())?,
+                                );
+                            } else if (0xDC00..=0xDFFF).contains(&first) {
+                                return Err("JSON low surrogate has no high surrogate".to_string());
+                            } else {
+                                value.push(
+                                    char::from_u32(first)
+                                        .ok_or_else(|| "JSON unicode escape is invalid".to_string())?,
+                                );
+                            }
+                        }
+                        _ => return Err(format!("JSON has an invalid escape `\\{escape}`")),
+                    }
+                }
+                ch if ch <= '\u{001f}' => {
+                    return Err("JSON string contains an unescaped control character".to_string())
+                }
+                _ => value.push(ch),
+            }
+        }
+        Err("JSON string is not closed".to_string())
+    }
+
+    fn hex_quad(&mut self) -> Result<u32, String> {
+        let mut value = 0u32;
+        for _ in 0..4 {
+            let ch = self
+                .peek()
+                .ok_or_else(|| "JSON unicode escape is incomplete".to_string())?;
+            self.pos += 1;
+            value = value
+                .checked_mul(16)
+                .and_then(|value| ch.to_digit(16).and_then(|digit| value.checked_add(digit)))
+                .ok_or_else(|| "JSON unicode escape is invalid".to_string())?;
+        }
+        Ok(value)
+    }
+
+    fn parse_number(&mut self) -> Result<JsonBindValue, String> {
+        let start = self.pos;
+        if self.peek() == Some('-') {
+            self.pos += 1;
+        }
+        match self.peek() {
+            Some('0') => self.pos += 1,
+            Some('1'..='9') => {
+                while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                    self.pos += 1;
+                }
+            }
+            _ => return Err("JSON number has no integer digits".to_string()),
+        }
+        if self.peek() == Some('.') {
+            self.pos += 1;
+            let digits = self.pos;
+            while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                self.pos += 1;
+            }
+            if self.pos == digits {
+                return Err("JSON number has no fractional digits".to_string());
+            }
+        }
+        if self.peek().is_some_and(|ch| ch == 'e' || ch == 'E') {
+            self.pos += 1;
+            if self.peek().is_some_and(|ch| ch == '+' || ch == '-') {
+                self.pos += 1;
+            }
+            let digits = self.pos;
+            while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                self.pos += 1;
+            }
+            if self.pos == digits {
+                return Err("JSON exponent has no digits".to_string());
+            }
+        }
+        let lexeme: String = self.chars[start..self.pos].iter().collect();
+        // Schema inference uses this spelling directly. A valid JSON number
+        // may exceed ordinary machine precision or exponent range; neither
+        // boundary changes whether its source lexeme is integer-shaped or
+        // decimal/exponent-shaped.
+        Ok(JsonBindValue::Number { lexeme })
+    }
+
+    fn parse_value(&mut self) -> Result<JsonBindValue, String> {
+        self.skip_space();
+        if self.starts_with("null") {
+            self.pos += 4;
+            return Ok(JsonBindValue::Null);
+        }
+        if self.starts_with("true") {
+            self.pos += 4;
+            return Ok(JsonBindValue::Bool(true));
+        }
+        if self.starts_with("false") {
+            self.pos += 5;
+            return Ok(JsonBindValue::Bool(false));
+        }
+        match self.peek() {
+            Some('"') => self.parse_string().map(JsonBindValue::String),
+            Some('[') => self.parse_array(),
+            Some('{') => self.parse_object(),
+            Some('-' | '0'..='9') => self.parse_number(),
+            Some(ch) => Err(format!("JSON has an unexpected value start {ch}")),
+            None => Err("JSON value is missing".to_string()),
+        }
+    }
+
+    fn parse_array(&mut self) -> Result<JsonBindValue, String> {
+        self.expect('[')?;
+        self.skip_space();
+        let mut values = Vec::new();
+        if self.peek() == Some(']') {
+            self.pos += 1;
+            return Ok(JsonBindValue::Array(values));
+        }
+        loop {
+            values.push(self.parse_value()?);
+            self.skip_space();
+            match self.peek() {
+                Some(',') => {
+                    self.pos += 1;
+                    self.skip_space();
+                    if self.peek() == Some(']') {
+                        return Err("JSON array has a trailing comma".to_string());
+                    }
+                }
+                Some(']') => {
+                    self.pos += 1;
+                    return Ok(JsonBindValue::Array(values));
+                }
+                _ => return Err("JSON array needs a comma or close bracket".to_string()),
+            }
+        }
+    }
+
+    fn parse_object(&mut self) -> Result<JsonBindValue, String> {
+        self.expect('{')?;
+        self.skip_space();
+        let mut object = BTreeMap::new();
+        if self.peek() == Some('}') {
+            self.pos += 1;
+            return Ok(JsonBindValue::Object(object));
+        }
+        loop {
+            self.skip_space();
+            let key = self.parse_string()?;
+            if object.contains_key(&key) {
+                return Err(format!("JSON object has duplicate key {key}"));
+            }
+            self.skip_space();
+            self.expect(':')?;
+            let value = self.parse_value()?;
+            object.insert(key, value);
+            self.skip_space();
+            match self.peek() {
+                Some(',') => {
+                    self.pos += 1;
+                    self.skip_space();
+                    if self.peek() == Some('}') {
+                        return Err("JSON object has a trailing comma".to_string());
+                    }
+                }
+                Some('}') => {
+                    self.pos += 1;
+                    return Ok(JsonBindValue::Object(object));
+                }
+                _ => return Err("JSON object needs a comma or close brace".to_string()),
+            }
+        }
+    }
+
+    fn parse(mut self) -> Result<JsonBindValue, String> {
+        let value = self.parse_value()?;
+        self.skip_space();
+        if self.pos != self.chars.len() {
+            return Err("JSON has trailing content".to_string());
+        }
+        Ok(value)
+    }
+}
+
 fn json_values_type(
     builder: &mut SchemaBuilder,
-    values: &[&JSONValue],
+    values: &[&JsonBindValue],
     hint: &str,
 ) -> Result<(BoundType, bool), String> {
-    let nullable = values.iter().any(|value| matches!(value, JSONValue::Null));
-    let nonnull: Vec<&JSONValue> = values
+    let nullable = values.iter().any(|value| matches!(value, JsonBindValue::Null));
+    let nonnull: Vec<&JsonBindValue> = values
         .iter()
         .copied()
-        .filter(|value| !matches!(value, JSONValue::Null))
+        .filter(|value| !matches!(value, JsonBindValue::Null))
         .collect();
     if nonnull.is_empty() {
         return Ok((BoundType::Dynamic, true));
     }
 
     let ty = match nonnull[0] {
-        JSONValue::Object(_) => {
-            if !nonnull.iter().all(|value| matches!(value, JSONValue::Object(_))) {
+        JsonBindValue::Object(_) => {
+            if !nonnull.iter().all(|value| matches!(value, JsonBindValue::Object(_))) {
                 BoundType::Dynamic
             } else {
-                let objects: Vec<&JSONValue> = nonnull;
+                let objects: Vec<&JsonBindValue> = nonnull;
                 let name = add_json_record(builder, hint, &objects)?;
                 BoundType::Named(name)
             }
         }
-        JSONValue::Array(_) => {
-            if !nonnull.iter().all(|value| matches!(value, JSONValue::Array(_))) {
+        JsonBindValue::Array(_) => {
+            if !nonnull.iter().all(|value| matches!(value, JsonBindValue::Array(_))) {
                 BoundType::Dynamic
             } else {
                 let mut elements = Vec::new();
                 for value in nonnull {
-                    if let JSONValue::Array(items) = value {
+                    if let JsonBindValue::Array(items) = value {
                         elements.extend(items.iter());
                     }
                 }
@@ -642,24 +848,31 @@ fn json_values_type(
                 BoundType::Array(Box::new(element))
             }
         }
-        JSONValue::Bool(_) => {
-            if nonnull.iter().all(|value| matches!(value, JSONValue::Bool(_))) {
+        JsonBindValue::Bool(_) => {
+            if nonnull.iter().all(|value| matches!(value, JsonBindValue::Bool(_))) {
                 BoundType::Scalar("Bool")
             } else {
                 BoundType::Dynamic
             }
         }
-        JSONValue::Str(_) => {
-            if nonnull.iter().all(|value| matches!(value, JSONValue::Str(_))) {
+        JsonBindValue::String(_) => {
+            if nonnull.iter().all(|value| matches!(value, JsonBindValue::String(_))) {
                 BoundType::Scalar("String")
             } else {
                 BoundType::Dynamic
             }
         }
-        JSONValue::Num(_) => {
-            if nonnull.iter().all(|value| matches!(value, JSONValue::Num(_))) {
+        JsonBindValue::Number { .. } => {
+            if nonnull
+                .iter()
+                .all(|value| matches!(value, JsonBindValue::Number { .. }))
+            {
                 if nonnull.iter().any(|value| {
-                    matches!(value, JSONValue::Num(number) if number.fract() != 0.0)
+                    matches!(
+                        value,
+                        JsonBindValue::Number { lexeme, .. }
+                            if lexeme.contains(['.', 'e', 'E'])
+                    )
                 }) {
                     BoundType::Scalar("Float")
                 } else {
@@ -669,7 +882,7 @@ fn json_values_type(
                 BoundType::Dynamic
             }
         }
-        JSONValue::Null => BoundType::Dynamic,
+        JsonBindValue::Null => BoundType::Dynamic,
     };
     Ok((ty, nullable))
 }
@@ -677,14 +890,14 @@ fn json_values_type(
 fn add_json_record(
     builder: &mut SchemaBuilder,
     preferred: &str,
-    objects: &[&JSONValue],
+    objects: &[&JsonBindValue],
 ) -> Result<String, String> {
     let (name, index) = builder.begin_record(preferred);
     let mut keys = BTreeSet::new();
     for value in objects {
-        let object = value.as_object().map_err(|_| {
-            "JSON schema contains a non-object where an object was inferred".to_string()
-        })?;
+        let JsonBindValue::Object(object) = value else {
+            return Err("JSON schema contains a non-object where an object was inferred".to_string());
+        };
         keys.extend(object.keys().cloned());
     }
     let mut fields = Vec::new();
@@ -692,7 +905,9 @@ fn add_json_record(
         let mut values = Vec::new();
         let mut optional = false;
         for value in objects {
-            let object = value.as_object().expect("object checked above");
+            let JsonBindValue::Object(object) = value else {
+                unreachable!("JSON object checked above")
+            };
             if let Some(field) = object.get(&key) {
                 values.push(field);
             } else {
@@ -713,8 +928,10 @@ fn add_json_record(
 }
 
 fn bind_json(input: &str, root_name: &str) -> Result<SchemaBuilder, String> {
-    let value = crate::JSON::parse(input).map_err(|error| format!("malformed JSON: {error}"))?;
-    if !matches!(&value, JSONValue::Object(_)) {
+    let value = JsonBindParser::new(input)
+        .parse()
+        .map_err(|error| format!("malformed JSON: {error}"))?;
+    if !matches!(&value, JsonBindValue::Object(_)) {
         return Err("JSON schema root must be an object".to_string());
     }
     let mut builder = SchemaBuilder::new();
@@ -1041,6 +1258,42 @@ fn sql_tokens(statement: &str) -> Result<Vec<String>, String> {
                 return Err("SQL has an unterminated quoted token".to_string());
             }
             tokens.push(value);
+        } else if ch.is_ascii_digit() {
+            let start = index;
+            index += 1;
+            while index < chars.len() && chars[index].is_ascii_digit() {
+                index += 1;
+            }
+            if chars.get(index) == Some(&'.')
+                && chars
+                    .get(index + 1)
+                    .is_some_and(|value| value.is_ascii_digit())
+            {
+                index += 1;
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+            }
+            if chars
+                .get(index)
+                .is_some_and(|value| *value == 'e' || *value == 'E')
+            {
+                index += 1;
+                if chars
+                    .get(index)
+                    .is_some_and(|value| *value == '+' || *value == '-')
+                {
+                    index += 1;
+                }
+                let digits = index;
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+                if digits == index {
+                    return Err("SQL numeric exponent has no digits".to_string());
+                }
+            }
+            tokens.push(chars[start..index].iter().collect());
         } else if ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' {
             let start = index;
             index += 1;
@@ -1062,41 +1315,606 @@ fn sql_tokens(statement: &str) -> Result<Vec<String>, String> {
     Ok(tokens)
 }
 
-fn sql_type(tokens: &[String]) -> Option<&'static str> {
-    let first = tokens.first()?.to_ascii_uppercase();
-    match first.as_str() {
-        "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "TINYINT" | "MEDIUMINT" | "SERIAL"
-        | "BIGSERIAL" => Some("Int"),
-        "REAL" | "FLOAT" | "DOUBLE" => Some("Float"),
-        "DECIMAL" | "NUMERIC" | "MONEY" => Some("Decimal"),
-        "BOOL" | "BOOLEAN" => Some("Bool"),
-        "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "VARCHAR" | "NVARCHAR"
-        | "CHAR" | "CHARACTER" | "CLOB" => Some("String"),
-        "DATE" => Some("Date"),
-        "TIME" => Some("LocalTime"),
-        "TIMESTAMP" | "DATETIME" => Some("DateTime"),
-        "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BYTEA" | "BINARY"
-        | "VARBINARY" => Some("Bytes"),
-        _ => None,
+fn sql_is_name(token: &str) -> bool {
+    !token.is_empty()
+        && !matches!(
+            token,
+            "(" | ")" | "," | "." | "<" | ">" | "*" | "%" | "+" | "=" | "|"
+                | "&" | "!" | "~" | "^" | ":" | "[" | "]" | "-"
+        )
+}
+
+fn sql_name_key(name: &str) -> String {
+    name.to_ascii_lowercase()
+}
+
+fn sql_take_name(tokens: &[String], index: &mut usize, what: &str) -> Result<String, String> {
+    let Some(token) = tokens.get(*index) else {
+        return Err(format!("SQL {what} is missing"));
+    };
+    if !sql_is_name(token) {
+        return Err(format!("SQL {what} is invalid"));
+    }
+    *index += 1;
+    Ok(token.clone())
+}
+
+fn sql_take_digits(tokens: &[String], index: &mut usize, what: &str) -> Result<u64, String> {
+    let value = sql_take_name(tokens, index, what)?;
+    let number = value
+        .parse::<u64>()
+        .map_err(|_| format!("SQL {what} must be a non-negative integer"))?;
+    Ok(number)
+}
+
+fn sql_take_positive_digits(
+    tokens: &[String],
+    index: &mut usize,
+    what: &str,
+) -> Result<u64, String> {
+    let number = sql_take_digits(tokens, index, what)?;
+    if number == 0 {
+        return Err(format!("SQL {what} must be greater than zero"));
+    }
+    Ok(number)
+}
+
+fn sql_parenthesized_digits(
+    tokens: &[String],
+    index: &mut usize,
+    what: &str,
+    two: bool,
+) -> Result<(), String> {
+    if tokens.get(*index).map(String::as_str) != Some("(") {
+        return Ok(());
+    }
+    *index += 1;
+    let first = if what.contains("time precision") || what.contains("timestamp precision") {
+        sql_take_digits(tokens, index, what)?
+    } else {
+        sql_take_positive_digits(tokens, index, what)?
+    };
+    let mut second = None;
+    if tokens.get(*index).map(String::as_str) == Some(",") {
+        if !two {
+            return Err(format!("SQL {what} has an unsupported second modifier"));
+        }
+        *index += 1;
+        second = Some(sql_take_digits(tokens, index, what)?);
+    }
+    if tokens.get(*index).map(String::as_str) != Some(")") {
+        return Err(format!("SQL {what} modifier is not closed"));
+    }
+    *index += 1;
+    if let Some(scale) = second {
+        if scale > first {
+            return Err(format!("SQL {what} scale exceeds its precision"));
+        }
+    }
+    Ok(())
+}
+
+fn sql_numeric_modifiers(tokens: &[String], index: &mut usize) -> Result<(), String> {
+    let mut signedness = false;
+    let mut zerofill = false;
+    loop {
+        if tokens
+            .get(*index)
+            .is_some_and(|value| value.eq_ignore_ascii_case("SIGNED") || value.eq_ignore_ascii_case("UNSIGNED"))
+        {
+            if signedness {
+                return Err("SQL numeric type repeats its signedness modifier".to_string());
+            }
+            signedness = true;
+            *index += 1;
+        } else if tokens
+            .get(*index)
+            .is_some_and(|value| value.eq_ignore_ascii_case("ZEROFILL"))
+        {
+            if zerofill {
+                return Err("SQL numeric type repeats ZEROFILL".to_string());
+            }
+            zerofill = true;
+            *index += 1;
+        } else {
+            return Ok(());
+        }
     }
 }
 
-fn sql_constraint_start(token: &str) -> bool {
-    matches!(
-        token.to_ascii_uppercase().as_str(),
-        "NOT"
-            | "NULL"
-            | "PRIMARY"
-            | "UNIQUE"
-            | "REFERENCES"
-            | "CHECK"
-            | "DEFAULT"
-            | "COLLATE"
-            | "CONSTRAINT"
-            | "GENERATED"
-            | "AUTO_INCREMENT"
-            | "AUTOINCREMENT"
-    )
+fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'static str, String> {
+    let Some(token) = tokens.get(*index) else {
+        return Err(format!("SQL column {column} has no type"));
+    };
+    let first = token.to_ascii_uppercase();
+    *index += 1;
+    let ty = match first.as_str() {
+        "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "TINYINT" | "MEDIUMINT" | "SERIAL"
+        | "BIGSERIAL" => {
+            sql_numeric_modifiers(tokens, index)?;
+            "Int"
+        }
+        "REAL" | "FLOAT" => {
+            sql_parenthesized_digits(tokens, index, "floating-point precision", false)?;
+            sql_numeric_modifiers(tokens, index)?;
+            "Float"
+        }
+        "DOUBLE" => {
+            if tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("PRECISION"))
+            {
+                *index += 1;
+            }
+            sql_numeric_modifiers(tokens, index)?;
+            "Float"
+        }
+        "DECIMAL" | "NUMERIC" | "MONEY" => {
+            sql_parenthesized_digits(tokens, index, "decimal precision", true)?;
+            sql_numeric_modifiers(tokens, index)?;
+            "Decimal"
+        }
+        "BOOL" | "BOOLEAN" => "Bool",
+        "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "VARCHAR" | "NVARCHAR"
+        | "CHAR" | "CHARACTER" | "CLOB" => {
+            if first == "CHARACTER"
+                && tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("VARYING"))
+            {
+                *index += 1;
+            }
+            if matches!(first.as_str(), "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER") {
+                sql_parenthesized_digits(tokens, index, "character width", false)?;
+            } else if tokens.get(*index).map(String::as_str) == Some("(") {
+                return Err(format!("SQL type {first} does not accept a width modifier"));
+            }
+            "String"
+        }
+        "DATE" => "Date",
+        "TIME" => {
+            sql_parenthesized_digits(tokens, index, "time precision", false)?;
+            if tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("WITH") || value.eq_ignore_ascii_case("WITHOUT"))
+            {
+                *index += 1;
+                if !tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("TIME"))
+                {
+                    return Err("SQL time zone modifier needs TIME ZONE".to_string());
+                }
+                *index += 1;
+                if !tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("ZONE"))
+                {
+                    return Err("SQL time zone modifier needs TIME ZONE".to_string());
+                }
+                *index += 1;
+            }
+            "LocalTime"
+        }
+        "TIMESTAMP" | "DATETIME" => {
+            sql_parenthesized_digits(tokens, index, "timestamp precision", false)?;
+            if first == "TIMESTAMP"
+                && tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("WITH") || value.eq_ignore_ascii_case("WITHOUT"))
+            {
+                *index += 1;
+                if !tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("TIME"))
+                {
+                    return Err("SQL time zone modifier needs TIME ZONE".to_string());
+                }
+                *index += 1;
+                if !tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("ZONE"))
+                {
+                    return Err("SQL time zone modifier needs TIME ZONE".to_string());
+                }
+                *index += 1;
+            }
+            "DateTime"
+        }
+        "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BYTEA" | "BINARY" | "VARBINARY" => {
+            if matches!(first.as_str(), "BINARY" | "VARBINARY") {
+                sql_parenthesized_digits(tokens, index, "binary width", false)?;
+            } else if tokens.get(*index).map(String::as_str) == Some("(") {
+                return Err(format!("SQL type {first} does not accept a width modifier"));
+            }
+            "Bytes"
+        }
+        _ => return Err(format!("SQL type for {column} is unsupported")),
+    };
+    Ok(ty)
+}
+
+fn sql_balanced_expression(
+    tokens: &[String],
+    index: &mut usize,
+    what: &str,
+) -> Result<(), String> {
+    if tokens.get(*index).map(String::as_str) != Some("(") {
+        return Err(format!("SQL {what} needs an open parenthesis"));
+    }
+    *index += 1;
+    let start = *index;
+    let mut depth = 1i32;
+    while *index < tokens.len() {
+        match tokens[*index].as_str() {
+            "(" => depth += 1,
+            ")" => {
+                depth -= 1;
+                if depth == 0 {
+                    if *index == start {
+                        return Err(format!("SQL {what} is empty"));
+                    }
+                    *index += 1;
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
+        *index += 1;
+    }
+    Err(format!("SQL {what} is not closed"))
+}
+
+fn sql_name_list(tokens: &[String], index: &mut usize, what: &str) -> Result<Vec<String>, String> {
+    if tokens.get(*index).map(String::as_str) != Some("(") {
+        return Err(format!("SQL {what} needs an open parenthesis"));
+    }
+    *index += 1;
+    let mut names = Vec::new();
+    loop {
+        names.push(sql_take_name(tokens, index, what)?);
+        if tokens.get(*index).map(String::as_str) == Some(",") {
+            *index += 1;
+            continue;
+        }
+        if tokens.get(*index).map(String::as_str) != Some(")") {
+            return Err(format!("SQL {what} list is not closed"));
+        }
+        *index += 1;
+        return Ok(names);
+    }
+}
+
+fn sql_reference(tokens: &[String], index: &mut usize) -> Result<(), String> {
+    sql_take_name(tokens, index, "referenced table")?;
+    while tokens.get(*index).map(String::as_str) == Some(".") {
+        *index += 1;
+        sql_take_name(tokens, index, "referenced table segment")?;
+    }
+    if tokens.get(*index).map(String::as_str) == Some("(") {
+        sql_name_list(tokens, index, "referenced column")?;
+    }
+    loop {
+        let Some(token) = tokens.get(*index) else { break };
+        match token.to_ascii_uppercase().as_str() {
+            "MATCH" => {
+                *index += 1;
+                sql_take_name(tokens, index, "MATCH name")?;
+            }
+            "ON" => {
+                *index += 1;
+                let action_kind = sql_take_name(tokens, index, "foreign-key action")?;
+                if !matches!(action_kind.to_ascii_uppercase().as_str(), "DELETE" | "UPDATE") {
+                    return Err("SQL foreign-key action needs DELETE or UPDATE".to_string());
+                }
+                let action = sql_take_name(tokens, index, "foreign-key action")?;
+                match action.to_ascii_uppercase().as_str() {
+                    "NO" => {
+                        let next = sql_take_name(tokens, index, "foreign-key action")?;
+                        if !next.eq_ignore_ascii_case("ACTION") {
+                            return Err("SQL foreign-key action `NO` needs ACTION".to_string());
+                        }
+                    }
+                    "SET" => {
+                        let next = sql_take_name(tokens, index, "foreign-key action")?;
+                        if !matches!(next.to_ascii_uppercase().as_str(), "NULL" | "DEFAULT") {
+                            return Err("SQL foreign-key SET action needs NULL or DEFAULT".to_string());
+                        }
+                    }
+                    "RESTRICT" | "CASCADE" => {}
+                    _ => return Err("SQL foreign-key action is unsupported".to_string()),
+                }
+            }
+            "DEFERRABLE" => *index += 1,
+            "NOT" if tokens
+                .get(*index + 1)
+                .is_some_and(|value| value.eq_ignore_ascii_case("DEFERRABLE")) => {
+                *index += 2;
+            }
+            "INITIALLY" => {
+                *index += 1;
+                let mode = sql_take_name(tokens, index, "constraint mode")?;
+                if !matches!(mode.to_ascii_uppercase().as_str(), "DEFERRED" | "IMMEDIATE") {
+                    return Err("SQL constraint mode is unsupported".to_string());
+                }
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+fn sql_default(tokens: &[String], index: &mut usize) -> Result<(), String> {
+    if tokens.get(*index).map(String::as_str) == Some("(") {
+        return sql_balanced_expression(tokens, index, "DEFAULT expression");
+    }
+    if tokens
+        .get(*index)
+        .is_some_and(|value| value == "+" || value == "-")
+    {
+        *index += 1;
+        sql_take_name(tokens, index, "DEFAULT numeric value")?;
+    } else {
+        sql_take_name(tokens, index, "DEFAULT value")?;
+    }
+    if tokens.get(*index).map(String::as_str) == Some(".") {
+        *index += 1;
+        sql_take_digits(tokens, index, "DEFAULT numeric value")?;
+    }
+    if tokens
+        .get(*index)
+        .is_some_and(|value| value.eq_ignore_ascii_case("E"))
+    {
+        *index += 1;
+        if tokens
+            .get(*index)
+            .is_some_and(|value| value == "+" || value == "-")
+        {
+            *index += 1;
+        }
+        sql_take_digits(tokens, index, "DEFAULT exponent")?;
+    }
+    if tokens.get(*index).map(String::as_str) == Some("(") {
+        *index += 1;
+        if tokens.get(*index).map(String::as_str) == Some(")") {
+            *index += 1;
+        } else {
+            *index -= 1;
+            sql_balanced_expression(tokens, index, "DEFAULT function arguments")?;
+        }
+    }
+    Ok(())
+}
+
+fn sql_constraint(
+    tokens: &[String],
+    index: &mut usize,
+    required: &mut bool,
+) -> Result<(), String> {
+    if tokens
+        .get(*index)
+        .is_some_and(|value| value.eq_ignore_ascii_case("CONSTRAINT"))
+    {
+        *index += 1;
+        sql_take_name(tokens, index, "constraint name")?;
+    }
+    let Some(token) = tokens.get(*index) else {
+        return Err("SQL constraint is incomplete".to_string());
+    };
+    match token.to_ascii_uppercase().as_str() {
+        "NOT" => {
+            *index += 1;
+            if !tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("NULL"))
+            {
+                return Err("SQL NOT constraint needs NULL".to_string());
+            }
+            *index += 1;
+            *required = true;
+        }
+        "NULL" => *index += 1,
+        "PRIMARY" => {
+            *index += 1;
+            if !tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("KEY"))
+            {
+                return Err("SQL PRIMARY constraint needs KEY".to_string());
+            }
+            *index += 1;
+            *required = true;
+            for modifier in ["ASC", "DESC", "AUTOINCREMENT", "AUTO_INCREMENT"] {
+                if tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case(modifier))
+                {
+                    *index += 1;
+                }
+            }
+        }
+        "UNIQUE" => {
+            *index += 1;
+            if tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("KEY") || value.eq_ignore_ascii_case("INDEX"))
+            {
+                *index += 1;
+            }
+            if tokens.get(*index).is_some_and(|value| {
+                sql_is_name(value)
+                    && !matches!(
+                        value.to_ascii_uppercase().as_str(),
+                        "NOT"
+                            | "NULL"
+                            | "PRIMARY"
+                            | "REFERENCES"
+                            | "CHECK"
+                            | "DEFAULT"
+                            | "COLLATE"
+                            | "GENERATED"
+                            | "AUTO_INCREMENT"
+                            | "AUTOINCREMENT"
+                            | "ON"
+                            | "COMMENT"
+                    )
+            }) {
+                *index += 1;
+            }
+        }
+        "KEY" | "INDEX" => {
+            *index += 1;
+            if tokens.get(*index).is_some_and(|value| sql_is_name(value)) {
+                *index += 1;
+            }
+        }
+        "REFERENCES" => {
+            *index += 1;
+            sql_reference(tokens, index)?;
+        }
+        "CHECK" => {
+            *index += 1;
+            sql_balanced_expression(tokens, index, "CHECK expression")?;
+        }
+        "DEFAULT" => {
+            *index += 1;
+            sql_default(tokens, index)?;
+        }
+        "COLLATE" => {
+            *index += 1;
+            sql_take_name(tokens, index, "collation name")?;
+        }
+        "GENERATED" => {
+            *index += 1;
+            if tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("ALWAYS"))
+            {
+                *index += 1;
+            }
+            if !tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("AS"))
+            {
+                return Err("SQL GENERATED constraint needs AS".to_string());
+            }
+            *index += 1;
+            if tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("IDENTITY"))
+            {
+                *index += 1;
+                if tokens.get(*index).map(String::as_str) == Some("(") {
+                    sql_balanced_expression(tokens, index, "IDENTITY options")?;
+                }
+            } else {
+                sql_balanced_expression(tokens, index, "GENERATED expression")?;
+                if tokens
+                    .get(*index)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("VIRTUAL") || value.eq_ignore_ascii_case("STORED"))
+                {
+                    *index += 1;
+                } else {
+                    return Err("SQL GENERATED constraint needs VIRTUAL or STORED".to_string());
+                }
+            }
+        }
+        "AUTO_INCREMENT" | "AUTOINCREMENT" => *index += 1,
+        "ON" => {
+            *index += 1;
+            if !tokens
+                .get(*index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("UPDATE"))
+            {
+                return Err("SQL ON constraint needs UPDATE".to_string());
+            }
+            *index += 1;
+            sql_default(tokens, index)?;
+        }
+        "COMMENT" => {
+            *index += 1;
+            sql_take_name(tokens, index, "column comment")?;
+        }
+        _ => return Err(format!("SQL column constraint {} is unsupported", token)),
+    }
+    Ok(())
+}
+
+fn sql_table_constraint(
+    segment: &[String],
+    required_columns: &mut BTreeSet<String>,
+    primary_seen: &mut bool,
+) -> Result<(), String> {
+    let mut index = 0usize;
+    if segment
+        .get(index)
+        .is_some_and(|value| value.eq_ignore_ascii_case("CONSTRAINT"))
+    {
+        index += 1;
+        sql_take_name(segment, &mut index, "constraint name")?;
+    }
+    let Some(token) = segment.get(index) else {
+        return Err("SQL table constraint is incomplete".to_string());
+    };
+    match token.to_ascii_uppercase().as_str() {
+        "PRIMARY" => {
+            if *primary_seen {
+                return Err("SQL table has more than one PRIMARY KEY constraint".to_string());
+            }
+            *primary_seen = true;
+            index += 1;
+            if !segment
+                .get(index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("KEY"))
+            {
+                return Err("SQL table PRIMARY constraint needs KEY".to_string());
+            }
+            index += 1;
+            let columns = sql_name_list(segment, &mut index, "PRIMARY KEY column")?;
+            required_columns.extend(columns.into_iter().map(|name| sql_name_key(&name)));
+        }
+        "UNIQUE" => {
+            index += 1;
+            if segment
+                .get(index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("KEY") || value.eq_ignore_ascii_case("INDEX"))
+            {
+                index += 1;
+                if segment.get(index).is_some_and(|value| sql_is_name(value)) {
+                    index += 1;
+                }
+            }
+            sql_name_list(segment, &mut index, "UNIQUE column")?;
+        }
+        "FOREIGN" => {
+            index += 1;
+            if !segment
+                .get(index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("KEY"))
+            {
+                return Err("SQL FOREIGN constraint needs KEY".to_string());
+            }
+            index += 1;
+            sql_name_list(segment, &mut index, "FOREIGN KEY column")?;
+            if !segment
+                .get(index)
+                .is_some_and(|value| value.eq_ignore_ascii_case("REFERENCES"))
+            {
+                return Err("SQL FOREIGN constraint needs REFERENCES".to_string());
+            }
+            index += 1;
+            sql_reference(segment, &mut index)?;
+        }
+        "CHECK" => {
+            index += 1;
+            sql_balanced_expression(segment, &mut index, "table CHECK expression")?;
+        }
+        _ => return Err(format!("SQL table constraint {} is unsupported", token)),
+    }
+    if index != segment.len() {
+        return Err("SQL table constraint has trailing tokens".to_string());
+    }
+    Ok(())
 }
 
 fn parse_sql_table(statement: &str) -> Result<(String, Vec<FieldSeed>), String> {
@@ -1124,20 +1942,10 @@ fn parse_sql_table(statement: &str) -> Result<(String, Vec<FieldSeed>), String> 
         }
         index += 3;
     }
-    let first_name = tokens
-        .get(index)
-        .filter(|value| !value.is_empty() && value.as_str() != "(")
-        .cloned()
-        .ok_or_else(|| "SQL table has no name".to_string())?;
-    index += 1;
+    let first_name = sql_take_name(&tokens, &mut index, "table name")?;
     let table_name = if word(index) == Some(".") {
         index += 1;
-        let name = tokens
-            .get(index)
-            .cloned()
-            .ok_or_else(|| "SQL qualified table has no final name".to_string())?;
-        index += 1;
-        name
+        sql_take_name(&tokens, &mut index, "qualified table name")?
     } else {
         first_name
     };
@@ -1177,7 +1985,7 @@ fn parse_sql_table(statement: &str) -> Result<(String, Vec<FieldSeed>), String> 
             Some(")") => depth -= 1,
             Some(",") if depth == 0 => {
                 if position == start {
-                    return Err("SQL table has an empty column declaration".to_string());
+                    return Err("SQL table has an empty declaration".to_string());
                 }
                 segments.push(&tokens[start..position]);
                 start = position + 1;
@@ -1186,55 +1994,58 @@ fn parse_sql_table(statement: &str) -> Result<(String, Vec<FieldSeed>), String> 
         }
     }
     if start == close {
-        return Err("SQL table has an empty column declaration".to_string());
+        return Err("SQL table has an empty declaration".to_string());
     }
     segments.push(&tokens[start..close]);
     let mut names = BTreeSet::new();
     let mut fields = Vec::new();
+    let mut required_columns = BTreeSet::new();
+    let mut primary_seen = false;
     for segment in segments {
         let first = segment.first().map(String::as_str).unwrap_or("");
         if matches!(
             first.to_ascii_uppercase().as_str(),
             "PRIMARY" | "UNIQUE" | "FOREIGN" | "CHECK" | "CONSTRAINT"
         ) {
+            sql_table_constraint(segment, &mut required_columns, &mut primary_seen)?;
             continue;
         }
         if segment.len() < 2 {
             return Err("SQL column needs a name and type".to_string());
         }
         let column = segment[0].clone();
-        if !names.insert(column.clone()) {
+        if !sql_is_name(&column) {
+            return Err("SQL column name is invalid".to_string());
+        }
+        if !names.insert(sql_name_key(&column)) {
             return Err(format!("SQL has duplicate column {column}"));
         }
-        let mut type_end = segment.len();
-        for (position, token) in segment.iter().enumerate().skip(1) {
-            if sql_constraint_start(token) {
-                type_end = position;
-                break;
-            }
+        let mut type_index = 1usize;
+        let ty = sql_type(segment, &mut type_index, &column)?;
+        let mut required = false;
+        while type_index < segment.len() {
+            sql_constraint(segment, &mut type_index, &mut required)?;
         }
-        if type_end == 1 {
-            return Err(format!("SQL column {column} has no type"));
-        }
-        let ty = sql_type(&segment[1..type_end])
-            .ok_or_else(|| format!("SQL type for {column} is unsupported"))?;
-        let constraint_text = segment[type_end..]
-            .iter()
-            .map(|token| token.to_ascii_uppercase())
-            .collect::<Vec<_>>();
-        let not_null = constraint_text
-            .windows(2)
-            .any(|pair| pair[0] == "NOT" && pair[1] == "NULL")
-            || constraint_text.iter().any(|token| token == "PRIMARY");
         fields.push(FieldSeed {
             wire_name: column,
             ty: BoundType::Scalar(ty),
-            optional: !not_null,
+            optional: !required,
             note: None,
         });
     }
     if fields.is_empty() {
         return Err(format!("SQL table {table_name} has no columns"));
+    }
+    if required_columns
+        .iter()
+        .any(|column| !names.contains(column))
+    {
+        return Err("SQL PRIMARY KEY names an unknown column".to_string());
+    }
+    for field in &mut fields {
+        if required_columns.contains(&sql_name_key(&field.wire_name)) {
+            field.optional = false;
+        }
     }
     Ok((table_name, fields))
 }
@@ -1249,7 +2060,7 @@ fn bind_sql(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Strin
     let mut table_names = BTreeSet::new();
     for statement in statements {
         let (name, fields) = parse_sql_table(&statement)?;
-        if !table_names.insert(name.clone()) {
+        if !table_names.insert(sql_name_key(&name)) {
             return Err(format!("SQL has duplicate table {name}"));
         }
         tables.push((name, fields));
@@ -1295,12 +2106,23 @@ impl XmlParser {
             .all(|(offset, ch)| self.chars.get(self.pos + offset) == Some(&ch))
     }
 
+    fn starts_with_xml_declaration(&self) -> bool {
+        self.starts_with("<?xml")
+            && self
+                .chars
+                .get(self.pos + 5)
+                .is_some_and(|ch| ch.is_ascii_whitespace() || *ch == '?')
+    }
+
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }
 
     fn skip_space(&mut self) {
-        while self.peek().is_some_and(|ch| ch.is_ascii_whitespace()) {
+        while self
+            .peek()
+            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+        {
             self.pos += 1;
         }
     }
@@ -1321,7 +2143,15 @@ impl XmlParser {
         while self.peek().is_some_and(valid_rest) {
             self.pos += 1;
         }
-        Ok(self.chars[start..self.pos].iter().collect())
+        let name: String = self.chars[start..self.pos].iter().collect();
+        if name.starts_with(':')
+            || name.ends_with(':')
+            || name.matches(':').count() > 1
+            || name.contains("::")
+        {
+            return Err(format!("XML name {name} has an invalid namespace separator"));
+        }
+        Ok(name)
     }
 
     fn attach(
@@ -1339,13 +2169,136 @@ impl XmlParser {
         Ok(())
     }
 
-    fn parse(mut self) -> Result<XmlNode, String> {
+    fn read_quoted_value(&mut self, what: &str) -> Result<String, String> {
+        let quote = self
+            .peek()
+            .filter(|ch| *ch == '"' || *ch == '\'')
+            .ok_or_else(|| format!("XML {what} is not quoted"))?;
+        self.pos += 1;
+        let start = self.pos;
+        while self.pos < self.chars.len() && self.peek() != Some(quote) {
+            self.pos += 1;
+        }
+        if self.pos >= self.chars.len() {
+            return Err(format!("XML {what} is not closed"));
+        }
+        let value: String = self.chars[start..self.pos].iter().collect();
+        validate_xml_characters(&value)?;
+        self.pos += 1;
+        Ok(value)
+    }
+
+    fn read_declaration_field(&mut self, expected: &str) -> Result<String, String> {
+        let name = self.read_name()?;
+        if name != expected {
+            return Err(format!("XML declaration expected {expected}"));
+        }
+        self.skip_space();
+        if self.peek() != Some('=') {
+            return Err(format!("XML declaration field {expected} has no equals sign"));
+        }
+        self.pos += 1;
+        self.skip_space();
+        self.read_quoted_value("declaration value")
+    }
+
+    fn consume_processing_instruction(&mut self) -> Result<(), String> {
+        self.pos += 2;
+        let target = self.read_name()?;
+        if target.eq_ignore_ascii_case("xml") {
+            return Err("XML processing-instruction target cannot be xml".to_string());
+        }
+        if self.starts_with("?>") {
+            self.pos += 2;
+            return Ok(());
+        }
+        if !self
+            .peek()
+            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+        {
+            return Err("XML processing instruction needs whitespace after its target".to_string());
+        }
+        let start = self.pos;
+        while self.pos < self.chars.len() && !self.starts_with("?>") {
+            self.pos += 1;
+        }
+        if self.pos >= self.chars.len() {
+            return Err("XML processing instruction is not closed".to_string());
+        }
+        let data: String = self.chars[start..self.pos].iter().collect();
+        validate_xml_characters(&data)?;
+        self.pos += 2;
+        Ok(())
+    }
+
+    fn consume_xml_declaration(&mut self) -> Result<(), String> {
+        self.pos += 5;
+        if !self
+            .peek()
+            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+        {
+            return Err("XML declaration needs a version field".to_string());
+        }
+        self.skip_space();
+        let version = self.read_declaration_field("version")?;
+        if version != "1.0" {
+            return Err("XML declaration version must be 1.0".to_string());
+        }
+        if !self.starts_with("?>") {
+            if !self
+                .peek()
+                .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+            {
+                return Err("XML declaration fields need whitespace separators".to_string());
+            }
+            self.skip_space();
+            if self.starts_with("encoding") {
+                let encoding = self.read_declaration_field("encoding")?;
+                if !encoding.eq_ignore_ascii_case("UTF-8") {
+                    return Err("XML declaration encoding must be UTF-8".to_string());
+                }
+                if !self.starts_with("?>") {
+                    if !self
+                        .peek()
+                        .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+                    {
+                        return Err("XML declaration fields need whitespace separators".to_string());
+                    }
+                    self.skip_space();
+                }
+            }
+            if !self.starts_with("?>") {
+                let standalone = self.read_declaration_field("standalone")?;
+                if !matches!(standalone.as_str(), "yes" | "no") {
+                    return Err("XML declaration standalone must be yes or no".to_string());
+                }
+            }
+        }
+        self.skip_space();
+        if !self.starts_with("?>") {
+            return Err("XML declaration has trailing content".to_string());
+        }
+        self.pos += 2;
+        Ok(())
+    }
+
+    fn parse_document(mut self) -> Result<XmlNode, String> {
         if self.peek() == Some('\u{feff}') {
             self.pos += 1;
         }
+        let mut declaration_allowed = true;
         let mut stack: Vec<XmlNode> = Vec::new();
         let mut root = None;
         while self.pos < self.chars.len() {
+            if self.starts_with_xml_declaration() {
+                if !declaration_allowed {
+                    return Err("XML declaration is out of order".to_string());
+                }
+                self.consume_xml_declaration()?;
+                declaration_allowed = false;
+                continue;
+            }
+            declaration_allowed = false;
             if self.peek() != Some('<') {
                 let start = self.pos;
                 while self.peek().is_some_and(|ch| ch != '<') {
@@ -1358,7 +2311,7 @@ impl XmlParser {
                 validate_xml_entities(&text)?;
                 if let Some(parent) = stack.last_mut() {
                     parent.text.push_str(&text);
-                } else if !text.trim().is_empty() {
+                } else if text.chars().any(|ch| !matches!(ch, ' ' | '\t' | '\r' | '\n')) {
                     return Err("XML has text outside its root element".to_string());
                 }
                 continue;
@@ -1373,9 +2326,10 @@ impl XmlParser {
                     return Err("XML comment is not closed".to_string());
                 }
                 let body: String = self.chars[start..self.pos].iter().collect();
-                if body.contains("--") {
-                    return Err("XML comment contains a double hyphen".to_string());
+                if body.contains("--") || body.ends_with('-') {
+                    return Err("XML comment contains an invalid double hyphen".to_string());
                 }
+                validate_xml_characters(&body)?;
                 self.pos += 3;
                 continue;
             }
@@ -1389,23 +2343,17 @@ impl XmlParser {
                     return Err("XML CDATA section is not closed".to_string());
                 }
                 let body: String = self.chars[start..self.pos].iter().collect();
+                validate_xml_characters(&body)?;
                 if let Some(parent) = stack.last_mut() {
                     parent.text.push_str(&body);
-                } else if !body.trim().is_empty() {
+                } else {
                     return Err("XML CDATA appears outside its root element".to_string());
                 }
                 self.pos += 3;
                 continue;
             }
             if self.starts_with("<?") {
-                self.pos += 2;
-                while self.pos < self.chars.len() && !self.starts_with("?>") {
-                    self.pos += 1;
-                }
-                if self.pos >= self.chars.len() {
-                    return Err("XML processing instruction is not closed".to_string());
-                }
-                self.pos += 2;
+                self.consume_processing_instruction()?;
                 continue;
             }
             if self.starts_with("</") {
@@ -1458,21 +2406,11 @@ impl XmlParser {
                 }
                 self.pos += 1;
                 self.skip_space();
-                let quote = self
-                    .peek()
-                    .filter(|ch| *ch == '"' || *ch == '\'')
-                    .ok_or_else(|| format!("XML attribute {attr_name} is not quoted"))?;
-                self.pos += 1;
-                let start = self.pos;
-                while self.pos < self.chars.len() && self.peek() != Some(quote) {
-                    self.pos += 1;
+                let value = self.read_quoted_value(&format!("attribute {attr_name}"))?;
+                if value.contains('<') {
+                    return Err(format!("XML attribute {attr_name} contains <"));
                 }
-                if self.pos >= self.chars.len() {
-                    return Err(format!("XML attribute {attr_name} is not closed"));
-                }
-                let value: String = self.chars[start..self.pos].iter().collect();
                 validate_xml_entities(&value)?;
-                self.pos += 1;
                 attrs.push((attr_name, value));
             }
             let node = XmlNode {
@@ -1494,6 +2432,22 @@ impl XmlParser {
     }
 }
 
+fn validate_xml_characters(text: &str) -> Result<(), String> {
+    if text.chars().any(|ch| !xml_character_allowed(ch)) {
+        return Err("XML contains an invalid control character".to_string());
+    }
+    Ok(())
+}
+
+fn xml_character_allowed(ch: char) -> bool {
+    let codepoint = ch as u32;
+    matches!(ch, '\t' | '\n' | '\r')
+        || (0x20..=0xD7FF).contains(&codepoint)
+            && !(0x7F..=0x9F).contains(&codepoint)
+        || (0xE000..=0xFFFD).contains(&codepoint)
+        || (0x10000..=0x10FFFF).contains(&codepoint)
+}
+
 fn validate_xml_entities(text: &str) -> Result<(), String> {
     let chars: Vec<char> = text.chars().collect();
     let mut index = 0usize;
@@ -1511,13 +2465,25 @@ fn validate_xml_entities(text: &str) -> Result<(), String> {
             return Err("XML entity is not terminated".to_string());
         }
         let entity: String = chars[start + 1..index].iter().collect();
+        let valid_numeric = entity
+            .strip_prefix("#x")
+            .or_else(|| entity.strip_prefix("#X"))
+            .and_then(|digits| {
+                (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_hexdigit()))
+                    .then(|| u32::from_str_radix(digits, 16).ok())
+            })
+            .flatten()
+            .or_else(|| {
+                entity.strip_prefix('#').and_then(|digits| {
+                    (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
+                        .then(|| digits.parse::<u32>().ok())
+                })
+            })
+            .flatten();
         let valid = matches!(entity.as_str(), "amp" | "lt" | "gt" | "quot" | "apos")
-            || entity
-                .strip_prefix("#x")
-                .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_hexdigit()))
-            || entity
-                .strip_prefix('#')
-                .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()));
+            || valid_numeric.is_some_and(|codepoint| {
+                char::from_u32(codepoint).is_some_and(xml_character_allowed)
+            });
         if !valid {
             return Err(format!("XML entity {entity} is invalid"));
         }
@@ -1597,7 +2563,7 @@ fn add_xml_record(
 }
 
 fn bind_xml(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, String> {
-    let root = XmlParser::new(input).parse()?;
+    let root = XmlParser::new(input).parse_document()?;
     let preferred = root_name
         .map(str::to_string)
         .unwrap_or_else(|| pascal_name(&root.name));
@@ -1610,7 +2576,7 @@ fn bind_xml(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Strin
 enum ProtoToken {
     Word(String),
     Number(String),
-    StringLiteral,
+    StringLiteral(String),
     Symbol(char),
 }
 
@@ -1658,33 +2624,132 @@ fn lex_proto(input: &str) -> Result<Vec<ProtoToken>, String> {
         if ch.is_ascii_digit() {
             let start = index;
             index += 1;
-            while index < chars.len() && chars[index].is_ascii_digit() {
+            if ch == '0' && chars.get(index).is_some_and(|value| *value == 'x' || *value == 'X') {
                 index += 1;
+                let digits = index;
+                while index < chars.len() && chars[index].is_ascii_hexdigit() {
+                    index += 1;
+                }
+                if digits == index {
+                    return Err("proto hexadecimal number has no digits".to_string());
+                }
+            } else {
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+                if chars.get(index) == Some(&'.')
+                    && chars
+                        .get(index + 1)
+                        .is_some_and(|value| value.is_ascii_digit())
+                {
+                    index += 1;
+                    while index < chars.len() && chars[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                }
+                if chars
+                    .get(index)
+                    .is_some_and(|value| *value == 'e' || *value == 'E')
+                {
+                    index += 1;
+                    if chars
+                        .get(index)
+                        .is_some_and(|value| *value == '+' || *value == '-')
+                    {
+                        index += 1;
+                    }
+                    let digits = index;
+                    while index < chars.len() && chars[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                    if digits == index {
+                        return Err("proto numeric exponent has no digits".to_string());
+                    }
+                }
             }
             tokens.push(ProtoToken::Number(chars[start..index].iter().collect()));
             continue;
         }
-        if ch == '"' {
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
             index += 1;
+            let mut value = String::new();
             let mut closed = false;
             while index < chars.len() {
                 match chars[index] {
-                    '"' => {
+                    current if current == quote => {
                         index += 1;
                         closed = true;
                         break;
                     }
                     '\\' => {
-                        index += 2;
+                        index += 1;
+                        let Some(escaped) = chars.get(index).copied() else {
+                            return Err("proto string ends after an escape".to_string());
+                        };
+                        let decoded = match escaped {
+                            'a' => '\u{0007}',
+                            'b' => '\u{0008}',
+                            'f' => '\u{000c}',
+                            'n' => '\n',
+                            'r' => '\r',
+                            't' => '\t',
+                            'v' => '\u{000b}',
+                            '\\' => '\\',
+                            '\'' => '\'',
+                            '"' => '"',
+                            '?' => '?',
+                            'x' => {
+                                let Some(first) = chars.get(index + 1).copied() else {
+                                    return Err("proto hex escape needs two digits".to_string());
+                                };
+                                let Some(second) = chars.get(index + 2).copied() else {
+                                    return Err("proto hex escape needs two digits".to_string());
+                                };
+                                if !first.is_ascii_hexdigit() || !second.is_ascii_hexdigit() {
+                                    return Err("proto hex escape needs two hexadecimal digits".to_string());
+                                }
+                                index += 2;
+                                let digits = [first, second].iter().collect::<String>();
+                                char::from_u32(u32::from_str_radix(&digits, 16).unwrap_or(0))
+                                    .ok_or_else(|| "proto hex escape is not a character".to_string())?
+                            }
+                            '0'..='7' => {
+                                let start = index;
+                                let mut end = index + 1;
+                                while end < chars.len()
+                                    && end < start + 3
+                                    && matches!(chars[end], '0'..='7')
+                                {
+                                    end += 1;
+                                }
+                                let digits: String = chars[start..end].iter().collect();
+                                index = end - 1;
+                                char::from_u32(u32::from_str_radix(&digits, 8).unwrap_or(0))
+                                    .ok_or_else(|| "proto octal escape is not a character".to_string())?
+                            }
+                            _ => return Err(format!("proto escape \\{escaped} is unsupported")),
+                        };
+                        if decoded == '\u{0000}' {
+                            return Err("proto string contains a NUL escape".to_string());
+                        }
+                        value.push(decoded);
+                        index += 1;
                     }
                     '\n' | '\r' => return Err("proto string contains a newline".to_string()),
-                    _ => index += 1,
+                    current if current.is_control() => {
+                        return Err("proto string contains a control character".to_string());
+                    }
+                    current => {
+                        value.push(current);
+                        index += 1;
+                    }
                 }
             }
             if !closed {
                 return Err("proto string is not closed".to_string());
             }
-            tokens.push(ProtoToken::StringLiteral);
+            tokens.push(ProtoToken::StringLiteral(value));
             continue;
         }
         if "{}[]()=;,.<>:+-".contains(ch) {
@@ -1697,6 +2762,22 @@ fn lex_proto(input: &str) -> Result<Vec<ProtoToken>, String> {
     Ok(tokens)
 }
 
+fn proto_ranges_overlap(left: (i64, i64), right: (i64, i64)) -> bool {
+    left.0 <= right.1 && right.0 <= left.1
+}
+
+fn proto_range_has_prohibited_number(range: (i64, i64)) -> bool {
+    range.0 <= 19_999 && range.1 >= 19_000
+}
+
+fn parse_proto_integer_literal(value: &str) -> Option<i64> {
+    if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16).ok()
+    } else {
+        value.parse::<i64>().ok()
+    }
+}
+
 struct ProtoField {
     wire_name: String,
     type_name: String,
@@ -1705,17 +2786,38 @@ struct ProtoField {
     number: u32,
 }
 
+#[derive(Default)]
+struct ProtoReserved {
+    names: BTreeSet<String>,
+    ranges: Vec<(i64, i64)>,
+}
+
 struct ProtoMessage {
     source_name: String,
     short_name: String,
     fields: Vec<ProtoField>,
 }
 
+struct ProtoEnum {
+    source_name: String,
+    short_name: String,
+}
+
+struct ProtoSchema {
+    messages: Vec<ProtoMessage>,
+    enums: Vec<ProtoEnum>,
+}
+
 struct ProtoParser {
     tokens: Vec<ProtoToken>,
     pos: usize,
     messages: Vec<ProtoMessage>,
+    enums: Vec<ProtoEnum>,
     message_names: BTreeSet<String>,
+    enum_names: BTreeSet<String>,
+    package: Option<String>,
+    syntax_seen: bool,
+    body_started: bool,
 }
 
 impl ProtoParser {
@@ -1724,7 +2826,12 @@ impl ProtoParser {
             tokens: lex_proto(input)?,
             pos: 0,
             messages: Vec::new(),
+            enums: Vec::new(),
             message_names: BTreeSet::new(),
+            enum_names: BTreeSet::new(),
+            package: None,
+            syntax_seen: false,
+            body_started: false,
         })
     }
 
@@ -1752,6 +2859,16 @@ impl ProtoParser {
         }
     }
 
+    fn take_string(&mut self, what: &str) -> Result<String, String> {
+        match self.tokens.get(self.pos).cloned() {
+            Some(ProtoToken::StringLiteral(value)) => {
+                self.pos += 1;
+                Ok(value)
+            }
+            _ => Err(format!("proto expected {what}")),
+        }
+    }
+
     fn expect_symbol(&mut self, expected: char, what: &str) -> Result<(), String> {
         if self.symbol_at(0, expected) {
             self.pos += 1;
@@ -1761,91 +2878,292 @@ impl ProtoParser {
         }
     }
 
-    fn skip_statement(&mut self) -> Result<(), String> {
-        let mut square = 0i32;
-        let mut paren = 0i32;
-        while self.pos < self.tokens.len() {
-            match self.tokens.get(self.pos) {
-                Some(ProtoToken::Symbol('[')) => square += 1,
-                Some(ProtoToken::Symbol(']')) => {
-                    square -= 1;
-                    if square < 0 {
-                        return Err("proto has an unmatched close bracket".to_string());
-                    }
-                }
-                Some(ProtoToken::Symbol('(')) => paren += 1,
-                Some(ProtoToken::Symbol(')')) => {
-                    paren -= 1;
-                    if paren < 0 {
-                        return Err("proto has an unmatched close parenthesis".to_string());
-                    }
-                }
-                Some(ProtoToken::Symbol(';')) if square == 0 && paren == 0 => {
-                    self.pos += 1;
-                    return Ok(());
-                }
-                _ => {}
-            }
-            self.pos += 1;
-        }
-        Err("proto statement is missing a semicolon".to_string())
-    }
-
-    fn skip_named_block(&mut self, kind: &str) -> Result<(), String> {
-        let _ = self.take_word(kind)?;
-        let _ = self.take_word("name")?;
-        self.expect_symbol('{', "an open block")?;
-        let mut depth = 1i32;
-        while self.pos < self.tokens.len() {
-            match self.tokens.get(self.pos) {
-                Some(ProtoToken::Symbol('{')) => depth += 1,
-                Some(ProtoToken::Symbol('}')) => {
-                    depth -= 1;
-                    if depth == 0 {
-                        self.pos += 1;
-                        return Ok(());
-                    }
-                }
-                _ => {}
-            }
-            self.pos += 1;
-        }
-        Err(format!("proto {kind} block is not closed"))
-    }
-
     fn parse_type_name(&mut self) -> Result<String, String> {
         let mut name = String::new();
         if self.symbol_at(0, '.') {
             name.push('.');
             self.pos += 1;
         }
-        name.push_str(&self.take_word("a field type")?);
+        let first = self.take_word("a field type")?;
+        if !is_proto_identifier(&first)
+            || (is_proto_keyword(&first) && proto_scalar(&first).is_none())
+        {
+            return Err(format!("proto type name {first} is invalid"));
+        }
+        name.push_str(&first);
         while self.symbol_at(0, '.') {
             self.pos += 1;
             name.push('.');
-            name.push_str(&self.take_word("a type segment")?);
+            let segment = self.take_word("a type segment")?;
+            if !is_proto_identifier(&segment)
+                || (is_proto_keyword(&segment) && proto_scalar(&segment).is_none())
+            {
+                return Err(format!("proto type name segment {segment} is invalid"));
+            }
+            name.push_str(&segment);
         }
         Ok(name)
     }
 
-    fn skip_field_options(&mut self) -> Result<(), String> {
-        self.expect_symbol('[', "field options")?;
-        let mut depth = 1i32;
-        while self.pos < self.tokens.len() {
-            match self.tokens.get(self.pos) {
-                Some(ProtoToken::Symbol('[')) => depth += 1,
-                Some(ProtoToken::Symbol(']')) => {
-                    depth -= 1;
-                    if depth == 0 {
+    fn parse_qualified_name(&mut self, what: &str) -> Result<String, String> {
+        let first = self.take_word(what)?;
+        if !is_proto_identifier(&first) {
+            return Err(format!("proto name {first} is invalid"));
+        }
+        let mut name = first;
+        while self.symbol_at(0, '.') {
+            self.pos += 1;
+            let segment = self.take_word(what)?;
+            if !is_proto_identifier(&segment) {
+                return Err(format!("proto name segment {segment} is invalid"));
+            }
+            name.push('.');
+            name.push_str(&segment);
+        }
+        Ok(name)
+    }
+
+    fn parse_option_name(&mut self) -> Result<String, String> {
+        if self.symbol_at(0, '(') {
+            self.pos += 1;
+            let mut name = format!("({})", self.parse_qualified_name("an option name")?);
+            self.expect_symbol(')', "the end of a custom option name")?;
+            while self.symbol_at(0, '.') {
+                self.pos += 1;
+                let segment = self.take_word("an option name segment")?;
+                if !is_proto_identifier(&segment) {
+                    return Err(format!("proto option name segment {segment} is invalid"));
+                }
+                name.push('.');
+                name.push_str(&segment);
+            }
+            Ok(name)
+        } else {
+            self.parse_qualified_name("an option name")
+        }
+    }
+
+    fn parse_option_value(&mut self) -> Result<OptionValue, String> {
+        if self.symbol_at(0, '{') {
+            self.pos += 1;
+            while !self.symbol_at(0, '}') {
+                if self.pos >= self.tokens.len() {
+                    return Err("proto option aggregate is not closed".to_string());
+                }
+                let _ = self.parse_option_name()?;
+                if self.symbol_at(0, ':') || self.symbol_at(0, '=') {
+                    self.pos += 1;
+                } else {
+                    return Err("proto option aggregate field needs a colon".to_string());
+                }
+                self.parse_option_value()?;
+                if self.symbol_at(0, ',') || self.symbol_at(0, ';') {
+                    self.pos += 1;
+                } else if !self.symbol_at(0, '}') {
+                    return Err("proto option aggregate needs a separator".to_string());
+                }
+            }
+            self.pos += 1;
+            return Ok(OptionValue::Aggregate);
+        }
+        if let Some(value) = self.tokens.get(self.pos).cloned() {
+            match value {
+                ProtoToken::StringLiteral(value) => {
+                    self.pos += 1;
+                    let mut value = value;
+                    while let Some(ProtoToken::StringLiteral(next)) = self.tokens.get(self.pos).cloned() {
                         self.pos += 1;
-                        return Ok(());
+                        value.push_str(&next);
+                    }
+                    Ok(OptionValue::String(value))
+                }
+                ProtoToken::Number(value) => {
+                    self.pos += 1;
+                    Ok(OptionValue::Number(value))
+                }
+                ProtoToken::Word(value) => {
+                    self.pos += 1;
+                    let mut value = value;
+                    while self.symbol_at(0, '.') {
+                        self.pos += 1;
+                        value.push('.');
+                        value.push_str(&self.take_word("an option value segment")?);
+                    }
+                    if value.eq_ignore_ascii_case("true") {
+                        Ok(OptionValue::Bool(true))
+                    } else if value.eq_ignore_ascii_case("false") {
+                        Ok(OptionValue::Bool(false))
+                    } else {
+                        Ok(OptionValue::Identifier(value))
                     }
                 }
-                _ => {}
+                ProtoToken::Symbol('+') | ProtoToken::Symbol('-') => {
+                    let sign = match value {
+                        ProtoToken::Symbol(sign) => sign,
+                        _ => unreachable!(),
+                    };
+                    self.pos += 1;
+                    let number = match self.tokens.get(self.pos).cloned() {
+                        Some(ProtoToken::Number(number)) => number,
+                        _ => return Err("proto option sign needs a number".to_string()),
+                    };
+                    self.pos += 1;
+                    Ok(OptionValue::Number(format!("{sign}{number}")))
+                }
+                ProtoToken::Symbol('.') => {
+                    let name = self.parse_type_name()?;
+                    Ok(OptionValue::Identifier(name))
+                }
+                _ => Err("proto option value is malformed".to_string()),
+            }
+        } else {
+            Err("proto option value is missing".to_string())
+        }
+    }
+
+    fn parse_option_assignment(&mut self) -> Result<(String, OptionValue), String> {
+        let name = self.parse_option_name()?;
+        self.expect_symbol('=', "an option equals sign")?;
+        let value = self.parse_option_value()?;
+        Ok((name, value))
+    }
+
+    fn parse_option_statement(&mut self) -> Result<(String, OptionValue), String> {
+        let _ = self.take_word("option")?;
+        let assignment = self.parse_option_assignment()?;
+        self.expect_symbol(';', "an option semicolon")?;
+        Ok(assignment)
+    }
+
+    fn parse_field_options(&mut self) -> Result<(), String> {
+        self.expect_symbol('[', "field options")?;
+        if self.symbol_at(0, ']') {
+            return Err("proto field options cannot be empty".to_string());
+        }
+        loop {
+            self.parse_option_assignment()?;
+            if self.symbol_at(0, ',') {
+                self.pos += 1;
+                if self.symbol_at(0, ']') {
+                    return Err("proto field options cannot end with a comma".to_string());
+                }
+                continue;
+            }
+            self.expect_symbol(']', "the end of field options")?;
+            return Ok(());
+        }
+    }
+
+    fn parse_integer(&mut self, what: &str, signed: bool) -> Result<i64, String> {
+        let mut sign = 1i64;
+        if signed && (self.symbol_at(0, '+') || self.symbol_at(0, '-')) {
+            if self.symbol_at(0, '-') {
+                sign = -1;
             }
             self.pos += 1;
         }
-        Err("proto field options are not closed".to_string())
+        let Some(ProtoToken::Number(number)) = self.tokens.get(self.pos).cloned() else {
+            return Err(format!("proto expected {what}"));
+        };
+        if number.contains('.') || number.contains('e') || number.contains('E') {
+            return Err(format!("proto {what} must be an integer"));
+        }
+        self.pos += 1;
+        let value = parse_proto_integer_literal(&number)
+            .ok_or_else(|| format!("proto {what} is out of range"))?;
+        value
+            .checked_mul(sign)
+            .ok_or_else(|| format!("proto {what} is out of range"))
+    }
+
+    fn parse_reserved(
+        &mut self,
+        signed: bool,
+        maximum: i64,
+    ) -> Result<ProtoReserved, String> {
+        let _ = self.take_word("reserved")?;
+        let mut reserved = ProtoReserved::default();
+        loop {
+            if let Some(ProtoToken::StringLiteral(name)) = self.tokens.get(self.pos).cloned() {
+                self.pos += 1;
+                if name.is_empty()
+                    || name.contains('.')
+                    || name.split('.').any(|part| {
+                        !is_proto_identifier(part) || is_proto_keyword(part)
+                    })
+                {
+                    return Err(format!("proto reserved name {name:?} is invalid"));
+                }
+                if !reserved.names.insert(name.clone()) {
+                    return Err(format!("proto reserved name {name} is repeated"));
+                }
+            } else {
+                let start = self.parse_integer("a reserved number", signed)?;
+                let end = if self.word_at(0) == Some("to") {
+                    self.pos += 1;
+                    if self.word_at(0) == Some("max") {
+                        self.pos += 1;
+                        maximum
+                    } else {
+                        self.parse_integer("a reserved range end", signed)?
+                    }
+                } else {
+                    start
+                };
+                let minimum = if signed { i32::MIN as i64 } else { 1 };
+                if start < minimum || end < minimum || start > end || end > maximum {
+                    return Err("proto reserved range is out of range".to_string());
+                }
+                if proto_range_has_prohibited_number((start, end)) {
+                    return Err("proto reserved range uses prohibited field numbers".to_string());
+                }
+                for (old_start, old_end) in &reserved.ranges {
+                    if proto_ranges_overlap((start, end), (*old_start, *old_end)) {
+                        return Err("proto reserved ranges overlap".to_string());
+                    }
+                }
+                reserved.ranges.push((start, end));
+            }
+            if self.symbol_at(0, ',') {
+                self.pos += 1;
+                if self.symbol_at(0, ';') {
+                    return Err("proto reserved list cannot end with a comma".to_string());
+                }
+                continue;
+            }
+            self.expect_symbol(';', "a reserved semicolon")?;
+            return Ok(reserved);
+        }
+    }
+
+    fn parse_extensions(&mut self) -> Result<(), String> {
+        let _ = self.take_word("extensions")?;
+        loop {
+            let start = self.parse_integer("an extension number", false)?;
+            let end = if self.word_at(0) == Some("to") {
+                self.pos += 1;
+                if self.word_at(0) == Some("max") {
+                    self.pos += 1;
+                    536_870_911
+                } else {
+                    self.parse_integer("an extension range end", false)?
+                }
+            } else {
+                start
+            };
+            if start == 0 || start > end || end > 536_870_911 {
+                return Err("proto extension range is out of range".to_string());
+            }
+            if proto_range_has_prohibited_number((start, end)) {
+                return Err("proto extension range uses prohibited field numbers".to_string());
+            }
+            if self.symbol_at(0, ',') {
+                self.pos += 1;
+                continue;
+            }
+            self.expect_symbol(';', "an extensions semicolon")?;
+            return Ok(());
+        }
     }
 
     fn parse_field(&mut self) -> Result<ProtoField, String> {
@@ -1870,21 +3188,30 @@ impl ProtoParser {
             return Err("proto field has no name".to_string());
         }
         let wire_name = self.take_word("a field name")?;
+        if !is_proto_identifier(&wire_name) || is_proto_keyword(&wire_name) {
+            return Err(format!("proto field name {wire_name} is invalid"));
+        }
         self.expect_symbol('=', "an equals sign")?;
         let number = match self.tokens.get(self.pos).cloned() {
             Some(ProtoToken::Number(number)) => {
                 self.pos += 1;
-                number
-                    .parse::<u32>()
-                    .map_err(|_| "proto field number is invalid".to_string())?
+                if number.contains('.') || number.contains('e') || number.contains('E') {
+                    return Err("proto field number must be an integer".to_string());
+                }
+                let value = parse_proto_integer_literal(&number)
+                    .ok_or_else(|| "proto field number is invalid".to_string())?;
+                u32::try_from(value).map_err(|_| "proto field number is invalid".to_string())?
             }
             _ => return Err("proto field number is missing".to_string()),
         };
         if number == 0 || number > 536_870_911 {
             return Err(format!("proto field number {number} is out of range"));
         }
+        if (19_000..=19_999).contains(&number) {
+            return Err(format!("proto field number {number} is prohibited"));
+        }
         if self.symbol_at(0, '[') {
-            self.skip_field_options()?;
+            self.parse_field_options()?;
         }
         self.expect_symbol(';', "a field semicolon")?;
         Ok(ProtoField {
@@ -1896,47 +3223,106 @@ impl ProtoParser {
         })
     }
 
-    fn parse_message(&mut self, parent: Option<&str>) -> Result<(), String> {
+    fn declare_message(&mut self, source_name: &str) -> Result<(), String> {
+        if self.enum_names.contains(source_name) || !self.message_names.insert(source_name.to_string()) {
+            return Err(format!("proto has duplicate declaration {source_name}"));
+        }
+        Ok(())
+    }
+
+    fn declare_enum(&mut self, source_name: &str) -> Result<(), String> {
+        if self.message_names.contains(source_name) || !self.enum_names.insert(source_name.to_string()) {
+            return Err(format!("proto has duplicate declaration {source_name}"));
+        }
+        Ok(())
+    }
+
+    fn full_name(&self, parent: Option<&str>, short_name: &str) -> String {
+        if let Some(parent) = parent {
+            format!("{parent}.{short_name}")
+        } else if let Some(package) = &self.package {
+            format!("{package}.{short_name}")
+        } else {
+            short_name.to_string()
+        }
+    }
+
+    fn parse_message(&mut self, parent: Option<&str>) -> Result<String, String> {
         let _ = self.take_word("message")?;
         let short_name = self.take_word("a message name")?;
-        let source_name = parent
-            .map(|parent| format!("{parent}.{short_name}"))
-            .unwrap_or_else(|| short_name.clone());
-        if !self.message_names.insert(source_name.clone()) {
-            return Err(format!("proto has duplicate message {source_name}"));
+        if !is_proto_identifier(&short_name) || is_proto_keyword(&short_name) {
+            return Err(format!("proto message name {short_name} is invalid"));
         }
+        let source_name = self.full_name(parent, &short_name);
+        self.declare_message(&source_name)?;
         self.expect_symbol('{', "a message block")?;
         let mut fields = Vec::new();
         let mut field_names = BTreeSet::new();
         let mut field_numbers = BTreeSet::new();
+        let mut nested_names = BTreeSet::new();
+        let mut reserved = ProtoReserved::default();
         while self.pos < self.tokens.len() {
             if self.symbol_at(0, '}') {
                 self.pos += 1;
+                if field_names.iter().any(|name| nested_names.contains(name)) {
+                    return Err("proto field collides with a nested message or enum".to_string());
+                }
+                if fields.iter().any(|field| {
+                    reserved.names.contains(&field.wire_name)
+                        || reserved.ranges.iter().any(|range| {
+                            (range.0..=range.1).contains(&(field.number as i64))
+                        })
+                }) {
+                    return Err("proto field uses a reserved name or number".to_string());
+                }
                 self.messages.push(ProtoMessage {
-                    source_name,
+                    source_name: source_name.clone(),
                     short_name,
                     fields,
                 });
-                return Ok(());
+                return Ok(source_name);
             }
             if self.word_at(0) == Some("message") {
-                self.parse_message(Some(&source_name))?;
+                let nested = self.parse_message(Some(&source_name))?;
+                nested_names.insert(nested.rsplit('.').next().unwrap_or(&nested).to_string());
                 continue;
             }
             if self.word_at(0) == Some("enum") {
-                self.skip_named_block("enum")?;
+                let nested = self.parse_enum(Some(&source_name))?;
+                nested_names.insert(nested.rsplit('.').next().unwrap_or(&nested).to_string());
                 continue;
             }
-            if matches!(
-                self.word_at(0),
-                Some("reserved") | Some("extensions") | Some("option")
-            ) {
-                self.skip_statement()?;
+            if self.word_at(0) == Some("reserved") {
+                let parsed = self.parse_reserved(false, 536_870_911)?;
+                for name in parsed.names {
+                    if !reserved.names.insert(name) {
+                        return Err("proto reserved name is repeated".to_string());
+                    }
+                }
+                for range in parsed.ranges {
+                    if reserved.ranges.iter().any(|(old_start, old_end)| {
+                        proto_ranges_overlap(range, (*old_start, *old_end))
+                    }) {
+                        return Err("proto reserved ranges overlap".to_string());
+                    }
+                    reserved.ranges.push(range);
+                }
+                continue;
+            }
+            if self.word_at(0) == Some("extensions") {
+                self.parse_extensions()?;
+                continue;
+            }
+            if self.word_at(0) == Some("option") {
+                self.parse_option_statement()?;
                 continue;
             }
             if self.symbol_at(0, ';') {
                 self.pos += 1;
                 continue;
+            }
+            if matches!(self.word_at(0), Some("oneof") | Some("group") | Some("extend")) {
+                return Err("proto oneof, group, and extend declarations are unsupported".to_string());
             }
             let field = self.parse_field()?;
             if !field_names.insert(field.wire_name.clone()) {
@@ -1950,17 +3336,169 @@ impl ProtoParser {
         Err(format!("proto message {source_name} is not closed"))
     }
 
-    fn parse(mut self) -> Result<Vec<ProtoMessage>, String> {
+    fn parse_enum(&mut self, parent: Option<&str>) -> Result<String, String> {
+        let _ = self.take_word("enum")?;
+        let short_name = self.take_word("an enum name")?;
+        if !is_proto_identifier(&short_name) || is_proto_keyword(&short_name) {
+            return Err(format!("proto enum name {short_name} is invalid"));
+        }
+        let source_name = self.full_name(parent, &short_name);
+        self.declare_enum(&source_name)?;
+        self.expect_symbol('{', "an enum block")?;
+        let mut names = BTreeSet::new();
+        let mut numbers = BTreeSet::new();
+        let mut reserved = ProtoReserved::default();
+        let mut allow_alias = false;
+        let mut values = Vec::new();
         while self.pos < self.tokens.len() {
-            if self.word_at(0) == Some("message") {
+            if self.symbol_at(0, '}') {
+                self.pos += 1;
+                if values.is_empty() {
+                    return Err(format!("proto enum {source_name} has no values"));
+                }
+                if values.iter().any(|(name, number)| {
+                    reserved.names.contains(name)
+                        || reserved
+                            .ranges
+                            .iter()
+                            .any(|range| (range.0..=range.1).contains(number))
+                }) {
+                    return Err("proto enum value uses a reserved name or number".to_string());
+                }
+                self.enums.push(ProtoEnum {
+                    source_name: source_name.clone(),
+                    short_name,
+                });
+                return Ok(source_name);
+            }
+            if self.word_at(0) == Some("option") {
+                let (name, value) = self.parse_option_statement()?;
+                if name == "allow_alias" {
+                    allow_alias = match value {
+                        OptionValue::Bool(value) => value,
+                        _ => return Err("proto enum allow_alias must be true or false".to_string()),
+                    };
+                }
+                continue;
+            }
+            if self.word_at(0) == Some("reserved") {
+                let parsed = self.parse_reserved(true, i32::MAX as i64)?;
+                for name in parsed.names {
+                    if !reserved.names.insert(name) {
+                        return Err("proto enum reserved name is repeated".to_string());
+                    }
+                }
+                for range in parsed.ranges {
+                    if reserved.ranges.iter().any(|(old_start, old_end)| {
+                        proto_ranges_overlap(range, (*old_start, *old_end))
+                    }) {
+                        return Err("proto enum reserved ranges overlap".to_string());
+                    }
+                    reserved.ranges.push(range);
+                }
+                continue;
+            }
+            if self.symbol_at(0, ';') {
+                self.pos += 1;
+                continue;
+            }
+            let value_name = self.take_word("an enum value name")?;
+            if !is_proto_identifier(&value_name) || is_proto_keyword(&value_name) {
+                return Err(format!("proto enum value name {value_name} is invalid"));
+            }
+            if value_name == short_name || !names.insert(value_name.clone()) {
+                return Err(format!("proto enum has a duplicate or colliding value {value_name}"));
+            }
+            self.expect_symbol('=', "an enum value equals sign")?;
+            let number = self.parse_integer("an enum value number", true)?;
+            if !(-2_147_483_648..=2_147_483_647).contains(&number) {
+                return Err("proto enum value number is out of int32 range".to_string());
+            }
+            if (19_000..=19_999).contains(&number) {
+                return Err("proto enum value uses a prohibited number".to_string());
+            }
+            if !allow_alias && !numbers.insert(number) {
+                return Err(format!("proto enum has duplicate value number {number}"));
+            }
+            if self.symbol_at(0, '[') {
+                self.parse_field_options()?;
+            }
+            self.expect_symbol(';', "an enum value semicolon")?;
+            values.push((value_name, number));
+        }
+        Err(format!("proto enum {source_name} is not closed"))
+    }
+
+    fn parse_syntax(&mut self) -> Result<(), String> {
+        let _ = self.take_word("syntax")?;
+        if self.syntax_seen {
+            return Err("proto has more than one syntax declaration".to_string());
+        }
+        self.expect_symbol('=', "a syntax equals sign")?;
+        let syntax = self.take_string("a syntax string")?;
+        if !matches!(syntax.as_str(), "proto2" | "proto3") {
+            return Err(format!("proto syntax {syntax:?} is unsupported"));
+        }
+        self.expect_symbol(';', "a syntax semicolon")?;
+        self.syntax_seen = true;
+        Ok(())
+    }
+
+    fn parse_package(&mut self) -> Result<(), String> {
+        let _ = self.take_word("package")?;
+        if self.package.is_some() {
+            return Err("proto has more than one package declaration".to_string());
+        }
+        let package = self.parse_qualified_name("a package name")?;
+        if package.split('.').any(|part| !is_proto_identifier(part)) {
+            return Err(format!("proto package name {package} is invalid"));
+        }
+        self.expect_symbol(';', "a package semicolon")?;
+        self.package = Some(package);
+        Ok(())
+    }
+
+    fn parse_import(&mut self) -> Result<(), String> {
+        let _ = self.take_word("import")?;
+        if matches!(self.word_at(0), Some("public") | Some("weak")) {
+            self.pos += 1;
+        }
+        let path = self.take_string("an import path")?;
+        if path.is_empty() || path.chars().any(char::is_control) {
+            return Err("proto import path is invalid".to_string());
+        }
+        self.expect_symbol(';', "an import semicolon")?;
+        Ok(())
+    }
+
+    fn parse(mut self) -> Result<ProtoSchema, String> {
+        while self.pos < self.tokens.len() {
+            if self.word_at(0) == Some("syntax") {
+                if self.body_started {
+                    return Err("proto syntax declaration must precede messages and enums".to_string());
+                }
+                self.parse_syntax()?;
+            } else if self.word_at(0) == Some("package") {
+                if self.body_started {
+                    return Err("proto package declaration must precede messages and enums".to_string());
+                }
+                self.parse_package()?;
+            } else if self.word_at(0) == Some("import") {
+                if self.body_started {
+                    return Err("proto import declaration must precede messages and enums".to_string());
+                }
+                self.parse_import()?;
+            } else if self.word_at(0) == Some("option") {
+                if self.body_started {
+                    return Err("proto file options must precede messages and enums".to_string());
+                }
+                self.parse_option_statement()?;
+            } else if self.word_at(0) == Some("message") {
+                self.body_started = true;
                 self.parse_message(None)?;
-            } else if matches!(
-                self.word_at(0),
-                Some("syntax") | Some("package") | Some("import") | Some("option")
-            ) {
-                self.skip_statement()?;
             } else if self.word_at(0) == Some("enum") {
-                self.skip_named_block("enum")?;
+                self.body_started = true;
+                self.parse_enum(None)?;
             } else if self.symbol_at(0, ';') {
                 self.pos += 1;
             } else {
@@ -1973,8 +3511,69 @@ impl ProtoParser {
         if self.messages.is_empty() {
             return Err("proto input has no message block".to_string());
         }
-        Ok(self.messages)
+        Ok(ProtoSchema {
+            messages: self.messages,
+            enums: self.enums,
+        })
     }
+}
+
+#[derive(Clone, Debug)]
+enum OptionValue {
+    Bool(bool),
+    String(String),
+    Number(String),
+    Identifier(String),
+    Aggregate,
+}
+
+fn is_proto_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn is_proto_keyword(value: &str) -> bool {
+    matches!(
+        value,
+        "syntax"
+            | "package"
+            | "import"
+            | "option"
+            | "message"
+            | "enum"
+            | "service"
+            | "rpc"
+            | "returns"
+            | "stream"
+            | "reserved"
+            | "extensions"
+            | "extend"
+            | "oneof"
+            | "group"
+            | "required"
+            | "optional"
+            | "repeated"
+            | "double"
+            | "float"
+            | "int32"
+            | "sint32"
+            | "sfixed32"
+            | "int64"
+            | "sint64"
+            | "sfixed64"
+            | "uint32"
+            | "uint64"
+            | "fixed32"
+            | "fixed64"
+            | "bool"
+            | "string"
+            | "bytes"
+            | "to"
+            | "max"
+            | "public"
+            | "weak"
+    )
 }
 
 fn proto_scalar(type_name: &str) -> Option<&'static str> {
@@ -1997,12 +3596,29 @@ fn proto_scalar(type_name: &str) -> Option<&'static str> {
 }
 
 fn bind_proto(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, String> {
-    let messages = ProtoParser::new(input)?.parse()?;
+    let schema = ProtoParser::new(input)?.parse()?;
+    let messages = schema.messages;
+    let enum_names: BTreeSet<String> = schema
+        .enums
+        .iter()
+        .map(|item| item.source_name.clone())
+        .collect();
     let mut builder = SchemaBuilder::new();
     let use_root = messages.len() == 1;
     let mut source_names = BTreeMap::new();
     let mut leaf_names = BTreeMap::new();
     let mut ambiguous_leaves = BTreeSet::new();
+    let mut enum_leaf_names = BTreeMap::new();
+    let mut ambiguous_enum_leaves = BTreeSet::new();
+    for enum_name in &enum_names {
+        let leaf = enum_name.rsplit('.').next().unwrap_or(enum_name);
+        if enum_leaf_names
+            .insert(leaf.to_string(), enum_name.clone())
+            .is_some()
+        {
+            ambiguous_enum_leaves.insert(leaf.to_string());
+        }
+    }
     for (index, message) in messages.iter().enumerate() {
         let preferred = if use_root && index == 0 {
             root_name.unwrap_or(&message.short_name)
@@ -2030,22 +3646,29 @@ fn bind_proto(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Str
             } else {
                 let reference = field.type_name.trim_start_matches('.');
                 let leaf = reference.rsplit('.').next().unwrap_or(reference);
-                let resolved = source_names
-                    .get(reference)
-                    .or_else(|| {
-                        if ambiguous_leaves.contains(leaf) {
-                            None
-                        } else {
-                            leaf_names.get(leaf)
-                        }
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "proto field {} references unknown message type {}",
-                            field.wire_name, field.type_name
-                        )
-                    })?;
-                BoundType::Named(resolved.clone())
+                if enum_names.contains(reference)
+                    || (!ambiguous_enum_leaves.contains(leaf)
+                        && enum_leaf_names.contains_key(leaf))
+                {
+                    BoundType::Scalar("Int")
+                } else {
+                    let resolved = source_names
+                        .get(reference)
+                        .or_else(|| {
+                            if ambiguous_leaves.contains(leaf) {
+                                None
+                            } else {
+                                leaf_names.get(leaf)
+                            }
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "proto field {} references unknown message or enum type {}",
+                                field.wire_name, field.type_name
+                            )
+                        })?;
+                    BoundType::Named(resolved.clone())
+                }
             };
             let ty = if field.repeated {
                 BoundType::Array(Box::new(base))
@@ -2076,7 +3699,7 @@ fn inference_rules(format: &str) -> &'static [&'static str] {
         ],
         "sql" => &[
             "SQL declared column types map to Jet scalar and core value types.",
-            "NOT NULL and PRIMARY KEY columns stay required; table constraints are ignored.",
+            "NOT NULL and PRIMARY KEY columns stay required; supported constraints are validated.",
         ],
         "xml" => &[
             "XML attributes use @ wire keys; element text uses the $text wire key.",
@@ -2084,10 +3707,26 @@ fn inference_rules(format: &str) -> &'static [&'static str] {
         ],
         "proto" => &[
             "Protobuf message blocks become #Codable records; scalar types use Jet core types.",
-            "repeated and optional labels map to lists and optional fields; numbers stay in comments.",
+            "repeated and optional labels map to lists, enums map to Int, and field numbers stay in comments.",
         ],
         _ => &["The input was parsed as a named data schema."],
     }
+}
+
+fn escape_provenance(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '\n' => "\\n".chars().collect(),
+            '\r' => "\\r".chars().collect(),
+            '\t' => "\\t".chars().collect(),
+            ch if ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}') => {
+                format!("\\u{:04x}", ch as u32).chars().collect()
+            }
+            ch => vec![ch],
+        })
+        .collect()
 }
 
 fn render_data_source(
@@ -2104,8 +3743,8 @@ fn render_data_source(
     } else {
         command.to_string()
     };
-    let _ = writeln!(source, "// generated by: {command}");
-    let _ = writeln!(source, "// input: {input_path}");
+    let _ = writeln!(source, "// generated by: {}", escape_provenance(&command));
+    let _ = writeln!(source, "// input: {}", escape_provenance(input_path));
     let _ = writeln!(source, "// sha256: {hash}");
     let _ = writeln!(source, "// format: {format}");
     for rule in inference_rules(format) {
@@ -2145,8 +3784,9 @@ fn render_data_source(
 
 /// Parse one supported data schema and render visible ordinary Jet source.
 ///
-/// command is recorded verbatim in the stable provenance header. Callers
-/// should pass the exact user-facing command line, without shell quoting.
+/// command is recorded losslessly in the stable provenance header; line and
+/// control characters are escaped so the generated comment cannot be injected.
+/// Callers should pass the exact user-facing command line, without shell quoting.
 pub fn generate_data(
     format: &str,
     input_path: &str,

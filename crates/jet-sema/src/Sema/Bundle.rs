@@ -3130,7 +3130,7 @@ fn check_bundle_opts_for_output_inner(
         }
     }
     match mode {
-        CompileMode::Test if entry.tests.is_empty()
+        CompileMode::Test if !states.iter().any(|state| !state.tests.is_empty())
             && !bundle.modules[bundle.entry].items.iter().any(|item| {
                 matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
             }) => {

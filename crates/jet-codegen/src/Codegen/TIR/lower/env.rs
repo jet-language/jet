@@ -1,14 +1,15 @@
 use crate::AST::{Expr, LValue, Stmt, Type};
-use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::{TBindingOrigin, TLocal};
 use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Per-function lowering environment: a local name -> (Rust place string, type).
-/// Built from params, extended by `let` bindings. The "place" already accounts
-/// for parameter deref, so `Local` emission needs no further resolution.
+/// Per-function lowering environment: a local name -> (structured slot, type).
+/// Built from params, extended by `let` bindings. The slot already accounts for
+/// parameter deref and binding provenance, so every TIR consumer sees the same
+/// local facts.
 ///
 /// The type is `Option<Type>`: a binding can carry a *resolved* type, or `None`
 /// when the AST path's slot had `jet_ty: None` and we must reproduce that
@@ -23,9 +24,6 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub(crate) struct LowerEnv {
     pub(super) locals: HashMap<String, (TLocal, Option<Type>)>,
-    /// D-PROVENANCE1=B: source note for each exact `#Track` Float binding.
-    /// Copies and other bindings have no entry.
-    pub(super) tracked_float_origins: HashMap<String, String>,
     /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
@@ -72,7 +70,6 @@ impl LowerEnv {
     pub(crate) fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
-            tracked_float_origins: HashMap::new(),
             fn_name,
             ret_ty: None,
             self_owner: None,
@@ -147,13 +144,6 @@ impl LowerEnv {
     /// can never be captured in generated Rust.
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
-        self.tracked_float_origins.remove(name);
-    }
-    pub(super) fn mark_tracked_float(&mut self, name: &str, origin: String) {
-        self.tracked_float_origins.insert(name.to_string(), origin);
-    }
-    pub(super) fn tracked_float_origin(&self, name: &str) -> Option<String> {
-        self.tracked_float_origins.get(name).cloned()
     }
     /// The structured slot for `name`. This is the single fact every engine
     /// resolves a local by; the Rust spellings below derive from it.
@@ -162,6 +152,11 @@ impl LowerEnv {
             Some((slot, _)) => slot.clone(),
             None => TLocal::user(name),
         }
+    }
+    pub(super) fn origin_of(&self, name: &str) -> Option<TBindingOrigin> {
+        self.locals
+            .get(name)
+            .and_then(|(slot, _)| slot.origin.clone())
     }
     pub(super) fn place_of(&self, name: &str) -> String {
         self.local_of(name).rust_place()
@@ -185,94 +180,114 @@ impl LowerEnv {
 }
 
 fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
-    match expr {
-        Expr::Ident(candidate, _) => candidate == name,
-        Expr::Call(call) => call
-            .args
-            .iter()
-            .any(|arg| gc_expr_references_ident(&arg.expr, name)),
-        Expr::MethodCall { receiver, args, .. }
-        | Expr::CallValue {
-            callee: receiver,
-            args,
-            ..
-        } => {
-            gc_expr_references_ident(receiver, name)
-                || args
-                    .iter()
-                    .any(|arg| gc_expr_references_ident(&arg.expr, name))
-        }
-        Expr::Binary(_, left, right, _) => {
-            gc_expr_references_ident(left, name) || gc_expr_references_ident(right, name)
-        }
-        Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
-        | Expr::Field(inner, _, _)
-        | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _)
-        | Expr::Place(inner, _, _)
-        | Expr::Tainted(inner, _, _)
-        | Expr::Present(inner, _)
-        | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => gc_expr_references_ident(inner, name),
-        Expr::OptField { base, .. } => gc_expr_references_ident(base, name),
-        Expr::Index { base, index, .. } => {
-            gc_expr_references_ident(base, name) || gc_expr_references_ident(index, name)
-        }
-        Expr::Slice {
-            base,
-            start,
-            end,
-            range,
-            ..
-        } => {
-            gc_expr_references_ident(base, name)
-                || range.as_deref().map_or_else(
-                    || {
-                        gc_expr_references_ident(start, name)
-                            || gc_expr_references_ident(end, name)
-                    },
-                    |range| gc_expr_references_ident(range, name),
-                )
-        }
-        Expr::Range { start, end, .. } => {
-            gc_expr_references_ident(start, name) || gc_expr_references_ident(end, name)
-        }
-        Expr::ListLit(items, _) => items
-            .iter()
-            .any(|item| gc_expr_references_ident(item, name)),
-        Expr::MapLit(pairs, _) => pairs.iter().any(|(key, value)| {
-            gc_expr_references_ident(key, name) || gc_expr_references_ident(value, name)
-        }),
-        Expr::StructLit { fields, .. } => fields
-            .iter()
-            .any(|(_, _, value)| gc_expr_references_ident(value, name)),
-        Expr::TypedLit { body, .. } => {
-            let mut hit = false;
-            body.for_each_expr(|value| {
-                if gc_expr_references_ident(value, name) {
-                    hit = true;
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            Expr::Ident(candidate, _) if candidate == name => return true,
+            Expr::Call(call) => {
+                for arg in call.args.iter().rev() {
+                    pending.push(&arg.expr);
                 }
-            });
-            hit
-        }
-        Expr::TupleLit(fields, _, _) => fields
-            .iter()
-            .any(|(_, value)| gc_expr_references_ident(value, name)),
-        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
-            crate::AST::EnumLitArg::Positional(value)
-            | crate::AST::EnumLitArg::Named { expr: value, .. } => {
-                gc_expr_references_ident(value, name)
             }
-        }),
-        Expr::Str(parts, _) => parts.iter().any(|part| match part {
-            crate::AST::StrPart::Interp(value, _) => gc_expr_references_ident(value, name),
-            crate::AST::StrPart::Lit(_) => false,
-        }),
-        _ => false,
+            Expr::MethodCall { receiver, args, .. }
+            | Expr::CallValue {
+                callee: receiver,
+                args,
+                ..
+            } => {
+                for arg in args.iter().rev() {
+                    pending.push(&arg.expr);
+                }
+                pending.push(receiver);
+            }
+            Expr::Binary(_, left, right, _) => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::Unary(_, inner, _)
+            | Expr::IncDec { operand: inner, .. }
+            | Expr::Field(inner, _, _)
+            | Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Copy(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _) => pending.push(inner),
+            Expr::OptField { base, .. } => pending.push(base),
+            Expr::Index { base, index, .. } => {
+                pending.push(index);
+                pending.push(base);
+            }
+            Expr::Slice {
+                base,
+                start,
+                end,
+                range,
+                ..
+            } => {
+                if let Some(range) = range {
+                    pending.push(range);
+                } else {
+                    pending.push(end);
+                    pending.push(start);
+                }
+                pending.push(base);
+            }
+            Expr::Range { start, end, .. } => {
+                pending.push(end);
+                pending.push(start);
+            }
+            Expr::ListLit(items, _) => {
+                for item in items.iter().rev() {
+                    pending.push(item);
+                }
+            }
+            Expr::MapLit(pairs, _) => {
+                for (key, value) in pairs.iter().rev() {
+                    pending.push(value);
+                    pending.push(key);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, _, value) in fields.iter().rev() {
+                    pending.push(value);
+                }
+            }
+            Expr::TypedLit { body, .. } => {
+                let mut values = Vec::new();
+                body.for_each_expr(|value| values.push(value));
+                for value in values.into_iter().rev() {
+                    pending.push(value);
+                }
+            }
+            Expr::TupleLit(fields, _, _) => {
+                for (_, value) in fields.iter().rev() {
+                    pending.push(value);
+                }
+            }
+            Expr::EnumLit { args, .. } => {
+                for arg in args.iter().rev() {
+                    let value = match arg {
+                        crate::AST::EnumLitArg::Positional(value)
+                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                    };
+                    pending.push(value);
+                }
+            }
+            Expr::Str(parts, _) => {
+                for part in parts.iter().rev() {
+                    if let crate::AST::StrPart::Interp(value, _) = part {
+                        pending.push(value);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
+    false
 }
 
 /// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
