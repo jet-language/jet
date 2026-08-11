@@ -8694,13 +8694,13 @@ fn multi_head_functions_match_interpreter_resident_jit_and_aot() {
     let src = "\
 enum Shape {
     Circle(Float)
-    Rect(w: Float, h: Float)
+    Rect(left_1: Float, right_1: Float)
 }
 fn area(Circle(r: Float)) => Float { return r * r }
-fn area(Rect(w: Float, h: Float)) => Float { return w * h }
+fn area(Rect(left_1: Float, right_1: Float)) => Float { return left_1 * right_1 }
 fn run() {
     print(area(Shape.Circle(3.0)))
-    print(area(.Rect.{ w: 2.0, h: 4.0 }))
+    print(area(.Rect.{ left_1: 2.0, right_1: 4.0 }))
 }
 ";
     let dir = std::env::temp_dir().join(format!("jet_multi_head_parity_{}", std::process::id()));

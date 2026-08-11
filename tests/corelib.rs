@@ -3490,7 +3490,7 @@ fn run() {
 
 #[cfg(unix)]
 #[test]
-fn core_os_interrupt_named_and_indirect_callbacks_match_dev_tiers() {
+fn core_os_interrupt_callback_forms_match_dev_tiers() {
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
@@ -3531,11 +3531,20 @@ fn stop_callback() {
 }
 
 fn run() {
-    indirect :: stop_callback
-    os.on_interrupt(named_callback)
-    os.on_interrupt(indirect)
-    loop {
-        tick :: 0
+    loop indirect := stop_callback, true {
+        named_alias :: named_callback
+        local_lambda :: () => {
+            print("lambda")
+        }
+        os.on_interrupt(() => {
+            named_alias()
+        })
+        os.on_interrupt(local_lambda)
+        os.on_interrupt(named_callback)
+        os.on_interrupt(indirect)
+        loop {
+            tick :: 0
+        }
     }
 }
 "#;
@@ -3591,7 +3600,11 @@ fn run() {
             status.code() == Some(70),
             "{tier} callback program failed: stdout={stdout:?} stderr={stderr:?}"
         );
-        assert_eq!(stdout, "named\nstop\n", "{tier} callback dispatch drifted");
+        assert_eq!(
+            stdout,
+            "named\nlambda\nnamed\nstop\n",
+            "{tier} callback dispatch drifted"
+        );
         assert!(
             stderr.contains("panic: stop"),
             "{tier} callback lost the runtime panic diagnostic: {stderr:?}"

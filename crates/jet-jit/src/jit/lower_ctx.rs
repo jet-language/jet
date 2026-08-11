@@ -373,8 +373,14 @@ impl LowerCtx<'_, '_> {
             Pattern::Or(alternatives, _) => {
                 let mut result = self.b.ins().iconst(types::I8, 0);
                 for alternative in alternatives {
+                    let alternative_heap = self.enum_pattern_uses_heap(alternative, enum_name);
                     let condition =
-                        self.lower_pattern_condition(subject, alternative, enum_name, heap)?;
+                        self.lower_pattern_condition(
+                            subject,
+                            alternative,
+                            enum_name,
+                            alternative_heap,
+                        )?;
                     result = self.b.ins().bor(result, condition);
                 }
                 Ok(result)
@@ -419,15 +425,23 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn pattern_binding(pattern: &Pattern) -> Option<(&str, &str)> {
+    fn pattern_bindings(pattern: &Pattern) -> Option<(&str, Vec<(usize, &str)>)> {
         match pattern {
             Pattern::Variant {
                 variant, bindings, ..
-            } => bindings
-                .first()
-                .and_then(PatSlot::as_bind)
-                .map(|binding| (variant.as_str(), binding)),
-            Pattern::Or(alternatives, _) => alternatives.first().and_then(Self::pattern_binding),
+            } => Some((
+                variant.as_str(),
+                bindings
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, slot)| {
+                        slot.as_bind()
+                            .filter(|name| *name != "_")
+                            .map(|name| (index, name))
+                    })
+                    .collect(),
+            )),
+            Pattern::Or(alternatives, _) => alternatives.first().and_then(Self::pattern_bindings),
             _ => None,
         }
     }
@@ -709,23 +723,34 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// True when this enum match uses heap-boxed payloads (F64 or DataTree ABI).
-    fn enum_match_uses_f64_heap(&self, arms: &[TIR::TMatchArm]) -> bool {
-        arms.iter().any(|arm| {
-            let Some(variant) = arm.pattern.variant() else {
-                return false;
-            };
-            let Some(enum_name) = arm.pattern.enum_type.as_deref() else {
-                return false;
-            };
-            if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
-                return true;
-            }
-            self.meta
+    /// True when this pattern's enum carrier stores its discriminant and payload
+    /// fields in a heap record. Named multi-payload variants use the same carrier
+    /// as floating-point payloads; scalar integer variants stay packed in one i64.
+    fn enum_pattern_uses_heap(&self, pattern: &Pattern, enum_name: Option<&str>) -> bool {
+        let Some(enum_name) = enum_name else {
+            return false;
+        };
+        if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
+            return true;
+        }
+        match pattern {
+            Pattern::Variant {
+                variant, bindings, ..
+            } => self
+                .meta
                 .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
-        })
+                .map(|tys| {
+                    tys.len() > 1
+                        || tys
+                            .first()
+                            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
+                })
+                .unwrap_or_else(|| bindings.len() > 1),
+            Pattern::Or(alternatives, _) => alternatives
+                .iter()
+                .any(|alternative| self.enum_pattern_uses_heap(alternative, Some(enum_name))),
+            _ => false,
+        }
     }
 
     fn is_datatree_value_ty(ty: &Type) -> bool {
@@ -882,20 +907,29 @@ impl LowerCtx<'_, '_> {
         packed: Value,
         payload_ty: &Type,
     ) -> Result<Value, String> {
-        let one = self.b.ins().iconst(types::I64, 1);
+        self.unpack_enum_heap_payload_at(packed, payload_ty, 1)
+    }
+
+    fn unpack_enum_heap_payload_at(
+        &mut self,
+        packed: Value,
+        payload_ty: &Type,
+        index: usize,
+    ) -> Result<Value, String> {
+        let index = self.b.ins().iconst(types::I64, index as i64);
         match self.meta.clif_ty(payload_ty) {
             Some(types::F64) => {
-                Ok(self.call_host(self.host.struct_get_f64, &[packed, one]))
+                Ok(self.call_host(self.host.struct_get_f64, &[packed, index]))
             }
             Some(types::I64) => {
-                Ok(self.call_host(self.host.struct_get_i64, &[packed, one]))
+                Ok(self.call_host(self.host.struct_get_i64, &[packed, index]))
             }
             Some(types::I8) => {
-                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, index]);
                 Ok(self.b.ins().ireduce(types::I8, raw))
             }
             Some(types::I32) => {
-                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, index]);
                 Ok(self.b.ins().ireduce(types::I32, raw))
             }
             other => Err(format!(
@@ -4265,7 +4299,6 @@ impl LowerCtx<'_, '_> {
                 // Ownership clone is a Rust spelling fact; the JIT already owns the
                 // value in a register, so the structured scrutinee is enough.
                 let subj = self.lower_expr(scrutinee)?;
-                let f64_heap = self.enum_match_uses_f64_heap(arms);
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -4284,45 +4317,47 @@ impl LowerCtx<'_, '_> {
                         .enum_type
                         .as_deref()
                         .or_else(|| user_type_name(&scrutinee.ty));
+                    let heap = self.enum_pattern_uses_heap(&arm.pattern.pattern, enum_name);
                     let then_block = self.b.create_block();
                     let next = self.b.create_block();
                     let eq = self.lower_pattern_condition(
                         subj,
                         &arm.pattern.pattern,
                         enum_name,
-                        f64_heap,
+                        heap,
                     )?;
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
-                    let bound = if let Some((variant, name)) =
-                        Self::pattern_binding(&arm.pattern.pattern)
+                    let mut bound = Vec::new();
+                    if let Some((variant, bindings)) =
+                        Self::pattern_bindings(&arm.pattern.pattern)
                     {
-                                let enum_name =
-                                    enum_name.ok_or("jit enum binding missing type")?;
-                                let payload_ty = self
-                                    .meta
-                                    .enum_variant_payload_types(enum_name, variant)
-                                    .and_then(|tys| tys.first())
-                                    .cloned()
-                                    .unwrap_or(Type::Int);
-                                let payload = if f64_heap {
-                                    self.unpack_enum_heap_payload(subj, &payload_ty)?
-                                } else {
-                                    self.unpack_enum_scalar(subj, &payload_ty)?
-                                };
-                                let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-                                let var = self.fresh_var(payload_clif);
-                                self.b.def_var(var, payload);
-                                let key = TIR::local_place(name);
-                                let old_var = self.vars.insert(key.clone(), var);
-                                let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-                                Some((key, old_var, old_ty))
-                    } else {
-                        None
-                    };
+                        let enum_name = enum_name.ok_or("jit enum binding missing type")?;
+                        for (index, name) in bindings {
+                            let payload_ty = self
+                                .meta
+                                .enum_variant_payload_types(enum_name, variant)
+                                .and_then(|tys| tys.get(index))
+                                .cloned()
+                                .unwrap_or(Type::Int);
+                            let payload = if heap {
+                                self.unpack_enum_heap_payload_at(subj, &payload_ty, index + 1)?
+                            } else {
+                                self.unpack_enum_scalar(subj, &payload_ty)?
+                            };
+                            let payload_clif =
+                                self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
+                            let var = self.fresh_var(payload_clif);
+                            self.b.def_var(var, payload);
+                            let key = TIR::local_place(name);
+                            let old_var = self.vars.insert(key.clone(), var);
+                            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
+                            bound.push((key, old_var, old_ty));
+                        }
+                    }
                     self.lower_stmts_scoped(&arm.body)?;
-                    if let Some((key, old_var, old_ty)) = bound {
+                    for (key, old_var, old_ty) in bound.into_iter().rev() {
                         match old_var {
                             Some(var) => {
                                 self.vars.insert(key.clone(), var);
@@ -13595,24 +13630,44 @@ impl LowerCtx<'_, '_> {
                     let set_i = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    let set_f = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_f64, self.b.func);
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let disc_v = self.b.ins().iconst(types::I64, disc);
                     self.b.ins().call(set_i, &[handle, zero, disc_v]);
                     for (i, (_name, arg)) in fields.iter().enumerate() {
                         let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
                         let payload = self.lower_expr(&arg.value)?;
-                        let bits = match self.meta.clif_ty(&arg.value.ty).or_else(|| clif_ty(&arg.value.ty)) {
-                            Some(ty) if ty == types::I64 => payload,
-                            Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
-                            Some(ty) if ty == types::I32 => self.b.ins().sextend(types::I64, payload),
-                            _ => {
+                        match self.meta.clif_ty(&arg.value.ty).or_else(|| clif_ty(&arg.value.ty)) {
+                            Some(ty) if ty == types::F64 => {
+                                self.b.ins().call(set_f, &[handle, idx, payload]);
+                            }
+                            Some(ty) => {
+                                let bits = match ty {
+                                    ty if ty == types::I64 => payload,
+                                    ty if ty == types::I8 => {
+                                        self.b.ins().uextend(types::I64, payload)
+                                    }
+                                    ty if ty == types::I32 => {
+                                        self.b.ins().sextend(types::I64, payload)
+                                    }
+                                    _ => {
+                                        return Err(format!(
+                                            "jit enum named payload field unsupported: {:?}",
+                                            arg.value.ty
+                                        ))
+                                    }
+                                };
+                                self.b.ins().call(set_i, &[handle, idx, bits]);
+                            }
+                            None => {
                                 return Err(format!(
                                     "jit enum named payload field unsupported: {:?}",
                                     arg.value.ty
-                                ))
+                                ));
                             }
-                        };
-                        self.b.ins().call(set_i, &[handle, idx, bits]);
+                        }
                     }
                     Ok(handle)
                 }
