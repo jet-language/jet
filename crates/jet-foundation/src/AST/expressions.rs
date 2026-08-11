@@ -837,6 +837,7 @@ impl Expr {
                     then_value,
                     else_body,
                     else_value,
+                    ..
                 } => {
                     walk(cond, f);
                     walk_stmts(then_body, f);

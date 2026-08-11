@@ -1,3 +1,4 @@
+use super::Expr;
 use crate::Diagnostics::Span;
 
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
