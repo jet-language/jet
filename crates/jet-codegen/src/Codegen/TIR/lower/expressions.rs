@@ -3353,6 +3353,7 @@ impl OrderedArg for TExpr {
                     | TExprKind::InlineBlock(_)
                     | TExprKind::Clone(_)
                     | TExprKind::StrLit(_)
+                    | TExprKind::Print(_)
             )
     }
 
