@@ -3232,13 +3232,14 @@ pub enum TExprKind {
         line: usize,
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
-    /// or borrowed value. Also the lowering target for `Expr::Copy` — D-CAP2
-    /// (D-MEM1/S4) `copy x`, the one user-typable copy verb — so the compiler's
-    /// own internal duplication rewrites and the explicit `copy x` a user writes
-    /// share one TIR node (I8). The AST path emits `(recv).clone()`
-    /// unconditionally; the TIR carries the lowered receiver and the result type
-    /// (the receiver's type).
+    /// or borrowed value. This is ordinary sharing/cloning semantics. The
+    /// user-written `~` copy has its own `ExplicitCopy` node so a Tensor does not
+    /// silently turn compiler-inserted clones into deep storage copies.
     Clone(Box<TExpr>),
+    /// D-MEM1/D-CAP2: the explicit Jet `~` copy signal. Backends route Tensor
+    /// values through the shared Prelude copy operation; non-Tensor values keep
+    /// their ordinary clone/materialization semantics.
+    ExplicitCopy(Box<TExpr>),
     /// D-SHAPE-PLACE1=A: a checked local whole/field/index place borrow.
     /// Range places use `ViewNew`/`ViewMutNew` so bounds are checked once.
     Borrow {

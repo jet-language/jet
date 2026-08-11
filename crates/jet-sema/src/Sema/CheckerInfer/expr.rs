@@ -1528,7 +1528,9 @@ impl<'a> Checker<'a> {
                     match base_ty {
                         Type::List(inner) => Some(Type::List(inner)),
                         Type::String => Some(Type::String),
-                        Type::Named(name) if name == "Tensor" => Some(Type::Named(name)),
+                        ty if ty.is_compute_tensor_family() => {
+                            Some(Type::Named("Tensor".to_string()))
+                        }
                         other => {
                             self.diags.push(Diagnostic::error(
                                 "E0505",
@@ -1817,7 +1819,7 @@ impl<'a> Checker<'a> {
                     let elem = match ty {
                         Type::List(elem) => *elem,
                         Type::FixedList { elem, .. } => *elem,
-                        Type::Named(name) if name == "Tensor" => Type::Float,
+                        ty if ty.is_compute_tensor_family() => Type::Float,
                         other => return Some(other),
                     };
                     Some(Type::Apply {
@@ -3094,8 +3096,7 @@ impl<'a> Checker<'a> {
             // window. Keep the range fact explicit so TIR can select the
             // owned-copy or mutable-view Prelude path; scalar indexing has no
             // one-axis result type and is not part of this surface.
-            Type::Named(name) if name == "Tensor"
-                || matches!(&base_ty, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")) => {
+            ty if ty.is_compute_tensor_family() => {
                 if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
                     Some(Type::Named("Tensor".to_string()))
@@ -3267,7 +3268,9 @@ impl<'a> Checker<'a> {
                 Some(Type::List(inner))
             }
             Type::String => Some(Type::String),
-            Type::Named(name) if name == "Tensor" => Some(Type::Named(name)),
+            ty if ty.is_compute_tensor_family() => {
+                Some(Type::Named("Tensor".to_string()))
+            }
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0505",

@@ -6,12 +6,13 @@ use crate::Codegen::mangle;
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{CtReport, CtValue};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, Span};
 use super::{
-    encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, raw_place_local,
-    progress_elapsed, progress_emit, progress_iter_parts, progress_no_color, progress_now,
-    progress_source_has_exact_total, store_view_mut_owner_list, unsupported, EvalCtx, Flow,
-    ViewMutPathStep,
+    encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, progress_elapsed,
+    progress_emit, progress_iter_parts, progress_no_color, progress_now,
+    progress_source_has_exact_total, store_view_mut_owner_list, store_view_mut_owner_value,
+    unsupported, view_mut_owner_value, view_mut_place, view_mut_window_args, EvalCtx, Flow,
+    view_mut_parts, ViewMutPathStep,
 };
 use crate::Codegen::TIR::{TExpr, TExprKind, THandleOp};
 
@@ -156,29 +157,20 @@ fn parse_place_region(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>, 
     Some((base?, parse_view_mut_path(fields), start?, end?))
 }
 
-fn owner_list_place(expr: &TExpr) -> Option<(String, Vec<ViewMutPathStep>)> {
-    match &expr.kind {
-        TExprKind::Local(local) => Some((local.name.clone(), Vec::new())),
-        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => owner_list_place(place),
-        TExprKind::Field { recv, field, .. } => {
-            let (base, mut path) = owner_list_place(recv)?;
-            path.push(ViewMutPathStep::Field(field.clone()));
-            Some((base, path))
-        }
-        TExprKind::Index {
-            base,
-            index,
-            is_map: false,
-            ..
-        } => {
-            let (root, mut path) = owner_list_place(base)?;
-            let TExprKind::IntLit(idx, _) = &index.kind else {
-                return None;
-            };
-            path.push(ViewMutPathStep::Index(*idx));
-            Some((root, path))
-        }
-        _ => raw_place_local(expr).map(|local| (local.name.clone(), Vec::new())),
+fn owner_list_place(
+    expr: &TExpr,
+    span: Span,
+) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+    let mut resolve_index = |index: &TExpr| match &index.kind {
+        TExprKind::IntLit(value, _) => Ok(*value),
+        _ => Err(unsupported("projected view index", span)),
+    };
+    match view_mut_place(expr, &mut resolve_index) {
+        Ok(place) => Ok(place),
+        // Whole-place and split planning historically fall back when a
+        // dynamic selector cannot be encoded in a persistent path. Tensor
+        // ViewMut acquisition itself evaluates dynamic selectors directly.
+        Err(_) => Ok(None),
     }
 }
 
@@ -340,7 +332,7 @@ impl<'a> EvalCtx<'a> {
                 // so bind an alias handle here instead of a copy — otherwise
                 // edits through the window vanish on this tier alone (I9).
                 if let TExprKind::Borrow { place, mutable: true } = &init.kind {
-                    if let Some((base, path)) = owner_list_place(place) {
+                    if let Some((base, path)) = owner_list_place(place, self.span())? {
                         // `x :: &x` would shadow its own owner and make the
                         // handle point at itself, so fall back to the value.
                         if &base != name && scope.contains_key(&base) {
@@ -382,6 +374,40 @@ impl<'a> EvalCtx<'a> {
                         }) = scope.get(&key).cloned()
                         {
                             if type_name == "__JetViewMut" {
+                                let owner = view_mut_owner_value(&fields, scope, self.span())?;
+                                if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                                    let window = view_mut_window_args(&fields)
+                                        .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                                    let mut replacement = rhs;
+                                    if let Some(binop) = op {
+                                        let current = crate::Comptime::ComputeLite::tensor_view_get_value(
+                                            &owner,
+                                            window,
+                                            0,
+                                            self.span(),
+                                        )?;
+                                        replacement = eval_binop(
+                                            *binop,
+                                            current,
+                                            replacement,
+                                            self.span(),
+                                        )?;
+                                    }
+                                    let updated = crate::Comptime::ComputeLite::tensor_view_set_value(
+                                        &owner,
+                                        window,
+                                        0,
+                                        &replacement,
+                                        self.span(),
+                                    )?;
+                                    store_view_mut_owner_value(
+                                        &fields,
+                                        scope,
+                                        updated,
+                                        self.span(),
+                                    )?;
+                                    return Ok(Flow::Normal);
+                                }
                                 let mut start = None;
                                 let mut end = None;
                                 for (n, v) in &fields {
@@ -1223,6 +1249,26 @@ impl<'a> EvalCtx<'a> {
                 } = &base_value
                 {
                     if type_name == "__JetViewMut" {
+                        let owner = view_mut_owner_value(fields, scope, self.span())?;
+                        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                            let window = view_mut_window_args(fields)
+                                .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                            let idx = as_int(&idx_v, self.span())?;
+                            let updated = crate::Comptime::ComputeLite::tensor_view_set_value(
+                                &owner,
+                                window,
+                                idx,
+                                &rhs,
+                                self.span(),
+                            )?;
+                            store_view_mut_owner_value(
+                                fields,
+                                scope,
+                                updated,
+                                self.span(),
+                            )?;
+                            return Ok(Flow::Normal);
+                        }
                         let mut start = None;
                         for (n, v) in fields {
                             if let ("start", CtValue::Int(n)) = (n.as_str(), v) {
@@ -1295,7 +1341,61 @@ impl<'a> EvalCtx<'a> {
                 if assign.clone_value {
                     rhs = rhs.clone();
                 }
-                let CtValue::List(mut items) = self.eval_expr(&assign.base, scope)? else {
+                let base_value = self.eval_expr(&assign.base, scope)?;
+                if let CtValue::Struct {
+                    type_name,
+                    fields,
+                } = &base_value
+                {
+                    if type_name == "__JetViewMut" {
+                        let owner = view_mut_owner_value(fields, scope, self.span())?;
+                        let (_, _, start, _) = view_mut_parts(fields)
+                            .ok_or_else(|| unsupported("view-mut fields", self.span()))?;
+                        let absolute = start
+                            .checked_add(idx)
+                            .ok_or_else(|| unsupported("view-mut index", self.span()))?;
+                        let CtValue::List(mut items) = owner else {
+                            return Err(unsupported("view-mut field owner", self.span()));
+                        };
+                        if absolute < 0 || absolute as usize >= items.len() {
+                            return Err(unsupported("view-mut OOB", self.span()));
+                        }
+                        let element = &mut items[absolute as usize];
+                        let CtValue::Struct {
+                            type_name: _,
+                            fields: element_fields,
+                        } = element
+                        else {
+                            return Err(unsupported("view-mut field element", self.span()));
+                        };
+                        let mangled = crate::Codegen::mangle(&assign.field);
+                        let slot = element_fields.iter_mut().find(|(name, _)| {
+                            name == &assign.field
+                                || name == &mangled
+                                || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    == Some(assign.field.as_str())
+                        });
+                        let Some((_, slot)) = slot else {
+                            return Err(unsupported(
+                                &format!("field `{}`", assign.field),
+                                self.span(),
+                            ));
+                        };
+                        if let Some(op) = assign.op {
+                            *slot = eval_binop(op, slot.clone(), rhs, self.span())?;
+                        } else {
+                            *slot = rhs;
+                        }
+                        return store_view_mut_owner_value(
+                            fields,
+                            scope,
+                            CtValue::List(items),
+                            self.span(),
+                        )
+                        .map(|()| Flow::Normal);
+                    }
+                }
+                let CtValue::List(mut items) = base_value else {
                     return Err(unsupported("index field assign list", self.span()));
                 };
                 let i = idx as usize;
@@ -1378,8 +1478,8 @@ impl<'a> EvalCtx<'a> {
                 // IndexAssign / field writes reach the owner (AOT emits real slices).
                 // Read-only windows still materialize.
                 let owner_path = if let Some(owner_expr) = owner {
-                    let (base_name, path) = owner_list_place(owner_expr)
-                        .ok_or_else(|| unsupported("split views owner", self.span()))?;
+                        let (base_name, path) = owner_list_place(owner_expr, self.span())?
+                            .ok_or_else(|| unsupported("split views owner", self.span()))?;
                     let items = {
                         let probe = place_region(&base_name, &path, 0, 0);
                         let CtValue::Struct { fields, .. } = &probe else {

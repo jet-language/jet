@@ -25,6 +25,22 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
     })
 }
 
+fn resident_safe_compute_call(
+    method: &str,
+    args: &[TExpr],
+    callees: &HashSet<String>,
+) -> bool {
+    match (method, args) {
+        ("from_list", [values]) if jit_list_float_type(&values.ty) => {
+            resident_safe_expr(values, callees)
+        }
+        ("to_list", [tensor]) if tensor.ty.is_compute_tensor_family() => {
+            resident_safe_expr(tensor, callees)
+        }
+        _ => false,
+    }
+}
+
 fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
     use jet_foundation::AST::{CtReport, CtValue};
     match value {
@@ -107,6 +123,26 @@ pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
     )
 }
 
+fn jit_float_view_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.len() == 1
+                && matches!(&args[0], Type::Float)
+    )
+}
+
+fn jit_float_view_mut_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                && args.len() == 1
+                && matches!(&args[0], Type::Float)
+    )
+}
+
 pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::String))
         || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::String))
@@ -166,7 +202,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
             if matches!(
                 inner.as_ref(),
                 Type::Apply { name, args }
-                    if name == "ViewMut"
+                    if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                         && args.len() == 1
                         && (matches!(
                             &args[0],
@@ -195,7 +231,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         // handles — scalar elems share list for-in / join / len; record elems too.
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
-                || matches!(name.as_str(), "View" | "ViewMut"))
+                || matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
                 && args.len() == 1
                 && jit_list_native_type(&args[0]) =>
         {
@@ -204,7 +240,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         // Iterators produced by chunks/windows carry list-valued elements.
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
-                || matches!(name.as_str(), "View" | "ViewMut"))
+                || matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
                 && args.len() == 1
                 && (matches!(
                     &args[0],
@@ -230,7 +266,7 @@ pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
         }
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
-                || matches!(name.as_str(), "View" | "ViewMut"))
+                || matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
                 && args.len() == 1
                 && record_type_key(&args[0]).is_some() =>
         {
@@ -419,7 +455,9 @@ fn jit_compound_type(ty: &Type) -> bool {
                     ) || (name == "Bag" && jit_bag_raw_key_candidate(&args[0])))
         )
         || matches!(ty, Type::Apply { name, args }
-            if name == "View" && args.len() == 1 && jit_value_type(&args[0]))
+            if matches!(name.as_str(), "View" | "ComputeViewMut")
+                && args.len() == 1
+                && jit_value_type(&args[0]))
         || matches!(ty, Type::Named(name) if matches!(name.as_str(), "BitSet" | "ByteBuffer"))
         || matches!(ty, Type::Shared(_))
 }
@@ -438,6 +476,9 @@ pub(crate) fn jit_concurrency_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_value_type(ty: &Type) -> bool {
+    if ty.is_compute_tensor_family() {
+        return true;
+    }
     if let Some((base, _)) = ty.quantity_parts() {
         return jit_value_type(base);
     }
@@ -733,9 +774,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 };
             }
             if module == "core.compute" {
-                // Tensor heap ABI is interpreter-owned until Cranelift hosts
-                // marshal the same Prelude symbols (I9 deopt path).
-                return false;
+                return resident_safe_compute_call(method, args, callees);
             }
             if module == "core.services" {
                 // ServiceTree mutates through Prelude; deopt to ambient (I9).
@@ -969,7 +1008,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 (jit_list_native_type(&base.ty)
                     || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
-                    || jit_closure_elem_type(&base.ty).is_some())
+                    || jit_closure_elem_type(&base.ty).is_some()
+                    || jit_float_view_type(&base.ty))
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
@@ -982,7 +1022,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             range,
             ..
         } => {
-            (jit_list_native_type(&base.ty) || jit_list_record_type(&base.ty))
+            (jit_list_native_type(&base.ty)
+                || jit_list_record_type(&base.ty)
+                || base.ty.is_compute_tensor_family())
                 && resident_safe_expr(base, callees)
                 && range.as_deref().map_or_else(
                     || {
@@ -1079,7 +1121,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && matches!(
                         &expr.ty,
                         Type::Apply { name, args }
-                            if name == "ViewMut" && args.len() == 1
+                            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                                && args.len() == 1
                     ) =>
             {
                 true
@@ -1095,7 +1138,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         || matches!(
                             &base.ty,
                             Type::Apply { name, args }
-                                if name == "View"
+                                if matches!(name.as_str(), "View" | "ComputeViewMut")
                                     && args.len() == 1
                                     && record_type_key(&args[0]).is_some()
                         ))
@@ -1261,7 +1304,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
                 && resident_safe_expr(else_value, callees)
         }
-        TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
+        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+            resident_safe_expr(inner, callees)
+        }
         TExprKind::Borrow { place, .. } => resident_safe_expr(place, callees),
         TExprKind::InlineBlock(stmts) => {
             (jit_value_type(&expr.ty)
@@ -2027,6 +2072,7 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_closure_elem_type(recv_ty).is_some()
+                || jit_float_view_type(recv_ty)
                 || jit_map_resident_type(recv_ty)
                 || matches!(
                     recv_ty,
@@ -2258,10 +2304,23 @@ fn resident_safe_builtin_op(
                     _ => false,
                 }
         }
-        // Tensor values stay in the ambient ABI. Their view operations must
-        // deopt so the interpreter calls the canonical Prelude symbols rather
-        // than inventing a second tensor representation in Cranelift.
-        TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => false,
+        TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => {
+            recv_ty.is_compute_tensor_family()
+                && match args {
+                    [range]
+                        if matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+                    {
+                        resident_safe_expr(range, callees)
+                    }
+                    [start, end] => {
+                        matches!(&start.ty, Type::Int)
+                            && matches!(&end.ty, Type::Int)
+                            && resident_safe_expr(start, callees)
+                            && resident_safe_expr(end, callees)
+                    }
+                    _ => false,
+                }
+        }
         TBuiltinOp::SplitWrite { .. } => {
             (jit_list_native_type(recv_ty) || jit_list_record_type(recv_ty))
                 && args.len() == 1
@@ -2919,7 +2978,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             } else {
                 (jit_list_native_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
-                    || jit_closure_elem_type(&base.ty).is_some())
+                    || jit_closure_elem_type(&base.ty).is_some()
+                    || jit_float_view_mut_type(&base.ty))
                     && matches!(&index.ty, Type::Int)
                     && matches!(
                         &value.ty,
@@ -2941,7 +3001,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 || matches!(
                     &assign.base.ty,
                     Type::Apply { name, args }
-                        if name == "ViewMut"
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                             && args.len() == 1
                             && (record_type_key(&args[0]).is_some()
                                 || matches!(&args[0], Type::TraitObject(_)))
@@ -3290,6 +3350,7 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
         TExprKind::Binary { .. } => "Binary",
         TExprKind::Local(_) => "Local",
         TExprKind::Clone(_) => "Clone",
+        TExprKind::ExplicitCopy(_) => "ExplicitCopy",
         _ => "OtherExpr",
     }
 }
@@ -3597,6 +3658,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         TExprKind::Print(inner)
         | TExprKind::Unary { operand: inner, .. }
         | TExprKind::Clone(inner)
+        | TExprKind::ExplicitCopy(inner)
         | TExprKind::Ok(inner)
         | TExprKind::Err(inner) => count_spawn_sites_expr(inner, n),
         TExprKind::ListLit(elems) | TExprKind::ColumnarListLit { elems, .. } => {

@@ -3,6 +3,7 @@
 // explicit CPU-oracle capability; views retain the backing allocation and its
 // strides. Mutable access requires the sema-proved exclusive ViewMut path;
 // shared writes fail closed instead of copying or pretending to update an alias.
+// Explicit Tensor copies materialize logical values into fresh backing storage.
 // Engines only marshal into these Prelude symbols (I9).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +83,7 @@ impl std::fmt::Debug for JetComputeTrace {
 }
 
 #[derive(Clone, Debug)]
-struct JetTensor {
+pub struct JetTensor {
     shape: Vec<i64>,
     strides: Vec<i64>,
     data: std::sync::Arc<Vec<f64>>,
@@ -90,6 +91,16 @@ struct JetTensor {
     last_placement: JetComputePlacementReceipt,
     last_transfer: Option<JetComputeTransferReceipt>,
     trace: Option<JetComputeTrace>,
+}
+
+/// A compiler-internal mutable Tensor window. Unlike an ordinary list view it
+/// retains the owner and original range so every element write can use the
+/// complete shared window policy.
+pub struct JetComputeViewMut<'a> {
+    tensor: &'a mut JetTensor,
+    start: i64,
+    end: i64,
+    exclusive: bool,
 }
 
 impl PartialEq for JetTensor {
@@ -849,6 +860,29 @@ fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError
     })
 }
 
+fn jet_compute_copy_checked(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?;
+    let shape = tensor.shape.clone();
+    let copy = JetTensor {
+        strides: jet_compute_row_major_strides(&shape)?,
+        data: std::sync::Arc::new(jet_compute_tensor_values(tensor)),
+        shape,
+        device: tensor.device,
+        last_placement: tensor.last_placement.clone(),
+        last_transfer: tensor.last_transfer.clone(),
+        trace: tensor.trace.clone(),
+    };
+    jet_compute_validate_tensor(&copy)?;
+    Ok(copy)
+}
+
+fn jet_compute_copy(tensor: &JetTensor) -> JetTensor {
+    match jet_compute_copy_checked(tensor) {
+        Ok(copy) => copy,
+        Err(error) => jet_panic("Compute.rs", line!(), &error.jet_show()),
+    }
+}
+
 /// Return the flat storage range selected by a bracket range.  A Tensor range
 /// selects rows on its first axis, so a rank-2 matrix window keeps complete
 /// rows and a higher-rank window keeps complete first-axis slabs.  This is the
@@ -955,20 +989,33 @@ fn jet_compute_slice_checked(
             JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string())
         })?)
         .ok_or_else(|| JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string()))?;
-    let mut strides = source_strides.to_vec();
+    let mut view_strides = source_strides.to_vec();
     if start_offset != 0 {
-        strides.push(i64::try_from(start_offset).map_err(|_| {
+        view_strides.push(i64::try_from(start_offset).map_err(|_| {
             JetComputeError::InvalidShape("Tensor view offset is too large".to_string())
         })?);
     }
-    let slice = JetTensor {
+    // An owned bracket slice is an ownership conversion, not another view.
+    // Read the selected logical values once, then give the result independent
+    // row-major storage. Read-only and mutable view helpers above retain their
+    // zero-copy backing; only this owned path detaches it.
+    let view = JetTensor {
         shape,
-        strides,
+        strides: view_strides,
         data: tensor.data.clone(),
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
         last_transfer: tensor.last_transfer.clone(),
         trace: tensor.trace.clone(),
+    };
+    let slice = JetTensor {
+        shape: view.shape.clone(),
+        strides: jet_compute_row_major_strides(&view.shape)?,
+        data: std::sync::Arc::new(jet_compute_tensor_values(&view)),
+        device: view.device,
+        last_placement: view.last_placement.clone(),
+        last_transfer: view.last_transfer.clone(),
+        trace: view.trace.clone(),
     };
     jet_compute_validate_tensor(&slice)?;
     Ok(slice)
@@ -997,6 +1044,21 @@ fn jet_compute_slice_range(
     jet_compute_slice(tensor, range.start, range.end, range.exclusive, file, line)
 }
 
+fn jet_compute_view_checked<'a>(
+    tensor: &'a JetTensor,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+) -> Result<&'a [f64], JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor views are not differentiable; reshape or copy before transforming".to_string(),
+        ));
+    }
+    let bounds = jet_compute_window_bounds(tensor, start, end, exclusive)?;
+    Ok(&tensor.data[bounds])
+}
+
 fn jet_compute_view<'a>(
     tensor: &'a JetTensor,
     start: i64,
@@ -1005,18 +1067,10 @@ fn jet_compute_view<'a>(
     file: &str,
     line: u32,
 ) -> &'a [f64] {
-    if tensor.trace.is_some() {
-        jet_panic(
-            file,
-            line,
-            "Tensor views are not differentiable; reshape or copy before transforming",
-        );
-    }
-    let bounds = match jet_compute_window_bounds(tensor, start, end, exclusive) {
-        Ok(bounds) => bounds,
+    match jet_compute_view_checked(tensor, start, end, exclusive) {
+        Ok(view) => view,
         Err(error) => jet_panic(file, line, &error.jet_show()),
-    };
-    &tensor.data[bounds]
+    }
 }
 
 fn jet_compute_view_range<'a>(
@@ -1028,6 +1082,31 @@ fn jet_compute_view_range<'a>(
     jet_compute_view(tensor, range.start, range.end, range.exclusive, file, line)
 }
 
+fn jet_compute_view_mut_checked<'a>(
+    tensor: &'a mut JetTensor,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+) -> Result<JetComputeViewMut<'a>, JetComputeError> {
+    if tensor.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+        ));
+    }
+    jet_compute_window_bounds(tensor, start, end, exclusive)?;
+    if std::sync::Arc::get_mut(&mut tensor.data).is_none() {
+        return Err(JetComputeError::Unsupported(
+            "Tensor mutable view requires exclusive backing storage".to_string(),
+        ));
+    }
+    Ok(JetComputeViewMut {
+        tensor,
+        start,
+        end,
+        exclusive,
+    })
+}
+
 fn jet_compute_view_mut<'a>(
     tensor: &'a mut JetTensor,
     start: i64,
@@ -1035,26 +1114,11 @@ fn jet_compute_view_mut<'a>(
     exclusive: bool,
     file: &str,
     line: u32,
-) -> &'a mut [f64] {
-    if tensor.trace.is_some() {
-        jet_panic(
-            file,
-            line,
-            "Tensor mutation is not differentiable; use a pure Tensor function",
-        );
-    }
-    let bounds = match jet_compute_window_bounds(tensor, start, end, exclusive) {
-        Ok(bounds) => bounds,
+) -> JetComputeViewMut<'a> {
+    match jet_compute_view_mut_checked(tensor, start, end, exclusive) {
+        Ok(view) => view,
         Err(error) => jet_panic(file, line, &error.jet_show()),
-    };
-    let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
-        jet_panic(
-            file,
-            line,
-            "Tensor mutable view requires exclusive backing storage",
-        );
-    };
-    &mut data[bounds]
+    }
 }
 
 fn jet_compute_view_mut_range<'a>(
@@ -1062,8 +1126,114 @@ fn jet_compute_view_mut_range<'a>(
     range: &JetRange,
     file: &str,
     line: u32,
-) -> &'a mut [f64] {
+) -> JetComputeViewMut<'a> {
     jet_compute_view_mut(tensor, range.start, range.end, range.exclusive, file, line)
+}
+
+fn jet_compute_window_set_view(
+    view: &mut JetComputeViewMut<'_>,
+    index: i64,
+    value: f64,
+) -> Result<(), String> {
+    jet_compute_window_set(
+        view.tensor,
+        view.start,
+        view.end,
+        view.exclusive,
+        index,
+        value,
+    )
+}
+
+fn jet_compute_window_get_view(
+    view: &JetComputeViewMut<'_>,
+    index: i64,
+    file: &str,
+    line: u32,
+) -> f64 {
+    match jet_compute_window_get(
+        view.tensor,
+        view.start,
+        view.end,
+        view.exclusive,
+        index,
+    ) {
+        Ok(value) => value,
+        Err(error) => jet_panic(file, line, &error),
+    }
+}
+
+impl<'a> JetComputeViewMut<'a> {
+    fn len(&self) -> i64 {
+        match jet_compute_window_bounds(self.tensor, self.start, self.end, self.exclusive) {
+            Ok(bounds) => i64::try_from(bounds.len()).unwrap_or(i64::MAX),
+            Err(error) => jet_panic("Compute.rs", line!(), &error.jet_show()),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn to_vec(&self) -> Vec<f64> {
+        match jet_compute_view_checked(self.tensor, self.start, self.end, self.exclusive) {
+            Ok(view) => view.to_vec(),
+            Err(error) => jet_panic("Compute.rs", line!(), &error.jet_show()),
+        }
+    }
+}
+
+/// The one mutable Tensor-window write seam. Every engine supplies the Tensor
+/// handle, the original window bounds, and the logical element coordinate;
+/// this Prelude operation owns trace policy, exclusive backing storage,
+/// window bounds, element addressing, finite-value validation, mutation, and
+/// their canonical errors.
+fn jet_compute_window_set(
+    tensor: &mut JetTensor,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    index: i64,
+    value: f64,
+) -> Result<(), String> {
+    if tensor.trace.is_some() {
+        return Err("Tensor mutation is not differentiable; use a pure Tensor function".to_string());
+    }
+    if !value.is_finite() {
+        return Err("Tensor values must be finite".to_string());
+    }
+    let bounds = jet_compute_window_bounds(tensor, start, end, exclusive)
+        .map_err(|error| error.jet_show())?;
+    // Validate the logical element before exclusivity. A valid empty window is
+    // still a view; an attempted element write must therefore report the
+    // canonical element-bounds error even when the owner has another handle.
+    let relative = jet_view_address(bounds.len(), index)?;
+    let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
+        return Err("Tensor mutable view requires exclusive backing storage".to_string());
+    };
+    let offset = bounds
+        .start
+        .checked_add(relative)
+        .ok_or_else(|| "Tensor view index is outside storage".to_string())?;
+    let Some(slot) = data.get_mut(offset) else {
+        return Err("Tensor view index is outside storage".to_string());
+    };
+    *slot = value;
+    Ok(())
+}
+
+/// The matching checked read for a Tensor window. It keeps element addressing
+/// (including empty-window rejection) beside the mutable write seam.
+fn jet_compute_window_get(
+    tensor: &JetTensor,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    index: i64,
+) -> Result<f64, String> {
+    let view = jet_compute_view_checked(tensor, start, end, exclusive)
+        .map_err(|error| error.jet_show())?;
+    jet_view_get_checked(view, index)
 }
 
 fn jet_compute_tensor_shape(tensor: &JetTensor) -> Vec<i64> {
@@ -1149,34 +1319,38 @@ fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComput
     jet_compute_get_raw(tensor, indices)
 }
 
-fn jet_compute_set(
-    tensor: &mut JetTensor,
-    indices: &[i64],
-    value: f64,
-) -> Result<(), JetComputeError> {
-    if tensor.trace.is_some() {
-        return Err(JetComputeError::Unsupported(
-            "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
-        ));
+impl JetComputeSetTarget for JetTensor {
+    type Error = JetComputeError;
+
+    fn jet_compute_set_target(
+        &mut self,
+        indices: &[i64],
+        value: f64,
+    ) -> Result<(), JetComputeError> {
+        if self.trace.is_some() {
+            return Err(JetComputeError::Unsupported(
+                "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+            ));
+        }
+        if !value.is_finite() {
+            return Err(JetComputeError::Arithmetic(
+                "Tensor values must be finite".to_string(),
+            ));
+        }
+        let offset = jet_compute_offset(self, indices)?;
+        let Some(data) = std::sync::Arc::get_mut(&mut self.data) else {
+            return Err(JetComputeError::Unsupported(
+                "Tensor write requires an exclusive ViewMut borrow".to_string(),
+            ));
+        };
+        let Some(slot) = data.get_mut(offset) else {
+            return Err(JetComputeError::OutOfBounds(
+                "tensor index is outside storage".to_string(),
+            ));
+        };
+        *slot = value;
+        Ok(())
     }
-    if !value.is_finite() {
-        return Err(JetComputeError::Arithmetic(
-            "Tensor values must be finite".to_string(),
-        ));
-    }
-    let offset = jet_compute_offset(tensor, indices)?;
-    let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
-        return Err(JetComputeError::Unsupported(
-            "Tensor write requires an exclusive ViewMut borrow".to_string(),
-        ));
-    };
-    let Some(slot) = data.get_mut(offset) else {
-        return Err(JetComputeError::OutOfBounds(
-            "tensor index is outside storage".to_string(),
-        ));
-    };
-    *slot = value;
-    Ok(())
 }
 
 fn jet_compute_add(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {

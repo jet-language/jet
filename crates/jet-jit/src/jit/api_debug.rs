@@ -473,6 +473,7 @@ fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
     match &expr.kind {
         TExprKind::Print(inner)
         | TExprKind::Clone(inner)
+        | TExprKind::ExplicitCopy(inner)
         | TExprKind::MaterializeView(inner)
         | TExprKind::DistinctRaw(inner)
         | TExprKind::Present(inner)

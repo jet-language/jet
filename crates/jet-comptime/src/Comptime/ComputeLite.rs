@@ -1,5 +1,6 @@
 //! D-COMPUTE1=D / I9: `core.compute` ambient mirrors AOT Prelude `jet_compute_*`
-//! by including the same source (`Prelude/CoreLib/Top/Compute.rs`). Marshalling
+//! by including the same compute and view-access sources
+//! (`Prelude/CoreLib/Top/Compute.rs`, `Prelude/Core/ViewAccess.rs`). Marshalling
 //! to `CtValue` lives here; engines must not re-encode tensor law.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs
 
@@ -41,6 +42,7 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
 fn device_to_ct(device: JetComputeDevice) -> CtValue {
@@ -667,9 +669,62 @@ pub fn tensor_view_window(
 ) -> Result<(usize, usize), Diagnostic> {
     let tensor = ct_to_tensor(value, span)?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    jet_compute_window_bounds(&tensor, start, end, exclusive)
-        .map(|bounds| (bounds.start, bounds.end))
+    jet_compute_view_checked(&tensor, start, end, exclusive)
+        .map(|view| (0, view.len()))
         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))
+}
+
+/// Ambient marshalling for a mutable Tensor view. Construction uses the same
+/// trace, bounds, and exclusivity checker as AOT and resident JIT; the returned
+/// range is only a CtValue carrier fact.
+pub fn tensor_view_mut_window(
+    value: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Result<(usize, usize), Diagnostic> {
+    let mut tensor = ct_to_tensor(value, span)?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    jet_compute_view_mut_checked(&mut tensor, start, end, exclusive)
+        .map(|view| (0, view.len()))
+        .map_err(|error| unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span))
+}
+
+/// Mutable/read-only Tensor-window indexing is an adapter concern at the
+/// CtValue boundary. Window addressing and element access come from the
+/// shared Prelude helpers used by AOT and the resident JIT.
+pub fn tensor_view_get_value(
+    value: &CtValue,
+    args: &[CtValue],
+    index: i64,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    jet_compute_window_get(&tensor, start, end, exclusive, index)
+        .map(|value| CtValue::Float(CtFloat::f64(value)))
+        .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))
+}
+
+pub fn tensor_view_set_value(
+    value: &CtValue,
+    args: &[CtValue],
+    index: i64,
+    replacement: &CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let mut tensor = ct_to_tensor(value, span)?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    let replacement = as_float(replacement, span)?;
+    jet_compute_window_set(
+        &mut tensor,
+        start,
+        end,
+        exclusive,
+        index,
+        replacement,
+    )
+    .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))?;
+    Ok(tensor_to_ct(&tensor))
 }
 
 pub fn tensor_view_list(
@@ -679,10 +734,10 @@ pub fn tensor_view_list(
 ) -> Result<CtValue, Diagnostic> {
     let tensor = ct_to_tensor(value, span)?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    let view = jet_compute_slice_checked(&tensor, start, end, exclusive)
+    let view = jet_compute_view_checked(&tensor, start, end, exclusive)
         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))?;
     Ok(CtValue::List(
-        jet_compute_tensor_to_list(&view)
+        view
             .iter()
             .map(|value| CtValue::Float(CtFloat::f64(*value)))
             .collect(),
@@ -700,6 +755,13 @@ pub fn tensor_slice_value(
     jet_compute_slice_checked(&tensor, start, end, exclusive)
         .map(|slice| tensor_to_ct(&slice))
         .map_err(|error| unsupported(&format!("Tensor slice: {}", error.jet_show()), span))
+}
+
+pub fn tensor_copy_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    jet_compute_copy_checked(&tensor)
+        .map(|copy| tensor_to_ct(&copy))
+        .map_err(|error| unsupported(&format!("Tensor copy: {}", error.jet_show()), span))
 }
 
 pub fn tensor_replace_data(

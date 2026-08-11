@@ -981,7 +981,9 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         match &expr.kind {
             TExprKind::MapLit(entries) => self.lower_datatree_object_maplit(entries),
-            TExprKind::Clone(inner) => self.lower_datatree_object_payload(inner, disc),
+            TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+                self.lower_datatree_object_payload(inner, disc)
+            }
             TExprKind::IfExpr {
                 cond,
                 then_body,
@@ -2989,7 +2991,8 @@ impl LowerCtx<'_, '_> {
                         let mut handle = self.b.use_var(var);
                         let record_ty = match &base_ty {
                             Type::Apply { name, args }
-                                if name == "ViewMut" && args.len() == 1 =>
+                                if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                                    && args.len() == 1 =>
                             {
                                 let (list, start, _) = self.unpack_view_mut(handle)?;
                                 let line = self.b.ins().iconst(types::I32, 1);
@@ -3123,7 +3126,8 @@ impl LowerCtx<'_, '_> {
                     }
                     let view_elem_ty = match self.var_tys.get(&key) {
                         Some(Type::Apply { name, args })
-                            if name == "ViewMut" && args.len() == 1 =>
+                            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                                && args.len() == 1 =>
                         {
                             Some(args[0].clone())
                         }
@@ -3236,8 +3240,8 @@ impl LowerCtx<'_, '_> {
                 let index = self.lower_expr(&assign.index)?;
                 // ViewMut write-through: absolute index = window.start + idx.
                 let (list, abs_index) = if Self::is_view_mut_ty(&assign.base.ty) {
-                    let (list, start, end) = self.unpack_view_mut(base)?;
-                    (list, self.checked_view_mut_index(start, end, index))
+                    let (list, start, _end) = self.unpack_view_mut(base)?;
+                    (list, self.view_mut_index(start, index))
                 } else {
                     (base, index)
                 };
@@ -3248,7 +3252,8 @@ impl LowerCtx<'_, '_> {
                 let elem_ty = match &assign.base.ty {
                     Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
                     Type::Apply { name, args }
-                        if name == "ViewMut" && args.len() == 1 =>
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                            && args.len() == 1 =>
                     {
                         &args[0]
                     }
@@ -3802,9 +3807,9 @@ impl LowerCtx<'_, '_> {
                     // ViewMut write-through: absolute index = window.start + idx.
                     if Self::is_view_mut_ty(&base.ty) {
                         let handle = self.lower_expr(base)?;
-                        let (list, start, end) = self.unpack_view_mut(handle)?;
+                        let (list, start, _end) = self.unpack_view_mut(handle)?;
                         let idx = self.lower_expr(index)?;
-                        let abs = self.checked_view_mut_index(start, end, idx);
+                        let abs = self.view_mut_index(start, idx);
                         let val = self.lower_expr(value)?;
                         let line = self.b.ins().iconst(types::I32, 1);
                         let host_id = match &value.ty {
@@ -7580,7 +7585,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn is_view_mut_ty(ty: &Type) -> bool {
-        matches!(ty, Type::Apply { name, .. } if name == "ViewMut")
+        matches!(ty, Type::Apply { name, .. } if matches!(name.as_str(), "ViewMut" | "ComputeViewMut"))
     }
 
     fn is_string_abi_ty(ty: &Type) -> bool {
@@ -7657,20 +7662,8 @@ impl LowerCtx<'_, '_> {
         Ok((list, start, end))
     }
 
-    fn checked_view_mut_index(&mut self, start: Value, end: Value, index: Value) -> Value {
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let nonnegative = self
-            .b
-            .ins()
-            .icmp(IntCC::SignedGreaterThanOrEqual, index, zero);
-        let absolute = self.b.ins().iadd(start, index);
-        let within_end = self
-            .b
-            .ins()
-            .icmp(IntCC::SignedLessThanOrEqual, absolute, end);
-        let valid = self.b.ins().band(nonnegative, within_end);
-        let invalid = self.b.ins().iconst(types::I64, -1);
-        self.b.ins().select(valid, absolute, invalid)
+    fn view_mut_index(&mut self, start: Value, index: Value) -> Value {
+        self.b.ins().iadd(start, index)
     }
 
     /// Write-through field place: heap record `[struct, field_index]`.
@@ -7723,7 +7716,9 @@ impl LowerCtx<'_, '_> {
         }
         let ty = self.var_tys.get(&key).cloned();
         let view_elem_ty = match ty.as_ref() {
-            Some(Type::Apply { name, args }) if name == "ViewMut" && args.len() == 1 => {
+            Some(Type::Apply { name, args })
+                if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                    && args.len() == 1 => {
                 Some(&args[0])
             }
             _ => None,
@@ -8983,6 +8978,7 @@ impl LowerCtx<'_, '_> {
                 Ok(phi)
             }
             TExprKind::Clone(inner) => self.lower_clone(inner),
+            TExprKind::ExplicitCopy(inner) => self.lower_explicit_copy(inner),
             TExprKind::CoreCall {
                 module,
                 method,
@@ -12881,8 +12877,8 @@ impl LowerCtx<'_, '_> {
                 let idx = self.lower_expr(index)?;
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
                 let (list, idx) = if Self::is_view_mut_ty(&base.ty) {
-                    let (inner, start, end) = self.unpack_view_mut(list)?;
-                    (inner, self.checked_view_mut_index(start, end, idx))
+                    let (inner, start, _end) = self.unpack_view_mut(list)?;
+                    (inner, self.view_mut_index(start, idx))
                 } else {
                     (list, idx)
                 };
@@ -12901,6 +12897,24 @@ impl LowerCtx<'_, '_> {
                 range,
                 line,
             } => {
+                if base.ty.is_compute_tensor_family() {
+                    let tensor = self.lower_expr(base)?;
+                    let (start, end, exclusive) = if let Some(range) = range {
+                        let [start, end, exclusive] = self.lower_range_expr(range)?;
+                        (start, end, exclusive)
+                    } else {
+                        let start = self.lower_expr(start)?;
+                        let end = self.lower_expr(end)?;
+                        let exclusive = self.b.ins().iconst(types::I8, 0);
+                        (start, end, exclusive)
+                    };
+                    let result = self.call_host(
+                        self.host.compute.slice,
+                        &[tensor, start, end, exclusive],
+                    );
+                    self.emit_trap_check()?;
+                    return Ok(result);
+                }
                 let list = self.lower_expr(base)?;
                 let (s, end_excl) = if let Some(range) = range {
                     self.lower_range_window(list, range, *line)?
@@ -12963,7 +12977,9 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.call_host(host, &[handle]));
                 }
                 let record_ty = match &recv.ty {
-                    Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+                    Type::Apply { name, args }
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                            && args.len() == 1 => {
                         let (list, start, _) = self.unpack_view_mut(handle)?;
                         let line = self.b.ins().iconst(types::I32, 1);
                         handle = self.call_host(self.host.coll.list_get, &[list, start, line]);
@@ -16110,6 +16126,39 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.coll.deque_from, &[recv_val]))
             }
             TBuiltinOp::TryCollect => self.lower_try_collect(recv),
+            // Compute aliases are handles backed by the shared Prelude. Keep
+            // even a generic View opcode on that path; routing it to the list
+            // ABI would discard Tensor bounds and ownership policy.
+            TBuiltinOp::ViewNew { .. }
+            | TBuiltinOp::ViewMutNew { .. }
+            | TBuiltinOp::ComputeViewNew { .. }
+            | TBuiltinOp::ComputeViewMutNew { .. }
+                if recv.ty.is_compute_tensor_family() =>
+            {
+                let (start, end, exclusive) = if let [range] = args {
+                    let [start, end, exclusive] = self.lower_range_expr(range)?;
+                    (start, end, exclusive)
+                } else {
+                    let start = self
+                        .lower_expr(args.first().ok_or("jit tensor view needs start")?)?;
+                    let end = self
+                        .lower_expr(args.get(1).ok_or("jit tensor view needs end")?)?;
+                    let exclusive = self.b.ins().iconst(types::I8, 0);
+                    (start, end, exclusive)
+                };
+                let host = match op {
+                    TBuiltinOp::ViewNew { .. } | TBuiltinOp::ComputeViewNew { .. } => {
+                        self.host.compute.view
+                    }
+                    TBuiltinOp::ViewMutNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => {
+                        self.host.compute.view_mut
+                    }
+                    _ => unreachable!(),
+                };
+                let result = self.call_host(host, &[recv_val, start, end, exclusive]);
+                self.emit_trap_check()?;
+                Ok(result)
+            }
             TBuiltinOp::ViewNew { line } => {
                 // Inclusive window → exclusive list_slice end. Materialized list
                 // handle matches Iter/View JIT ABI (safety.rs).
@@ -16171,7 +16220,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_view_mut_window(recv_val, start, end)
             }
             TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => {
-                Err("jit tensor view requires ambient Prelude evaluation".to_string())
+                Err("jit compute view needs a compute tensor receiver".to_string())
             }
             TBuiltinOp::SplitWrite { .. } => {
                 let mid = self.lower_expr(&args[0])?;
@@ -16304,6 +16353,17 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    fn lower_explicit_copy(&mut self, inner: &TExpr) -> Result<Value, String> {
+        if inner.ty.is_compute_tensor_family() {
+            let value = self.lower_expr(inner)?;
+            let copied = self.call_host(self.host.compute.copy, &[value]);
+            self.emit_trap_check()?;
+            Ok(copied)
+        } else {
+            self.lower_clone(inner)
+        }
+    }
+
     fn lower_clone(&mut self, inner: &TExpr) -> Result<Value, String> {
         if matches!(
             inner.ty,
@@ -16319,6 +16379,16 @@ impl LowerCtx<'_, '_> {
         // Distinct numeric wrappers share the base ABI — clone is a no-op copy.
         if matches!(self.erase_distinct_ty(&inner.ty), Type::Int | Type::Float) {
             return self.lower_expr(inner);
+        }
+        // Ordinary compiler clones preserve JetTensor's shallow Arc-sharing
+        // semantics. The host allocates a fresh handle around the Prelude
+        // `Clone`, so Arc exclusivity remains observable by a later ViewMut.
+        // The explicit `~` path is the only deep-copy operation.
+        if inner.ty.is_compute_tensor_family() {
+            let value = self.lower_expr(inner)?;
+            let cloned = self.call_host(self.host.compute.clone, &[value]);
+            self.emit_trap_check()?;
+            return Ok(cloned);
         }
         if inner.ty == Type::String
             || matches!(&inner.ty, Type::Named(name) if name == "HTML")
@@ -19049,7 +19119,8 @@ impl LowerCtx<'_, '_> {
             if let Some(ty) = self.var_tys.get(&key) {
                 if local.deref {
                     if let Type::Apply { name, args } = ty {
-                        if name == "ViewMut" && args.len() == 1 {
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                            && args.len() == 1 {
                             return self.erase_distinct_ty(&args[0]);
                         }
                     }
@@ -19610,7 +19681,9 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok([values[0], values[1], values[2]])
             }
-            TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => {
+            TExprKind::Clone(inner)
+            | TExprKind::ExplicitCopy(inner)
+            | TExprKind::MaterializeView(inner) => {
                 self.lower_range_expr(inner)
             }
             TExprKind::Call { name, args, .. } => {

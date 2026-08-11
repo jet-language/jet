@@ -727,12 +727,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::RawOf(Box::new(operand)),
             }
         }
-        // D-CAP2 (D-MEM1/S4): `copy x` — a fresh, independent value. Result
-        // type is `x`'s own type (sema already proved it cloneable, E0211).
-        // Reuses the existing `TExprKind::Clone` node (c109 Phase 6's
-        // sema-inserted-clone lowering target) — one TIR shape whether the
-        // compiler inserted the clone or the user wrote `copy` (I8).
-        Expr::Copy(inner, _) => {
+        // D-CAP2 (D-MEM1/S4): `~x` — a fresh, independent value. Keep this
+        // signal distinct from compiler-inserted Clone nodes: Tensor's explicit
+        // copy is a Prelude storage operation, while ordinary Clone shares its
+        // Arc-backed storage.
+        Expr::Copy(inner, copy_span) => {
             let operand = lower_expr(inner, cx, env);
             let ty = operand.ty.clone();
             // D-MEM1 stage S5: `copy d` where `d` is a string-view local is the
@@ -743,8 +742,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // `.to_string()` is the correct materialization here.
             let is_view_copy =
                 matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name));
+            // Parser-created `~` spans begin at the sigil. Sema-created
+            // ownership clones reuse the operand span. Preserve that
+            // existing provenance fact as a TIR distinction; do not inspect
+            // source text or make a backend guess.
+            let explicit = *copy_span != inner.span();
             let kind = if is_view_copy {
                 TExprKind::MaterializeView(Box::new(operand))
+            } else if explicit {
+                env.note_clone(&ty);
+                TExprKind::ExplicitCopy(Box::new(operand))
             } else {
                 env.note_clone(&ty);
                 TExprKind::Clone(Box::new(operand))
@@ -761,10 +768,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             } = inner.as_ref()
             {
                 let recv = lower_expr(base, cx, env);
-                let is_tensor = match &recv.ty {
-                    Type::Named(name) | Type::Apply { name, .. } if name == "Tensor" => true,
-                    _ => false,
-                };
+                // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
+                // Prelude. The foundation predicate is exact, so ordinary
+                // generics cannot accidentally enter the tensor-view path.
+                let is_tensor = recv.ty.is_compute_tensor_family();
                 let elem = if is_tensor {
                     Type::Float
                 } else {
@@ -782,7 +789,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 TExpr {
                     ty: Type::Apply {
-                        name: if mutable { "ViewMut" } else { "View" }.to_string(),
+                        name: if mutable && is_tensor {
+                            "ComputeViewMut"
+                        } else if mutable {
+                            "ViewMut"
+                        } else {
+                            "View"
+                        }
+                        .to_string(),
                         args: vec![elem],
                     },
                     kind: TExprKind::BuiltinMethod {
@@ -2710,7 +2724,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 Type::FixedList { elem, .. } => (**elem).clone(),
                 // D-DYNARRAY1: `window[i]` on a `View<T>`.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                        && args.len() == 1 =>
                 {
                     args[0].clone()
                 }
@@ -3151,7 +3166,9 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
             retag_numeric_width(lhs, head);
             retag_numeric_width(rhs, head);
         }
-        TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => {
+        TExprKind::Clone(inner)
+        | TExprKind::ExplicitCopy(inner)
+        | TExprKind::MaterializeView(inner) => {
             retag_numeric_width(inner, head)
         }
         _ => {}
@@ -3361,6 +3378,7 @@ impl OrderedArg for TExpr {
                     | TExprKind::HostCall(_)
                     | TExprKind::InlineBlock(_)
                     | TExprKind::Clone(_)
+                    | TExprKind::ExplicitCopy(_)
                     | TExprKind::StrLit(_)
             )
     }

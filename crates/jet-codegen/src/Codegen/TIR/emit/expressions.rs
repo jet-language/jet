@@ -1,6 +1,6 @@
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Generics;
-use crate::Codegen::TIR::emit::statements::PRELUDE_CARRIED;
+use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
@@ -71,6 +71,28 @@ fn emit_tir_lambda(lam: &TLambda) -> String {
 
 fn emit_tir_lambda_sync(lam: &TLambda) -> String {
     emit_tir_lambda_with_arc(lam, true)
+}
+
+pub(super) fn is_view(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.len() == 1
+    )
+}
+
+pub(super) fn is_float_view(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.first().is_some_and(|arg| matches!(arg, Type::Float))
+    )
+}
+
+pub(super) fn is_compute_view_mut(ty: &Type) -> bool {
+    ty.is_compute_view_mut()
 }
 
 fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> String {
@@ -994,11 +1016,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             };
             call
         }
-        // c109 Phase 6: the synthetic `.clone()`. Mirrors `emit_method_call`'s
-        // `clone` early return: `(recv).clone()`, no deref/borrow decision (the
-        // receiver was already lowered to the place the AST path would clone).
+        // c109 Phase 6: compiler-inserted Clone is ordinary Rust clone. It must
+        // not acquire explicit Jet-copy semantics for Tensor values.
         TExprKind::Clone(recv) => {
             format!("({}).clone()", emit_tir_expr(recv, cx))
+        }
+        // D-MEM1/D-CAP2: only the explicit Jet `~` copy calls the canonical
+        // Tensor copy helper. Other explicit-copyable values use their normal
+        // clone/materialization path.
+        TExprKind::ExplicitCopy(recv) => {
+            let value = emit_tir_expr(recv, cx);
+            if recv.ty.is_compute_tensor_family() {
+                format!("{}jet_compute_copy(&({}))", cx.root_prefix, value)
+            } else {
+                format!("({}).clone()", value)
+            }
         }
         TExprKind::Borrow { place, mutable } => {
             if let TExprKind::Local(local) = &place.kind {
@@ -1166,19 +1198,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv_is_list = matches!(&recv.ty, Type::List(_) | Type::FixedList { .. });
-            let recv = emit_tir_expr(recv, cx);
+            let recv_is_compute_view_mut = is_compute_view_mut(&recv.ty);
+            let recv_expr = recv;
+            let recv = emit_tir_expr(recv_expr, cx);
             let a = |i: usize| {
                 args.get(i)
                     .map(|e| emit_tir_expr(e, cx))
                     .unwrap_or_default()
             };
             // D-ITERTOOLS1=A: Iter is IntoIterator; List clones. Adapters start from JetIter.
-            let vec_src = if recv_is_iter {
+            let vec_src = if recv_is_compute_view_mut {
+                format!("({recv}).to_vec()")
+            } else if recv_is_iter {
                 format!("({recv})")
             } else {
                 format!("({recv}).clone()")
             };
-            let as_iter = if recv_is_iter {
+            let as_iter = if recv_is_compute_view_mut {
+                format!("jet_iter_from_vec(({recv}).to_vec())")
+            } else if recv_is_iter {
                 format!("({recv})")
             } else {
                 format!("jet_iter_from_vec(({recv}).clone())")
@@ -1690,6 +1728,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::ViewMutNew { line } => {
+                    let recv = emit_mut_list_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "jet_view_mut_range_new(&mut ({}), &({}), {:?}, {})",
@@ -1732,6 +1771,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::ComputeViewMutNew { line } => {
+                    let recv = emit_mut_list_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "{}jet_compute_view_mut_range(&mut ({}), &({}), {:?}, {})",
@@ -2731,14 +2771,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
             } else if *uninit_fixed {
                 format!("(({b})[({i}) as usize].clone())")
-            } else if matches!(
-                &e.ty,
-                Type::Apply { name, .. } if name == "ViewMut"
-            ) {
+            } else if is_compute_view_mut(&base.ty) {
                 format!(
-                    "(&mut **jet_index_vec_mut(&mut ({}), {}, {:?}, {}))",
-                    b, i, cx.file, line
+                    "{}jet_compute_window_get_view(&({}), {}, {:?}, {})",
+                    cx.root_prefix, b, i, cx.file, line
                 )
+            } else if is_view(&base.ty) {
+                format!("jet_view_get(&*({}), {}, {:?}, {})", b, i, cx.file, line)
             } else {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }
@@ -2820,8 +2859,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
         } => {
             let b = emit_tir_expr(base, cx);
-            let is_tensor = matches!(&base.ty, Type::Named(name) if name == "Tensor")
-                || matches!(&base.ty, Type::Apply { name, .. } if name == "Tensor");
+            let is_tensor = base.ty.is_compute_tensor_family();
             if let Some(range) = range {
                 return format!(
                     "{}(&({}), &({}), {:?}, {})",

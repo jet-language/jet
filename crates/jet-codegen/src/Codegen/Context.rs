@@ -944,10 +944,12 @@ impl Cx {
                 // so it needs the same hidden Rust lifetime everywhere it is
                 // stored or returned. It is always a write window.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN)
                         && args.len() == 1 =>
                 {
-                    !mutable_only || name == "ViewMut" || name == Syntax::TYPE_PIN
+                    !mutable_only
+                        || matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                        || name == Syntax::TYPE_PIN
                 }
                 Type::Named(name) => named_contains(cx, name, seen, mutable_only),
                 Type::Apply { name, args } => {
@@ -1072,6 +1074,8 @@ impl Cx {
                 format!("&'__jet_view mut {rest}")
             } else if let Some(rest) = rust.strip_prefix('&') {
                 format!("&'__jet_view {rest}")
+            } else if let Some(prefix) = rust.strip_suffix("JetComputeViewMut<'_>") {
+                format!("{prefix}JetComputeViewMut<'__jet_view>")
             } else {
                 rust
             }
@@ -1103,7 +1107,7 @@ impl Cx {
         fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
             match ty {
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN)
                         && args.len() == 1 =>
                 {
                     add_reference_lifetime(base(ty))
@@ -2111,6 +2115,9 @@ impl Cx {
                 } else {
                     format!("&[{}]", self.rust_type(&args[0]))
                 }
+            }
+            Type::Apply { name, args } if name == "ComputeViewMut" && args.len() == 1 => {
+                format!("{}JetComputeViewMut<'_>", self.root_prefix)
             }
             Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                 format!("&mut [{}]", self.rust_type(&args[0]))
@@ -3999,7 +4006,7 @@ pub(crate) fn field_type_cloneable(
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
         // than `ViewMut` — duplicating it would hand out a second no-move claim.
         Type::Apply { name, .. }
-            if matches!(name.as_str(), "ViewMut" | "Task" | Syntax::TYPE_PIN)
+            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut" | "Task" | Syntax::TYPE_PIN)
                 || name == Syntax::TYPE_SHARED_GUARD =>
         {
             false

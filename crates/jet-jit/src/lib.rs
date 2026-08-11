@@ -149,6 +149,7 @@ mod Cell;
 mod CLI;
 mod Collections;
 mod Compress;
+mod Compute;
 mod Concurrency;
 mod CoreHost;
 mod Crypto;

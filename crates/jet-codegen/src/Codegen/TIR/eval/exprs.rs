@@ -19,7 +19,8 @@ use super::local_cell::{internal_index, project_mut, project_pair_mut, project_r
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
     progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
-    unsupported, EvalCallable, EvalCtx, Flow,
+    unsupported, view_mut_owner_value, view_mut_window_args, EvalCallable, EvalCtx, Flow,
+    ViewMutPathStep,
 };
 
 fn progress_parts(
@@ -1822,6 +1823,40 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    fn eval_view_mut_place(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+        match &expr.kind {
+            TExprKind::Local(local) => Ok(Some((local.name.clone(), Vec::new()))),
+            TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+                self.eval_view_mut_place(place, scope)
+            }
+            TExprKind::Field { recv, field, .. } => {
+                let Some((base, mut path)) = self.eval_view_mut_place(recv, scope)? else {
+                    return Ok(None);
+                };
+                path.push(ViewMutPathStep::Field(field.clone()));
+                Ok(Some((base, path)))
+            }
+            TExprKind::Index {
+                base,
+                index,
+                is_map: false,
+                ..
+            } => {
+                let Some((root, mut path)) = self.eval_view_mut_place(base, scope)? else {
+                    return Ok(None);
+                };
+                let value = self.eval_expr(index, scope)?;
+                path.push(ViewMutPathStep::Index(as_int(&value, self.span())?));
+                Ok(Some((root, path)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn eval_expr(
         &mut self,
         expr: &'a TExpr,
@@ -2391,45 +2426,48 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
-                let is_tensor = matches!(&recv.ty, Type::Named(name) if name == "Tensor")
-                    || matches!(&recv.ty, Type::Apply { name, .. } if name == "Tensor");
+                let is_tensor = recv.ty.is_compute_tensor_family();
                 if matches!(
                     op,
                     crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
                         | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
                 ) {
-                    let base_name = match &recv.kind {
-                        TExprKind::Local(local) => local.name.clone(),
-                        TExprKind::Borrow { place, .. } => match &place.kind {
-                            TExprKind::Local(local) => local.name.clone(),
-                            _ => {
-                                return Err(unsupported("view-mut base", self.span()));
-                            }
-                        },
-                        _ => return Err(unsupported("view-mut base", self.span())),
+                    let Some((base_name, path)) = self.eval_view_mut_place(recv, scope)?
+                    else {
+                        return Err(unsupported("view-mut base", self.span()));
                     };
-                    let base_value = scope
+                    let root = scope
                         .get(&base_name)
-                        .cloned()
                         .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?;
+                    let base_value = super::project_list_place(root, &path, self.span())?.clone();
+                    let mut fields = vec![
+                        ("base".into(), CtValue::Str(base_name)),
+                    ];
+                    if !path.is_empty() {
+                        fields.push(("path".into(), super::encode_view_mut_path(&path)));
+                    }
                     if is_tensor {
                         let evaluated_args = args
                             .iter()
                             .map(|arg| self.eval_expr(arg, scope))
                             .collect::<Result<Vec<_>, _>>()?;
                         let (start, end_exclusive) =
-                            crate::Comptime::ComputeLite::tensor_view_window(
+                            crate::Comptime::ComputeLite::tensor_view_mut_window(
                                 &base_value,
                                 &evaluated_args,
                                 self.span(),
                             )?;
                         return Ok(CtValue::Struct {
                             type_name: "__JetViewMut".into(),
-                            fields: vec![
-                                ("base".into(), CtValue::Str(base_name)),
-                                ("start".into(), CtValue::Int(start as i64)),
-                                ("end".into(), CtValue::Int(end_exclusive as i64 - 1)),
-                            ],
+                            fields: {
+                                fields.push(("start".into(), CtValue::Int(start as i64)));
+                                fields.push((
+                                    "end".into(),
+                                    CtValue::Int(end_exclusive as i64 - 1),
+                                ));
+                                fields.push(("window".into(), CtValue::List(evaluated_args)));
+                                fields
+                            },
                         });
                     }
                     let CtValue::List(xs) = base_value else {
@@ -2452,14 +2490,14 @@ impl<'a> EvalCtx<'a> {
                         }
                         (start, end + 1)
                     };
-                    let end = end_exclusive - 1;
+                    let end = i64::try_from(end_exclusive)
+                        .map_err(|_| unsupported("view-mut end is too large", self.span()))?
+                        - 1;
+                    fields.push(("start".into(), CtValue::Int(start)));
+                    fields.push(("end".into(), CtValue::Int(end)));
                     return Ok(CtValue::Struct {
                         type_name: "__JetViewMut".into(),
-                        fields: vec![
-                            ("base".into(), CtValue::Str(base_name)),
-                            ("start".into(), CtValue::Int(start)),
-                            ("end".into(), CtValue::Int(end)),
-                        ],
+                        fields,
                     });
                 }
                 if matches!(
@@ -3592,7 +3630,17 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::List(out))
             }
-            TExprKind::Clone(inner) => self.eval_expr(inner, scope),
+            TExprKind::Clone(inner) => {
+                self.eval_expr(inner, scope)
+            }
+            TExprKind::ExplicitCopy(inner) => {
+                let value = self.eval_expr(inner, scope)?;
+                if expr.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_copy_value(&value, self.span())
+                } else {
+                    Ok(value)
+                }
+            }
             TExprKind::Present(inner) => {
                 Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?)))
             }
@@ -3648,6 +3696,17 @@ impl<'a> EvalCtx<'a> {
                     } = &b
                     {
                         if type_name == "__JetViewMut" {
+                            let owner = view_mut_owner_value(fields, scope, self.span())?;
+                            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                                let window = view_mut_window_args(fields)
+                                    .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                                return crate::Comptime::ComputeLite::tensor_view_get_value(
+                                    &owner,
+                                    window,
+                                    idx,
+                                    self.span(),
+                                );
+                            }
                             let window =
                                 materialize_view_mut_window(fields, scope, self.span())?;
                             let CtValue::List(xs) = window else {

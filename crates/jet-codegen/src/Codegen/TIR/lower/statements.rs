@@ -747,13 +747,13 @@ fn split_view_plan(
     cx: &Cx,
     env: &LowerEnv,
 ) -> HashMap<usize, PlannedSplitView> {
-    // The planner emits Rust slice operations. Compute Tensor windows use
+    // The planner emits Rust slice operations. Compute windows use
     // checked Prelude handles instead, so resolve block-local owners before
     // planning and leave those bindings on the normal `Expr::Place` path.
     // This temporary environment never affects lexical lowering; it only makes
     // the already-resolved local types visible while selecting candidates. It
     // must advance in source order: prebinding the whole block makes an earlier
-    // owner look like a later shadow and can route a Tensor through Rust slices.
+    // owner look like a later shadow and can route a compute alias through Rust slices.
     let mut owner_env = env.clone();
     let mut owner_generation: HashMap<String, usize> = HashMap::new();
     let mut candidates = Vec::new();
@@ -761,7 +761,7 @@ fn split_view_plan(
         if let Some(mut view) = split_view_candidate(stmt, index, cx) {
             let is_tensor = matches!(
                 tir_recv_jet_ty(&view.owner, &owner_env),
-                Some(Type::Named(name) | Type::Apply { name, .. }) if name == "Tensor"
+                Some(ty) if ty.is_compute_tensor_family()
             );
             if !is_tensor && view.start >= 0 && view.end >= view.start {
                 let root = split_owner_root(&view.owner).unwrap_or_default();
@@ -1246,21 +1246,31 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let moved = lower_owned_expr(inner, cx, env);
                 if matches!(
                     &moved.ty,
-                    Type::Apply { name, .. } if name == "ViewMut"
+                    Type::Apply { name, .. }
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                 ) {
                     Some(moved)
                 } else {
-                    let range = matches!(inner, Expr::Slice { .. });
                     let init = lower_expr(&b.init, cx, env);
+                    let range = matches!(inner, Expr::Slice { .. });
                     let slot = if range {
                         TLocal::user(&b.name)
                     } else {
                         TLocal::user(&b.name).through_ref()
                     };
-                    env.bind(&b.name, slot, b.ty.clone());
+                    let binding_ty = if init.ty.is_compute_view_mut() {
+                        Some(init.ty.clone())
+                    } else {
+                        b.ty.clone()
+                    };
+                    env.bind(&b.name, slot, binding_ty);
                     return TStmt::Let {
                         name: b.name.clone(),
-                        kw: "let",
+                        kw: if init.ty.is_compute_view_mut() {
+                            "let mut"
+                        } else {
+                            "let"
+                        },
                         let_ty: TLetTy::Inferred,
                         init,
                         gc_promotion: None,
@@ -1423,7 +1433,15 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
             // Totality: if the source omitted the type, infer it ONCE here from
             // the init's already-resolved type. Codegen never infers.
-            let ty = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            // A written Tensor place has an internal carrier that keeps the
+            // owner/range for the shared Prelude window setter. It must stay
+            // inferred; the source-facing ViewMut spelling is a sema type,
+            // not the generated Rust carrier.
+            let ty = if init.ty.is_compute_view_mut() {
+                init.ty.clone()
+            } else {
+                b.ty.clone().unwrap_or_else(|| init.ty.clone())
+            };
             let send_fn = env.is_send_fn(&b.name)
                 && matches!(&ty, Type::Fn { .. })
                 && !mut_fn;
@@ -1496,7 +1514,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
             // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
             // inferred binding.
-            let let_ty = if send_fn && b.ty.is_some() {
+            let let_ty = if ty.is_compute_view_mut() {
+                TLetTy::Inferred
+            } else if send_fn && b.ty.is_some() {
                 TLetTy::SendFn(ty.clone())
             } else {
                 crate::Codegen::TIR::let_ty_for_opt(
@@ -1650,7 +1670,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             // must write through the slice element, not clone
                             // via `jet_index_vec` and mutate a temporary.
                             Type::Apply { name, args }
-                                if matches!(name.as_str(), "View" | "ViewMut")
+                                if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
                                     && args.len() == 1 =>
                             {
                                 Some(args[0].clone())
@@ -1970,7 +1990,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     Type::Named(name) => encoding_reader_item_type(name),
                     // D-DYNARRAY1: `loop x; window` — a `View<T>`'s element type.
                     Type::Apply { name, args }
-                        if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => {
+                        if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                            && args.len() == 1 => {
                         Some(args[0].clone())
                     }
                     _ => None,
@@ -1983,7 +2004,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // already has its own iteration form below; leave it alone.
                 let elem_is_view_mut = matches!(
                     coll_elem_ty.as_ref(),
-                    Some(Type::Apply { name, .. }) if name == "ViewMut"
+                    Some(Type::Apply { name, .. })
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                 );
                 // Only a type carrying a task handle is consumed here. codegen's
                 // `field_type_cloneable` answers a narrower question than sema's
@@ -2032,7 +2054,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             branch.bind(v2, TLocal::user(v2), Some((**inner).clone()));
                         }
                         Type::Apply { name, args }
-                            if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                                && args.len() == 1 =>
                         {
                             branch.bind(var, TLocal::user(var), Some(Type::Int));
                             branch.bind(v2, TLocal::user(v2), Some(args[0].clone()));

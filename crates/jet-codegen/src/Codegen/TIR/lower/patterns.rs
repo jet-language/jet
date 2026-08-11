@@ -772,7 +772,8 @@ pub(crate) fn lower_enum_arg(
     let _ = variant;
     let mutable_view_payload = matches!(
         payload_ty,
-        Some(Type::Apply { name, .. }) if name == "ViewMut"
+        Some(Type::Apply { name, .. })
+            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
     );
     let mutable_place;
     let payload_expr = if mutable_view_payload {

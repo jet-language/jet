@@ -98,14 +98,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
 /// representation. Sema owns the shape checks; this gate only admits the
 /// resolved forms that `cx.rust_type` renders to that representation.
 pub(crate) fn is_covered_compute_ty(ty: &Type) -> bool {
-    match ty {
-        Type::Named(name) => name == "Tensor",
-        Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
-        Type::Apply { name, .. } if matches!(name.as_str(), "Vec" | "Matrix") => {
-            ty.compute_shape_dimensions().is_some()
-        }
-        _ => false,
-    }
+    ty.is_compute_tensor_family()
 }
 
 fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
@@ -123,7 +116,7 @@ fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(
         ty,
         Type::Apply { name, args }
-            if matches!(name.as_str(), "View" | "ViewMut" | crate::Syntax::TYPE_PIN)
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_PIN)
                 && args.len() == 1
                 && (matches!(&args[0], Type::Named(inner) if inner == "str")
                     || is_subset_param_ty(&args[0], cx))

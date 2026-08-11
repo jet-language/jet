@@ -27,6 +27,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
+        compute: crate::Compute::ComputeState::default(),
         compile_strings: Vec::new(),
         invocations: 0,
         channels: Vec::new(),
@@ -117,6 +118,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
     rt.heap.install_string_slots(&compile_strings);
+    rt.compute.clear();
     crate::Data::clear_lazy_state();
     crate::Math::clear_math_values();
     let stream_consumers = std::mem::take(&mut rt.stream_consumers);

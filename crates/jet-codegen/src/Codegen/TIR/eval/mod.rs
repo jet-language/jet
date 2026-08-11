@@ -59,7 +59,8 @@ use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
 use crate::Codegen::mangle;
 use super::Cx;
 use crate::Codegen::TIR::{
-    self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
+    self, JitProgram, LowerEnv, TExpr, TExprKind, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal,
+    TStmt,
 };
 use super::build_cx_items;
 use crate::Comptime::{self, CtReport, CtValue, DevSink};
@@ -516,6 +517,41 @@ pub(super) enum ViewMutPathStep {
     Index(i64),
 }
 
+/// Recover the complete owner place carried by a view expression. The caller
+/// supplies index evaluation so dynamic projected indexes retain their TIR
+/// provenance instead of being reduced to a bare root local.
+pub(super) fn view_mut_place(
+    expr: &TExpr,
+    resolve_index: &mut impl FnMut(&TExpr) -> Result<i64, Diagnostic>,
+) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+    match &expr.kind {
+        TExprKind::Local(local) => Ok(Some((local.name.clone(), Vec::new()))),
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+            view_mut_place(place, resolve_index)
+        }
+        TExprKind::Field { recv, field, .. } => {
+            let Some((base, mut path)) = view_mut_place(recv, resolve_index)? else {
+                return Ok(None);
+            };
+            path.push(ViewMutPathStep::Field(field.clone()));
+            Ok(Some((base, path)))
+        }
+        TExprKind::Index {
+            base,
+            index,
+            is_map: false,
+            ..
+        } => {
+            let Some((root, mut path)) = view_mut_place(base, resolve_index)? else {
+                return Ok(None);
+            };
+            path.push(ViewMutPathStep::Index(resolve_index(index)?));
+            Ok(Some((root, path)))
+        }
+        _ => Ok(None),
+    }
+}
+
 pub(super) fn parse_view_mut_path(fields: &[(String, CtValue)]) -> Vec<ViewMutPathStep> {
     let Some((_, CtValue::List(steps))) = fields.iter().find(|(name, _)| name == "path") else {
         return Vec::new();
@@ -550,7 +586,7 @@ pub(super) fn encode_view_mut_path(path: &[ViewMutPathStep]) -> CtValue {
     )
 }
 
-fn view_mut_parts(
+pub(super) fn view_mut_parts(
     fields: &[(String, CtValue)],
 ) -> Option<(String, Vec<ViewMutPathStep>, i64, i64)> {
     let mut base = None;
@@ -567,7 +603,7 @@ fn view_mut_parts(
     Some((base?, parse_view_mut_path(fields), start?, end?))
 }
 
-fn project_list_place<'a>(
+pub(super) fn project_list_place<'a>(
     root: &'a CtValue,
     path: &[ViewMutPathStep],
     span: Span,
@@ -596,7 +632,7 @@ fn project_list_place<'a>(
     Ok(cur)
 }
 
-fn replace_list_place(
+pub(super) fn replace_list_place(
     root: CtValue,
     path: &[ViewMutPathStep],
     replacement: CtValue,
@@ -633,6 +669,45 @@ fn replace_list_place(
     }
 }
 
+pub(super) fn view_mut_window_args(fields: &[(String, CtValue)]) -> Option<&[CtValue]> {
+    fields.iter().find_map(|(name, value)| {
+        (name == "window").then(|| match value {
+            CtValue::List(args) => Some(args.as_slice()),
+            _ => None,
+        })
+    }).flatten()
+}
+
+pub(super) fn view_mut_owner_value(
+    fields: &[(String, CtValue)],
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let (base, path, _, _) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let root = scope
+        .get(&base)
+        .ok_or_else(|| unsupported("view-mut owner", span))?;
+    project_list_place(root, &path, span).cloned()
+}
+
+pub(super) fn store_view_mut_owner_value(
+    fields: &[(String, CtValue)],
+    scope: &mut HashMap<String, CtValue>,
+    replacement: CtValue,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let (base, path, _, _) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let root = scope
+        .get(&base)
+        .cloned()
+        .ok_or_else(|| unsupported("view-mut owner", span))?;
+    let updated = replace_list_place(root, &path, replacement, span)?;
+    scope.insert(base, updated);
+    Ok(())
+}
+
 pub(super) fn load_view_mut_owner_list(
     fields: &[(String, CtValue)],
     scope: &HashMap<String, CtValue>,
@@ -646,7 +721,7 @@ pub(super) fn load_view_mut_owner_list(
     match project_list_place(root, &path, span)? {
         CtValue::List(items) => Ok(items.clone()),
         CtValue::Struct { type_name, fields }
-            if path.is_empty() && (type_name == "Tensor" || type_name == "JetTensor") =>
+            if type_name == "Tensor" || type_name == "JetTensor" =>
         {
             fields
                 .iter()
@@ -673,14 +748,19 @@ pub(super) fn store_view_mut_owner_list(
         .get(&base)
         .cloned()
         .ok_or_else(|| unsupported("view-mut owner", span))?;
-    if path.is_empty()
-        && matches!(&root, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
-    {
-        let updated = crate::Comptime::ComputeLite::tensor_replace_data(&root, items, span)?;
-        scope.insert(base, updated);
-        return Ok(());
-    }
-    let updated = replace_list_place(root, &path, CtValue::List(items), span)?;
+    let replacement = match project_list_place(&root, &path, span)? {
+        CtValue::Struct { type_name, .. }
+            if type_name == "Tensor" || type_name == "JetTensor" =>
+        {
+            crate::Comptime::ComputeLite::tensor_replace_data(
+                project_list_place(&root, &path, span)?,
+                items,
+                span,
+            )?
+        }
+        _ => CtValue::List(items),
+    };
+    let updated = replace_list_place(root, &path, replacement, span)?;
     scope.insert(base, updated);
     Ok(())
 }
@@ -693,6 +773,12 @@ pub(super) fn materialize_view_mut_window(
 ) -> Result<CtValue, Diagnostic> {
     let (_, _, start, end) =
         view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let owner = view_mut_owner_value(fields, scope, span)?;
+    if let Some(window) = view_mut_window_args(fields) {
+        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+            return crate::Comptime::ComputeLite::tensor_view_list(&owner, window, span);
+        }
+    }
     let items = load_view_mut_owner_list(fields, scope, span)?;
     if start < 0
         || end < start - 1

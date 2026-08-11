@@ -1323,7 +1323,12 @@ impl Type {
         let Type::Apply { name, args } = self else {
             return None;
         };
-        if !matches!(name.as_str(), "Vec" | "Matrix") {
+        let expected = match name.as_str() {
+            "Vec" => 1,
+            "Matrix" => 2,
+            _ => return None,
+        };
+        if args.len() != expected {
             return None;
         }
         args.iter().map(Self::compute_dimension_value).collect()
@@ -1333,8 +1338,36 @@ impl Type {
     /// `Tensor` is compatible with a shaped alias; two shaped aliases still
     /// require exact equality, so `Vec<3>` cannot silently become `Vec<4>`.
     pub fn is_compute_tensor_family(&self) -> bool {
-        matches!(self, Type::Named(name) if name == "Tensor")
-            || matches!(self, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix"))
+        match self {
+            Type::Tagged { inner, .. } => inner.is_compute_tensor_family(),
+            Type::Named(name) => name == "Tensor",
+            Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "Vec" | "Matrix") =>
+            {
+                let expected = if name == "Vec" { 1 } else { 2 };
+                args.len() == expected
+                    // Sema retains the fixed ComputeDim facts. TIR receives
+                    // only their erased Int carrier, so both exact forms
+                    // belong to the same compiler-owned compute family.
+                    && (self.compute_shape_dimensions().is_some()
+                        || args.iter().all(|arg| matches!(arg, Type::Int)))
+            }
+            _ => false,
+        }
+    }
+
+    /// Compiler-internal mutable Tensor windows retain the Tensor owner and
+    /// original range through all backends. This is not a user-typeable form;
+    /// lowering introduces it for a written Tensor place.
+    pub fn is_compute_view_mut(&self) -> bool {
+        matches!(
+            self,
+            Type::Apply { name, args }
+                if name == "ComputeViewMut"
+                    && args.len() == 1
+                    && matches!(args.first(), Some(Type::Float))
+        )
     }
 
     pub fn compute_tensor_compatible(want: &Type, got: &Type) -> bool {

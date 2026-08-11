@@ -73,6 +73,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Time.rs"),
     include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core.rs"),
+    include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
     // (Codegen/Web.rs) so every tier runs one power.
     include_str!("../Prelude/Core/Power.rs"),
@@ -2234,6 +2235,8 @@ mod tests {
         let time = std::fs::read_to_string(root.join("src/Prelude/Core/Time.rs")).unwrap();
         let sketch = std::fs::read_to_string(root.join("src/Prelude/Core/Sketch.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
+        let view_access =
+            std::fs::read_to_string(root.join("src/Prelude/Core/ViewAccess.rs")).unwrap();
         let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
         let division =
             std::fs::read_to_string(root.join("src/Prelude/Core/Division.rs")).unwrap();
@@ -2277,6 +2280,7 @@ mod tests {
             ("src/Prelude/Core/Time.rs", time.as_str()),
             ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
+            ("src/Prelude/Core/ViewAccess.rs", view_access.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
             ("src/Prelude/Core/Division.rs", division.as_str()),
             ("../jet-foundation/src/TypedHeads.rs", typed_heads.as_str()),
@@ -2352,6 +2356,9 @@ mod tests {
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
             .unwrap();
+        let view_access_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/ViewAccess.rs\")")
+            .unwrap();
         let collections_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Collections.rs\")")
             .unwrap();
@@ -2382,7 +2389,8 @@ mod tests {
                 && measurement_pos < time_pos
                 && time_pos < sketch_pos
                 && sketch_pos < core_pos
-                && core_pos < collections_pos
+                && core_pos < view_access_pos
+                && view_access_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
@@ -2407,6 +2415,7 @@ mod tests {
                 time.as_str(),
                 sketch.as_str(),
                 core.as_str(),
+                view_access.as_str(),
                 power.as_str(),
                 division.as_str(),
                 typed_heads.as_str(),
@@ -2440,6 +2449,7 @@ mod tests {
             time.as_str(),
             sketch.as_str(),
             core.as_str(),
+            view_access.as_str(),
             power.as_str(),
             division.as_str(),
             typed_heads.as_str(),
@@ -2460,10 +2470,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 344_633, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 363_184, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "5f06e715b4c38dbd0d75f561b08abd6e57e2584278568e92b32c049954d2f5d7",
+            "5aaa35cee053663ba934cb49d5e5b2738024e03691c6dd45163a1303781e2593",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
