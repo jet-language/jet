@@ -40,16 +40,19 @@ supported-feature gap; byte-identical output") is violated on every row below.
 | types/generic_constructor_inference | static `Box.new` (#1254 repro) |
 | ui/events | `core.event.scope()` at comptime |
 
-## Failures — other divergences (need triage)
+## Failures — other divergences (triaged 2026-08-12, card #1648)
 
-| Example | Symptom |
-|---|---|
-| types/dimensional_quantities | E0112 `print` doesn't know Length — sema diagnostic fires under run path only; AOT path prints fine (mode-divergent sema) |
-| concurrency/deadline_context | exit 70 deadline exceeded under run tier (interp slower than AOT? possibly expected-exit method artifact — has .err.out channel) |
-| concurrency/parallel_scan | stdout diff |
-| io/terminal_parity | stdout diff (possibly tty-env-sensitive) |
-| memory/returned_views | stdout diff |
-| web/web_wasm_callback, web/web_wasm_list, web/web_wasm_list_string | stdout diff |
+Every row was re-probed on 2026-08-12 (`target-audit-e3/divergence-triage.md`,
+board audit #1869). Rows route to cards, not to a ledger.
+
+| Example | 2026-07-28 symptom | 2026-08-12 result | Resolution |
+|---|---|---|---|
+| types/dimensional_quantities | E0112 under run only | changed shape: E2201 under `jet run`, codegen ICE under `--release` | card #1930 |
+| concurrency/deadline_context | exit 70 under run | both tiers fail E1004 `core.tasks` has no `spawn`; fixed by the canonical spawn lowering (e892acc21) riding the bucket-1 integration (card #1929) | rides #1929 |
+| concurrency/parallel_scan | stdout diff | IDENTICAL, matches golden | resolved |
+| io/terminal_parity | stdout diff (tty-sensitive) | genuine tier divergence: secret-read error and stream ordering | card #1931 |
+| memory/returned_views | stdout diff | run matches golden; `--release` ICEs on five generated-Rust E0308 | card #1932 |
+| web/web_wasm_callback, web/web_wasm_list, web/web_wasm_list_string | stdout diff | IDENTICAL, match goldens | resolved |
 
 ## Policy fix
 
