@@ -1339,19 +1339,18 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
     check_bundle_opts_for_output(bundle, mode, false, false, None, None).0
 }
 
-/// Prepare script entries for entry-swap callers (`jet dev` and named tasks)
-/// before they install their ordinary forwarding `run` wrapper.
-pub fn prepare_script_entries(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
+fn validate_script_entries(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    materialize_script_entries(bundle, &mut diags);
+    validate_script_entry_bodies(bundle, &mut diags);
     diags
 }
 
 /// D-ENTRY-SCRIPT1=B: keep the script surface in the parser/formatter, then
-/// lower only the entry file's loose statements to the ordinary `run` path.
-/// Imported scripts are rejected before registration so their statements can
-/// never become an accidental runtime side effect.
-fn materialize_script_entries(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+/// validate the package seam's entry materialization. Imported scripts and
+/// explicit-run conflicts are rejected before registration so their statements
+/// can never become an accidental runtime side effect.
+fn validate_script_entry_bodies(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+    bundle.materialize_script_entries();
     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
         let body = std::mem::take(&mut module.script_body);
         if body.is_empty() {
@@ -1398,22 +1397,22 @@ fn materialize_script_entries(bundle: &mut ProgramBundle, diags: &mut Vec<Diagno
 /// The edit is deliberately conservative for unusual same-line layouts; the
 /// diagnostic still remains actionable when no mechanical edit is safe.
 fn script_conflict_edit(source: &str, body: &[Stmt], run: &Func) -> Option<TextEdit> {
-    let statement_ranges = body
+    let statement_spans = body
         .iter()
-        .map(|stmt| statement_line_range(source, stmt.span()))
-        .collect::<Vec<_>>();
-    let mut ranges = statement_ranges.clone();
-    ranges.sort_by_key(|(start, _)| *start);
-    ranges.dedup();
-    if ranges.len() != statement_ranges.len() {
+        .map(|stmt| script_statement_span(source, stmt))
+        .collect::<Option<Vec<_>>>()?;
+    let mut spans = statement_spans.clone();
+    spans.sort_by_key(|span| (span.start, span.end));
+    spans.dedup_by_key(|span| (span.start, span.end));
+    if spans.len() != statement_spans.len() {
         return None;
     }
-    if ranges
+    if spans
         .windows(2)
-        .any(|pair| pair[0].1 > pair[1].0)
-        || ranges
+        .any(|pair| pair[0].end > pair[1].start)
+        || spans
             .iter()
-            .any(|(start, end)| *start < run.span.end && *end > run.span.start)
+            .any(|span| span.start < run.span.end && span.end > run.span.start)
     {
         return None;
     }
@@ -1425,36 +1424,38 @@ fn script_conflict_edit(source: &str, body: &[Stmt], run: &Func) -> Option<TextE
     let close = matching_brace(source, open)?;
     let before = body
         .iter()
-        .filter(|stmt| stmt.span().start < run.span.start)
-        .map(|stmt| source_slice_for_statement(source, stmt.span()))
+        .filter_map(|stmt| script_statement_span(source, stmt))
+        .filter(|span| span.start < run.span.start)
+        .filter_map(|span| source.get(span.start..span.end))
         .collect::<Vec<_>>()
-        .join("");
+        .join("\n");
     let after = body
         .iter()
-        .filter(|stmt| stmt.span().start > run.span.end)
-        .map(|stmt| source_slice_for_statement(source, stmt.span()))
+        .filter_map(|stmt| script_statement_span(source, stmt))
+        .filter(|span| span.start > run.span.end)
+        .filter_map(|span| source.get(span.start..span.end))
         .collect::<Vec<_>>()
-        .join("");
+        .join("\n");
     let before_insert = (!before.is_empty()).then(|| {
         let text = indent_script(&before);
         if source.as_bytes().get(open + 1) == Some(&b'\n') {
-            text
-        } else {
             format!("\n{text}")
+        } else {
+            format!("\n{text}\n")
         }
     });
     let after_insert = (!after.is_empty()).then(|| {
         let text = indent_script(&after);
         if source.as_bytes().get(close.saturating_sub(1)) == Some(&b'\n') {
-            text
+            format!("{text}\n")
         } else {
-            format!("\n{text}")
+            format!("\n{text}\n")
         }
     });
 
-    let mut edits = ranges
+    let mut edits = spans
         .into_iter()
-        .map(|(start, end)| (start, end, String::new()))
+        .map(|span| (span.start, span.end, String::new()))
         .collect::<Vec<_>>();
     if let Some(text) = before_insert {
         edits.push((open + 1, open + 1, text));
@@ -1481,19 +1482,133 @@ fn script_conflict_edit(source: &str, body: &[Stmt], run: &Func) -> Option<TextE
     })
 }
 
-fn statement_line_range(source: &str, span: Span) -> (usize, usize) {
-    let start = source[..span.start.min(source.len())]
-        .rfind('\n')
-        .map_or(0, |index| index + 1);
-    let end = source[span.end.min(source.len())..]
-        .find('\n')
-        .map_or(source.len(), |index| span.end.min(source.len()) + index + 1);
-    (start, end)
+/// Return the source occupied by one parsed script statement.
+///
+/// `Stmt::span` is the semantic/debug span. Calls and method calls intentionally
+/// retain only their callee span, so extend that AST anchor to the first
+/// top-level statement terminator without consuming following declarations or
+/// their trivia. This is source-boundary recovery for an existing AST node, not
+/// another parser or desugaring path.
+fn script_statement_span(source: &str, stmt: &Stmt) -> Option<Span> {
+    let statement = stmt.span();
+    let start = match stmt {
+        Stmt::Expr(expr) => expression_source_start(expr),
+        Stmt::Return(_, span) | Stmt::Yield(_, span) => span.start,
+        _ => statement.start,
+    };
+    let end = source_statement_end(source, start, statement.end)?;
+    let span = Span::new(start, end.max(statement.end));
+    source.get(span.start..span.end)?;
+    Some(span)
 }
 
-fn source_slice_for_statement(source: &str, span: Span) -> &str {
-    let (start, end) = statement_line_range(source, span);
-    &source[start..end]
+fn expression_source_start(expr: &Expr) -> usize {
+    match expr {
+        Expr::MethodCall { receiver, .. } => expression_source_start(receiver),
+        _ => expr.span().start,
+    }
+}
+
+fn source_statement_end(source: &str, start: usize, initial_end: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if start > bytes.len() {
+        return None;
+    }
+    let mut index = start;
+    let mut end = initial_end.min(bytes.len());
+    let mut parens = 0usize;
+    let mut brackets = 0usize;
+    let mut braces = 0usize;
+    let mut string_delimiter = 0u8;
+    let mut character = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if line_comment {
+            if byte == b'\n' {
+                line_comment = false;
+                if parens == 0 && brackets == 0 && braces == 0 {
+                    return Some(end);
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if block_comment {
+            if bytes.get(index..index + 2) == Some(b"*/") {
+                block_comment = false;
+                index += 2;
+            } else {
+                if byte == b'\n' && parens == 0 && brackets == 0 && braces == 0 {
+                    return Some(end);
+                }
+                index += 1;
+            }
+            continue;
+        }
+        if string_delimiter != 0 || character {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+            } else if string_delimiter == 3
+                && bytes.get(index..index + 3) == Some(b"\"\"\"")
+            {
+                string_delimiter = 0;
+                index += 3;
+            } else {
+                if (string_delimiter == 1 && byte == b'"') || (character && byte == b'\'') {
+                    string_delimiter = 0;
+                    character = false;
+                }
+                index += 1;
+            }
+            end = end.max(index.min(bytes.len()));
+            continue;
+        }
+
+        if bytes.get(index..index + 2) == Some(b"//") {
+            if parens == 0 && brackets == 0 && braces == 0 {
+                return Some(end);
+            }
+            line_comment = true;
+            index += 2;
+            continue;
+        }
+        if bytes.get(index..index + 2) == Some(b"/*") {
+            block_comment = true;
+            index += 2;
+            continue;
+        }
+        if bytes.get(index..index + 3) == Some(b"\"\"\"") {
+            string_delimiter = 3;
+            index += 3;
+            end = end.max(index);
+            continue;
+        }
+
+        match byte {
+            b'"' => string_delimiter = 1,
+            b'\'' => character = true,
+            b'(' => parens += 1,
+            b')' if parens > 0 => parens -= 1,
+            b')' => return Some(end),
+            b'[' => brackets += 1,
+            b']' if brackets > 0 => brackets -= 1,
+            b']' => return Some(end),
+            b'{' => braces += 1,
+            b'}' if braces > 0 => braces -= 1,
+            b'}' => return Some(end),
+            b';' if parens == 0 && brackets == 0 && braces == 0 => return Some(end),
+            b'\n' if parens == 0 && brackets == 0 && braces == 0 => return Some(end),
+            _ => {}
+        }
+        index += 1;
+        if !byte.is_ascii_whitespace() {
+            end = end.max(index);
+        }
+    }
+    Some(end)
 }
 
 fn indent_script(source: &str) -> String {
@@ -1696,7 +1811,7 @@ fn check_bundle_opts_for_output_inner(
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
-    diags.extend(prepare_script_entries(bundle));
+    diags.extend(validate_script_entries(bundle));
     diags.extend(inject_units_prelude(bundle));
     super::Prelude::inject(bundle);
     diags.extend(super::Casing::validate_bundle(bundle));
@@ -3582,6 +3697,64 @@ mod structure_tests {
         dedupe_unknown_names(&mut second_module);
         let diagnostics = [first_module, second_module].concat();
         assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn script_conflict_edit_splices_statement_not_shared_line() {
+        let source = "print(\"before\"); fn helper() {}\nfn run() { print(\"middle\") }\n";
+        let (tokens, lexer_diagnostics) = crate::Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).unwrap();
+        let body = std::mem::take(&mut program.script_body);
+        let run = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == "run" => Some(function.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let edit = script_conflict_edit(source, &body, &run).expect("structured script edit");
+        let fixed = edit.new_text;
+        let (fixed_tokens, fixed_lexer_diagnostics) = crate::Lexer::lex(&fixed);
+        assert!(fixed_lexer_diagnostics.is_empty(), "{fixed_lexer_diagnostics:?}");
+        let fixed_program = crate::Parser::parse(&fixed_tokens).unwrap();
+        assert_eq!(
+            fixed_program
+                .items
+                .iter()
+                .filter(|item| matches!(item, Item::Func(function) if function.name == "run"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            fixed_program
+                .items
+                .iter()
+                .filter(|item| matches!(item, Item::Func(function) if function.name == "helper"))
+                .count(),
+            1,
+            "a declaration sharing the script line must survive outside run"
+        );
+        let fixed_run = fixed_program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == "run" => Some(function),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            fixed_run
+                .body
+                .iter()
+                .filter(|stmt| matches!(stmt, Stmt::Expr(Expr::Call(call)) if call.name == "print"))
+                .count(),
+            2,
+            "the fix must retain the loose and explicit run statements"
+        );
+        assert!(fixed_program.script_body.is_empty());
     }
 
     fn incremental_bundle(source: &str) -> ProgramBundle {

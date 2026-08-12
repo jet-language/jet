@@ -65,6 +65,11 @@ pub fn canonical_bytes(bundle: &ProgramBundle) -> Vec<u8> {
         s.push('\u{1}');
         let _ = write!(s, "{:?}", m.imports);
         s.push('\u{1}');
+        // D-ENTRY-SCRIPT1=B: pre-sema script statements are program content
+        // too. They have not become the ordinary implicit `run` item yet, so
+        // serializing only `items` would let distinct scripts share a key.
+        let _ = write!(s, "{:?}", m.script_body);
+        s.push('\u{1}');
         let _ = write!(s, "{:?}", m.items);
         s.push('\u{2}');
     }

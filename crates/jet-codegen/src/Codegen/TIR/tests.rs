@@ -118,6 +118,88 @@
     }
 
     #[test]
+    fn script_body_is_lowered_as_the_canonical_run_function() {
+        let source = "print(\"script\"); fn helper() {}\n";
+        let bundle = checked_bundle(source);
+        let module = &bundle.modules[bundle.entry];
+        assert!(module.script_body.is_empty());
+        let runs = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Func(function) if function.name == "run" => Some(function),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(runs.len(), 1, "sema must materialize exactly one ordinary run");
+        let run = runs[0];
+        assert!(run.params.is_empty(), "implicit run must have no parameters");
+        assert!(!run.is_task && !run.is_unsafe && !run.is_reactive);
+        assert!(matches!(
+            &run.return_type,
+            Some(Type::Result { ok, err })
+                if matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+        ));
+        assert_eq!(
+            run.body
+                .iter()
+                .filter(|stmt| matches!(stmt, Stmt::Expr(Expr::Call(call)) if call.name == "print"))
+                .count(),
+            1,
+            "the script operation must enter run exactly once"
+        );
+
+        let helpers = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Func(function) if function.name == "helper" => Some(function),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(helpers.len(), 1, "same-line declarations stay file-wide");
+        assert!(helpers[0].span.start >= run.span.end);
+        assert!(helpers[0].body.is_empty());
+
+        let lowered = lower_after_sema(source, "run");
+        assert_eq!(lowered.name, "run");
+        assert!(matches!(&lowered.kind, TFuncKind::TopLevel));
+        assert!(matches!(
+            &lowered.ret,
+            Some(Type::Result { ok, err })
+                if matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+        ), "canonical fallible unit return must survive TIR lowering");
+        assert_eq!(
+            lowered
+                .body
+                .iter()
+                .filter(|stmt| matches!(stmt, TStmt::SourceSpan(_)))
+                .count(),
+            1,
+            "TIR must retain one source statement marker for the script operation"
+        );
+        let printed = lowered
+            .body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                TStmt::ExprStmt(TExpr {
+                    kind: TExprKind::Print(value),
+                    ..
+                }) => Some(value.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(printed.len(), 1, "the script operation must lower exactly once");
+        assert!(matches!(
+            &printed[0].kind,
+            TExprKind::StrLit(parts)
+                if matches!(parts.as_slice(), [TStrPart::Lit(text)] if text == "script")
+        ));
+    }
+
+    #[test]
     fn comptime_float_and_string_constants_lower_to_typed_literals() {
         install_comptime_bridge();
         let lowered = lower_after_sema(

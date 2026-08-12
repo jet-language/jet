@@ -844,6 +844,7 @@ fn load_entry_with_overlays_mode_with_sink(
             ));
         }
     }
+    bundle.materialize_script_entries();
     Ok(bundle)
 }
 

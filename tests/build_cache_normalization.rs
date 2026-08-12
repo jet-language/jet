@@ -107,6 +107,15 @@ fn literal_sensitive() {
 }
 
 #[test]
+fn script_body_sensitive() {
+    let a = "print(\"a\")\n";
+    let b = "print(\"b\")\n";
+    let c = "print(\"a\")\nprint(\"b\")\n";
+    assert_ne!(key(a), key(b), "a different script statement must change the key");
+    assert_ne!(key(a), key(c), "an added script statement must change the key");
+}
+
+#[test]
 fn string_literal_content_sensitive() {
     // String-literal contents are part of the program and must change the key.
     // (The exact `Span {…}`-lookalike-inside-a-literal robustness of the span

@@ -2002,7 +2002,7 @@ pub use Bundle::{
     bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    prepare_script_entries, specialize_function_types,
+    specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{EffectSummary, SemIndexEffectFacts};
