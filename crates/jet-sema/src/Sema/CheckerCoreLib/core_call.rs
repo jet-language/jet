@@ -4,9 +4,10 @@ use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
 use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
 use crate::Sema::FFI::e3301;
-use crate::Sema::Purity::{e3401, e3403, is_impure_core, is_nondeterministic_core};
+use crate::Sema::Purity::{e3401, is_impure_core};
 use crate::Sema::SendCrossing;
 use crate::Syntax;
+use jet_foundation::Effects::is_nondeterministic_core;
 use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
 use super::core_types::{game_run_label_error, decode_error_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
@@ -890,7 +891,7 @@ impl<'a> Checker<'a> {
             // determinism rejection — the expert escape hatch.
             if self.in_pure && self.det_suppress == 0 && is_nondeterministic_core(module, name) {
                 let api = format!("{}.{}", module_short_name(module), name);
-                self.diags.push(e3403(&api, Some(span)));
+                self.diags.push(Diagnostic::e3403(&api, Some(span)));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }

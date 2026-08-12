@@ -11,12 +11,13 @@ use crate::Codegen::TIR::{
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{
-    apply_core_call, apply_impure_core_call, apply_repl_authorized_core_call, CtReport, CtValue,
-    DevSink,
+    apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
+    apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
 };
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
 use super::builtins::eval_builtin;
-use super::handles::eval_handle;
+use super::handles::eval_handle_with_type;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
@@ -1731,25 +1732,74 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
-    // #1799: these calls read or mutate runtime-owned clock/global state. A
-    // build-time fold uses a throwaway evaluator, so materializing any of them
-    // would freeze state that the running program cannot resync. Runtime and
-    // REPL evaluation are the live execution paths and remain allowed. Keep
-    // argument-only time constructors/conversions and the constant
-    // `core.perf.default_fidelity` out of this list. The current parity leaks
-    // are `date.today`'s SystemTime read and `time.instant`'s placeholder
-    // monotonic sample. E3403 remains the determinism gate, while this
-    // predicate only backs off D-VERDICT-1308-1.
+    // #1799: a build-time fold uses a throwaway evaluator, so materializing an
+    // ambient clock/PRNG result would freeze state that the running program
+    // cannot resync. Runtime and REPL evaluation are the live execution paths
+    // and remain allowed. The nondeterministic call set is shared with sema;
+    // perf fidelity is a separate runtime-global signal.
     fn should_decline_ambient_fold(&self, module: &str, method: &str) -> bool {
         !self.runtime_execution
             && !self.repl_mode
-            && matches!(
-                (module, method),
-                ("core.time", "now" | "now_utc" | "today" | "instant" | "start")
-                    | ("core.time.date", "today")
-                    | ("core.time.datetime", "now")
-                    | ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
-            )
+            && (is_nondeterministic_core(module, method)
+                || matches!(
+                    (module, method),
+                    ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
+                ))
+    }
+
+    fn comptime_core_fold_diagnostic(
+        &self,
+        module: &str,
+        method: &str,
+        span: Span,
+    ) -> Option<Diagnostic> {
+        if self.runtime_execution || self.repl_mode {
+            return None;
+        }
+        // These two calls have dedicated ownership/authorization diagnostics
+        // below; do not let the generic effect law replace them.
+        if (module == "core.net" && method == "fetch") || module == "core.vault" {
+            return None;
+        }
+        if is_nondeterministic_core(module, method) {
+            let api = format!(
+                "{}.{}",
+                module.rsplit('.').next().unwrap_or(module),
+                method
+            );
+            return Some(Diagnostic::e3403(&api, Some(span)));
+        }
+        if self.should_decline_ambient_fold(module, method) {
+            return Some(unsupported(
+                &format!("`{module}.{method}()` at compile time"),
+                span,
+            ));
+        }
+        if core_effect(module, method).is_some() && self.impure_depth == 0 {
+            return Some(Diagnostic::error(
+                "E3410",
+                format!(
+                    "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                ),
+                "effectful Core APIs are not allowed in pure comptime evaluation".to_string(),
+                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime".to_string(),
+                Some(span),
+            ));
+        }
+        None
+    }
+
+    fn runtime_time_now(
+        &self,
+        module: &str,
+        method: &str,
+        argv: &[CtValue],
+    ) -> Option<CtValue> {
+        (self.runtime_execution
+            && module == "core.time"
+            && method == "now"
+            && argv.is_empty())
+            .then(|| CtValue::Int(crate::scheduler::jet_std_time_now()))
     }
 
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
@@ -3401,6 +3451,9 @@ impl<'a> EvalCtx<'a> {
                 ));
             }
         }
+        if let Some(diagnostic) = self.comptime_core_fold_diagnostic(module, method, source_span) {
+            return Err(diagnostic);
+        }
         if module == "core.data" {
             return self.eval_core_data_call(method, args, &expr.ty, scope);
         }
@@ -3662,34 +3715,44 @@ impl<'a> EvalCtx<'a> {
                 source_span,
             ));
         }
-        if !self.runtime_execution
-            && !self.repl_mode
-            && module == "core.random"
-            && method != "rng"
-        {
-            return Err(unsupported(
-                &format!("`{module}.{method}()` at compile time"),
-                source_span,
-            ));
-        }
-        if self.should_decline_ambient_fold(module, method) {
-            return Err(unsupported(
-                &format!("`{module}.{method}()` at compile time"),
-                source_span,
-            ));
+        if let Some(value) = self.runtime_time_now(module, method, &argv) {
+            return Ok(value);
         }
         let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
+        let is_shuffle = module == "core.random" && method == "shuffle";
         if !is_tier2 {
-            return apply_core_call(module, method, argv, source_span, self.repl_mode).map(|value| {
-                mark_unknown_progress_total(value, module, method, args, progress_known_total)
-            });
+            let value = apply_core_call_with_type(
+                module,
+                method,
+                argv,
+                source_span,
+                self.repl_mode,
+                Some(&expr.ty),
+            )?;
+            if is_shuffle {
+                if let Some(place) = args.first() {
+                    let items = match &value {
+                        CtValue::List(items) => items.clone(),
+                        _ => return Err(unsupported("random.shuffle needs a list", source_span)),
+                    };
+                    self.write_back_place(place, CtValue::List(items), scope)?;
+                    return Ok(CtValue::Unit);
+                }
+            }
+            return Ok(mark_unknown_progress_total(
+                value,
+                module,
+                method,
+                args,
+                progress_known_total,
+            ));
         }
-        if self.repl_mode {
+        let value = if self.repl_mode {
             let mut sink = self
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            apply_repl_authorized_core_call(
+            apply_repl_authorized_core_call_with_type(
                 module,
                 method,
                 argv,
@@ -3698,14 +3761,14 @@ impl<'a> EvalCtx<'a> {
                 sink.as_deref_mut(),
                 &self.repl_grants,
                 reborrow_repl_authorizer(&mut self.repl_authorizer),
+                Some(&expr.ty),
             )
-            .map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
         } else if self.impure_depth > 0 && self.allow_impure {
             let mut sink = self
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            let result = apply_impure_core_call(
+            apply_impure_core_call_with_type(
                 module,
                 method,
                 argv,
@@ -3715,10 +3778,10 @@ impl<'a> EvalCtx<'a> {
                 false,
                 None,
                 None,
-            );
-            result.map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
+                Some(&expr.ty),
+            )
         } else if self.impure_depth == 0 {
-            Err(Diagnostic::error(
+            return Err(Diagnostic::error(
                 "E3410",
                 format!(
                     "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
@@ -3728,9 +3791,9 @@ impl<'a> EvalCtx<'a> {
                 "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime"
                     .to_string(),
                 Some(source_span),
-            ))
+            ));
         } else {
-            Err(Diagnostic::error(
+            return Err(Diagnostic::error(
                 "E3411",
                 format!(
                     "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
@@ -3738,8 +3801,19 @@ impl<'a> EvalCtx<'a> {
                 "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
                 "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
                 Some(source_span),
-            ))
+            ));
+        }?;
+        if is_shuffle {
+            if let Some(place) = args.first() {
+                let items = match &value {
+                    CtValue::List(items) => items.clone(),
+                    _ => return Err(unsupported("random.shuffle needs a list", source_span)),
+                };
+                self.write_back_place(place, CtValue::List(items), scope)?;
+                return Ok(CtValue::Unit);
+            }
         }
+        Ok(mark_unknown_progress_total(value, module, method, args, progress_known_total))
     }
 
     fn eval_expr_inner(
@@ -4701,7 +4775,13 @@ impl<'a> EvalCtx<'a> {
                         _ => {}
                     }
                 }
-                let mut result = eval_handle(op, &mut r, &mut argv, self.span())?;
+                let mut result = eval_handle_with_type(
+                    op,
+                    &mut r,
+                    &mut argv,
+                    self.span(),
+                    Some(&expr.ty),
+                )?;
                 let http_json = matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
@@ -5353,11 +5433,12 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                     }
-                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating(
+                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating_with_type(
                         &mut r,
                         &method.name,
                         argv.clone(),
                         self.span(),
+                        Some(&expr.ty),
                     ) {
                         self.write_back_place(recv, r, scope)?;
                         return Ok(ret);
@@ -5959,11 +6040,12 @@ impl<'a> EvalCtx<'a> {
                     for a in args {
                         argv.push(self.eval_expr_child(a, scope)?);
                     }
-                    let result = match crate::Comptime::Builtins::apply_mutating(
+                    let result = match crate::Comptime::Builtins::apply_mutating_with_type(
                         &mut r,
                         method,
                         argv.clone(),
                         self.span(),
+                        Some(&expr.ty),
                     ) {
                         Ok(v) => v,
                         Err(_) => crate::Comptime::Builtins::apply_method(
@@ -6615,19 +6697,39 @@ impl<'a> EvalCtx<'a> {
                         // Core-import alias may still lower as StaticCall when
                         // function bodies were typed before imports propagated.
                         if let Some(module) = self.core_imports.get(type_name) {
-                            if self.should_decline_ambient_fold(module, &method.name) {
-                                return Err(unsupported(
-                                    &format!("`{module}.{}()` at compile time", method.name),
-                                    self.span(),
-                                ));
+                            if let Some(value) =
+                                self.runtime_time_now(module, &method.name, &argv)
+                            {
+                                return Ok(value);
                             }
-                            return apply_core_call(
+                            if let Some(diagnostic) = self.comptime_core_fold_diagnostic(
+                                module,
+                                &method.name,
+                                self.span(),
+                            ) {
+                                return Err(diagnostic);
+                            }
+                            let value = apply_core_call_with_type(
                                 module,
                                 &method.name,
                                 argv,
                                 self.span(),
                                 self.repl_mode,
-                            );
+                                Some(&expr.ty),
+                            )?;
+                            if module == "core.random" && method.name == "shuffle" {
+                                if let (Some(place), CtValue::List(items)) =
+                                    (args.first(), &value)
+                                {
+                                    self.write_back_place(
+                                        &place.value,
+                                        CtValue::List(items.clone()),
+                                        scope,
+                                    )?;
+                                    return Ok(CtValue::Unit);
+                                }
+                            }
+                            return Ok(value);
                         }
                         // Match Cranelift JIT `static_method_key`: mono methods are
                         // keyed by the concrete owner (`Box<Int>::new`). When a

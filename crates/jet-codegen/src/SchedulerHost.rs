@@ -68,24 +68,6 @@ enum JetParaRuntimeFailure {
 // drift. The E3003 text comes from the one renderer in Prelude/TaskGroup.rs.
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-thread_local! {
-    static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-#[cfg(test)]
-fn jet_deadline_remaining_ms() -> Option<i64> {
-    if TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get()) {
-        return Some(0);
-    }
-    jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
-}
-
-#[cfg(not(test))]
-fn jet_deadline_remaining_ms() -> Option<i64> {
-    jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
-}
-
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = jet_std::jet_task_deadline(wait_kind).render();
     jet_std::jet_task_deadline_mark_pending();

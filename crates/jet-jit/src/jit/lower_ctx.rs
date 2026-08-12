@@ -12070,6 +12070,11 @@ impl LowerCtx<'_, '_> {
                         "seed" if args.len() == 1 => {
                             (self.host.random.seed, vec![self.lower_expr(&args[0])?])
                         }
+                        "int" if args.len() == 2 => (
+                            self.host.random.int,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "float" if args.is_empty() => (self.host.random.float, Vec::new()),
                         "bool" if args.len() == 1 => {
                             (self.host.random.bool_p, vec![self.lower_expr(&args[0])?])
                         }
@@ -12086,6 +12091,15 @@ impl LowerCtx<'_, '_> {
                         }
                         "bytes" if args.len() == 1 => {
                             (self.host.random.bytes, vec![self.lower_expr(&args[0])?])
+                        }
+                        "pick" if args.len() == 1 => {
+                            (self.host.random.pick, vec![self.lower_expr(&args[0])?])
+                        }
+                        "shuffle" if args.len() == 1 => {
+                            (self.host.random.shuffle, vec![self.lower_expr(&args[0])?])
+                        }
+                        "split" if args.len() == 1 => {
+                            (self.host.random.split, vec![self.lower_expr(&args[0])?])
                         }
                         "weighted_pick" if args.len() == 2 => {
                             if matches!(
@@ -12937,6 +12951,9 @@ impl LowerCtx<'_, '_> {
                             vec![self.lower_expr(&args[0])?],
                         ),
                         ("core.time.datetime", "now") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
+                        ("core.time", "now_utc") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
+                        ("core.time", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
+                        ("core.time", "start") if args.is_empty() => (self.host.time.start, Vec::new()),
                         ("core.time", "parse_rfc3339") if args.len() == 1 => (
                             self.host.time.parse_rfc3339,
                             vec![self.lower_expr(&args[0])?],
@@ -12946,8 +12963,40 @@ impl LowerCtx<'_, '_> {
                             vec![self.lower_expr(&args[0])?],
                         ),
                         ("core.time", "utc") if args.is_empty() => (self.host.time.utc, Vec::new()),
+                        ("core.time", "period") if args.len() == 3 => (
+                            self.host.time.period,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        ("core.time", "period_days") if args.len() == 1 => (
+                            self.host.time.period_days,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         ("core.time", "period_months") if args.len() == 1 => (
                             self.host.time.period_months,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "period_years") if args.len() == 1 => (
+                            self.host.time.period_years,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "zone") if args.len() == 1 => (
+                            self.host.time.zone,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "zoned_local") if args.len() == 3 => (
+                            self.host.time.zoned_local,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        ("core.time", "parse_time") if args.len() == 1 => (
+                            self.host.time.parse_time,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         ("core.time", "instant") if args.is_empty() => (self.host.time.instant, Vec::new()),
@@ -18970,7 +19019,9 @@ impl LowerCtx<'_, '_> {
             THandleOp::StderrIsTty => {
                 Ok(self.call_host(self.host.io.stderr_is_tty, &[recv_val]))
             }
-            THandleOp::StopwatchElapsedMillis => Err("jit handle method unsupported".to_string()),
+            THandleOp::StopwatchElapsedMillis => {
+                Ok(self.call_host(self.host.time.stopwatch_elapsed, &[recv_val]))
+            }
             THandleOp::ClockNow => {
                 Ok(self.call_host(self.host.clock_now, &[recv_val]))
             }
@@ -19003,7 +19054,9 @@ impl LowerCtx<'_, '_> {
                 let hi = self.lower_expr(&args[1])?;
                 Ok(self.call_host(self.host.random.rng_int, &[recv_val, lo, hi]))
             }
-            THandleOp::RngFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngFloat => {
+                Ok(self.call_host(self.host.random.rng_float, &[recv_val]))
+            }
             THandleOp::RngFloatRange => {
                 let lo = self.lower_expr(&args[0])?;
                 let hi = self.lower_expr(&args[1])?;
@@ -19016,8 +19069,21 @@ impl LowerCtx<'_, '_> {
                 let p = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.random.rng_bool_p, &[recv_val, p]))
             }
-            THandleOp::RngNormal => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngExponential => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngNormal => {
+                let mean = self.lower_expr(&args[0])?;
+                let stddev = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.random.rng_normal,
+                    &[recv_val, mean, stddev],
+                ))
+            }
+            THandleOp::RngExponential => {
+                let lambda = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.random.rng_exponential,
+                    &[recv_val, lambda],
+                ))
+            }
             THandleOp::RngBytes => {
                 let n = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.random.rng_bytes, &[recv_val, n]))

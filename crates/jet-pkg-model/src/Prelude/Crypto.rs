@@ -15,6 +15,7 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use hkdf::Hkdf;
 use sha2::{Digest, Sha256, Sha512};
 use subtle::ConstantTimeEq;
+use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 
 const JETV_MAGIC: &[u8; 4] = b"JETV";
 const JETW_MAGIC: &[u8; 4] = b"JETW";

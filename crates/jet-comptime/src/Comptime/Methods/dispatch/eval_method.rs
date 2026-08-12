@@ -1,6 +1,7 @@
 use super::*;
 use crate::AST::CtReport;
 use super::super::super::Interpreter::reborrow_repl_authorizer;
+use jet_foundation::Effects::core_effect;
 
 fn decode_path(path: &str) -> String {
     if path == "$" {
@@ -372,48 +373,56 @@ impl<'a> Interp<'a> {
         // Check *before* evaluating the receiver so unknown aliases don't fail.
         if let Expr::Ident(alias, _) = receiver {
             if let Some(module) = self.core_imports.get(alias.as_str()).cloned() {
+                // D-DET1: ambient nondeterminism is never folded into an AST
+                // value. This must precede argument evaluation so `shuffle`
+                // cannot mutate a temporary before E3403 is registered.
+                if !self.repl_mode && is_nondeterministic_core(&module, method) {
+                    let api = format!(
+                        "{}.{}",
+                        module.rsplit('.').next().unwrap_or(&module),
+                        method
+                    );
+                    return Err(Diagnostic::e3403(&api, Some(span)));
+                }
                 // D-DET1: `random.shuffle(&xs)` edits its list in place (E0202 requires
-                // write access) — the one `core.random` call that mutates a caller
-                // binding rather than returning a value, so it needs `write_back`
-                // (the same mechanism `.sort`/`.push` use) instead of the generic
-                // by-value `apply_core_call` dispatch below.
+                // write access). Evaluate the list first, then use the same Core
+                // adapter as every other tier before writing the returned list back.
                 if matches!((module.as_str(), method), ("core.random", "shuffle")) {
                     let Some(arg) = args.first() else {
                         return Err(unsupported("random.shuffle(): missing arg 0", span));
                     };
                     let list = self.eval(&arg.expr, scope)?;
-                    let CtValue::List(mut items) = list else {
+                    if !matches!(&list, CtValue::List(_)) {
+                        return Err(unsupported("random.shuffle needs a list", span));
+                    }
+                    let value = if self.repl_mode {
+                        self.poll_repl_interrupt();
+                        let _runtime_call =
+                            super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
+                        apply_repl_authorized_core_call_with_type(
+                            &module,
+                            method,
+                            vec![list],
+                            span,
+                            self.base_dir,
+                            self.sink.as_deref_mut(),
+                            &self.repl_grants,
+                            reborrow_repl_authorizer(&mut self.repl_authorizer),
+                            resolved_ret,
+                        )?
+                    } else {
+                        apply_core_call_with_type(
+                            &module,
+                            method,
+                            vec![list],
+                            span,
+                            false,
+                            resolved_ret,
+                        )?
+                    };
+                    let CtValue::List(items) = value else {
                         return Err(unsupported("random.shuffle needs a list", span));
                     };
-                    if self.repl_mode {
-                        let request = super::super::super::ReplEffectRequest {
-                            root: "Rand".to_string(),
-                            operation: "Draw".to_string(),
-                            resource: "shuffle".to_string(),
-                        };
-                        if !self.repl_grants.iter().any(|cap| cap == "Rand") {
-                            return Err(Diagnostic::error(
-                                "E1803",
-                                "Rand.Draw for `shuffle` has no REPL runtime authority".to_string(),
-                                "REPL ambient randomness requires lexical `#Grant(Rand)` authority; the RNG state did not advance".to_string(),
-                                "wrap this draw in `#Grant(Rand) { caps -> ... }` and approve it or pass `--allow-rand`".to_string(),
-                                Some(span),
-                            ));
-                        }
-                        let Some(authorizer) =
-                            reborrow_repl_authorizer(&mut self.repl_authorizer)
-                        else {
-                            return Err(Diagnostic::error(
-                                "E1803",
-                                "Rand.Draw for `shuffle` was denied".to_string(),
-                                "this REPL mode has no runtime authority provider; the RNG state did not advance".to_string(),
-                                "restart with `jet repl --allow-rand`".to_string(),
-                                Some(span),
-                            ));
-                        };
-                        authorizer.authorize(&request, span)?;
-                    }
-                    with_ambient_rng(|st| shuffle_ct_list(st, &mut items));
                     self.write_back(&arg.expr, CtValue::List(items), scope)?;
                     return Ok(CtValue::Unit);
                 }
@@ -658,11 +667,35 @@ impl<'a> Interp<'a> {
                 if module == "core.vault" {
                     return Err(vault_comptime_denied(&module, method, span));
                 }
+                // D-DET1 / I9: the AST interpreter is another fold-capable
+                // entry point. Read the same foundation effect law before its
+                // generic adapter so ambient time/random state cannot be
+                // materialized by an implicit comptime evaluation.
+                if !self.repl_mode && is_nondeterministic_core(&module, method) {
+                    let api = format!(
+                        "{}.{}",
+                        module.rsplit('.').next().unwrap_or(&module),
+                        method
+                    );
+                    return Err(Diagnostic::e3403(&api, Some(span)));
+                }
+                if !self.repl_mode && self.impure_depth == 0 && core_effect(&module, method).is_some() {
+                    return Err(Diagnostic::error(
+                        "E3410",
+                        format!(
+                            "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                        ),
+                        "effectful Core APIs are not allowed in pure comptime evaluation"
+                            .to_string(),
+                        "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime".to_string(),
+                        Some(span),
+                    ));
+                }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
                 if is_tier2 {
                     if self.repl_mode {
-                        return apply_repl_authorized_core_call(
+                        return apply_repl_authorized_core_call_with_type(
                             &module,
                             method,
                             argv,
@@ -671,6 +704,7 @@ impl<'a> Interp<'a> {
                             self.sink.as_deref_mut(),
                             &self.repl_grants,
                             reborrow_repl_authorizer(&mut self.repl_authorizer),
+                            resolved_ret,
                         );
                     }
                     if self.impure_depth == 0 {
@@ -695,7 +729,7 @@ impl<'a> Interp<'a> {
                             Some(span),
                         ));
                     }
-                    return apply_impure_core_call(
+                    return apply_impure_core_call_with_type(
                         &module,
                         method,
                         argv,
@@ -705,12 +739,20 @@ impl<'a> Interp<'a> {
                         false,
                         None,
                         None,
+                        resolved_ret,
                     );
                 }
                 if matches!((module.as_str(), method), ("core.data", "pivot_sum")) {
                     return self.eval_pivot_sum(argv, span);
                 }
-                return apply_core_call(&module, method, argv, span, self.repl_mode);
+                return apply_core_call_with_type(
+                    &module,
+                    method,
+                    argv,
+                    span,
+                    self.repl_mode,
+                    resolved_ret,
+                );
             }
         }
 
@@ -2047,7 +2089,13 @@ impl<'a> Interp<'a> {
                         _ => None,
                     })
                     .unwrap_or(0);
-                let value = apply_seeded_rng_method(&mut state, method, &mut argv, span)?;
+                let value = apply_seeded_rng_method_with_type(
+                    &mut state,
+                    method,
+                    &mut argv,
+                    span,
+                    resolved_ret,
+                )?;
                 if method == "shuffle" {
                     self.write_back(&args[0].expr, argv[0].clone(), scope)?;
                 }

@@ -359,6 +359,50 @@ fn run() { print("{bad()}") }
     );
 }
 
+/// #1488: `date.today()` must have the same ambient classification in sema's
+/// purity walk and the explicit `$` comptime-fold path. It used to be present
+/// only in the TIR fold guard, so the two paths diverged.
+#[test]
+fn nondeterministic_time_classification_is_shared_by_purity_and_folding() {
+    let pure_src = r#"
+use core.time.date as date;
+
+fn pure_today() =[]=> String {
+    return date.today().to_string()
+}
+
+fn run() {
+    print(pure_today())
+}
+"#;
+    let purity_diagnostics =
+        jet::compile(pure_src).expect_err("ambient date.today must be rejected in pure code");
+    assert!(
+        purity_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "sema purity must report E3403, got: {purity_diagnostics:#?}"
+    );
+
+    let fold_src = r#"
+use core.time.date as date;
+
+fn run() {
+    $today :: date.today()
+}
+"#;
+    let fold_diagnostics =
+        jet::compile(fold_src).expect_err("ambient date.today must be rejected at comptime");
+    assert!(
+        fold_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "explicit comptime folding must report E3403, got: {fold_diagnostics:#?}"
+    );
+    assert!(
+        fold_diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "E0956"),
+        "ambient date.today must not fall back to generic comptime E0956: {fold_diagnostics:#?}"
+    );
+}
+
 // ── Piece 2: audited nondeterminism escape ────────────────────────────────────
 
 /// `#Nondeterministic("reason") { … }` suspends E3403 inside `#Pure fn`.

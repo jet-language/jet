@@ -56,19 +56,10 @@ pub fn e3402(call_name: &str, span: Option<crate::Diagnostics::Span>) -> Diagnos
     )
 }
 
-/// E3403: non-deterministic construct in pure evaluation context.
+/// E3403: keep the sema-facing constructor while the registered diagnostic
+/// wording lives with the foundation diagnostic row.
 pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
-    Diagnostic::error(
-        "E3403",
-        format!(
-            "`{}` is non-deterministic and cannot appear in a pure evaluation",
-            what
-        ),
-        "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
-        "remove this call, or remove the enclosing function's explicit `=[]=>` bound"
-            .to_string(),
-        span,
-    )
+    Diagnostic::e3403(what, span)
 }
 
 /// The builtins that are always impure (write to stdout/stderr or read input).
@@ -88,24 +79,6 @@ pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
             "core.io",
             "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input"
         )
-    )
-}
-
-/// E3403: std calls that are non-deterministic — their result depends on wall
-/// clock or RNG, so they cannot appear in a pure evaluation. Keyed on the
-/// resolved `(module, method)` pair (std calls are method calls on a module
-/// alias, not bare names). Time formatting is pure (Int + pattern → String)
-/// and intentionally excluded.
-pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
-    matches!(
-        (module, method),
-        ("core.time", "now" | "sleep" | "start")
-            | (
-                "core.random",
-                "int" | "float" | "float_range" | "bool" | "normal" | "exponential" | "pick"
-                    | "weighted_pick" | "sample" | "shuffle" | "seed" | "split" | "bytes"
-            )
-            | ("core.crypto.random", "bytes")
     )
 }
 

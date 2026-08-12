@@ -1,6 +1,8 @@
 // D-CRYPTO-KEYWRAP1=A: canonical JVKW/v1 portable backup for typed vault keys.
 // Emitted after Crypto.rs and SecretsCrypto.rs in the hidden bridge crate.
 
+use jet_crypto_entropy::jet_crypto_entropy_fill;
+
 const JVKW_MAGIC: &[u8; 4] = b"JVKW";
 const JVKW_VERSION: u8 = 1;
 const JVKW_MAX: usize = 8_192;

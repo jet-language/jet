@@ -15,6 +15,32 @@ pub fn apply_impure_core_call(
     pinned_executable: Option<&std::fs::File>,
     verified_root: Option<&std::fs::File>,
 ) -> Result<CtValue, Diagnostic> {
+    apply_impure_core_call_with_type(
+        module,
+        method,
+        args,
+        span,
+        base_dir,
+        sink,
+        repl_mode,
+        pinned_executable,
+        verified_root,
+        None,
+    )
+}
+
+pub fn apply_impure_core_call_with_type(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    base_dir: &std::path::Path,
+    sink: Option<&mut super::super::super::Interpreter::DevSink>,
+    repl_mode: bool,
+    pinned_executable: Option<&std::fs::File>,
+    verified_root: Option<&std::fs::File>,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(
@@ -39,8 +65,13 @@ pub fn apply_impure_core_call(
             return result;
         }
     }
-    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
-    {
+    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+        module,
+        method,
+        args.clone(),
+        span,
+        resolved_ret.cloned(),
+    ) {
         return result;
     }
     let one = |i: usize| {
@@ -401,9 +432,11 @@ pub fn apply_impure_core_call(
         ("core.compress.gzip", _)
         | ("core.compress.zstd", _)
         | ("core.archive", _)
-        | ("core.perf", _) => apply_core_call(module, method, args, span, repl_mode),
+        | ("core.perf", _) => {
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
+        }
         (module, _) if module.starts_with("core.encoding.") => {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         // Ambient impure depth must not block pure-tier CorePureParity surfaces
         // that TirBridge already evaluates (date/math/measurement/testing/…).
@@ -412,10 +445,13 @@ pub fn apply_impure_core_call(
         ("core.io", method)
             if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
         {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.random", _) | ("core.testing", "fake_rng") => {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
+        }
+        ("core.crypto.random", "bytes") => {
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.time.date", _)
         | ("core.time.duration", _)
@@ -441,14 +477,16 @@ pub fn apply_impure_core_call(
         | ("core.units", _)
         | ("core.time", _)
         | ("core.time.datetime", _)
-        | ("core.science.measurement", _) => apply_core_call(module, method, args, span, repl_mode),
+        | ("core.science.measurement", _) => {
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
+        }
         // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
         // Keep E3412 for the rest. D-META-EFFECT1: "pure" is what the effect
         // table says, so both tiers agree without a second list here.
         ("core.net", method)
             if jet_foundation::Effects::core_effect("core.net", method).is_none() =>
         {
-            apply_core_call(module, method, args, span, repl_mode)
+            apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.net", _) => Err(Diagnostic::error(
             "E3412",

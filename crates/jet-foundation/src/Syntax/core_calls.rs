@@ -931,7 +931,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "parse_time", "JetLocalTime::parse", false, &[true])
         .with_pure_route(CoreCallPureRoute::Time)
         .without_direct_aot()
-        .without_direct_jit(),
+        .with_jit_symbol("jet_jit_time_parse_time"),
     CoreCallRecord::new("core.time.date", "parse", "JetDate::parse", false, &[true])
         .with_pure_route(CoreCallPureRoute::Date)
         .without_direct_aot()

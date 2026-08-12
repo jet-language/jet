@@ -6,11 +6,11 @@ use jet_codegen::scheduler::{
     jet_scheduler_propagate_deadline,
     jet_scheduler_panic_should_unwind,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
-    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_std_time_sleep,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
     jet_scheduler_task_group_wait, jet_scheduler_yield_now, jet_task_delay_ms_defaulted,
     jet_task_interval_ms_defaulted,
-    jet_task_join_deadline_check, jet_task_sleep_ms_defaulted, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
+    jet_task_join_deadline_check, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
     JetSchedulerWait, JetShieldExit, JetTaskControl, ParkSlot,
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
@@ -402,20 +402,7 @@ extern "C" fn jet_jit_generator_channel_new() -> i64 {
 
 /// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
 extern "C" fn jet_jit_time_now() -> i64 {
-    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    jet_codegen::scheduler::jet_std_time_now()
 }
 
 /// `#Context(deadline: …)` enter.
@@ -1067,7 +1054,7 @@ extern "C" fn jet_jit_interval(ms: i64) -> i64 {
 
 extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
     wait_status(|| {
-        jet_task_sleep_ms_defaulted(millis);
+        jet_std_time_sleep(millis);
         0
     })
 }

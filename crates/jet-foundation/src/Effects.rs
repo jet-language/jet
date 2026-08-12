@@ -63,6 +63,23 @@ pub enum Effect {
     Secret,
 }
 impl Effect {
+    /// Whether a call with this effect needs an explicit comptime capability
+    /// gate.  This policy is part of the effect law, so the evaluator and
+    /// interpreter do not maintain their own ambient-effect whitelist.
+    pub fn requires_comptime_gate(self) -> bool {
+        matches!(
+            self,
+            Effect::Net
+                | Effect::FS
+                | Effect::IO
+                | Effect::DB
+                | Effect::Env
+                | Effect::Exec
+                | Effect::Browser
+                | Effect::Secret
+        )
+    }
+
     /// The PascalCase surface spelling (D-CASING1).
     pub fn name(self) -> &'static str {
         match self {
@@ -146,6 +163,40 @@ impl Effect {
 /// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
 /// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
 pub type EffectSet = BTreeSet<String>;
+
+/// D-DET1: Core calls whose result depends on ambient wall-clock or PRNG
+/// state. This is the one classification used by purity checking and
+/// compile-time folding; deterministic constructors such as `random.rng`
+/// remain outside it.
+pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
+    matches!(
+        (module, method),
+        (
+            "core.time",
+            "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
+        )
+            | ("core.time.date", "today")
+            | ("core.time.datetime", "now")
+            | (
+                "core.random",
+                "int"
+                    | "float"
+                    | "float_range"
+                    | "bool"
+                    | "normal"
+                    | "exponential"
+                    | "pick"
+                    | "weighted_pick"
+                    | "sample"
+                    | "shuffle"
+                    | "seed"
+                    | "split"
+                    | "bytes"
+            )
+            | ("core.crypto.random", "bytes")
+    )
+}
+
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
 /// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring
@@ -173,12 +224,20 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
                 | "period_days"
                 | "period_months"
                 | "period_years"
+                | "zone"
                 | "utc"
                 | "zoned"
                 | "zoned_local"
         ) | ("core.random", "rng")
     ) {
         return None;
+    }
+    if is_nondeterministic_core(module, method) {
+        return Some(match module {
+            "core.time" | "core.time.date" | "core.time.datetime" => Effect::Time,
+            "core.random" | "core.crypto.random" => Effect::Rand,
+            _ => return None,
+        });
     }
     // D-META-EFFECT1: these read or reshape values the caller already holds —
     // parsing an address, asking a recorded error for its message, reading a
@@ -310,6 +369,11 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.vault.expert" => Effect::Secret,
         _ => return None,
     })
+}
+
+/// The shared comptime gate fact for a Core call.
+pub fn core_requires_comptime_gate(module: &str, method: &str) -> bool {
+    core_effect(module, method).is_some_and(Effect::requires_comptime_gate)
 }
 /// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
 /// effect that, once performed, cannot be rolled back. These are rejected when

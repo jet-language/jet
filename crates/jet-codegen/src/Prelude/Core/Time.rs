@@ -251,6 +251,7 @@ impl JetPeriod {
 pub(crate) struct JetInstant {
     start: std::time::Instant,
 }
+
 impl JetInstant {
     pub(crate) fn now() -> Self {
         JetInstant {

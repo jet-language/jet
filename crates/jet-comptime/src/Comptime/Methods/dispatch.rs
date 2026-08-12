@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::Effects::{core_effect, Effect};
+use jet_foundation::Effects::{core_requires_comptime_gate, is_nondeterministic_core};
 use crate::AST::{
     AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp,
 };
@@ -25,21 +25,16 @@ use super::super::Interpreter::{Flow, Interp};
 use crate::AST::{as_bytes, CtValue};
 use jet_foundation::Names::{mangle, user_type_rust};
 use super::core_calls::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, as_float, display_core_pure_value,
-    eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
-    with_ambient_rng,
+    apply_core_call_with_type, apply_data_line_call,
+    apply_impure_core_call_with_type, as_float, display_core_pure_value,
+    eval_regex_replace_all_with, sketch_add, solver_new, solver_require,
 };
-use super::repl_process::apply_repl_authorized_core_call;
+use super::repl_process::{
+    apply_repl_authorized_core_call_with_type,
+};
 
 mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
-}
-
-// Keep this seeded SplitMix64 stream byte-for-byte with the AOT `jet_rng_*`
-// helpers. `core.random`'s ambient interpreter RNG is intentionally separate.
-// parity: include path=crates/jet-codegen/src/Prelude/Core/SeededRandom.rs
-fn seeded_rng_next(state: &mut u64) -> u64 {
-    seeded_random_kernel::jet_seeded_rng_next(state)
 }
 
 fn seeded_rng_int(state: &mut u64, low: i64, high: i64) -> i64 {
@@ -78,37 +73,16 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
     unique
 }
 
-/// D-META-EFFECT1: which tier a Core call belongs to is read off its effect
-/// set, not off a list kept here. An ambient effect — one that reaches the
-/// build machine's filesystem, environment, terminal, processes, network,
-/// secrets, or a live store — is Tier 2: it needs `#Impure("reason")` and
-/// `--allow-impure`. Time and Rand stay outside this gate because determinism
-/// already governs them (E3403), and Log/GPU touch nothing the build can
-/// observe.
-fn is_ambient_effect(effect: Effect) -> bool {
-    matches!(
-        effect,
-        Effect::FS
-            | Effect::Env
-            | Effect::IO
-            | Effect::Exec
-            | Effect::Net
-            | Effect::Secret
-            | Effect::DB
-            | Effect::Browser
-    )
-}
-
 pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
     // `app.live(…)` and friends are the web module's live-query registry under
     // the entry alias; resolve the alias before asking for the fact.
     let resolved = if module == "app" { "core.web" } else { module };
-    if core_effect(resolved, method).is_some_and(is_ambient_effect) {
+    if core_requires_comptime_gate(resolved, method) {
         return true;
     }
     // The REPL re-reads ambient randomness between lines, so a folded draw
     // would go stale; the seeded constructor stays deterministic.
-    repl_mode && module == "core.random" && method != "rng"
+    repl_mode && is_nondeterministic_core(resolved, method)
 }
 
 pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnostic {
@@ -147,6 +121,16 @@ pub fn apply_seeded_rng_method(
     method: &str,
     args: &mut [CtValue],
     span: Span,
+) -> Result<CtValue, Diagnostic> {
+    apply_seeded_rng_method_with_type(state, method, args, span, None)
+}
+
+pub fn apply_seeded_rng_method_with_type(
+    state: &mut u64,
+    method: &str,
+    args: &mut [CtValue],
+    span: Span,
+    resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
     let float = |index| {
         args.get(index)
@@ -208,70 +192,56 @@ pub fn apply_seeded_rng_method(
         }),
         "pick" => {
             let values = list(0)?;
-            Ok(if values.is_empty() {
-                CtValue::absent(Type::Int)
-            } else {
-                let index = seeded_rng_int(state, 0, values.len() as i64 - 1) as usize;
-                CtValue::Present(Box::new(values[index].clone()))
-            })
+            match seeded_random_kernel::jet_seeded_rng_pick(state, &values.to_vec()) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Rng.pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         "weighted_pick" => {
             let values = list(0)?;
             let weights = list(1)?;
             if values.is_empty() || values.len() != weights.len() {
-                return Ok(CtValue::absent(Type::Int));
+                return Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Rng.weighted_pick needs a resolved element type", span)
+                    })?,
+                ));
             }
             let weights = weights
                 .iter()
                 .map(|weight| as_float(weight, span))
                 .collect::<Result<Vec<_>, _>>()?;
-            let total = weights
-                .iter()
-                .filter(|weight| weight.is_finite() && **weight > 0.0)
-                .sum::<f64>();
-            if total <= 0.0 {
-                return Ok(CtValue::absent(Type::Int));
+            match seeded_random_kernel::jet_seeded_rng_weighted_pick(
+                state,
+                &values.to_vec(),
+                &weights,
+            ) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("Rng.weighted_pick needs a resolved element type", span)
+                    })?,
+                )),
             }
-            let mut needle = seeded_rng_float(state) * total;
-            let picked = values
-                .iter()
-                .zip(weights)
-                .find_map(|(value, weight)| {
-                    let weight = if weight.is_finite() && weight > 0.0 {
-                        weight
-                    } else {
-                        0.0
-                    };
-                    if needle < weight {
-                        Some(value.clone())
-                    } else {
-                        needle -= weight;
-                        None
-                    }
-                })
-                .or_else(|| values.last().cloned());
-            Ok(CtValue::Present(Box::new(picked.unwrap())))
         }
         "sample" => {
             let values = list(0)?;
             let count = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
-            let count = (count.max(0) as usize).min(values.len());
-            let mut pool = values.to_vec();
-            for index in 0..count {
-                let picked = seeded_rng_int(state, index as i64, pool.len() as i64 - 1) as usize;
-                pool.swap(index, picked);
-            }
-            pool.truncate(count);
-            Ok(CtValue::List(pool))
+            Ok(CtValue::List(seeded_random_kernel::jet_seeded_rng_sample(
+                state,
+                &values.to_vec(),
+                count,
+            )))
         }
         "shuffle" => {
             let Some(CtValue::List(values)) = args.first_mut() else {
                 return Err(unsupported("Rng.shuffle with a non-list argument", span));
             };
-            for index in (1..values.len()).rev() {
-                let picked = seeded_rng_int(state, 0, index as i64) as usize;
-                values.swap(index, picked);
-            }
+            seeded_random_kernel::jet_seeded_rng_shuffle(state, values);
             Ok(CtValue::Unit)
         }
         _ => Err(unsupported("this Rng method", span)),

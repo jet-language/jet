@@ -602,11 +602,224 @@ fn struct_bytes(v: &CtValue, type_name: &str, span: Span) -> Result<Vec<u8>, Dia
     }
 }
 
+fn ambient_int_arg(
+    args: &[CtValue],
+    index: usize,
+    name: &str,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Int(value)) => Ok(*value),
+        _ => Err(unsupported(&format!("{name} expects an Int argument"), span)),
+    }
+}
+
+fn ambient_float_arg(
+    args: &[CtValue],
+    index: usize,
+    name: &str,
+    span: Span,
+) -> Result<f64, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Float(value)) => Ok(value.as_f64()),
+        Some(CtValue::Int(value)) => Ok(*value as f64),
+        _ => Err(unsupported(&format!("{name} expects a numeric argument"), span)),
+    }
+}
+
+fn ambient_random_call(
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    resolved_ret: Option<&Type>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if method == "rng"
+        || !matches!(
+            method,
+            "seed"
+                | "int"
+                | "float"
+                | "float_range"
+                | "bool"
+                | "normal"
+                | "exponential"
+                | "bytes"
+                | "pick"
+                | "weighted_pick"
+                | "sample"
+                | "shuffle"
+                | "split"
+        )
+    {
+        return None;
+    }
+    let result = (|| match method {
+        "seed" => {
+            crate::Random::ambient_seed(ambient_int_arg(&args, 0, "random.seed", span)?);
+            Ok(CtValue::Unit)
+        }
+        "int" => Ok(CtValue::Int(crate::Random::ambient_int(
+            ambient_int_arg(&args, 0, "random.int", span)?,
+            ambient_int_arg(&args, 1, "random.int", span)?,
+        ))),
+        "float" => Ok(CtValue::Float(CtFloat::f64(crate::Random::ambient_float()))),
+        "float_range" => Ok(CtValue::Float(CtFloat::f64(
+            crate::Random::ambient_float_range(
+                ambient_float_arg(&args, 0, "random.float_range", span)?,
+                ambient_float_arg(&args, 1, "random.float_range", span)?,
+            ),
+        ))),
+        "bool" => Ok(CtValue::Bool(crate::Random::ambient_bool(
+            ambient_float_arg(&args, 0, "random.bool", span)?,
+        ))),
+        "normal" => Ok(CtValue::Float(CtFloat::f64(crate::Random::ambient_normal(
+            ambient_float_arg(&args, 0, "random.normal", span)?,
+            ambient_float_arg(&args, 1, "random.normal", span)?,
+        )))),
+        "exponential" => Ok(CtValue::Float(CtFloat::f64(
+            crate::Random::ambient_exponential(ambient_float_arg(
+                &args,
+                0,
+                "random.exponential",
+                span,
+            )?),
+        ))),
+        "bytes" => Ok(CtValue::Bytes(crate::Random::ambient_bytes(
+            ambient_int_arg(&args, 0, "random.bytes", span)?,
+        ))),
+        "pick" => {
+            let CtValue::List(items) = args.first().ok_or_else(|| {
+                unsupported("random.pick needs a list", span)
+            })? else {
+                return Err(unsupported("random.pick needs a list", span));
+            };
+            match crate::Random::ambient_pick(items) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
+        }
+        "weighted_pick" => {
+            let CtValue::List(items) = args.first().ok_or_else(|| {
+                unsupported("random.weighted_pick needs a list", span)
+            })? else {
+                return Err(unsupported(
+                    "random.weighted_pick needs a list",
+                    span,
+                ));
+            };
+            let CtValue::List(weights) = args.get(1).ok_or_else(|| {
+                unsupported("random.weighted_pick needs weights", span)
+            })? else {
+                return Err(unsupported(
+                    "random.weighted_pick needs weights",
+                    span,
+                ));
+            };
+            let weights = weights
+                .iter()
+                .map(|value| match value {
+                    CtValue::Float(value) => Ok(value.as_f64()),
+                    CtValue::Int(value) => Ok(*value as f64),
+                    _ => Err(unsupported(
+                        "random.weighted_pick weights must be numeric",
+                        span,
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            match crate::Random::ambient_weighted_pick(items, &weights) {
+                Some(value) => Ok(CtValue::Present(Box::new(value))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.weighted_pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
+        }
+        "sample" => {
+            let CtValue::List(items) = args.first().ok_or_else(|| {
+                unsupported("random.sample needs a list", span)
+            })? else {
+                return Err(unsupported("random.sample needs a list", span));
+            };
+            Ok(CtValue::List(crate::Random::ambient_sample(
+                items,
+                ambient_int_arg(&args, 1, "random.sample", span)?,
+            )))
+        }
+        "shuffle" => {
+            let CtValue::List(mut items) = args.first().cloned().ok_or_else(|| {
+                unsupported("random.shuffle needs a list", span)
+            })? else {
+                return Err(unsupported("random.shuffle needs a list", span));
+            };
+            crate::Random::ambient_shuffle(&mut items);
+            Ok(CtValue::List(items))
+        }
+        "split" => Ok(CtValue::Struct {
+            type_name: jet_foundation::Syntax::RNG_TYPE.to_string(),
+            fields: vec![(
+                "state".to_string(),
+                CtValue::Int(crate::Random::ambient_split(ambient_int_arg(
+                    &args,
+                    0,
+                    "random.split",
+                    span,
+                )?)),
+            )],
+        }),
+        _ => unreachable!("ambient random method was filtered above"),
+    })();
+    Some(result)
+}
+
+fn ambient_time_call(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(
+        (module, method),
+        ("core.time", "now" | "now_utc" | "today" | "instant" | "sleep" | "start")
+            | ("core.time.date", "today")
+            | ("core.time.datetime", "now")
+    ) {
+        return None;
+    }
+    let result = (|| match (module, method) {
+        ("core.time", "now") => Ok(CtValue::Int(jet_codegen::scheduler::jet_std_time_now())),
+        ("core.time", "now_utc") => Ok(crate::Time::ambient_datetime_now_value()),
+        ("core.time", "today") => Ok(crate::Time::ambient_date_today_value()),
+        ("core.time", "instant") => Ok(crate::Time::ambient_instant_value()),
+        ("core.time", "sleep") => {
+            let millis = ambient_int_arg(args, 0, "time.sleep", span)?;
+            jet_codegen::scheduler::jet_std_time_sleep(millis);
+            Ok(CtValue::Unit)
+        }
+        ("core.time", "start") => Ok(CtValue::Struct {
+            type_name: "Stopwatch".to_string(),
+            fields: vec![(
+                "start_ms".to_string(),
+                CtValue::Int(crate::Time::ambient_monotonic_now_ms()),
+            )],
+        }),
+        ("core.time.date", "today") => Ok(crate::Time::ambient_date_today_value()),
+        ("core.time.datetime", "now") => Ok(crate::Time::ambient_datetime_now_value()),
+        _ => unreachable!("ambient time method was filtered above"),
+    })();
+    Some(result)
+}
+
 pub fn ambient_core_call(
     module: &str,
     method: &str,
     args: Vec<CtValue>,
     span: Span,
+    resolved_ret: Option<Type>,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
@@ -632,6 +845,25 @@ pub fn ambient_core_call(
         );
     }
     if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
+        return Some(result);
+    }
+    if module == "core.random" {
+        if let Some(result) = ambient_random_call(method, args.clone(), span, resolved_ret.as_ref()) {
+            return Some(result);
+        }
+    }
+    if module == "core.crypto.random" && method == "bytes" {
+        let count = match args.first() {
+            Some(CtValue::Int(count)) => *count,
+            _ => return Some(Err(unsupported("crypto.random.bytes expects an Int", span))),
+        };
+        return Some(
+            crate::Crypto::runtime::jet_crypto_entropy_bytes(count)
+                .map(CtValue::Bytes)
+                .map_err(|error| unsupported(&error.to_string(), span)),
+        );
+    }
+    if let Some(result) = ambient_time_call(module, method, &args, span) {
         return Some(result);
     }
     // I9: core.http.server adapters call the same Prelude helpers as AOT/JIT.

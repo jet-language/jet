@@ -49,7 +49,13 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Time, "zone") => zone_named(args, span),
         (CoreCallPureRoute::Time, "zoned") => zoned_from_datetime(args, span),
         (CoreCallPureRoute::Time, "zoned_local") => zoned_from_local(args, span),
-        (CoreCallPureRoute::Time, "instant") => Ok(structure("Instant", vec![("start_ns", CtValue::Int(0))])),
+        (CoreCallPureRoute::Time, "instant") => Ok(structure(
+            "Instant",
+            vec![(
+                "start_ns",
+                CtValue::Int(super::time_kernel::jet_time_monotonic_now_ns()),
+            )],
+        )),
         (CoreCallPureRoute::Time, "datetime") => datetime_parts(args, span),
         (CoreCallPureRoute::Time, "time" | "local_time") => local_time_parts(args, span),
         (CoreCallPureRoute::Time, "days_in_month") => time_days_in_month(args, span),
@@ -300,8 +306,8 @@ pub(super) fn evaluate_method(
         ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(ZonedDateTime::from_datetime(date_time, zone_from_value(&args[0], span)?).value())
         }),
-        ("Instant", "elapsed_millis", 0) => Ok(CtValue::Int(0)),
-        ("Instant", "elapsed", 0) => Ok(duration_value(0)),
+        ("Instant", "elapsed_millis", 0) => instant_elapsed_millis(recv, span),
+        ("Instant", "elapsed", 0) => instant_elapsed(recv, span),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
         ("Fraction", "to_string", 0) => fraction_from_value(recv, span)
             .map(|f| CtValue::Str(f.to_string_rep())),
@@ -1819,6 +1825,25 @@ fn datetime_value(seconds: i64, nanos: u32) -> CtValue {
             ("nanos", CtValue::Int(nanos as i64)),
         ],
     )
+}
+
+fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+    int_field(value, "Instant", "start_ns", span)
+}
+
+fn instant_elapsed_millis(value: &CtValue, span: Span) -> EvalResult {
+    Ok(CtValue::Int(
+        super::time_kernel::jet_time_monotonic_now_ns()
+            .saturating_sub(instant_start_ns(value, span)?)
+            .saturating_div(1_000_000),
+    ))
+}
+
+fn instant_elapsed(value: &CtValue, span: Span) -> EvalResult {
+    Ok(duration_value(
+        super::time_kernel::jet_time_monotonic_now_ns()
+            .saturating_sub(instant_start_ns(value, span)?),
+    ))
 }
 
 fn duration_value(ns: i64) -> CtValue {
