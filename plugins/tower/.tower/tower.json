@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1938,
-    "rev": 35648,
+    "rev": 35660,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-12T19:03:56.674Z"
+    "completionCursor": "2026-08-12T22:18:10.886Z"
   },
   "epochs": [
     {
@@ -101522,7 +101522,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Three tests/ui .stderr golden fixtures are stale, unrelated to the marker/D-META-STAGE1 work that surfaced them. (1) tests/ui/struct_missing_field.stderr: re-bless to the current E0303 wording, 'every field without an = default must appear exactly once', matching the D-FIELDDEF1=C default-field rework. (2) tests/ui/source_owned_conversion_retired.stderr: '\"7\".to_int()' now returns Int ? ParseError instead of raising E0311, so update the fixture to expect the new E0112 ('print doesn't know how to show ...') on printing that result, and drop the retired to_float() line from the fixture source. (3) tests/ui/view_mut_bounds_interpreter.stderr: leave this one alone; its interpreter tier silently skips a real bounds check, a genuine I9 safety gap already tracked and being fixed under card #1616 — do not re-bless it to '(no errors)'. Proof: cargo test --test diagnostic_snapshots passes once the first two fixtures are re-blessed, with #1616 landing separately for the third.",
       "blockedBy": [],
@@ -101651,10 +101651,10 @@
           "n": 4,
           "text": "diagnostic_snapshots ui_snapshots and lint_snapshots pass: both currently die on an internal compiler error at crates/jet-codegen/src/Codegen/Items.rs:2172, 'codegen reached a construct the typed IR does not cover (run)', which is an I2 violation reached from a UI fixture. Confirmed pre-existing on master at 5ae24334f, independent of cards 1856 and 1863.",
           "status": "met",
-          "metBy": "fable",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Commit e892acc21 (bd1856/corpus-health): core.tasks.spawn lowered through canonical mechanism removes the Items.rs codegen ICE; worker Luna-max targeted run reports diagnostic_snapshots ui_snapshots and lint_snapshots green plus codegen covers_core_tasks_spawn_alias. Re-proved in the bucket-boundary composed sweep.",
-          "at": "2026-08-12T04:12:58.186Z"
+          "evidence": "ui_snapshots and lint_snapshots both green on master 1467c469b with bubblewrap available (jet-env full); Items.rs ICE fixed in sema/TIR at commit 26d5097cb. Note: ui fixture build_action_failed requires bubblewrap; without it the env-specific E3505 text differs — environmental, not code",
+          "at": "2026-08-12T22:39:24.527Z"
         }
       ],
       "refs": [],
@@ -101664,8 +101664,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:03:02.874Z",
-      "updated": "2026-08-12T18:10:08.918Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T22:39:25.222Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T22:39:25.221Z"
     },
     {
       "id": "c09qyavw",
@@ -102955,11 +102956,11 @@
         {
           "n": 1,
           "text": "cargo test --test corelib passes (no --no-fail-fast needed); full failing-test list captured 2026-08-07: builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback, consuming_core_constructor_copies_borrowed_field_explicitly, core_email_address_and_mime_are_bounded_and_deterministic, core_email_mailer_surface_constructs_with_real_secret, core_email_policy_envelope_and_reports_are_real_jet_values, async_event_scope_cancel_and_inherited_deadline_are_single_terminal, core_ioerror_native_flush_preserves_operation, cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling, base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity, core_db_implements_driver_trait, cbor_stream_is_incremental_bounded_deterministic_and_terminal, core_http_nominal_message_and_body_surface_is_executable, core_auth_strict_jwt_and_paseto_hostile_matrix, cbor_stream_drop_and_codec_heap_ceiling_are_enforced, core_net_unix_stream_implements_nominal_io_reader_writer, core_auth_expiry_equality_and_subsecond_skew, core_ioerror_debug_renders_in_aot_and_dev, core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers, core_ioerror_preserves_kind_operation_and_resource, core_tls_byte_stream_runs_real_local_handshake_and_close_notify, core_tls_expert_config_peer_identity_and_directional_close_are_real, core_net_udp_and_unix_waits_use_typed_scheduler_interrupts, core_net_udp_same_handle_readiness_cancels_and_close_is_idempotent, decode_traced_json_plain_and_published_fresh, core_os_facts_and_interrupt_hook_compile, core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary, generated_internal_tagged_enum_round_trips_every_variant_shape, core_os_interrupt_handlers_are_additive_and_ordered, generated_enum_codecs_reenter_jet_pipeline, generated_struct_codecs_preserve_flatten_rename_and_default, generated_struct_decode_accumulates_nested_errors_and_validation, generated_struct_decode_denies_unknown_fields, invariant_refinement_proves_fixed_array_index, json_decode_lenient_surfaces_coercions, csv_stream_drop_and_codec_heap_ceiling_are_enforced, generated_struct_encode_preserves_order_with_rename_and_option, db_checked_sql_params_feed_parameterized_execute, hand_written_encode_decode_round_trips, generated_decode_dispatches_across_module_boundaries, option_zip_and_lift2_combinators, csv_stream_records_are_incremental_rfc4180_bounded_and_terminal, tracked_float_origin_reports_binding_site_and_plain_float_is_untracked, json_stream_drop_and_codec_heap_ceiling_are_enforced, xml_whole_byte_verbs_match_comptime_aot_and_dev, jsonl_stream_drop_and_codec_heap_ceiling_are_enforced, xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev, yaml_full_nested_decode_and_features, xml_stream_drop_and_codec_heap_ceiling_are_enforced, core_tls_identity_drop_and_protocol_mapping_use_shared_runtime_laws",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T13:27:04.121Z"
+          "evidence": "cargo test --test corelib green on merged master 1467c469b: 11 passed 0 failed (orchestrator ran). Root-cause fixes in Prelude codecs, TIR Option/Unit, JIT equality adapters (commit 6c57156a2 merged dc71b86ec)",
+          "at": "2026-08-12T22:39:34.249Z"
         },
         {
           "n": 2,
@@ -102981,8 +102982,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T13:26:49.378Z",
-      "updated": "2026-08-12T18:10:07.766Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T22:39:34.249Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c0vypaig",
@@ -126472,7 +126473,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Fix the AOT emission of returned-view types. jet run --release on examples/features/memory/returned_views.jet ICEs: generated returned_views.rs fails rustc with five E0308 (expected &str, found String) — an I2 violation; default jet run and the golden agree the semantics are fine. Find the emit site for returned View<str> values (crates/jet-codegen/src/Codegen/TIR/emit — the view-return lowering; check the D-MEM-VIEWRET1=B provenance emission) where an owned String is produced for a &str-typed slot (or the type is declared &str while the value path materializes owned). Fix at the emitter/typing level; add a codegen test pinning the generated types for the returned-view family so no rustc error is reachable (I2/I3). Coordinate with #1927 (same example family, JIT side).",
       "blockedBy": [],
@@ -126488,29 +126489,29 @@
         {
           "n": 1,
           "text": "jet run --release compiles and runs examples/features/memory/returned_views.jet to its nine-line golden, byte-identical with default jet run and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:33.724Z"
+          "evidence": "Orchestrator verified on master 1467c469b: returned_views byte-identical to examples/features/expected/memory/returned_views.out under default jet run, jet run --release, jet run --interpret (fresh jet cache)",
+          "at": "2026-08-12T22:39:09.133Z"
         },
         {
           "n": 2,
           "text": "The &str/String mismatch in emitted returned-view types is fixed at the emitter/typing level with a targeted codegen test; no post-hoc string patching",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:34.159Z"
+          "evidence": "Emitter/typing fix in Sema/CheckerCore/bindings.rs:685 and TIR lower/statements.rs:2021 (commit 26d5097cb); targeted returned_view tests in ownership.rs green on master",
+          "at": "2026-08-12T22:39:10.879Z"
         },
         {
           "n": 3,
           "text": "No rustc error is reachable from this construct family (I2): a sema/codegen test seals the returned-view type lowering",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:34.823Z"
+          "evidence": "returned-view lowering sealed by tests/ownership.rs returned_view family (4+ tests green on master); release build compiles with zero rustc errors (I2)",
+          "at": "2026-08-12T22:39:12.178Z"
         }
       ],
       "refs": [],
@@ -126523,8 +126524,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T17:53:16.109Z",
-      "updated": "2026-08-12T18:21:10.295Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T22:39:13.169Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T22:39:13.169Z"
     },
     {
       "id": "c0eezfh9",
@@ -126535,7 +126537,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -126551,11 +126553,11 @@
         {
           "n": 1,
           "text": "examples/features/crypto/auth_sessions.jet runs byte-identical to its golden under AOT, default jet run, and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:40:54.208Z"
+          "evidence": "Orchestrator verified on master 1467c469b: auth_sessions byte-identical to expected/crypto/auth_sessions.out under default jet run, --release, --interpret (fresh cache); guarded by golden suite examples_compile_and_run",
+          "at": "2026-08-12T22:39:10.073Z"
         }
       ],
       "refs": [],
@@ -126567,8 +126569,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T18:40:53.193Z",
-      "updated": "2026-08-12T18:59:24.189Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T22:39:11.542Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T22:39:11.542Z"
     },
     {
       "id": "c0jx18t8",
@@ -126633,7 +126636,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -126649,11 +126652,11 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test diagnostic_snapshots lint_snapshots passes, with each of the six fixtures either content-reviewed-and-blessed or fixed at its seam (decision logged per fixture)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:55:13.014Z"
+          "evidence": "lint_snapshots green on merged master (orchestrator ran diagnostic_snapshots: lint_snapshots ok). Six fixtures content-reviewed: a11y_duplicate_label, a11y_unlabeled_control, compiler_extension_finding, float_money, typestate_dead_end, unjoined_task (decisions in luna-sliceA transcript, commit 26d5097cb)",
+          "at": "2026-08-12T22:39:12.737Z"
         }
       ],
       "refs": [],
@@ -126664,8 +126667,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T18:55:12.572Z",
-      "updated": "2026-08-12T18:59:25.335Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T22:39:13.687Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T22:39:13.687Z"
     },
     {
       "id": "c0mt1weu",
@@ -170062,6 +170066,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-12T22:39:34.249Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0lzyla1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T22:39:25.222Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T22:39:24.528Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00jybyb",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-12T22:39:13.687Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c06z57x4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T22:39:13.169Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0vggzqc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T22:39:12.737Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06z57x4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T22:39:12.179Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0vggzqc",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-12T22:39:11.543Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0eezfh9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T22:39:10.879Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0vggzqc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T22:39:10.074Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0eezfh9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T22:39:09.133Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0vggzqc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T22:18:10.886Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-12T22:18:10.886Z"
+    },
+    {
       "at": "2026-08-12T21:50:06.601Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -173475,90 +173563,6 @@
       "by": "fable-e3-audit",
       "action": "card.update",
       "ref": "c03jlle3",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:15.245Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:14.662Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0vggzqc",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:14.098Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0d1ge7t",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:13.534Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0890oah",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:12.951Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c003lpmk",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:12.362Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c05t5j38",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:11.789Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0bxf5m7",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:11.217Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c03wyvdx",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:10.639Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0ae3pqg",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:10.084Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0pdyteh",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:09.507Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0tkno3o",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:08.919Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c00jybyb",
       "note": "milestoneId"
     }
   ],
