@@ -90,7 +90,14 @@ fn bad_file(tag: &str) -> PathBuf {
 
 /// Replace machine-specific temp paths so snapshots are portable.
 fn scrub(s: &str, file: &Path) -> String {
-    s.replace(&file.display().to_string(), "BAD.jet")
+    let mut scrubbed = s.replace(&file.display().to_string(), "BAD.jet");
+    let temp_dir = std::env::temp_dir();
+    if let Some(temp_root) = temp_dir.parent() {
+        if let Ok(relative) = file.strip_prefix(temp_root) {
+            scrubbed = scrubbed.replace(&relative.display().to_string(), "BAD.jet");
+        }
+    }
+    scrubbed
 }
 
 /// A private cwd for a `jet run`/`build`/`bench`/`test` subprocess.
