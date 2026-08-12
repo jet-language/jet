@@ -4,12 +4,6 @@ impl JetShow for JetDate {
     }
 }
 
-impl JetDebug for JetDate {
-    fn jet_debug(&self) -> String {
-        <Self as JetShow>::jet_show(self)
-    }
-}
-
 impl JetDebug for jet_std::DataTree {
     fn jet_debug(&self) -> String {
         <Self as JetShow>::jet_show(self)
@@ -19,12 +13,6 @@ impl JetDebug for jet_std::DataTree {
 impl JetShow for JetLocalTime {
     fn jet_show(&self) -> String {
         self.to_string_fmt()
-    }
-}
-
-impl JetDebug for JetLocalTime {
-    fn jet_debug(&self) -> String {
-        <Self as JetShow>::jet_show(self)
     }
 }
 
@@ -43,12 +31,6 @@ impl JetShow for JetInstant {
 impl JetShow for JetDateTime {
     fn jet_show(&self) -> String {
         self.to_string_fmt()
-    }
-}
-
-impl JetDebug for JetDateTime {
-    fn jet_debug(&self) -> String {
-        <Self as JetShow>::jet_show(self)
     }
 }
 
