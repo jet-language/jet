@@ -10,6 +10,7 @@ use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::render_lambda_str;
 use crate::Codegen::TIR::render_lambda_str_expecting_value;
 use crate::Codegen::TIR::render_lambda_str_sync;
+use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -98,12 +99,10 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     }
 }
 
-/// c109 Phase 13: lower a closure-taking core call (`http.serve`/`scope.guard`)
+/// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`, `http.serve`,
+/// or `scope.guard`)
 /// into a bespoke `CoreClosureCall` node. Returns `None` when `(module, method)`
-/// isn't one of the two (so the caller falls through to the plain
-/// c109 Phase 13: lower a closure-taking core call (`http.serve`/`scope.guard`)
-/// into a bespoke `CoreClosureCall` node. Returns `None` when `(module, method)`
-/// isn't one of the two (so the caller falls through to the plain
+/// isn't one of these (so the caller falls through to the plain
 /// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
 /// in-subset lambda in the closure-arg position.
 pub(super) fn core_module_path_from_receiver(
@@ -136,6 +135,25 @@ pub(crate) fn lower_core_closure_call(
         Some(Expr::Lambda(lam)) => Some(lam),
         _ => None,
     };
+    if module == "core.tasks" && method == "spawn" {
+        let lam = lam_at(0)?;
+        let body_ty = lambda_body_ty(lam, cx, env);
+        let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+        let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+        cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+        let spawn_closure = render_spawn_lambda(lam, cx, env);
+        return Some(TExpr {
+            ty: core_closure_call_return_ty(module, method, body_ty),
+            kind: TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Spawn {
+                    group: None,
+                    site,
+                    spawn_closure,
+                    scoped: lam.meta.scoped_task_borrow,
+                },
+            },
+        });
+    }
     let data_err = || Type::Named("DataError".to_string());
     let data_checked = jet_foundation::PackageEdition::edition_at_least(&cx.package_edition, "2027");
     let wrap_data = |ok: Type| -> Type {

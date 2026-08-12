@@ -463,12 +463,21 @@ fn make(n: String) => Person {
     /// (see `tests/tir_unsafe_and_runtime.rs::unsafe_fn_block_and_ptr_ops`);
     /// this exercises the gate shape.
     fn covers_with_mem(src: &str, fn_name: &str) -> bool {
+        covers_with_core_import(src, fn_name, "mem", "core.mem")
+    }
+
+    fn covers_with_core_import(
+        src: &str,
+        fn_name: &str,
+        alias: &str,
+        module: &str,
+    ) -> bool {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let prog = crate::Parser::parse(&toks).expect("parse failed");
         let mut cx = build_cx(&prog, src, "test.jet");
         cx.core_imports
-            .insert("mem".to_string(), "core.mem".to_string());
+            .insert(alias.to_string(), module.to_string());
         let f = prog
             .items
             .iter()
@@ -478,6 +487,16 @@ fn make(n: String) => Person {
             })
             .unwrap_or_else(|| panic!("no fn {fn_name}"));
         tir_covers(f, &cx)
+    }
+
+    #[test]
+    fn covers_core_tasks_spawn_alias() {
+        assert!(covers_with_core_import(
+            "use core.tasks as tasks\nfn run() {\n _ :: tasks.spawn(() => 42)\n}\n",
+            "run",
+            "tasks",
+            "core.tasks",
+        ));
     }
 
     /// Like `covers`, but injects a foreign type → module mapping (`cx.foreign_types`)
@@ -1724,6 +1743,13 @@ fn consume(ch: Receiver<Int>) => Int {
         assert!(core_closure_call_in_subset(
             "core.scope",
             "guard",
+            &guard_args,
+            &cx,
+            &locals
+        ));
+        assert!(core_closure_call_in_subset(
+            "core.tasks",
+            "spawn",
             &guard_args,
             &cx,
             &locals
