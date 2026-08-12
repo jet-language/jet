@@ -1581,12 +1581,24 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     // Rust integer suffix. Sema may leave bare `IntLit(_, None)` when the list
     // type comes from the head alone; retag from the expected element type so
     // emit produces `104u8` rather than `104i64` (I2).
-    if let Type::IntN { signed, bits } = expected_elem {
+    if matches!(expected_elem, Type::IntN { .. } | Type::List(_) | Type::FixedList { .. }) {
         if let TExprKind::ListLit(elems) = &mut expr.kind {
             for elem in elems.iter_mut() {
-                if let TExprKind::IntLit(_, width) = &mut elem.kind {
-                    *width = Some((*signed, *bits));
-                    elem.ty = expected_elem.clone();
+                match (&mut elem.kind, expected_elem) {
+                    (TExprKind::IntLit(_, width), Type::IntN { signed, bits }) => {
+                        *width = Some((*signed, *bits));
+                        elem.ty = expected_elem.clone();
+                    }
+                    // A nested list literal (`[[U8]]`) drives suffixes one
+                    // dimension down with the same rule.
+                    (TExprKind::ListLit(_), Type::List(_) | Type::FixedList { .. }) => {
+                        let inner = std::mem::replace(elem, TExpr {
+                            ty: Type::Int,
+                            kind: TExprKind::ListLit(Vec::new()),
+                        });
+                        *elem = preserve_typed_list_shape(inner, expected_elem, cx);
+                    }
+                    _ => {}
                 }
             }
             expr.ty = expected.clone();
@@ -1991,11 +2003,21 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     || matches!(elem, Type::Named(name) if cx.trait_names.contains(name))
             };
             let binding_ty = b.ty.as_ref().map(Type::without_user_tags);
-            let skip_ct_list_bake = matches!(binding_ty, Some(Type::FixedList { .. }))
-                || matches!(
-                    binding_ty,
-                    Some(Type::List(elem)) if matches!(elem.as_ref(), Type::IntN { .. }) || is_trait_elem(elem)
-                );
+            // Recursive: `[[U8]]` and deeper nestings need the same skip as
+            // `[U8]` — serialize suffixes every level `i64`.
+            fn list_needs_lowering(ty: &Type, is_trait_elem: &impl Fn(&Type) -> bool) -> bool {
+                match ty {
+                    Type::FixedList { .. } => true,
+                    Type::List(elem) => {
+                        matches!(elem.as_ref(), Type::IntN { .. })
+                            || is_trait_elem(elem)
+                            || list_needs_lowering(elem, is_trait_elem)
+                    }
+                    _ => false,
+                }
+            }
+            let skip_ct_list_bake =
+                binding_ty.is_some_and(|ty| list_needs_lowering(ty, &is_trait_elem));
             if b.ct.is_some() && !skip_ct_list_bake {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init_ty = b
