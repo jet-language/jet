@@ -419,6 +419,7 @@ pub fn core_fixed_sig(
                     ret: None,
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                call_metadata: None,
                 },
             )],
             None,
@@ -828,7 +829,11 @@ pub fn core_fixed_sig(
             Some(Type::Named("ZonedDateTime".to_string())),
         )),
         ("core.game", "run") => Some((
-            vec![(read, Type::Named("GameScene".to_string()))],
+            vec![
+                (read, Type::Named("GameScene".to_string())),
+                (read, Type::Named("GameReplay".to_string())),
+                (read, Type::Named("GameBackend".to_string())),
+            ],
             Some(Type::String),
         )),
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
@@ -3032,6 +3037,7 @@ pub fn core_fixed_sig(
                         ret: None,
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     },
                 ),
             ],
@@ -3157,6 +3163,9 @@ pub struct CoreParam {
 #[derive(Clone, Copy)]
 pub enum CoreDefault {
     Bool(bool),
+    /// An omitted optional Core handle. The binder inserts the slot; the
+    /// Core emitter turns this declaration-side absence into `None`.
+    Absent,
     /// A no-argument static call on a Core type, such as `EncodingLimits.safe()`.
     /// The type name resolves without the caller importing its module.
     StaticCall { type_name: &'static str, method: &'static str },
@@ -3166,6 +3175,7 @@ impl CoreDefault {
     pub fn build(self, span: crate::Diagnostics::Span) -> crate::AST::Expr {
         match self {
             CoreDefault::Bool(value) => crate::AST::Expr::Bool(value, span),
+            CoreDefault::Absent => crate::AST::Expr::Absent(span),
             CoreDefault::StaticCall { type_name, method } => crate::AST::Expr::MethodCall {
                 receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
                 method: method.to_string(),
@@ -3197,6 +3207,28 @@ const ENCODING_LIMITS_DEFAULT: CoreDefault =
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
     match (module, name) {
+        ("core.game", "run") => Some(vec![
+            required("scene"),
+            CoreParam {
+                label: "replay",
+                zone: crate::AST::ParamZone::Either,
+                default: Some(CoreDefault::Absent),
+            },
+            CoreParam {
+                label: "backend",
+                zone: crate::AST::ParamZone::Either,
+                default: Some(CoreDefault::Absent),
+            },
+        ]),
+        ("core.http.server", "bind" | "serve") => Some(vec![
+            required("address"),
+            required("mux"),
+            CoreParam {
+                label: "tls",
+                zone: crate::AST::ParamZone::LabelOnly,
+                default: Some(CoreDefault::Absent),
+            },
+        ]),
         (
             "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv"
             | "core.encoding.cbor",

@@ -154,13 +154,21 @@ impl<'a> Checker<'a> {
                     len,
                     len_symbol,
                 },
-Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
-                    param_contract: param_contract.clone(),
-                    params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
-                    ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
-                    effect_bound,
-                    return_view_provenance,
-                },
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            param_contract,
+            call_metadata,
+            return_view_provenance,
+        } => Type::Fn {
+            params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
+            ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
+            effect_bound,
+            param_contract,
+            call_metadata,
+            return_view_provenance,
+        },
                 Type::Tagged { marker, inner } => Type::Tagged {
                     marker,
                     inner: Box::new(self.resolve_type(*inner)),

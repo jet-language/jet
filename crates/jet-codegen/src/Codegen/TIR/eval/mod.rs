@@ -2632,7 +2632,27 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                     .collect(),
                 ret: function.return_type.clone().map(Box::new),
                 effect_bound: None, return_view_provenance: None,
-                param_contract: None,
+                param_contract: (!function.params.is_empty()).then(|| {
+                    function
+                        .params
+                        .iter()
+                        .map(|parameter| (parameter.call_label().to_string(), parameter.zone))
+                        .collect()
+                }),
+                call_metadata: Some(crate::AST::FunctionCallMetadata {
+                    names: function.params.iter().map(|parameter| parameter.name.clone()).collect(),
+                    defaults: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.default.as_deref().cloned())
+                        .collect(),
+                    variadic: function.params.iter().map(|parameter| parameter.variadic).collect(),
+                    conventions: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.convention)
+                        .collect(),
+                }),
             },
         );
     }
@@ -2714,7 +2734,14 @@ fn seed_fragment_structs(
                 .params
                 .iter()
                 .filter(|param| param.name != crate::Syntax::KW_SELF)
-                .map(|param| (param.convention, param.ty.clone()))
+                .map(|param| {
+                    let ty = if param.variadic {
+                        Type::List(Box::new(param.ty.clone()))
+                    } else {
+                        param.ty.clone()
+                    };
+                    (param.convention, ty)
+                })
                 .collect(),
         );
         cx.method_rets.insert(key, method.return_type.clone());

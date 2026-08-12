@@ -11,7 +11,8 @@ mod Types;
 pub use JSON::{package_facts_json, workspace_overlay_policy_json};
 pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
-    build_index, build_symbol_db, function_parameter_parts, structural_nodes_from_parsed,
+    binder_active_parameter, build_index, build_symbol_db, function_parameter_parts,
+    structural_nodes_from_parsed,
     HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
@@ -303,7 +304,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 12);
+        assert_eq!(SCHEMA_VERSION, 13);
     }
 
     #[test]

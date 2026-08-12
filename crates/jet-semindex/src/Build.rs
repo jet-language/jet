@@ -20,6 +20,9 @@ pub enum SymKind {
         /// Public call labels and zones, kept separately from local body names.
         /// D-APILABEL1=A: LSP consumers must show the callable contract.
         param_contract: Vec<(String, String, AST::ParamZone)>,
+        /// D-VARIADIC1: the public parameter list marks its final rest slot;
+        /// the AST type stored in `params` remains the element type.
+        param_variadic: Vec<bool>,
         ret: Option<AST::Type>,
         effects: Option<Vec<(String, Span)>>,
         effect_via: Option<(String, Span)>,
@@ -305,15 +308,14 @@ fn local_identity(scope: &str, kind: &str, name: &str) -> String {
 fn fn_signature(
     name: &str,
     params: &[(String, AST::Type)],
+    param_contract: &[(String, String, AST::ParamZone)],
+    param_variadic: &[bool],
     ret: &Option<AST::Type>,
     effects: Option<&Vec<(String, Span)>>,
     effect_via: Option<&(String, Span)>,
     view_provenance: Option<&AST::ViewProvenanceMap>,
 ) -> String {
-    let params = params
-        .iter()
-        .map(|(n, t)| format!("{n}: {}", t.name()))
-        .collect::<Vec<_>>()
+    let params = function_parameter_parts(params, param_contract, param_variadic)
         .join(", ");
     let arrow = if let Some((param, _)) = effect_via {
         format!(" =[via {param}]=>")
@@ -349,11 +351,27 @@ fn method_parameter_contract(f: &AST::Func) -> Vec<(String, String, AST::ParamZo
     parameter_contract(&f.params)
 }
 
+fn method_parameter_variadic(f: &AST::Func) -> Vec<bool> {
+    f.params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| p.variadic)
+        .collect()
+}
+
 fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZone)> {
     params
         .iter()
         .filter(|p| p.name != Syntax::KW_SELF)
         .map(|p| (p.name.clone(), p.call_label().to_string(), p.zone))
+        .collect()
+}
+
+fn parameter_variadic(params: &[AST::Param]) -> Vec<bool> {
+    params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| p.variadic)
         .collect()
 }
 
@@ -363,6 +381,7 @@ fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZ
 pub fn function_parameter_parts(
     params: &[(String, AST::Type)],
     contract: &[(String, String, AST::ParamZone)],
+    variadic: &[bool],
 ) -> Vec<String> {
     let mut parts = Vec::new();
     let mut star_done = false;
@@ -382,7 +401,12 @@ pub fn function_parameter_parts(
         } else {
             format!("{label} {contract_local}")
         };
-        parts.push(format!("{shown}: {}", ty.name()));
+        let rest = if variadic.get(index).copied().unwrap_or(false) {
+            "..."
+        } else {
+            ""
+        };
+        parts.push(format!("{shown}: {rest}{}", ty.name()));
         if zone == AST::ParamZone::PositionalOnly
             && contract
                 .get(index + 1)
@@ -392,6 +416,67 @@ pub fn function_parameter_parts(
         }
     }
     parts
+}
+
+/// Map the argument slot the shared binder consumes to the visible LSP
+/// parameter index. Declaration slots include label-only parameters; the
+/// rendered signature does not include the `*` separator, so the two indices
+/// must not be used interchangeably.
+pub fn binder_active_parameter(
+    active_label: Option<&str>,
+    active_positional: usize,
+    consumed_labels: &[String],
+    contract: &[(String, String, AST::ParamZone)],
+    visible_parameter_count: usize,
+) -> usize {
+    if visible_parameter_count == 0 {
+        return 0;
+    }
+    let mut consumed_slots = Vec::new();
+    for label in consumed_labels {
+        if let Some((index, _)) = contract.iter().enumerate().find(|(index, (_, public, zone))| {
+            !consumed_slots.contains(index)
+                && *zone != AST::ParamZone::PositionalOnly
+                && public == label
+        }) {
+            consumed_slots.push(index);
+        }
+    }
+    let positional_before_active = active_positional.saturating_sub(consumed_slots.len());
+    let declaration_slot = active_label
+        .and_then(|label| {
+            contract.iter().position(|(_, public, zone)| {
+                *zone != AST::ParamZone::PositionalOnly && public == label
+            })
+        })
+        .or_else(|| {
+            let mut bare_parameters_before_active = positional_before_active;
+            for (index, (_, _, zone)) in contract.iter().enumerate() {
+                if consumed_slots_contains(&consumed_slots, index) {
+                    continue;
+                }
+                if *zone == AST::ParamZone::LabelOnly {
+                    if bare_parameters_before_active == 0 {
+                        return Some(index);
+                    }
+                    continue;
+                }
+                if bare_parameters_before_active == 0 {
+                    return Some(index);
+                }
+                bare_parameters_before_active -= 1;
+            }
+            None
+        });
+    // `parameter_parts` removes only the zone separators (`/` and `*`), not
+    // label-only declarations. Every declaration slot therefore occupies one
+    // visible parameter index.
+    let visible_index = declaration_slot.map_or(active_positional, |slot| slot);
+    visible_index.min(visible_parameter_count - 1)
+}
+
+fn consumed_slots_contains(slots: &[usize], slot: usize) -> bool {
+    slots.contains(&slot)
 }
 
 fn method_fact(
@@ -411,6 +496,8 @@ fn method_fact(
         signature: fn_signature(
             &f.name,
             &params,
+            &method_parameter_contract(f),
+            &method_parameter_variadic(f),
             &f.return_type,
             f.declared_effects.as_ref(),
             f.effect_via.as_ref(),
@@ -721,6 +808,8 @@ fn apply_inferred_effect_rows(
     {
         let SymKind::Function {
             params,
+            param_contract,
+            param_variadic,
             ret,
             effects,
             effect_via,
@@ -756,6 +845,8 @@ fn apply_inferred_effect_rows(
         let signature = fn_signature(
             &def.name,
             params,
+            param_contract,
+            param_variadic,
             ret,
             effects.as_ref(),
             None,
@@ -836,16 +927,27 @@ fn definition_kind(kind: &SymbolKind) -> &'static str {
 
 fn definition_signature(def: &SymbolDef) -> String {
     match &def.kind {
-        SymbolKind::Function { params, ret } => format!(
-            "({})->{};view_source={}",
-            params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
-            ret.as_deref().unwrap_or("()"),
-            def.view_provenance
+        SymbolKind::Function {
+            params,
+            call_contract,
+            ret,
+        } => {
+            let call_contract = call_contract
                 .iter()
-                .map(|provenance| provenance.canonical())
+                .map(|(label, zone, variadic)| format!("{label}:{zone}:{variadic}"))
                 .collect::<Vec<_>>()
-                .join("|"),
-        ),
+                .join(",");
+            format!(
+                "({})->{};call_contract=[{call_contract}];view_source={}",
+                params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
+                ret.as_deref().unwrap_or("()"),
+                def.view_provenance
+                    .iter()
+                    .map(|provenance| provenance.canonical())
+                    .collect::<Vec<_>>()
+                    .join("|"),
+            )
+        }
         SymbolKind::Struct { fields } => format!("{{{}}}", fields.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(",")),
         SymbolKind::Enum { variants } => format!("variants:{}", variants.len()),
         _ => definition_kind(&def.kind).to_string(),
@@ -980,6 +1082,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 kind: SymKind::Function {
                     params: params.clone(),
                     param_contract: method_parameter_contract(f),
+                    param_variadic: method_parameter_variadic(f),
                     ret: f.return_type.clone(),
                     effects: f.declared_effects.clone(),
                     effect_via: f.effect_via.clone(),
@@ -1147,6 +1250,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
                         param_contract: method_parameter_contract(meth),
+                        param_variadic: method_parameter_variadic(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1205,6 +1309,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         kind: SymKind::Function {
                             params: method_params(meth),
                             param_contract: method_parameter_contract(meth),
+                            param_variadic: method_parameter_variadic(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
@@ -1304,6 +1409,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
                         param_contract: method_parameter_contract(meth),
+                        param_variadic: method_parameter_variadic(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1343,6 +1449,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         kind: SymKind::Function {
                             params: method_params(meth),
                             param_contract: method_parameter_contract(meth),
+                            param_variadic: method_parameter_variadic(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
@@ -1390,6 +1497,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     kind: SymKind::Function {
                         params: params.clone(),
                         param_contract: parameter_contract(&sig.params),
+                        param_variadic: parameter_variadic(&sig.params),
                         ret: sig.return_type.clone(),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
@@ -1403,7 +1511,16 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     origin: MemberOrigin::TraitRequirement {
                         trait_name: t.name.clone(),
                     },
-                    signature: fn_signature(&sig.name, &params, &sig.return_type, sig.declared_effects.as_ref(), None, None),
+                    signature: fn_signature(
+                        &sig.name,
+                        &params,
+                        &parameter_contract(&sig.params),
+                        &parameter_variadic(&sig.params),
+                        &sig.return_type,
+                        sig.declared_effects.as_ref(),
+                        None,
+                        None,
+                    ),
                     module_path: mp.to_string(),
                     span: sig.name_span.into(),
                 });
@@ -1454,6 +1571,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .map(|p| (p.name.clone(), p.ty.clone()))
                             .collect(),
                         param_contract: method_parameter_contract(meth),
+                        param_variadic: method_parameter_variadic(meth),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
@@ -1665,15 +1783,20 @@ fn hover_for_fn(f: &AST::Func) -> String {
             star_done = true;
             params.push(Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
         }
-        let head = match &p.public_label {
-            Some((label, _)) => format!("{label} {}", p.name),
-            None => p.name.clone(),
+        let head = if p.zone == AST::ParamZone::PositionalOnly {
+            p.name.clone()
+        } else {
+            match &p.public_label {
+                Some((label, _)) => format!("{label} {}", p.name),
+                None => p.name.clone(),
+            }
         };
         let default = match &p.default {
             Some(_) => " = …",
             None => "",
         };
-        params.push(format!("{head}: {}{default}", p.ty.name()));
+        let rest = if p.variadic { "..." } else { "" };
+        params.push(format!("{head}: {rest}{}{default}", p.ty.name()));
         let last_positional_only = p.zone == AST::ParamZone::PositionalOnly
             && callable
                 .get(index + 1)

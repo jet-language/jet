@@ -1585,6 +1585,7 @@ fn check_func_body_bundle_scoped(
             .filter(|param| param.name != crate::Syntax::KW_SELF)
             .map(|param| param.name.clone())
             .collect(),
+        binder_ref_types: HashMap::new(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
@@ -1901,10 +1902,27 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
 
 pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
     Type::Fn {
-        params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+        params: sig
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, (_, ty))| {
+                if sig.param_variadic.get(index).copied().unwrap_or(false) {
+                    Type::List(Box::new(ty.clone()))
+                } else {
+                    ty.clone()
+                }
+            })
+            .collect(),
         ret: sig.return_type.clone().map(Box::new),
         effect_bound: None,
         param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),
+        call_metadata: Some(crate::AST::FunctionCallMetadata {
+            names: sig.param_info.iter().map(|(name, _)| name.clone()).collect(),
+            defaults: sig.defaults.clone(),
+            variadic: sig.param_variadic.clone(),
+            conventions: sig.params.iter().map(|(convention, _)| *convention).collect(),
+        }),
         return_view_provenance: sig.return_view_provenance.get(),
     }
 }
@@ -2009,6 +2027,7 @@ mod callable_contract_tests {
                     .map(|(label, zone)| (label.to_string(), zone))
                     .collect()
             }),
+                call_metadata: None,
             return_view_provenance: None,
         }
     }
@@ -2033,6 +2052,7 @@ mod callable_contract_tests {
                 ret: Some(Box::new(Type::Int)),
                 effect_bound: None,
                 param_contract: Some(vec![("force".to_string(), zone)]),
+                call_metadata: None,
                 return_view_provenance: None,
             }
         }
@@ -2051,6 +2071,7 @@ mod callable_contract_tests {
                 ret: None,
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             }
         }

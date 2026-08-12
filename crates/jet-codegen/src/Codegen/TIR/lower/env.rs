@@ -64,6 +64,9 @@ pub(crate) struct LowerEnv {
     pub(super) cloned_types: Rc<RefCell<Vec<Type>>>,
     /// Function locals whose value crosses the native interrupt boundary.
     pub(super) send_fn_locals: HashSet<String>,
+    /// Compiler-private default references resolve to the declaration-slot
+    /// temporary made by source-order lowering.
+    pub(super) binder_refs: HashMap<String, (String, Type)>,
 }
 
 impl LowerEnv {
@@ -83,6 +86,7 @@ impl LowerEnv {
             split_view_handles: HashMap::new(),
             cloned_types: Rc::new(RefCell::new(Vec::new())),
             send_fn_locals: HashSet::new(),
+            binder_refs: HashMap::new(),
         }
     }
     /// Record the non-AOT handle type for a split-view local (see the field).
@@ -126,6 +130,9 @@ impl LowerEnv {
     }
     pub(super) fn is_send_fn(&self, name: &str) -> bool {
         self.send_fn_locals.contains(name)
+    }
+    pub(super) fn binder_ref(&self, name: &str) -> Option<&(String, Type)> {
+        self.binder_refs.get(name)
     }
     pub(super) fn gc_edges_for_expr(&self, expr: &Expr, exclude: Option<&str>) -> Vec<String> {
         let mut names = self.gc_locals.iter().collect::<Vec<_>>();

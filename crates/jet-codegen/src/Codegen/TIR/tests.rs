@@ -1392,6 +1392,7 @@ fn greet() => String { return input() }
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         assert!(field_ty_covered(&fn_ty, &cx, &mut HashSet::new()));

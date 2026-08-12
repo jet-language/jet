@@ -675,7 +675,7 @@ impl Box {
         return Box<T>.{ value: value }
     }
 
-    fn convert<U>(self, value: ^U) => U {
+    fn convert<U>(self, value: ^U, *, note: String = "unused") => U {
         return value
     }
 
@@ -686,8 +686,8 @@ impl Box {
 
 fn run() {
     box :: Box<Int>.new(3)
-    value :: box.convert<String>("ok")
-    inferred :: box.convert("again")
+    value :: box.convert<String>(note: "explicit", value: "ok")
+    inferred :: box.convert(note: "inferred", value: "again")
     static_value :: Box.make<String>("static")
     static_inferred :: Box.make("inferred")
     print(value)

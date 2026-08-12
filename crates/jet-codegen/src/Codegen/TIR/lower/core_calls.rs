@@ -62,6 +62,7 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ret: tl.ret.clone().map(Box::new),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: lam.meta.return_view_provenance.clone(),
             };
             interrupt_callback_value(TExpr {

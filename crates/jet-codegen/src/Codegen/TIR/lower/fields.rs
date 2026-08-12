@@ -597,6 +597,7 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
                     ret: Some(Box::new(args[0].clone())),
                     effect_bound: None,
                     param_contract: None,
+                call_metadata: None,
                     return_view_provenance: None,
                 }),
                 "grads" => Some(args[0].clone()),

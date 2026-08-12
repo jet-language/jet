@@ -240,7 +240,7 @@ module math {
 }
 fn run() {
     print(math.double(5))
-    print(math.add(3, 4))
+    print(math.add(b: 4, a: 3))
 }
 ";
     let (code, stdout) = build_and_run("tir_inline_mod", src);
@@ -459,7 +459,7 @@ fn file_module_qualified_call() {
 module math
 fn run() {
     print(math.clamp(15, 0, 10))
-    print(math.label(\"x\", 5))
+    print(math.label(n: 5, prefix: \"x\"))
     print(math.checked(7) ?? -1)
     print(math.checked(-1) ?? -2)
 }
@@ -502,7 +502,7 @@ fn file_module_qualified_call_runs_under_default_lens() {
 module math
 fn run() {
     print(math.clamp(15, 0, 10))
-    print(math.label(\"x\", 5))
+    print(math.label(n: 5, prefix: \"x\"))
     print(math.checked(7) ?? -1)
     print(math.checked(-1) ?? -2)
 }

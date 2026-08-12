@@ -330,7 +330,7 @@ fn compiler_symbol_kind_value(kind: &jet_semindex::SymbolKind) -> CtValue {
         jet_semindex::SymbolKind::Module => {
             ("module", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
         }
-        jet_semindex::SymbolKind::Function { params, ret } => (
+        jet_semindex::SymbolKind::Function { params, ret, .. } => (
             "function",
             params
                 .iter()

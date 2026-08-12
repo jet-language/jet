@@ -34,11 +34,27 @@ fn note(label: String, value: Float) => Float {
     return value
 }
 
+// The generic call exercises one declaration slot twice: `second` defaults
+// from `first`, while `rest` packs the remaining written arguments. The tap
+// calls make source-order and exactly-once evaluation visible.
+fn tap<T>(label: String, value: T) => T {
+    print("tap {label}")
+    return value
+}
+
+fn collect<T>(first: T, second: T = first, rest: ...T) => T {
+    print("rest {rest.len()}")
+    return second
+}
+
 // D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
 // are part of callable identity. `apply` only accepts a labelled call.
 fn apply(action: fn(*, force: Bool) => Int) => Int { return action(force: true) }
 
-fn saver(force: Bool) => Int = 7
+fn saver(force: Bool) => Int {
+    print("saver {force}")
+    return 7
+}
 
 fn run() {
     r :: Rect.new(width: 4.0, height: 3.0)
@@ -66,4 +82,14 @@ fn run() {
 
     // A label-only parameter on a function TYPE.
     print("{apply(saver)}")
+
+    // Generic default plus variadic rest: the first call inserts `second`,
+    // and the second packs two written tail values after the fixed slots.
+    print(collect<Int>(tap("first", 1)))
+    print(collect<Int>(
+        tap("first", 1),
+        tap("second", 2),
+        tap("third", 3),
+        tap("fourth", 4)
+    ))
 }

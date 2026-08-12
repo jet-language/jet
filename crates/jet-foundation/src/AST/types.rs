@@ -1,3 +1,4 @@
+use crate::AST::Expr;
 use crate::Diagnostics::Span;
 
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
@@ -168,7 +169,23 @@ impl Measure {
 pub struct FunctionObligations {
     pub effect_bound: Option<Vec<String>>,
     pub param_contract: Option<Vec<(String, super::ParamZone)>>,
+    /// Declaration-ordered rest-slot facts. Local names and default bodies
+    /// stay out of callable identity.
+    pub variadic: Option<Vec<bool>>,
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
+}
+
+/// Declaration-side call slots carried by a function value. Public labels and
+/// zones remain callable obligations; this row carries the defaults,
+/// conventions, and rest slots needed to bind a value call.
+#[derive(Debug, Clone)]
+pub struct FunctionCallMetadata {
+    /// Declaration-local names used only to resolve default bodies. They are
+    /// not public callable labels or semantic-index identity.
+    pub names: Vec<String>,
+    pub defaults: Vec<Option<Expr>>,
+    pub variadic: Vec<bool>,
+    pub conventions: Vec<AccessConvention>,
 }
 
 impl FunctionObligations {
@@ -188,12 +205,20 @@ impl FunctionObligations {
                     .join(",")
             })
             .unwrap_or_default();
+        let variadic = self.variadic.as_ref().map_or_else(String::new, |row| {
+            row.iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        });
         let provenance = self
             .return_view_provenance
             .as_ref()
             .map(super::canonical_view_provenance_map)
             .unwrap_or_default();
-        format!("effects=[{effects}];contract=[{contract}];provenance=[{provenance}]")
+        format!(
+            "effects=[{effects}];contract=[{contract}];variadic=[{variadic}];provenance=[{provenance}]"
+        )
     }
 
     /// required is the contract at the use site. offered is the contract
@@ -226,6 +251,17 @@ impl FunctionObligations {
             }),
         };
         if !contract_ok {
+            return false;
+        }
+
+        let variadic_ok = match &required.variadic {
+            None => true,
+            Some(required) => self
+                .variadic
+                .as_ref()
+                .is_none_or(|offered| offered == required),
+        };
+        if !variadic_ok {
             return false;
         }
 
@@ -355,21 +391,23 @@ impl KnowledgeVector {
                     if entry.plane != crate::Registry::TYPE_PLANE_OBLIGATION {
                         return None;
                     }
-                    // D-APILABEL1: this mixed plane contributes only its call
-                    // contract to identity; effects and return provenance
-                    // remain directional obligations.
+                    // D-APILABEL1/D-VARIADIC1: this mixed plane contributes
+                    // only declaration-ordered public call facts to identity;
+                    // effects, defaults, and return provenance remain
+                    // directional or local implementation details.
                     let KnowledgeFact::Obligation(obligations) = &entry.fact else {
                         return None;
                     };
-                    let Some(param_contract) = &obligations.param_contract else {
+                    if obligations.param_contract.is_none() && obligations.variadic.is_none() {
                         return None;
-                    };
+                    }
                     Some(KnowledgeEntry {
                         path: entry.path.clone(),
                         plane: entry.plane,
                         fact: KnowledgeFact::Obligation(FunctionObligations {
                             effect_bound: None,
-                            param_contract: Some(param_contract.clone()),
+                            param_contract: obligations.param_contract.clone(),
+                            variadic: obligations.variadic.clone(),
                             return_view_provenance: None,
                         }),
                     })
@@ -587,6 +625,9 @@ pub enum Type {
         /// identity; sema also checks directional compatibility. `None` means
         /// the callable has no declared call contract.
         param_contract: Option<Vec<(String, super::ParamZone)>>,
+        /// D-APILABEL1/D-NARG-D2/D-VARIADIC1: declaration-side call slots for
+        /// function-value calls.
+        call_metadata: Option<FunctionCallMetadata>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
         /// at parse time (names resolve then and are not kept on the type).
@@ -1057,14 +1098,23 @@ impl Type {
         let Type::Fn {
             effect_bound,
             param_contract,
+            call_metadata,
             return_view_provenance,
             ..
         } = self
         else {
             return None;
         };
+        let variadic = call_metadata.as_ref().and_then(|metadata| {
+            metadata
+                .variadic
+                .iter()
+                .any(|is_variadic| *is_variadic)
+                .then(|| metadata.variadic.clone())
+        });
         if effect_bound.is_none()
             && param_contract.is_none()
+            && variadic.is_none()
             && return_view_provenance.is_none()
         {
             return None;
@@ -1074,6 +1124,7 @@ impl Type {
                 .as_ref()
                 .map(|row| row.iter().map(|(name, _)| name.clone()).collect()),
             param_contract: param_contract.clone(),
+            variadic,
             return_view_provenance: return_view_provenance.clone(),
         })
     }
@@ -1232,6 +1283,7 @@ impl Type {
                     .map(|return_type| Box::new(return_type.erased_carrier())),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1410,11 +1462,12 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
+            Type::Fn { params, ret, effect_bound, param_contract, call_metadata, return_view_provenance } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1800,6 +1853,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let labelled = Type::Fn {
@@ -1807,6 +1861,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), ParamZone::LabelOnly)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
 
@@ -1857,6 +1912,7 @@ mod tests {
             })),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));
@@ -1938,6 +1994,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), zone)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
         let positional = callable(ParamZone::PositionalOnly);
@@ -1948,6 +2005,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
 

@@ -372,6 +372,7 @@ impl<'a> Fmt<'a> {
                 effect_bound,
                 param_contract,
                 return_view_provenance,
+                ..
             } => {
                 self.write("fn(");
                 // D-APILABEL1=A: reprint the declared call contract — the

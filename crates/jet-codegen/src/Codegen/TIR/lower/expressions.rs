@@ -923,7 +923,15 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
             }
             ExprWork::EnterArg(arg) => {
                 let expr = strip_expr_parens(&arg.arg.expr);
+                let has_binder_refs = !arg.arg.flags.binder_refs.is_empty();
                 work.push(ExprWork::BuildArg(arg));
+                // Default expressions carry declaration-slot references. Lower
+                // them as one argument under that slot mapping; pre-lowering
+                // their children would resolve the private names as ordinary
+                // locals before `lower_call_arg_value` installs the mapping.
+                if has_binder_refs {
+                    continue;
+                }
                 if let Some(body) = inline_loop_body(expr) {
                     work.push(ExprWork::LowerInlineLoop { expr, body });
                 } else if matches!(expr, Expr::If { .. }) {
@@ -1472,6 +1480,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Ident(name, _) => {
+            if let Some((temp, ty)) = env.binder_ref(name).cloned() {
+                return TExpr {
+                    ty,
+                    kind: TExprKind::Local(TLocal::user(&temp)),
+                };
+            }
             // c109 Phase 24: a comptime CONST inlines its pre-rendered value FIRST (the
             // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
             // check — so a const takes precedence even over a same-named local, matching
@@ -1587,6 +1601,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 Type::Fn { params, .. } => Some(params.as_slice()),
                 _ => None,
             };
+            let conventions = match &callee_t.ty {
+                Type::Fn {
+                    call_metadata: Some(metadata),
+                    ..
+                } => Some(metadata.conventions.as_slice()),
+                _ => None,
+            };
             let targs = args
                 .iter()
                 .enumerate()
@@ -1594,7 +1615,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     let conv = params
                         .and_then(|ps| ps.get(i))
                         .cloned()
-                        .map(|ty| (AccessConvention::Read, ty));
+                        .map(|ty| {
+                            (
+                                conventions
+                                    .and_then(|cs| cs.get(i))
+                                    .copied()
+                                    .unwrap_or(AccessConvention::Read),
+                                ty,
+                            )
+                        });
                     lower_one_call_arg(a, conv, env, cx)
                 })
                 .collect();
@@ -2011,6 +2040,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     Type::Fn { params, .. } => Some(params.as_slice()),
                     _ => None,
                 };
+                let conventions = match &callee_t.ty {
+                    Type::Fn {
+                        call_metadata: Some(metadata),
+                        ..
+                    } => Some(metadata.conventions.as_slice()),
+                    _ => None,
+                };
                 let targs = call
                     .args
                     .iter()
@@ -2019,7 +2055,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let conv = params
                             .and_then(|ps| ps.get(i))
                             .cloned()
-                            .map(|ty| (AccessConvention::Read, ty));
+                            .map(|ty| {
+                                (
+                                    conventions
+                                        .and_then(|cs| cs.get(i))
+                                        .copied()
+                                        .unwrap_or(AccessConvention::Read),
+                                    ty,
+                                )
+                            });
                         lower_one_call_arg(a, conv, env, cx)
                     })
                     .collect();
@@ -2543,9 +2587,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // per-arity function `VariadicBound.rs` synthesizes; record the
             // arity so the post-pass in `Codegen/mod.rs` knows to emit it.
             if let Some((fixed, _bounds)) = cx.variadic_bound_fns.get(&call.name).cloned() {
-                return crate::Codegen::VariadicBound::lower_variadic_bound_call(
+                let lowered = crate::Codegen::VariadicBound::lower_variadic_bound_call(
                     call, fixed, cx, env,
                 );
+                return match source_arg_order(&call.args) {
+                    Some(order) => preserve_source_arg_order(
+                        lowered,
+                        &order,
+                        call.args.len(),
+                        call.name_span.start as u32,
+                    ),
+                    None => lowered,
+                };
             }
             // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
             // decided here, totally — via the shared `lower_one_call_arg` (the single
@@ -3856,6 +3909,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ret,
                     effect_bound: None,
                     param_contract: None,
+                call_metadata: None,
                     return_view_provenance: lam.meta.return_view_provenance.clone(),
                 },
                 kind: TExprKind::Lambda(Box::new(tl)),
@@ -4110,13 +4164,26 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// every supplied argument anyway, in the declaration order the rewritten list
 /// already has.
 pub(crate) fn source_arg_order(args: &[crate::AST::CallArg]) -> Option<Vec<usize>> {
-    if !args.iter().any(|arg| arg.flags.source_index.is_some()) {
+    let has_default = args
+        .iter()
+        .any(|arg| arg.flags.binder_slot.is_some() && arg.flags.source_index.is_none());
+    if !has_default && !args.iter().any(|arg| arg.flags.source_index.is_some()) {
         return None;
     }
     let mut slots: Vec<usize> = (0..args.len())
         .filter(|slot| args[*slot].flags.source_index.is_some())
         .collect();
     slots.sort_by_key(|slot| args[*slot].flags.source_index);
+    if has_default {
+        let mut defaults: Vec<usize> = (0..args.len())
+            .filter(|slot| {
+                args[*slot].flags.binder_slot.is_some()
+                    && args[*slot].flags.source_index.is_none()
+            })
+            .collect();
+        defaults.sort_by_key(|slot| args[*slot].flags.binder_slot);
+        slots.extend(defaults);
+    }
     Some(slots)
 }
 
@@ -4154,51 +4221,14 @@ pub(crate) fn preserve_source_arg_order(
     }
 }
 
-/// D-APILABEL1=A: can evaluating this argument be *observed*? A place read can:
-/// an earlier supplied call may mutate the place before this argument reads it.
-/// Only values independent of runtime state may stay in declaration order.
-///
-/// Conservative: anything not recognised here is assumed to have an effect.
-fn effect_free(e: &TExpr) -> bool {
-    match &e.kind {
-        TExprKind::IntLit(..)
-        | TExprKind::FloatLit(_)
-        | TExprKind::BoolLit(_)
-        | TExprKind::CharLit(_)
-        | TExprKind::Unit
-        | TExprKind::DefaultLit
-        | TExprKind::CtLit(_)
-        | TExprKind::ConstRef(_) => true,
-        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
-            crate::Codegen::TIR::TStrPart::Lit(_) => true,
-            crate::Codegen::TIR::TStrPart::Interp(inner, ..) => effect_free(inner),
-        }),
-        // Arithmetic can panic (division by zero, overflow, or negating the
-        // minimum integer). Keep it in written order rather than trying to
-        // duplicate sema's operator/type proof here.
-        TExprKind::Unary { .. } | TExprKind::Binary { .. } => false,
-        _ => false,
-    }
-}
-
 trait OrderedArg {
     fn value(&self) -> &TExpr;
-    /// A borrowed place must remain a place: moving it into a temporary changes
-    /// ownership, while sema rejects any neighboring access that could make the
-    /// borrow's timing observable. Other arguments can be pinned.
-    fn can_bind(&self) -> bool {
-        true
-    }
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr;
 }
 
 impl OrderedArg for crate::Codegen::TIR::TCallArg {
     fn value(&self) -> &TExpr {
         &self.value
-    }
-
-    fn can_bind(&self) -> bool {
-        !self.mut_borrow && (!self.borrow || self.clone || self.arc_clone)
     }
 
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
@@ -4212,6 +4242,17 @@ impl OrderedArg for crate::Codegen::TIR::TCallArg {
             };
             self.clone = false;
             self.arc_clone = false;
+        }
+        if self.borrow || self.mut_borrow {
+            value = TExpr {
+                ty: value.ty.clone(),
+                kind: TExprKind::Borrow {
+                    place: Box::new(value),
+                    mutable: self.mut_borrow,
+                },
+            };
+            self.borrow = false;
+            self.mut_borrow = false;
         }
         value
     }
@@ -4240,33 +4281,6 @@ impl OrderedArg for TExpr {
         self
     }
 
-    fn can_bind(&self) -> bool {
-        // Raw Core args do not carry the signature's Read/Move convention.
-        // A scalar place is Copy; a computed owning value is safe to move into
-        // the source-order temporary. Keep non-scalar places in the call so a
-        // later Core emit borrow cannot turn the temporary into an accidental
-        // move. Sema rejects a neighboring mutation that would make that Read
-        // place's exact borrow instant observable.
-        self.ty.is_scalar()
-            || matches!(
-                &self.kind,
-                TExprKind::Call { .. }
-                    | TExprKind::MethodCall { .. }
-                    | TExprKind::FnFieldCall { .. }
-                    | TExprKind::StaticCall { .. }
-                    | TExprKind::ModuleCall { .. }
-                    | TExprKind::FnValue { .. }
-                    | TExprKind::CoreCall { .. }
-                    | TExprKind::ExternCall { .. }
-                    | TExprKind::HostCall(_)
-                    | TExprKind::InlineBlock(_)
-                    | TExprKind::Clone(_)
-                    | TExprKind::ExplicitCopy(_)
-                    | TExprKind::StrLit(_)
-                    | TExprKind::Print(_)
-            )
-    }
-
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
         std::mem::replace(self, replacement)
     }
@@ -4285,43 +4299,33 @@ fn bind_arg_temporaries<A: OrderedArg>(
     // TIR argument list, while `order` was computed over the AST list the
     // receiver was stripped from. Recover the offset from the two lengths.
     let offset = args.len().saturating_sub(ast_arg_count);
-    // The hidden prefix is the receiver (currently one slot for `#Root`),
-    // which is written before every explicit argument in the source call.
-    // Keep it at the front when the explicit slots are reordered.
-    let order: Vec<usize> = (0..offset)
-        .chain(order.iter().map(|slot| slot + offset))
-        .collect();
-    // Only arguments that can actually be observed need pinning down. Count
-    // them across the whole list, not just the written ones: a filled default
-    // with an effect also has to run after every supplied argument, and it
-    // sits in the call rather than in `order`. With fewer than two, nothing can
-    // be observed out of order and the call stays a plain call.
-    let observable_total = args.iter().filter(|arg| !effect_free(arg.value())).count();
-    if observable_total < 2 {
+    let mut order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+    if offset > 0 {
+        // `#Root` dot calls keep the receiver in TIR slot zero even though
+        // sema stripped it from the AST argument list. Materialize that slot
+        // before the written arguments: later defaults may refer to the root
+        // parameter, and the reference must read the same once-evaluated temp.
+        order.splice(0..0, 0..offset);
+    }
+    // Every slot in the binder's source order is evaluated exactly once. This
+    // includes pure-looking expressions and borrowed/mut-borrowed places: the
+    // capability wrapper is moved into the temporary by `take_for_binding`.
+    if order.is_empty() {
         return Vec::new();
     }
-    let observable: Vec<usize> = order
-        .iter()
-        .copied()
-        .filter(|slot| {
-            args.get(*slot)
-                .is_some_and(|arg| arg.can_bind() && !effect_free(arg.value()))
-        })
-        .collect();
-    if observable.is_empty() {
-        return Vec::new();
-    }
-    let mut stmts: Vec<TStmt> = Vec::with_capacity(observable.len() + 1);
-    for (step, slot) in observable.iter().enumerate() {
-        let Some(arg) = args.get_mut(*slot) else {
-            continue;
-        };
+    let mut stmts: Vec<TStmt> = Vec::with_capacity(order.len() + 1);
+    for slot in order {
+        let arg = args
+            .get_mut(slot)
+            .expect("binder source-order slot must have a lowered argument");
         // The name has to be unique across nesting: a nested reordered call is
         // lowered as the initialiser of one of these very temporaries, and the
         // interpreter shares one scope with it. `site` is the call's source
         // offset, so two calls can never collide and the name stays stable
         // across runs.
-        let temp = format!("__jet_arg{site}_{step}");
+        let ast_slot = slot.saturating_sub(offset);
+        let temp_slot = if offset > 0 { slot } else { ast_slot };
+        let temp = format!("__jet_arg{site}_{temp_slot}");
         let ty = arg.value().ty.clone();
         let bound = arg.take_for_binding(TExpr {
             ty: ty.clone(),

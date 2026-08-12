@@ -5248,6 +5248,141 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Apply the declaration-side capability contract to a function-value
+    /// argument. Function values carry the same convention metadata as named
+    /// functions, so their calls must not silently collapse to read-only.
+    pub(crate) fn check_callable_argument_ownership(
+        &mut self,
+        call_name: &str,
+        index: usize,
+        param_conv: AccessConvention,
+        param_ty: &Type,
+        arg: &mut crate::AST::CallArg,
+    ) {
+        if param_conv != AccessConvention::Move {
+            if let Expr::Ident(name, span) = &arg.expr {
+                if self
+                    .lookup(name)
+                    .is_some_and(|info| info.single_use_span.is_some())
+                {
+                    self.diags.push(e0142_aliased(name, call_name, *span));
+                    return;
+                }
+            }
+        }
+
+        if arg.convention == AccessConvention::Write
+            && !matches!(arg.expr, Expr::Ident(_, _))
+        {
+            self.diags.push(Diagnostic::error(
+                "E0202",
+                "the write-capability marker `&` needs a plain named binding after it".to_string(),
+                "write access from the write-capability marker `&` can only be granted to a named binding, not an expression"
+                    .to_string(),
+                self.non_name_write_argument_fix(&arg.expr),
+                Some(arg.span),
+            ));
+        }
+
+        match (param_conv, arg.convention) {
+            (AccessConvention::Move, AccessConvention::Read) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if type_is_copy(param_ty) {
+                        // Copy values cross an owning parameter by bits.
+                    } else if !self.is_resource_type(param_ty)
+                        && is_cloneable(param_ty, self.registry)
+                    {
+                        arg.flags.implicit_clone = true;
+                        let diagnostic = self.e0209_implicit_clone(
+                            format!("implicit clone of `{name}`"),
+                            format!("`{call_name}` expects to take ownership of this value"),
+                            name,
+                            *span,
+                        );
+                        self.diags.push(diagnostic);
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0201",
+                            format!(
+                                "`{call_name}` needs the move-capability marker `^` here — this value can't be copied"
+                            ),
+                            format!(
+                                "parameter {} takes ownership through the move-capability marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied",
+                                index + 1
+                            ),
+                            format!(
+                                "write the move-capability marker `^` (`{}{name}`) to move ownership to `{call_name}`",
+                                Syntax::SIGIL_MOVE
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                }
+            }
+            (AccessConvention::Move, AccessConvention::Move) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if !type_is_copy(param_ty) {
+                        self.mark_moved(name.clone(), *span);
+                    }
+                }
+            }
+            (AccessConvention::Write, AccessConvention::Read) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    self.diags.push(Diagnostic::error(
+                        "E0202",
+                        format!(
+                            "parameter `{name}` requires the write-capability marker `&` at the call site"
+                        ),
+                        format!(
+                            "`{call_name}` needs to edit this value with the write-capability marker `&`; passing it without that marker grants only read access"
+                        ),
+                        format!(
+                            "write the write-capability marker `&` (`{}{name}`) when calling `{call_name}`",
+                            Syntax::SIGIL_WRITE
+                        ),
+                        Some(*span),
+                    ));
+                }
+            }
+            (AccessConvention::Write, AccessConvention::Write) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if let Some(info) = self.lookup(name) {
+                        if !info.mutable {
+                            self.diags.push(Diagnostic::error(
+                                "E0111",
+                                format!(
+                                    "`{name}` was made with `{}`, so it can't be changed",
+                                    Syntax::SIGIL_BIND_IMMUT
+                                ),
+                                format!(
+                                    "`{call_name}` will change this value, so it must be mutable (`{}`)",
+                                    Syntax::SIGIL_BIND_MUT
+                                ),
+                                format!(
+                                    "declare it with `{} {name} ...`",
+                                    Syntax::SIGIL_BIND_MUT
+                                ),
+                                Some(*span),
+                            ));
+                        }
+                    }
+                }
+            }
+            (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
+                self.diags.push(Diagnostic::error(
+                    "E0203",
+                    "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
+                    "only parameters declared with the move-capability marker `^` accept a moved value at the call site".to_string(),
+                    "remove the move-capability marker `^`, or declare the parameter with that marker to take ownership".to_string(),
+                    Some(arg.span),
+                ));
+            }
+            _ => {}
+        }
+
+        self.check_write_arg_change(arg);
+    }
+
     pub(crate) fn finish_sender_send(
         &mut self,
         recv_ty: &Type,
@@ -5473,6 +5608,7 @@ impl<'a> Checker<'a> {
             ret: Some(value.clone()),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let saved_expected = self.expected_type.clone();
@@ -5685,6 +5821,7 @@ impl<'a> Checker<'a> {
             ret: expected_return.map(Box::new),
             effect_bound: None, return_view_provenance: None,
             param_contract: None,
+                call_metadata: None,
         };
         let saved_exp = self.expected_type.clone();
         self.expected_type = Some(expected);

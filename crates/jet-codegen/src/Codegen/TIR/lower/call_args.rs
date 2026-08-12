@@ -154,10 +154,18 @@ pub(crate) fn lower_call_arg_value(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TExpr {
+    let saved_binder_refs = env.binder_refs.clone();
+    let site = a.flags.binder_site.unwrap_or(a.span.start as u32);
+    for (name, slot, ty) in &a.flags.binder_refs {
+        env.binder_refs.insert(
+            name.clone(),
+            (format!("__jet_arg{site}_{slot}"), ty.clone()),
+        );
+    }
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
-    match (&a.expr, &conv) {
+    let value = match (&a.expr, &conv) {
         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
             TExpr {
                 ty: ty.clone(),
@@ -194,7 +202,9 @@ pub(crate) fn lower_call_arg_value(
             }
         }
         _ => lower_expr(&a.expr, cx, env),
-    }
+    };
+    env.binder_refs = saved_binder_refs;
+    value
 }
 
 pub(crate) fn lower_one_call_arg(

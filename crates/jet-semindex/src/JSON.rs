@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use jet_foundation::AST::ParamZone;
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::Package::{
@@ -388,18 +389,34 @@ fn json_view_provenance(provenance: &ViewProvenanceFact) -> String {
 fn json_kind(kind: &SymbolKind) -> String {
     match kind {
         SymbolKind::Module => "{\"kind\":\"module\"}".to_string(),
-        SymbolKind::Function { params, ret } => {
+        SymbolKind::Function {
+            params,
+            call_contract,
+            ret,
+        } => {
             let ps: Vec<String> = params
                 .iter()
-                .map(|(n, t)| format!("{{\"name\":{},\"type\":{}}}", json_str(n), json_str(t)))
+                .map(|(_, t)| format!("{{\"type\":{}}}", json_str(t)))
                 .collect();
+            let contract = call_contract
+                .iter()
+                .map(|(label, zone, variadic)| {
+                    format!(
+                        "{{\"label\":{},\"zone\":{},\"variadic\":{}}}",
+                        json_str(label),
+                        json_str(zone),
+                        variadic,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
             let ret_json = match ret {
                 Some(t) => json_str(t),
                 None => "null".to_string(),
             };
             format!(
-                "{{\"kind\":\"function\",\"params\":[{}],\"ret\":{}}}",
-                ps.join(","), ret_json
+                "{{\"kind\":\"function\",\"params\":[{}],\"call_contract\":[{}],\"ret\":{}}}",
+                ps.join(","), contract, ret_json
             )
         }
         SymbolKind::Struct { fields } => {
@@ -824,8 +841,30 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
 fn convert_kind(kind: &SymKind) -> SymbolKind {
     match kind {
         SymKind::Module => SymbolKind::Module,
-        SymKind::Function { params, ret, .. } => SymbolKind::Function {
+        SymKind::Function {
+            params,
+            param_contract,
+            param_variadic,
+            ret,
+            ..
+        } => SymbolKind::Function {
             params: params.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
+            call_contract: param_contract
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label, zone))| {
+                    (
+                        label.clone(),
+                        match zone {
+                            ParamZone::PositionalOnly => "positional_only",
+                            ParamZone::Either => "either",
+                            ParamZone::LabelOnly => "label_only",
+                        }
+                        .to_string(),
+                        param_variadic.get(index).copied().unwrap_or(false),
+                    )
+                })
+                .collect(),
             ret: ret.as_ref().map(|t| t.name()),
         },
         SymKind::Struct { fields } => SymbolKind::Struct {

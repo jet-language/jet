@@ -242,18 +242,61 @@ fn area(width: Int, height: Int) => Int {
 fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String {
     return \"{host} t={seconds} tls={tls}\"
 }
+fn identity<T>(value: T, *, note: String = \"unused\") => T {
+    return value
+}
+fn force(*, force: Bool) => Int = 1
+fn apply(action: fn(*, force: Bool) => Int) => Int {
+    return action(force: true)
+}
+struct Logger {
+    id: Int
+}
+impl Logger {
+    fn write(self, level: String, parts: ...String) => String {
+        return [level, ...parts].join(\" \")
+    }
+}
 fn run() {
     print(area(width: 4, height: 3))
     print(area(4, height: 3))
     print(connect(\"db\", tls: false, timeout: 5))
     print(connect(\"db\", tls: false))
+    print(identity<Int>(note: \"generic\", value: 7))
+    print(apply(force))
+    logger :: Logger.{id: 0}
+    print(logger.write(parts: \"a\", level: \"L\"))
+    print(logger.write(\"M\", \"b\", \"c\"))
 }
 ";
     let (code, stdout) = build_and_run("tir_named_args", src);
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "12\n12\ndb t=5 tls=false\ndb t=30 tls=false\n"
+        "12\n12\ndb t=5 tls=false\ndb t=30 tls=false\n7\n1\nL a\nM b c\n"
+    );
+}
+
+#[test]
+fn named_arg_diagnostic_covers_zero_parameter_calls() {
+    let src = "fn nothing() {}\nfn run() { nothing(value: 1) }\n";
+    let diagnostics = jet::compile(src).expect_err("a label on a zero-parameter call must fail");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0764"),
+        "expected E0764 for a label on a zero-parameter call: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn named_arg_diagnostic_covers_unlabelled_function_values() {
+    let src = "\
+fn apply(action: fn(Int) => Int) => Int { return action(value: 1) }
+fn run() { _ :: apply((value: Int) => value) }
+";
+    let diagnostics = jet::compile(src).expect_err("an unlabelled function type must reject labels");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0764"),
+        "expected E0764 for a label on an unlabelled function value: {diagnostics:#?}"
     );
 }
 

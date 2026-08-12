@@ -107,6 +107,19 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|error| panic!("named_args example must compile in resident JIT: {error}"));
 
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT named_args failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        aot.stdout,
+        expected.as_bytes(),
+        "AOT named_args observable order drifted"
+    );
+
     jet_jit::reset_jit_trace_for_test();
     let interpreted = match dev_iteration(&shown, false, true) {
         RunOutcome::Ran {

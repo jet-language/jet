@@ -647,54 +647,30 @@ pub(crate) fn foreign_thread_safe_lambda(lam: &crate::AST::Lambda) -> bool {
         }
 }
 
-/// D-NARG-D2: Walk a default expression and substitute any `Ident` that names
-/// an earlier parameter with the corresponding supplied argument expression.
-/// `param_names` is the slice of earlier param names (index-aligned with `args`).
-/// Returns the rewritten expression.
+/// D-NARG-D2: Walk one default expression exhaustively and replace each
+/// declaration-local reference with its compiler-private slot name. The
+/// replacement is a slot read, never a supplied argument AST, so side effects
+/// in a written argument cannot be duplicated by a default.
 pub(crate) fn substitute_param_refs(
-    expr: crate::AST::Expr,
-    param_names: &[String],
-    args: &[crate::AST::CallArg],
+    mut expr: crate::AST::Expr,
+    refs: &[(&str, String)],
 ) -> crate::AST::Expr {
-    use crate::AST::Expr;
-    match expr {
-        Expr::Ident(ref name, _) => {
-            if let Some(idx) = param_names.iter().position(|n| n == name) {
-                if let Some(arg) = args.get(idx) {
-                    return arg.expr.clone();
-                }
-            }
-            expr
+    expr.for_each_expr_mut(|node| {
+        let crate::AST::Expr::Ident(name, _) = node else {
+            return;
+        };
+        if let Some((_, replacement)) = refs.iter().find(|(param, _)| *param == name) {
+            *name = replacement.clone();
         }
-        Expr::Unary(op, inner, span) => Expr::Unary(
-            op,
-            Box::new(substitute_param_refs(*inner, param_names, args)),
-            span,
-        ),
-        Expr::Binary(op, lhs, rhs, span) => Expr::Binary(
-            op,
-            Box::new(substitute_param_refs(*lhs, param_names, args)),
-            Box::new(substitute_param_refs(*rhs, param_names, args)),
-            span,
-        ),
-        Expr::Field(base, field, span) => Expr::Field(
-            Box::new(substitute_param_refs(*base, param_names, args)),
-            field,
-            span,
-        ),
-        // All other expression forms don't mention parameter names directly
-        // (calls, literals, etc.) — leave them as-is. A complex default
-        // expression containing a nested call with a param ident would need
-        // recursive handling, but the parser only allows simple expressions in
-        // defaults (literals, idents, field access, arithmetic).
-        other => other,
-    }
+    });
+    expr
 }
 
-/// D-NARG-D2: Check whether a default expression references any parameter
-/// that appears *after* the current parameter index. Collects the names of
-/// any forward-referenced parameters found. `all_param_names` is the full
-/// list of non-self parameter names for this function (in order).
+/// D-NARG-D2: Use the same exhaustive expression walker to check whether a
+/// default expression references any parameter that appears *after* the
+/// current parameter index. Collects the names of any forward-referenced
+/// parameters found. `all_param_names` is the full list of non-self parameter
+/// names for this function (in order).
 /// `default_param_idx` is the index of the parameter whose default we're checking.
 pub(crate) fn find_forward_refs(
     expr: &crate::AST::Expr,
@@ -712,28 +688,17 @@ fn find_forward_refs_inner(
     default_param_idx: usize,
     found: &mut Vec<(String, crate::Diagnostics::Span)>,
 ) {
-    use crate::AST::Expr;
-    match expr {
-        Expr::Ident(name, span) => {
-            // A forward ref: name is in param list at an index >= default_param_idx
-            if let Some(idx) = all_param_names.iter().position(|n| n == name) {
-                if idx >= default_param_idx {
-                    found.push((name.clone(), *span));
-                }
+    let mut copy = expr.clone();
+    copy.for_each_expr_mut(|node| {
+        let crate::AST::Expr::Ident(name, span) = node else {
+            return;
+        };
+        if let Some(idx) = all_param_names.iter().position(|candidate| candidate == name) {
+            if idx >= default_param_idx {
+                found.push((name.clone(), *span));
             }
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
-            find_forward_refs_inner(inner, all_param_names, default_param_idx, found);
-        }
-        Expr::Binary(_, lhs, rhs, _) => {
-            find_forward_refs_inner(lhs, all_param_names, default_param_idx, found);
-            find_forward_refs_inner(rhs, all_param_names, default_param_idx, found);
-        }
-        Expr::Field(base, _, _) => {
-            find_forward_refs_inner(base, all_param_names, default_param_idx, found);
-        }
-        _ => {}
-    }
+    });
 }
 
 #[derive(Debug, Clone)]
@@ -1390,6 +1355,9 @@ pub(crate) struct Checker<'a> {
     fn_name: String,
     /// Canonical caller-visible parameter order; excludes `self`.
     current_param_names: Vec<String>,
+    /// Compiler-private names in inserted defaults resolve to their declaration
+    /// slot type here. This map is populated by the shared call binder.
+    pub(crate) binder_ref_types: HashMap<String, Type>,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
@@ -1534,6 +1502,13 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn register_binder_refs(&mut self, args: &[crate::AST::CallArg]) {
+        for arg in args {
+            for (name, _, ty) in &arg.flags.binder_refs {
+                self.binder_ref_types.insert(name.clone(), ty.clone());
+            }
+        }
+    }
     pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
         self.source_nesting += 1;
         if self.source_nesting <= crate::Diagnostics::MAX_SOURCE_NESTING {
