@@ -4249,12 +4249,22 @@ pub(crate) fn preserve_source_arg_order(
 
 trait OrderedArg {
     fn value(&self) -> &TExpr;
+    /// A by-reference place must remain a place: moving it into a temporary
+    /// changes ownership, while sema has already proved its read/write timing.
+    /// Other arguments can be pinned in source order.
+    fn can_bind(&self) -> bool {
+        true
+    }
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr;
 }
 
 impl OrderedArg for crate::Codegen::TIR::TCallArg {
     fn value(&self) -> &TExpr {
         &self.value
+    }
+
+    fn can_bind(&self) -> bool {
+        !self.mut_borrow && (!self.borrow || self.clone || self.arc_clone)
     }
 
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
@@ -4307,6 +4317,31 @@ impl OrderedArg for TExpr {
         self
     }
 
+    fn can_bind(&self) -> bool {
+        // Raw Core args do not carry the signature's Read/Move convention.
+        // A scalar place is Copy; a computed owning value is safe to move into
+        // the source-order temporary. Keep non-scalar places in the call so a
+        // later Core emit borrow cannot turn the temporary into an accidental
+        // move.
+        self.ty.is_scalar()
+            || matches!(
+                &self.kind,
+                TExprKind::Call { .. }
+                    | TExprKind::MethodCall { .. }
+                    | TExprKind::FnFieldCall { .. }
+                    | TExprKind::StaticCall { .. }
+                    | TExprKind::ModuleCall { .. }
+                    | TExprKind::FnValue { .. }
+                    | TExprKind::CoreCall { .. }
+                    | TExprKind::ExternCall { .. }
+                    | TExprKind::HostCall(_)
+                    | TExprKind::InlineBlock(_)
+                    | TExprKind::Clone(_)
+                    | TExprKind::StrLit(_)
+                    | TExprKind::Print(_)
+            )
+    }
+
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
         std::mem::replace(self, replacement)
     }
@@ -4333,14 +4368,21 @@ fn bind_arg_temporaries<A: OrderedArg>(
         // parameter, and the reference must read the same once-evaluated temp.
         order.splice(0..0, 0..offset);
     }
-    // Every slot in the binder's source order is evaluated exactly once. This
-    // includes pure-looking expressions and borrowed/mut-borrowed places: the
-    // capability wrapper is moved into the temporary by `take_for_binding`.
+    // Every bindable slot in the binder's source order is evaluated exactly
+    // once. A borrowed place stays in the call, where its access wrapper is
+    // emitted against the original place instead of moving it into a temp.
     if order.is_empty() {
         return Vec::new();
     }
-    let mut stmts: Vec<TStmt> = Vec::with_capacity(order.len() + 1);
-    for slot in order {
+    let bindable: Vec<usize> = order
+        .into_iter()
+        .filter(|slot| args.get(*slot).is_some_and(OrderedArg::can_bind))
+        .collect();
+    if bindable.is_empty() {
+        return Vec::new();
+    }
+    let mut stmts: Vec<TStmt> = Vec::with_capacity(bindable.len() + 1);
+    for slot in bindable {
         let arg = args
             .get_mut(slot)
             .expect("binder source-order slot must have a lowered argument");

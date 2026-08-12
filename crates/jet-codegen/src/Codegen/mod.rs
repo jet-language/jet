@@ -792,6 +792,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         }\n\
         impl JetDebug for jet_std::JetTaskFailure {\n\
             fn jet_debug(&self) -> String { self.jet_show() }\n\
+        }\n\
+        impl JetDebug for jet_std::DataTree {\n\
+            fn jet_debug(&self) -> String { self.jet_show() }\n\
         }\n",
     );
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");

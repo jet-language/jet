@@ -12,7 +12,7 @@ use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
-use crate::Codegen::TIR::{TExpr, TExprKind};
+use crate::Codegen::TIR::TExpr;
 
 fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
     let Type::Tuple(fields) = ty else {
@@ -1060,16 +1060,15 @@ pub(crate) fn emit_tir_core_call(
         // D-DET1: deterministic injected Clock capability constructor.
         
         ("core.game", "run") => {
-            let replay = if matches!(&args[1].kind, TExprKind::Absent) {
-                "None".to_string()
-            } else {
-                format!("Some(&({}))", arg(1))
+            let optional_ref = |index: usize| {
+                if matches!(args.get(index).map(|arg| &arg.ty), Some(Type::Option(_))) {
+                    format!("({}).as_ref().ok()", arg(index))
+                } else {
+                    format!("Some(&({}))", arg(index))
+                }
             };
-            let backend = if matches!(&args[2].kind, TExprKind::Absent) {
-                "None".to_string()
-            } else {
-                format!("Some(&({}))", arg(2))
-            };
+            let replay = optional_ref(1);
+            let backend = optional_ref(2);
             format!(
                 "{root}jet_game_run(&mut ({scene}), {replay}, {backend})",
                 root = cx.root_prefix,
@@ -2840,7 +2839,7 @@ pub(crate) fn emit_tir_core_call(
         
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
         ("core.http.server", "bind")
-            if args.len() == 3 && !matches!(&args[2].kind, TExprKind::Absent) =>
+            if args.len() == 3 && !matches!(&args[2].ty, Type::Option(_)) =>
         {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
@@ -2853,7 +2852,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         
         ("core.http.server", "serve")
-            if args.len() == 3 && !matches!(&args[2].kind, TExprKind::Absent) =>
+            if args.len() == 3 && !matches!(&args[2].ty, Type::Option(_)) =>
         {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(

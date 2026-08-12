@@ -4,12 +4,6 @@ impl JetShow for JetDate {
     }
 }
 
-impl JetDebug for jet_std::DataTree {
-    fn jet_debug(&self) -> String {
-        <Self as JetShow>::jet_show(self)
-    }
-}
-
 impl JetShow for JetLocalTime {
     fn jet_show(&self) -> String {
         self.to_string_fmt()
