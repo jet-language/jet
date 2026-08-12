@@ -147,6 +147,14 @@ impl NameLedger {
         self.declaration(module, name).map(|declaration| declaration.path.as_str())
     }
 
+    fn declaration_at(&self, module: usize, start: usize, end: usize) -> Option<&NameDeclaration> {
+        self.declarations.values().find(|declaration| {
+            declaration.module == module
+                && declaration.span.start == start
+                && declaration.span.end == end
+        })
+    }
+
     /// Canonical identity for a nominal declared in one loaded module.
     ///
     /// Every semantic nominal crossing a module boundary uses this form.  It
@@ -175,13 +183,7 @@ impl NameLedger {
         start: usize,
         end: usize,
     ) -> Option<String> {
-        self.declarations
-            .values()
-            .find(|declaration| {
-                declaration.module == module
-                    && declaration.span.start == start
-                    && declaration.span.end == end
-            })
+        self.declaration_at(module, start, end)
             .map(|declaration| declaration.path.clone())
     }
 
@@ -259,6 +261,37 @@ impl NameLedger {
         } else {
             Some(resolved_path)
         }
+    }
+
+    /// Project one indexed declaration through the same unique/ambiguous rule
+    /// as diagnostics. Inline-module declarations use generated ledger keys,
+    /// so their recorded canonical path is the only source-facing fallback.
+    /// Members first project their owner, then append the member leaf.
+    pub fn display_path_at(
+        &self,
+        from_module: usize,
+        start: usize,
+        end: usize,
+        name: &str,
+        owner: Option<&str>,
+        resolved_module: Option<usize>,
+    ) -> Option<String> {
+        let declaration = self.declaration_at(from_module, start, end)?;
+        let canonical = declaration.path.clone();
+        if let Some(owner) = owner {
+            return self
+                .display_path(from_module, owner, resolved_module)
+                .map(|owner| format!("{owner}.{name}"))
+                .or(Some(canonical));
+        }
+        if declaration
+            .name
+            .starts_with(crate::Syntax::GENERATED_NAME_PREFIX)
+        {
+            return Some(canonical);
+        }
+        self.display_path(from_module, name, resolved_module)
+            .or(Some(canonical))
     }
 
     /// Return every source-name key in one module with its canonical path.
@@ -642,6 +675,66 @@ mod tests {
         assert_eq!(
             ledger.display_path(0, "Thing", Some(2)),
             Some("two.Thing".to_string())
+        );
+    }
+
+    #[test]
+    fn display_path_at_projects_unique_and_ambiguous_definitions() {
+        let mut ledger = NameLedger::default();
+        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
+        ledger.set_module(1, "one".to_string(), "one.jet".to_string(), "pkg".to_string());
+        ledger.set_module(2, "two".to_string(), "two.jet".to_string(), "pkg".to_string());
+        ledger.declare(
+            0,
+            "Point".to_string(),
+            "app.Point".to_string(),
+            "type".to_string(),
+            Span::new(10, 15),
+            NameVisibility::Public,
+        );
+        assert_eq!(
+            ledger.display_path_at(0, 10, 15, "Point", None, Some(0)),
+            Some("Point".to_string())
+        );
+        for (module, path) in [(1, "one.Point"), (2, "two.Point")] {
+            ledger.declare(
+                module,
+                "Point".to_string(),
+                path.to_string(),
+                "type".to_string(),
+                span(),
+                NameVisibility::Public,
+            );
+        }
+        assert_eq!(
+            ledger.display_path_at(0, 3, 7, "Point", None, Some(2)),
+            Some("two.Point".to_string())
+        );
+    }
+
+    #[test]
+    fn display_path_at_projects_members_from_their_owner() {
+        let mut ledger = NameLedger::default();
+        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
+        ledger.declare(
+            0,
+            "Point".to_string(),
+            "app.Point".to_string(),
+            "type".to_string(),
+            Span::new(10, 15),
+            NameVisibility::Public,
+        );
+        ledger.declare(
+            0,
+            "Point.x".to_string(),
+            "app.Point.x".to_string(),
+            "field".to_string(),
+            Span::new(20, 21),
+            NameVisibility::Public,
+        );
+        assert_eq!(
+            ledger.display_path_at(0, 20, 21, "x", Some("Point"), Some(0)),
+            Some("Point.x".to_string())
         );
     }
 }

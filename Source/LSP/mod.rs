@@ -183,6 +183,46 @@ mod tests {
     }
 
     #[test]
+    fn unique_type_uses_leaf_in_hover_and_json() {
+        let src = "struct Point { x: Int }\nfn run() {}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(
+            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "unique type fixture should check: {diagnostics:#?}"
+        );
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let point = db
+            .symbols
+            .symbols()
+            .iter()
+            .find(|symbol| {
+                symbol.name == "Point"
+                    && symbol.kind == jet_semindex::SemanticSymbolKind::Type
+            })
+            .expect("Point semantic symbol");
+        assert_eq!(point.qualified_name, "Point");
+
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let hover = compute_hover(
+            &db,
+            &tokens,
+            src,
+            project.entry(),
+            src.find("Point").expect("Point declaration"),
+        )
+        .expect("Point hover");
+        assert!(hover.contains("Point"), "{hover}");
+
+        let json = db.index.to_json();
+        assert!(
+            json.contains("\"name\":\"Point\",\"leaf_name\":\"Point\""),
+            "{json}"
+        );
+    }
+
+    #[test]
     fn hover_shows_source_module_for_imported_root_call() {
         let project = TestProject::new();
         std::fs::write(

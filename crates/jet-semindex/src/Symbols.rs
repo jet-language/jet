@@ -367,7 +367,16 @@ pub(crate) fn canonical_symbol_name(
     };
     let ledger = &bundle.name_ledger;
     if let Some((start, end)) = span {
-        if let Some(path) = ledger.canonical_path_at(module_idx, start, end) {
+        // The span resolves generated inline-module keys, while the ledger
+        // still owns the short-vs-canonical user-facing spelling.
+        if let Some(path) = ledger.display_path_at(
+            module_idx,
+            start,
+            end,
+            name,
+            owner,
+            Some(module_idx),
+        ) {
             return path;
         }
     }

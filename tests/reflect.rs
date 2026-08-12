@@ -147,6 +147,14 @@ fn type_info_exposes_methods_type_params_and_markers() {
         validate_span: None,
     };
     let info = build_struct_type_info(&s);
+    assert!(matches!(
+        struct_field(&info, "name"),
+        CtValue::Str(name) if name.as_str() == "Box"
+    ));
+    assert!(matches!(
+        struct_field(&info, "path"),
+        CtValue::Str(path) if path.as_str() == "Box"
+    ));
     assert_eq!(list_len(struct_field(&info, "fields")), 2);
     assert_eq!(list_len(struct_field(&info, "methods")), 1);
     assert_eq!(list_len(struct_field(&info, "type_params")), 1);
@@ -352,6 +360,14 @@ fn range_and_dimension_facts_are_typed_records() {
         },
         "main",
     );
+    assert!(matches!(
+        struct_field(&info, "name"),
+        CtValue::Str(name) if name.as_str() == "Severity"
+    ));
+    assert!(matches!(
+        struct_field(&info, "path"),
+        CtValue::Str(path) if path.as_str() == "main.Severity"
+    ));
     let CtValue::List(facts) = struct_field(&info, "facts") else {
         panic!("facts");
     };
