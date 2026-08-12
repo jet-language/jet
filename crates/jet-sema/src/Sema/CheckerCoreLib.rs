@@ -1,7 +1,6 @@
 mod imports;
 mod fields_ptrs;
 mod serde;
-mod reactive;
 mod core_call;
 mod a11y;
 mod core_literals;

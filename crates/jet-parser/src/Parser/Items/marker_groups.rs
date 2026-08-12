@@ -1393,6 +1393,10 @@ impl<'a> Parser<'a> {
                     | Syntax::MARKER_SKIP
                     | Syntax::MARKER_DEFAULT
                     | Syntax::MARKER_FLATTEN => serde.push(m),
+                    // D-REPRC1: `Layout` is a type-layout fact, not a derive.
+                    // Keep it in `type_markers`; `attach_type_markers` projects
+                    // its variant into `StructDef.layout` below.
+                    Syntax::MARKER_LAYOUT => {}
                     // Any other name is a derive-trait: the D-VERDICT-732-1
                     // (formerly D-MARKERMOVE3) built-ins (`#[Debug]`,
                     // `#[Summarize]`, `#[Comparable]`) or a user derive-trait name.
@@ -1442,6 +1446,26 @@ impl<'a> Parser<'a> {
             }
             Ok(match item {
                 Item::Struct(mut s) => {
+                    // D-REPRC1: a bracket marker list is the canonical way to
+                    // combine `#Layout(...)` with another type marker. The
+                    // dedicated bare-layout parser fills these fields for the
+                    // single-marker spelling; mirror it here for
+                    // `#[Layout(c), Codable]` and user derive markers.
+                    if let Some(marker) = markers
+                        .iter()
+                        .find(|marker| marker.name == Syntax::MARKER_LAYOUT)
+                    {
+                        if let Some(crate::AST::Expr::Ident(variant, _)) = marker.args.first() {
+                            s.layout = match variant.as_str() {
+                                Syntax::LAYOUT_C => Some(crate::AST::StructLayout::C),
+                                Syntax::LAYOUT_COLUMNAR => {
+                                    Some(crate::AST::StructLayout::Columnar)
+                                }
+                                _ => s.layout,
+                            };
+                            s.layout_span = Some(marker.span);
+                        }
+                    }
                     // D-MIGRATE1 (I2/E0910 fix): `PublishedSchema` appearing inside an
                     // item-level `#[…]` bracket LIST (e.g. `#[PublishedSchema, Codable]
                     // struct …`) previously only got recorded in `type_markers` — the

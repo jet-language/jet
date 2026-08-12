@@ -517,6 +517,17 @@ extern "C" fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
     })
 }
 
+/// Typed list equality adapters preserve the element semantics of the shared
+/// Prelude kernel. String elements are arena handles, so comparing raw IDs
+/// would make equal independently-created lists unequal.
+extern "C" fn jet_jit_list_eq_str(a: i64, b: i64) -> i8 {
+    collection_semantics::list_equal(&clone_list_strings(a), &clone_list_strings(b)) as i8
+}
+
+extern "C" fn jet_jit_list_eq_f64(a: i64, b: i64) -> i8 {
+    collection_semantics::list_equal(&clone_list_floats(a), &clone_list_floats(b)) as i8
+}
+
 /// Mirror AOT `jet_iter_indexes(n)` — materialize `Iter<Int>` as a list handle.
 extern "C" fn jet_jit_list_indexes(n: i64) -> i64 {
     let n = n.max(0);
@@ -1159,6 +1170,22 @@ fn clone_list_strings(list: i64) -> Vec<String> {
                 rt.heap
                     .clone_string(id)
                     .expect("jit string-list adapter: bad string handle")
+            })
+            .collect()
+    })
+}
+
+fn clone_list_floats(list: i64) -> Vec<f64> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit float-list adapter: bad list handle");
+        (0..len)
+            .map(|index| {
+                rt.heap
+                    .list_get_float(list, index)
+                    .expect("jit float-list adapter: bad element")
             })
             .collect()
     })
@@ -3794,6 +3821,8 @@ host_fns! {
     list_len: "jet_jit_list_len" => jet_jit_list_len: sig_len;
     list_contains_str: "jet_jit_list_contains_str" => jet_jit_list_contains_str: sig_list_eq;
     list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
+    list_eq_str: "jet_jit_list_eq_str" => jet_jit_list_eq_str: sig_list_eq;
+    list_eq_f64: "jet_jit_list_eq_f64" => jet_jit_list_eq_f64: sig_list_eq;
     list_indexes: "jet_jit_list_indexes" => jet_jit_list_indexes: sig_len;
     list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;

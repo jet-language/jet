@@ -95,6 +95,13 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_vault_ty(&ty, cx)
 }
 
+/// Unit has no value representation for parameters or bindings, but it is a
+/// valid function result. Keep that distinction explicit so a Unit-returning
+/// function can stay on the same TIR path as its body and call sites.
+pub(crate) fn is_subset_return_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(ty, Type::Named(name) if name == "Unit") || is_subset_param_ty(ty, cx)
+}
+
 /// D-COMPUTE-TYPE1: all compute aliases use the same `JetTensor` value
 /// representation. Sema owns the shape checks; this gate only admits the
 /// resolved forms that `cx.rust_type` renders to that representation.

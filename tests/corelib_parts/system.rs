@@ -949,6 +949,12 @@ fn core_module_items_covers_known_core_modules() {
     if fn_body.contains("if module == \"core.lang\"") {
         items_keys.insert("core.lang".to_string());
     }
+    if fn_body.contains("module == Syntax::CORE_MEM_MODULE") {
+        items_keys.insert("core.mem".to_string());
+    }
+    if fn_body.contains("Syntax::CORE_MOD_MODULE =>") {
+        items_keys.insert("core.mod".to_string());
+    }
     for line in fn_body.lines() {
         let trimmed = line.trim();
         // A match arm head: `"core.files" => &[` or `"core.log" => &[`
@@ -1087,4 +1093,3 @@ fn run() {
         diags.iter().map(|d| d.code.to_string()).collect::<Vec<_>>()
     );
 }
-

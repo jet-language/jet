@@ -3582,7 +3582,7 @@ fn wasm_emit_expr(
             reconstructions,
         )?,
         TIR::TExprKind::OptionLift2 { f, a, b } => format!(
-            "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || ({}))",
+            "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || {{ let __jet_f = ({}); move |__jet_a, __jet_b| (__jet_f)(__jet_a, __jet_b) }})",
             wasm_emit_expr(a, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(b, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(f, funcs, file_prefix, reconstructions)?

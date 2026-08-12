@@ -3,6 +3,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::is_subset_param_ty;
+use crate::Codegen::TIR::is_subset_return_ty;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_is_generic;
@@ -59,7 +60,7 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     }
     // Return type, if present, must be a scalar, String, or a covered struct type.
     if let Some(rt) = &f.return_type {
-        if !is_subset_param_ty(rt, cx) {
+        if !is_subset_return_ty(rt, cx) {
             return false;
         }
     }
@@ -152,7 +153,7 @@ fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
         }
     }
     if let Some(rt) = &f.return_type {
-        if !is_subset_param_ty(&resolve_self_ty(rt, type_name), cx) {
+        if !is_subset_return_ty(&resolve_self_ty(rt, type_name), cx) {
             return false;
         }
     }
@@ -237,7 +238,7 @@ pub(crate) fn tir_covers_trait_method(
         }
     }
     if let Some(rt) = &f.return_type {
-        if !is_subset_param_ty(&resolve_self_ty(rt, type_name), cx) {
+        if !is_subset_return_ty(&resolve_self_ty(rt, type_name), cx) {
             return false;
         }
     }

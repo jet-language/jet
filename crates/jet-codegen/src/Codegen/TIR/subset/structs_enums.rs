@@ -38,6 +38,29 @@ pub(crate) fn enum_is_covered(name: &str, cx: &Cx) -> bool {
     enum_is_covered_inner(name, cx, &mut HashSet::new())
 }
 
+/// Core enum values with a concrete `PartialEq` representation in the shared
+/// Prelude. Sema resolves `==` on these values to the ordinary `Equatable`
+/// method shape, but they are not user enum items in `cx.enum_variants`.
+pub(crate) fn core_enum_equal_type(name: &str) -> bool {
+    matches!(
+        name,
+        "ProcessStreamMode"
+            | "TerminalMode"
+            | "EncodingFormat"
+            | "EncodingErrorKind"
+            | "DataEvent"
+            | "CBORErrorKind"
+            | "XMLReason"
+            | "XMLEntityPolicy"
+            | "XMLEncoding"
+            | "XMLLexicalPolicy"
+            | "XMLCanonicalMode"
+            | "DataErrorKind"
+            | "DurationUnit"
+            | "LocalDate"
+    )
+}
+
 /// c109 Phase 16: an enum is covered when every variant payload field is a covered
 /// VALUE type — scalar/Char/String, a covered struct, a covered collection, or
 /// (recursively) another covered enum (the recursion may go through a `boxed_edge`,

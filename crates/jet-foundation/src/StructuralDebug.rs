@@ -11,10 +11,31 @@ static IO_CONTEXT_FIELD_METADATA: &[(&str, bool)] = &[
     ("cause", false),
 ];
 
+/// Core CBOR parser options are a Prelude record. Keep its declaration order
+/// available to JIT and structural-debug adapters when no user item owns it.
+static CBOR_OPTIONS_FIELD_METADATA: &[(&str, bool)] = &[
+    ("max_depth", false),
+    ("max_items", false),
+    ("max_bytes", false),
+    ("require_canonical", false),
+];
+
+static CBOR_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
+    ("kind", false),
+    ("byte_offset", false),
+    ("path", false),
+    ("reason", false),
+];
+
+static FIELD_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("path", false), ("reason", false)];
+
 /// Return shared field metadata for a core structural type.
 pub fn jet_debug_field_metadata(type_name: &str) -> Option<&'static [(&'static str, bool)]> {
     match type_name {
         "IOContext" => Some(IO_CONTEXT_FIELD_METADATA),
+        "CBOROptions" => Some(CBOR_OPTIONS_FIELD_METADATA),
+        "CBORError" => Some(CBOR_ERROR_FIELD_METADATA),
+        "FieldError" => Some(FIELD_ERROR_FIELD_METADATA),
         _ => None,
     }
 }

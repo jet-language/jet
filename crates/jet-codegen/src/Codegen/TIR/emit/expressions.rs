@@ -3019,7 +3019,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let a = emit_tir_expr(a, cx);
             let b = emit_tir_expr(b, cx);
             format!(
-                "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || ({}))",
+                "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || {{ let __jet_f = ({}); move |__jet_a, __jet_b| (__jet_f)(__jet_a, __jet_b) }})",
                 a, b, f
             )
         }

@@ -400,22 +400,20 @@ fn jet_cbor_error(error: crate::jet_cbor_kernel::Error) -> jet_std::CBORError {
     }
 }
 
-fn jet_enc_cbor_to_bytes<T: __jet_Encode>(
-    value: &T,
-    canonical: bool,
-) -> Result<Vec<u8>, jet_std::CBORError> {
+fn jet_enc_cbor_to_bytes<T: __jet_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
     let tree = value.jet_encode();
-    crate::jet_cbor_kernel::encode(&jet_cbor_value(&tree), canonical).map_err(jet_cbor_error)
+    crate::jet_cbor_kernel::encode(&jet_cbor_value(&tree), false).map_err(jet_cbor_error)
 }
 
 fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(
     value: &T,
 ) -> Result<Vec<u8>, jet_std::CBORError> {
-    jet_enc_cbor_to_bytes(value, true)
+    let tree = value.jet_encode();
+    crate::jet_cbor_kernel::encode(&jet_cbor_value(&tree), true).map_err(jet_cbor_error)
 }
 
 fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
-    jet_enc_cbor_to_bytes(value, false).unwrap_or_else(|error| {
+    jet_enc_cbor_to_bytes(value).unwrap_or_else(|error| {
         panic!("cbor.encode failed: {}", error.reason)
     })
 }

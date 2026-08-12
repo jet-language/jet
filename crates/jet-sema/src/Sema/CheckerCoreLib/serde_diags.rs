@@ -628,30 +628,6 @@ pub(crate) fn reactive_lambda_arity(kind: &str, n: usize, span: Span) -> Diagnos
     )
 }
 
-/// D-REACT1=B (E2912): a `reactive.derived` whose lambda returns nothing.
-pub(crate) fn reactive_derived_unit(span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E2912",
-        "`reactive.derived` must compute and return a value".to_string(),
-        "a derived value is recomputed from its signals; its lambda has to return the value"
-            .to_string(),
-        "return a value from the body, or use `reactive.effect(() => { … })` for a side effect"
-            .to_string(),
-        Some(span),
-    )
-}
-
-/// D-REACT1=B (E2913): a reactive value type the library can't hold (e.g. a function).
-pub(crate) fn reactive_bad_value_type(kind: &str, ty: &Type, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E2913",
-        format!("a reactive {} can't hold a {}", kind, ty.show()),
-        "signals and derived values hold ordinary data so they can be copied to dependents".to_string(),
-        "use a data value (number, text, list, struct, …); wrap behaviour in `reactive.effect` instead".to_string(),
-        Some(span),
-    )
-}
-
 /// D-NUMOPS1 (E1005): a `wrapping`/`saturating`/`checked` opt-in wasn't given a
 /// single integer `+`/`-`/`*`/`/` to wrap.
 pub(crate) fn overflow_opt_in_error(kind: &str, span: Span) -> Diagnostic {

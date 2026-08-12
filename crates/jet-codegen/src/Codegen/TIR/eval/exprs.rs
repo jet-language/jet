@@ -2928,6 +2928,15 @@ impl<'a> EvalCtx<'a> {
                                 | TExprKind::OrFallback { .. }
                                 | TExprKind::RequireStop { .. }
                         );
+                        // A Core alias can still lower as StaticCall when the
+                        // fragment was typed before imports were propagated.
+                        // Check its comptime effect before entering arguments;
+                        // an explicit `$` must report E3403 for ambient
+                        // nondeterminism even when an argument is a runtime
+                        // place that cannot be materialized by the evaluator.
+                        if let Some(diagnostic) = self.core_call_fold_diagnostic(leaf) {
+                            return Err(diagnostic);
+                        }
                         if !special || short_binary || control {
                             // `eval_expr_inner` charges before it descends. Do
                             // that at Enter so queued children retain the same
@@ -3336,6 +3345,26 @@ impl<'a> EvalCtx<'a> {
                 scope,
             )),
             TExprKind::ListLit(elems) => Some(self.eval_list_lit_expr(expr, elems, scope)),
+            _ => None,
+        }
+    }
+
+    fn core_call_fold_diagnostic(&self, expr: &TExpr) -> Option<Diagnostic> {
+        match &expr.kind {
+            TExprKind::CoreCall {
+                module,
+                method,
+                source_span,
+                ..
+            } => self.comptime_core_fold_diagnostic(module, method, *source_span),
+            TExprKind::StaticCall {
+                owner: crate::Codegen::TIR::TStaticOwner::User(type_name),
+                method,
+                ..
+            } => {
+                let module = self.core_imports.get(type_name)?;
+                self.comptime_core_fold_diagnostic(module, &method.name, self.span())
+            }
             _ => None,
         }
     }

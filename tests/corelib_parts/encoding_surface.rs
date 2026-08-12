@@ -299,7 +299,7 @@ fn run() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let source_name = "nondeterministic_matrix.jet";
+    let source_name = "nondeterministic_matrix";
     let source = r#"
 use core.random as random
 use core.time as time
@@ -326,18 +326,19 @@ fn run() {
     print(random.weighted_pick(items, weights) ?? "none")
     print(random.sample(items, 2))
     random.shuffle(&items)
-    print(items.at(0) ?? "none")
-    print(items.at(1) ?? "none")
-    print(items.at(2) ?? "none")
+    print("shuffle-unit-ok")
+    print(items[0])
+    print(items[1])
+    print(items[2])
     float_items := [1.5, 2.5, 3.5]
     print(random.pick(float_items) ?? -1.0)
     print(random.weighted_pick(float_items, weights) ?? -1.0)
     print(random.sample(float_items, 2))
     random.shuffle(&float_items)
-    print(float_items.at(0) ?? -1.0)
+    print(float_items[0])
+    shuffle_unit()
     print(random.split(9).float() >= 0.0)
     print(random.bytes(4).len())
-    print(shuffle_unit())
 
     rng := random.rng(99)
     twin := random.rng(99)
@@ -390,11 +391,11 @@ fn run() {
     );
     assert_eq!(code, 0, "nondeterministic AOT matrix failed: {stderr}");
     assert!(
-        aot_stdout.lines().any(|line| line == "()"),
-        "ambient random.shuffle must yield Unit: {aot_stdout}"
+        aot_stdout.lines().any(|line| line == "shuffle-unit-ok"),
+        "ambient random.shuffle must run as a Unit expression: {aot_stdout}"
     );
 
-    let path = dir.join(source_name);
+    let path = dir.join("nondeterministic_matrix.jet");
     fs::write(&path, source).unwrap();
     jet_jit::reset_jit_trace_for_test();
     let resident_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
@@ -704,10 +705,10 @@ fn summarize() => String {
     return "unreachable"
 }
 
-@expected :: summarize()
+$expected :: summarize()
 
 fn run() {
-    print(@expected)
+    print($expected)
     print(summarize())
 }
 "#;
@@ -754,17 +755,17 @@ fn show(result: DataTree ? XMLError) => String {
     return "unreachable"
 }
 
-@numeric :: show(xml.parse("<r>&#0;</r>"))
-@attribute :: show(xml.parse("<r a='&#0;'/>"))
-@namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+$numeric :: show(xml.parse("<r>&#0;</r>"))
+$attribute :: show(xml.parse("<r a='&#0;'/>"))
+$namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
-    print("{@numeric}|{runtime_numeric}")
-    print("{@attribute}|{runtime_attribute}")
-    print("{@namespace}|{runtime_namespace}")
+    print("{$numeric}|{runtime_numeric}")
+    print("{$attribute}|{runtime_attribute}")
+    print("{$namespace}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
@@ -817,14 +818,14 @@ fn summarize(source: String) => String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-@cr :: String.from_bytes([13]) ?? panic("CR")
-@close :: "/>"
-@source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{@cr}\nD{@cr}E' b='&#xD;&#xA;&#x9;'{@close}"
-@normalized :: summarize(@source)
+$cr :: String.from_bytes([13]) ?? panic("CR")
+$close :: "/>"
+$source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{$cr}\nD{$cr}E' b='&#xD;&#xA;&#x9;'{$close}"
+$normalized :: summarize($source)
 
 fn run() {
-    runtime := summarize(@source)
-    print("{@normalized}|{runtime}")
+    runtime := summarize($source)
+    print("{$normalized}|{runtime}")
 }
 "#;
     let expected = "true|true|3|true|true|true|3|true\n";
@@ -897,24 +898,24 @@ fn show32(text: String) => String {
     return "unreachable"
 }
 
-@standard_ws :: show64("Z g = =\n")
-@standard_unpadded :: show64("Zg")
-@standard_interior :: show64("Zg=A")
-@standard_excess :: show64("Zg====")
-@standard_bits :: show64("Zh==")
-@standard_padding :: show64("=AAA")
-@standard_alphabet :: show64("Zg-=")
-@standard_size :: show64("A")
-@url_outer_ws :: show64url(" \tZg==\n")
-@url_interior :: show64url("Zg=A")
-@url_standard_alphabet :: show64url("+w")
-@url_bits :: show64url("Zh")
-@url_padding :: show64url("=AAA")
-@url_size :: show64url("A")
-@base32_loose :: show32("m=y======\n")
-@base32_bits :: show32("MZ======")
-@base32_short :: show32("A")
-@base32_alphabet :: show32("M0======")
+$standard_ws :: show64("Z g = =\n")
+$standard_unpadded :: show64("Zg")
+$standard_interior :: show64("Zg=A")
+$standard_excess :: show64("Zg====")
+$standard_bits :: show64("Zh==")
+$standard_padding :: show64("=AAA")
+$standard_alphabet :: show64("Zg-=")
+$standard_size :: show64("A")
+$url_outer_ws :: show64url(" \tZg==\n")
+$url_interior :: show64url("Zg=A")
+$url_standard_alphabet :: show64url("+w")
+$url_bits :: show64url("Zh")
+$url_padding :: show64url("=AAA")
+$url_size :: show64url("A")
+$base32_loose :: show32("m=y======\n")
+$base32_bits :: show32("MZ======")
+$base32_short :: show32("A")
+$base32_alphabet :: show32("M0======")
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")
@@ -935,24 +936,24 @@ fn run() {
     r_base32_bits := show32("MZ======")
     r_base32_short := show32("A")
     r_base32_alphabet := show32("M0======")
-    print("{@standard_ws}|{r_standard_ws}")
-    print("{@standard_unpadded}|{r_standard_unpadded}")
-    print("{@standard_interior}|{r_standard_interior}")
-    print("{@standard_excess}|{r_standard_excess}")
-    print("{@standard_bits}|{r_standard_bits}")
-    print("{@standard_padding}|{r_standard_padding}")
-    print("{@standard_alphabet}|{r_standard_alphabet}")
-    print("{@standard_size}|{r_standard_size}")
-    print("{@url_outer_ws}|{r_url_outer_ws}")
-    print("{@url_interior}|{r_url_interior}")
-    print("{@url_standard_alphabet}|{r_url_standard_alphabet}")
-    print("{@url_bits}|{r_url_bits}")
-    print("{@url_padding}|{r_url_padding}")
-    print("{@url_size}|{r_url_size}")
-    print("{@base32_loose}|{r_base32_loose}")
-    print("{@base32_bits}|{r_base32_bits}")
-    print("{@base32_short}|{r_base32_short}")
-    print("{@base32_alphabet}|{r_base32_alphabet}")
+    print("{$standard_ws}|{r_standard_ws}")
+    print("{$standard_unpadded}|{r_standard_unpadded}")
+    print("{$standard_interior}|{r_standard_interior}")
+    print("{$standard_excess}|{r_standard_excess}")
+    print("{$standard_bits}|{r_standard_bits}")
+    print("{$standard_padding}|{r_standard_padding}")
+    print("{$standard_alphabet}|{r_standard_alphabet}")
+    print("{$standard_size}|{r_standard_size}")
+    print("{$url_outer_ws}|{r_url_outer_ws}")
+    print("{$url_interior}|{r_url_interior}")
+    print("{$url_standard_alphabet}|{r_url_standard_alphabet}")
+    print("{$url_bits}|{r_url_bits}")
+    print("{$url_padding}|{r_url_padding}")
+    print("{$url_size}|{r_url_size}")
+    print("{$base32_loose}|{r_base32_loose}")
+    print("{$base32_bits}|{r_base32_bits}")
+    print("{$base32_short}|{r_base32_short}")
+    print("{$base32_alphabet}|{r_base32_alphabet}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);
@@ -1314,4 +1315,3 @@ fn run() {{
     );
     let _ = fs::remove_dir_all(&dir);
 }
-

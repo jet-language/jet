@@ -95,6 +95,12 @@ fn parse_fast(text: String) => Int = text.parse() ?? 0
 An expected marker argument also accepts a dot literal without an import:
 `#Inline(.Always)`.
 
+### `core.mod` — pinned library loading
+
+`core.mod.load` loads a project-contained, pinned Jet library through an explicit
+grant. The compiler checks the grant and package boundary before any library
+code runs.
+
 **Not allowed:**
 
 ```jet

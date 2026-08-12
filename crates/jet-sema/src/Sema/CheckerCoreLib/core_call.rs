@@ -12,7 +12,7 @@ use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
 use super::core_types::{decode_error_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
-    freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
+    freestanding_hint, is_freestanding_forbidden, module_short_name,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
 
@@ -228,7 +228,7 @@ fn safe_envelope_raw_argument(
     args: &[crate::AST::CallArg],
     expected_arity: usize,
 ) -> Option<Diagnostic> {
-    if !matches!(module, "jet.crypto" | "core.crypto")
+    if module != "core.crypto"
         || !matches!(name, "seal" | "open" | "file_seal" | "file_open")
         || args.len() != expected_arity + 1
     {
@@ -271,7 +271,7 @@ fn crypto_misuse_diagnostic(
     name: &str,
     args: &[crate::AST::CallArg],
 ) -> Option<Diagnostic> {
-    if matches!(module, "jet.crypto" | "core.crypto") && name == "password_hash_with_salt" {
+    if module == "core.crypto" && name == "password_hash_with_salt" {
         return Some(Diagnostic::crypto_misuse_fact(
             "`password_hash_with_salt` would use caller-controlled salt bytes, which makes a deterministic entropy seam reachable from a release build".to_string(),
             "use `crypto.password_hash` so Jet generates the salt, or move a fixed vector to `expert.argon2id` inside `#Unsafe`".to_string(),
@@ -280,8 +280,7 @@ fn crypto_misuse_diagnostic(
             "password_hash_with_salt",
         ));
     }
-    if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert")
-        && name == "hkdf_sha256"
+    if matches!(module, "core.crypto" | "core.crypto.expert") && name == "hkdf_sha256"
     {
         let length = args.get(3)?;
         let actual = literal_int(&length.expr)?;
@@ -470,7 +469,7 @@ fn resolved_core_fixed_sig(
         Some(row) => core_fixed_sig_for_row(row)?,
         None => core_fixed_sig(module, name)?,
     };
-    if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert") {
+    if matches!(module, "core.crypto" | "core.crypto.expert") {
         Some((
             params
                 .into_iter()
@@ -3249,109 +3248,6 @@ impl<'a> Checker<'a> {
                         ),
                     ]));
                 }
-                // D-ROUTE1=A: jet.http.router() → HTTPRouter.
-                ("jet.http", "router") => {
-                    if !args.is_empty() {
-                        self.diags
-                            .push(wrong_core_arity("router", 0, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                    }
-                    return Some(Type::Named("HTTPRouter".to_string()));
-                }
-                // D-ROUTE1=A: http.parse(raw_string) → HTTPRequest (parses HTTP/1.1 bytes).
-                ("jet.http", "parse") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("parse", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HTTPRequest".to_string()));
-                }
-                // D-HTTP-CORE2=A: the router's sole Handler propagates HTTPError.
-                ("jet.http", "dispatch") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("dispatch", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let router_ty = self.infer(&mut args[0].expr);
-                    match &router_ty {
-                        Some(Type::Named(n)) if n == "HTTPRouter" => {}
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`http.dispatch` needs an HTTPRouter, not {}", other.show()),
-                                "build a router with `http.router()` and register routes with `.get/.post/…`".to_string(),
-                                "write `http.dispatch(router, req)`".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
-                        }
-                        _ => {}
-                    }
-                    if let Some(arg) = args.get_mut(1) {
-                        let req_ty = self.infer(&mut arg.expr);
-                        match &req_ty {
-                            Some(Type::Named(n)) if n == "HTTPRequest" => {}
-                            Some(other) => {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!(
-                                        "`http.dispatch` needs an HTTPRequest, not {}",
-                                        other.show()
-                                    ),
-                                    "parse the raw request with `http.parse(raw)`".to_string(),
-                                    "write `http.dispatch(router, req)` where `req` is an HTTPRequest"
-                                        .to_string(),
-                                    Some(arg.expr.span()),
-                                ));
-                            }
-                            _ => {}
-                        }
-                    }
-                    return Some(Type::Result {
-                        ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                        err: Box::new(Type::Named("HTTPError".to_string())),
-                    });
-                }
-                // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
-                // handler: fn(HTTPRequest) => HTTPResponse (lambda) or HTTPRouter.
-                ("jet.http", "serve") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("serve", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
-                    // Accept an HTTPRouter or a callable (lambda/fn pointer).
-                    let handler_ty = self.infer(&mut args[1].expr);
-                    match &handler_ty {
-                        Some(Type::Fn { .. }) => {}
-                        Some(Type::Named(n)) if n == "HTTPRouter" => {}
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`http.serve` handler must be a function or HTTPRouter, not {}", other.show()),
-                                "the handler is called with each incoming `HTTPRequest`".to_string(),
-                                "pass a router (`http.router()`) or a lambda: `(req) => HTTPResponse { … }`".to_string(),
-                                Some(args[1].expr.span()),
-                            ));
-                        }
-                        None => {}
-                    }
-                    return None; // serve runs forever; no meaningful return type
-                }
                 // D-DEFER1 option B: scope.guard(() => { … }) → ScopeGuard
                 // The argument must be a zero-parameter lambda. LIFO drop order is
                 // guaranteed by Rust's reverse-declaration semantics.
@@ -3393,130 +3289,6 @@ impl<'a> Checker<'a> {
                         None => {}
                     }
                     return Some(Type::Named("ScopeGuard".to_string()));
-                }
-                // D-REACT1=B: reactive.signal(initial) → Signal<T>. The value type is
-                // inferred from the initial value; an explicit annotation may guide an
-                // empty/ambiguous literal via `expected_type`.
-                ("jet.reactive", "signal") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("signal", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    // If the binding is annotated `Signal<T>`, push `T` as the expected
-                    // type for the initial value so an ambiguous literal elaborates.
-                    let saved = self.expected_type.clone();
-                    if let Some(Type::Apply { name, args: ta }) = &self.expected_type {
-                        if name == crate::Syntax::TYPE_SIGNAL && ta.len() == 1 {
-                            self.expected_type = Some(ta[0].clone());
-                        }
-                    }
-                    let init_ty = self.infer(&mut args[0].expr);
-                    self.expected_type = saved;
-                    let elem = init_ty.unwrap_or(Type::Int);
-                    if !self.reactive_value_ok(&elem, args[0].expr.span(), "signal") {
-                        return None;
-                    }
-                    return Some(Type::Apply {
-                        name: crate::Syntax::TYPE_SIGNAL.to_string(),
-                        args: vec![elem],
-                    });
-                }
-                // D-REACT1=B: reactive.derived(() => expr) → Derived<T>. The compute
-                // closure takes no parameters; `T` is its return type. Reading a signal
-                // (`.get()`) inside the body subscribes the derived to it.
-                ("jet.reactive", "derived") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("derived", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let lam_ty = self.infer(&mut args[0].expr);
-                    let elem = match &lam_ty {
-                        Some(Type::Fn { params, ret, .. }) => {
-                            if !params.is_empty() {
-                                self.diags.push(reactive_lambda_arity(
-                                    "derived",
-                                    params.len(),
-                                    args[0].expr.span(),
-                                ));
-                                return None;
-                            }
-                            match ret {
-                                Some(r) => (**r).clone(),
-                                None => {
-                                    self.diags.push(reactive_derived_unit(args[0].expr.span()));
-                                    return None;
-                                }
-                            }
-                        }
-                        Some(other) => {
-                            self.diags
-                                .push(reactive_not_lambda("derived", other, args[0].expr.span()));
-                            return None;
-                        }
-                        None => return None,
-                    };
-                    if !self.reactive_value_ok(&elem, args[0].expr.span(), "derived") {
-                        return None;
-                    }
-                    return Some(Type::Apply {
-                        name: crate::Syntax::TYPE_DERIVED.to_string(),
-                        args: vec![elem],
-                    });
-                }
-                // D-SIGNAL1: `reactive.computed` is a canonical alias for `derived`.
-                ("jet.reactive", "computed") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("computed", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let lam_ty = self.infer(&mut args[0].expr);
-                    let elem = match &lam_ty {
-                        Some(Type::Fn { params, ret, .. }) => {
-                            if !params.is_empty() {
-                                self.diags.push(reactive_lambda_arity(
-                                    "computed",
-                                    params.len(),
-                                    args[0].expr.span(),
-                                ));
-                                return None;
-                            }
-                            match ret {
-                                Some(r) => (**r).clone(),
-                                None => {
-                                    self.diags.push(reactive_derived_unit(args[0].expr.span()));
-                                    return None;
-                                }
-                            }
-                        }
-                        Some(other) => {
-                            self.diags.push(reactive_not_lambda(
-                                "computed",
-                                other,
-                                args[0].expr.span(),
-                            ));
-                            return None;
-                        }
-                        None => return None,
-                    };
-                    if !self.reactive_value_ok(&elem, args[0].expr.span(), "computed") {
-                        return None;
-                    }
-                    return Some(Type::Apply {
-                        name: crate::Syntax::TYPE_COMPUTED.to_string(),
-                        args: vec![elem],
-                    });
                 }
                 // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(() => { … })` — reactive
                 // measure/layout/paint loop; re-runs when a signal read inside changes.
@@ -3677,39 +3449,6 @@ impl<'a> Checker<'a> {
                         }
                     }
                     return Some(unit_ty());
-                }
-                // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
-                // whenever a signal it read changes. The body is a zero-parameter,
-                // unit-returning closure; the call returns a retained Effect.
-                ("jet.reactive", "effect") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("effect", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let lam_ty = self.infer(&mut args[0].expr);
-                    match &lam_ty {
-                        Some(Type::Fn { params, .. }) => {
-                            if !params.is_empty() {
-                                self.diags.push(reactive_lambda_arity(
-                                    "effect",
-                                    params.len(),
-                                    args[0].expr.span(),
-                                ));
-                                return None;
-                            }
-                        }
-                        Some(other) => {
-                            self.diags
-                                .push(reactive_not_lambda("effect", other, args[0].expr.span()));
-                            return None;
-                        }
-                        None => return None,
-                    }
-                    return Some(Type::Named(crate::Syntax::TYPE_EFFECT.to_string()));
                 }
                 // D-EVENT1=D: first-party typed Event/Hook family. Constructors are
                 // module functions so the semantic family is one Core library surface,

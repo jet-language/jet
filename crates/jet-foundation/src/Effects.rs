@@ -322,7 +322,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
-        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
+        "core.net" | "core.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
@@ -330,7 +330,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.env" => Effect::Env,
         "core.process" => Effect::Exec,
         "core.io" => Effect::IO,
-        "jet.db" | "jet.sql" => Effect::DB,
+        "core.db" => Effect::DB,
         // D-AUTH1: the storeful session APIs read and write a live user store.
         // Declared here so the comptime tier reads the same fact the run tier
         // does, instead of naming these seven methods in a list of its own.
@@ -351,8 +351,8 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         // D-DEP-WASM1=A (c81): loading a sandboxed plugin executes foreign
         // code, even though the sandbox makes it memory-safe — same bucket as
         // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
-        "core.plugin" | "jet.plugin" | "core.mod" => Effect::Exec,
-        "jet.log" => Effect::Log,
+        "core.plugin" | "core.mod" => Effect::Exec,
+        "core.log" => Effect::Log,
         "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
             Effect::Browser
         }

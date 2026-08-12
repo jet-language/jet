@@ -1010,7 +1010,7 @@ struct Point { x: Int  y: Int }
 struct UserRecord { id: Int  display_name: String }
 
 migration UserRecord {
-    rename name -> display_name
+    rename name => display_name
 }
 
 fn run() {
