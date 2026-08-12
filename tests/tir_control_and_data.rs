@@ -1122,15 +1122,15 @@ fn run() {
     assert!(table.contains("// jet:branch sparse-search"), "{table}");
     assert!(table.contains("// jet:branch bool-two-way"), "{table}");
     assert!(
-        table.contains("else if *__jet_switch_subject < 100"),
+        table.contains("else if *__jet___switch_subject < 100"),
         "sparse integers should emit a balanced search tree: {table}"
     );
     assert!(
-        table.contains("if *__jet_switch_subject {"),
+        table.contains("if *__jet___switch_subject {"),
         "two-way Bool dispatch should branch on the subject directly: {table}"
     );
     assert_eq!(
-        table.matches("match *__jet_switch_subject").count(),
+        table.matches("match *__jet___switch_subject").count(),
         1,
         "only dense integer arms should use table lowering: {table}"
     );
@@ -1150,11 +1150,11 @@ fn run() {
 "#,
     );
     assert!(
-        ordered.contains("let __jet_switch_subject = &(__jet_subject())"),
+        ordered.contains("let __jet___switch_subject = &(__jet_subject())"),
         "{ordered}"
     );
     assert!(
-        ordered.contains("(*__jet_switch_subject)"),
+        ordered.contains("(*__jet___switch_subject)"),
         "conditions must reuse the evaluated subject: {ordered}"
     );
     assert_eq!(
@@ -1163,7 +1163,7 @@ fn run() {
         "branch subject was evaluated more than once: {ordered}"
     );
     assert!(
-        !ordered.contains("__jet_switch_subject.clone()"),
+        !ordered.contains("__jet___switch_subject.clone()"),
         "branch dispatch must not clone its subject: {ordered}"
     );
 }

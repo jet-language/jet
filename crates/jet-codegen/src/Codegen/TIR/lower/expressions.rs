@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{
     AccessConvention, BinOp, CallArg, EnumLitArg, Expr, IndexKind, OrFallback, Stmt, StrPart,
     TryConvert, Type, TypedLitBody,
@@ -8,6 +9,7 @@ use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_json_type_name;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
 use crate::Codegen::TIR::{call_return_type, call_return_type_with_args};
@@ -1545,7 +1547,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
-            // const) emits `emit_named_fn_value` — `Box::new(move |…| user_<name>(…))
+            // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
             // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
             if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
                 if let Some(ft @ Type::Fn { .. }) = cx.fn_types.get(name) {
@@ -2700,7 +2702,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ..
         } => {
             // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
-            // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn user_<Trait>>`; the
+            // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn __jet_<Trait>>`; the
             // value's type is the trait object. Resolved here (totality) — only the plain
             // user-struct branch below carries it (a coerced import_ns/prelude literal is
             // not a construct any covered program produces; the gate keeps those uncoerced).
@@ -3075,7 +3077,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
             // a `Field` whose receiver is the enum-name ident (sema re-types but does
             // not rewrite the node). The gate proved this is a covered enum + unit
-            // variant; emit `user_<Enum>::user_<variant>` (the AST path's form).
+            // variant; emit `__jet_<Enum>::__jet_<variant>` (the AST path's form).
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
                 let resolved_enum = cx
                     .core_qualified_rust_type_name(enum_name)
@@ -3185,7 +3187,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 {
                     // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in
                     // search.jet) qualifies with the module path, exactly as `emit_expr`'s
-                    // `Field` arm (Expression.rs ~L232): `{root}{mod}::user_<Enum>::<V>`.
+                    // `Field` arm (Expression.rs ~L232): `{root}{mod}::__jet_<Enum>::<V>`.
                     // Keyed on the ENUM-name (`enum_name`, the receiver) in `cx.foreign_types`,
                     // NOT the variant — matching the AST byte-for-byte.
                     return TExpr {
@@ -3247,7 +3249,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             // D-SOA1: a fused `xs[i].field` where `xs` is a columnar list reads the
-            // field's column directly (`jet_index_vec(&(base).user_<field>, i, …)`),
+            // field's column directly (`jet_index_vec(&(base).__jet_<field>, i, …)`),
             // the cache-friendly path — no whole-`S` gather. The result is the same
             // owned, bounds-checked field value the AoS form would produce.
             if let Expr::Index {
@@ -3375,7 +3377,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
             // A field of a CORE struct (`ProcessResult.code`, `JSONError.message`, …) is
-            // emitted by its PLAIN Rust name, never `user_<name>` (the core structs in
+            // emitted by its PLAIN Rust name, never `__jet_<name>` (the core structs in
             // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
             // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
             // type so the field read is byte-exact for both core and user structs.
@@ -3476,7 +3478,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // literal. The gate guaranteed `ty` is `Some(Type::Tuple)`. Reproduce
         // `emit_expr`'s `TupleLit` arm: the CANONICAL field order + struct name come
         // from the type; each canonical field's value is taken from the literal (by
-        // name) and lowered. Fields are emitted as `user_<f>: <v>` in canonical order.
+        // name) and lowered. Fields are emitted as `__jet_<f>: <v>` in canonical order.
         Expr::TupleLit(lit_fields, _, ty) => {
             let canonical = match ty {
                 Some(Type::Tuple(fs)) => tuple_fields_plain(fs),
@@ -3535,13 +3537,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::MapLit(Vec::new()),
                 };
             }
-            let map_name = "__jet_m";
+            let map_name = mangle_generated("m");
             let empty = TExpr {
                 ty: map_ty.clone(),
                 kind: TExprKind::MapLit(Vec::new()),
             };
             let mut then_body = vec![crate::Codegen::TIR::TStmt::Let {
-                name: map_name.to_string(),
+                name: map_name.clone(),
                 kw: "let mut",
                 let_ty: crate::Codegen::TIR::TLetTy::Inferred,
                 init: empty,
@@ -3553,7 +3555,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     uninit: false,
                     base: TExpr {
                         ty: map_ty.clone(),
-                        kind: TExprKind::Local(TLocal::user(map_name)),
+                        kind: TExprKind::Local(TLocal::user(map_name.clone())),
                     },
                     index: k,
                     is_map: true,
@@ -4393,7 +4395,7 @@ fn bind_arg_temporaries<A: OrderedArg>(
         // across runs.
         let ast_slot = slot.saturating_sub(offset);
         let temp_slot = if offset > 0 { slot } else { ast_slot };
-        let temp = format!("__jet_arg{site}_{temp_slot}");
+        let temp = jet_format!("{jet_prefix}arg{site}_{temp_slot}");
         let ty = arg.value().ty.clone();
         let bound = arg.take_for_binding(TExpr {
             ty: ty.clone(),

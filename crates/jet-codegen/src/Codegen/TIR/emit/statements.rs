@@ -1,5 +1,7 @@
+use crate::jet_generated_format as jet_format;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_let_ty_clause;
@@ -124,11 +126,11 @@ fn emit_sparse_branch_tree(
         }
         return;
     };
-    out.push_str(&format!("{pad}if *__jet_switch_subject == {pivot} {{\n"));
+    out.push_str(&jet_format!("{pad}if *{jet_prefix}switch_subject == {pivot} {{\n"));
     emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
     let middle = arms.len() / 2;
     if middle > 0 {
-        out.push_str(&format!("{pad}}} else if *__jet_switch_subject < {pivot} {{\n"));
+        out.push_str(&jet_format!("{pad}}} else if *{jet_prefix}switch_subject < {pivot} {{\n"));
         emit_sparse_branch_tree(
             &arms[..middle],
             else_body,
@@ -155,7 +157,7 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
     for cleanup in cleanups.iter().rev() {
         match cleanup {
             ActiveCleanup::Deferred(id) => {
-                out.push_str(&format!("{}__jet_deferred_close_{}.run();\n", pad, id));
+                out.push_str(&jet_format!("{}{jet_prefix}deferred_close_{}.run();\n", pad, id));
             }
             ActiveCleanup::Resource(name) => {
                 out.push_str(&format!("{}{}.close();\n", pad, name));
@@ -175,7 +177,7 @@ fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[
     for active in cleanups.iter().rev() {
         match active {
             ActiveCleanup::Deferred(id) => {
-                cleanup.push_str(&format!("__jet_deferred_close_{}.run(); ", id));
+                cleanup.push_str(&jet_format!("{jet_prefix}deferred_close_{}.run(); ", id));
             }
             ActiveCleanup::Resource(name) => cleanup.push_str(&format!("{}.close(); ", name)),
         }
@@ -414,7 +416,7 @@ fn emit_tir_stmt(
                 _ => None,
             };
             if let Some(bytes) = fixed_bytes {
-                let backing = format!("{}__fixed_backing", mangle(name));
+                let backing = mangle_generated(&format!("fixed_backing_{}", name));
                 out.push_str(&format!(
                     "{}let mut {} = [std::mem::MaybeUninit::<u8>::uninit(); {}];\n",
                     pad, backing, bytes
@@ -436,8 +438,8 @@ fn emit_tir_stmt(
             }
             if let Some(promotion) = gc_promotion {
                 let local = mangle(name);
-                let value = format!("__jet_gc_value_{local}");
-                let site = format!("__jet_gc_site_{local}");
+                let value = jet_format!("{jet_prefix}gc_value_{local}");
+                let site = jet_format!("{jet_prefix}gc_site_{local}");
                 out.push_str(&format!(
                     "{}let {} = {};\n",
                     pad,
@@ -513,23 +515,23 @@ fn emit_tir_stmt(
                 ));
             }
             if *replace_all {
-                out.push_str(&format!(
-                    "{}jet_gc::runtime_or_exit({}.edit_replacing_all_edges(&[{}], |__jet_value| {{\n",
+                out.push_str(&jet_format!(
+                    "{}jet_gc::runtime_or_exit({}.edit_replacing_all_edges(&[{}], |{jet_prefix}value| {{\n",
                     pad,
                     root,
                     edges.join(", ")
                 ));
             } else if let Some((temp, _)) = index_temp {
-                out.push_str(&format!(
-                    "{}jet_gc::runtime_or_exit({}.edit_edge_slot_index(\"collection\", {} as usize, &[{}], |__jet_value| {{\n",
+                out.push_str(&jet_format!(
+                    "{}jet_gc::runtime_or_exit({}.edit_edge_slot_index(\"collection\", {} as usize, &[{}], |{jet_prefix}value| {{\n",
                     pad,
                     root,
                     temp,
                     edges.join(", ")
                 ));
             } else {
-                out.push_str(&format!(
-                    "{}jet_gc::runtime_or_exit({}.edit_edge_slot({:?}, &[{}], |__jet_value| {{\n",
+                out.push_str(&jet_format!(
+                    "{}jet_gc::runtime_or_exit({}.edit_edge_slot({:?}, &[{}], |{jet_prefix}value| {{\n",
                     pad,
                     root,
                     slot,
@@ -784,8 +786,8 @@ fn emit_tir_stmt(
             resource,
             id,
         } => {
-            out.push_str(&format!(
-                "{}let mut __jet_deferred_close_{} = JetDeferredClose::new(move || {{ let _ = {}; }});\n",
+            out.push_str(&jet_format!(
+                "{}let mut {jet_prefix}deferred_close_{} = JetDeferredClose::new(move || {{ let _ = {}; }});\n",
                 pad,
                 id,
                 emit_expr_with_cleanups(close, cx, active_deferred_closes)
@@ -841,7 +843,7 @@ fn emit_tir_stmt(
             emit_tir_stmt(init, cx, out, indent + 1, &mut counted_deferred);
             let inner_pad = "    ".repeat(indent + 1);
             if step.is_some() {
-                out.push_str(&format!("{}let mut __jet_loop_first = true;\n", inner_pad));
+                out.push_str(&jet_format!("{}let mut {jet_prefix}loop_first = true;\n", inner_pad));
             }
             out.push_str(&format!(
                 "{}{}loop {{\n",
@@ -854,7 +856,7 @@ fn emit_tir_stmt(
             // thereafter run it before retesting. Break/return/failure/panic leave
             // the loop and therefore never execute it.
             if let Some(step) = step {
-                out.push_str(&format!("{}if __jet_loop_first {{ __jet_loop_first = false; }} else {{\n", body_pad));
+                out.push_str(&jet_format!("{}if {jet_prefix}loop_first {{ {jet_prefix}loop_first = false; }} else {{\n", body_pad));
                 emit_tir_stmt(step, cx, out, indent + 3, &mut counted_deferred);
                 out.push_str(&format!("{}}}\n", body_pad));
             }
@@ -880,35 +882,35 @@ fn emit_tir_stmt(
             let lbl = tir_label_prefix(label);
             if let Some(source) = source {
                 let source = emit_expr_with_cleanups(source, cx, active_deferred_closes);
-                out.push_str(&format!("{}{{ let __jet_range = {};\n", pad, source));
+                out.push_str(&jet_format!("{}{{ let {jet_prefix}range = {};\n", pad, source));
                 let range_pad = "    ".repeat(indent + 1);
                 let body_pad = "    ".repeat(indent + 2);
                 let stride = step.as_ref().map(|step| {
                     emit_expr_with_cleanups(step, cx, active_deferred_closes)
                 });
                 if let Some(stride) = &stride {
-                    out.push_str(&format!(
-                        "{}let __jet_loop_stride = {};\n",
+                    out.push_str(&jet_format!(
+                        "{}let {jet_prefix}loop_stride = {};\n",
                         range_pad, stride
                     ));
-                    out.push_str(&format!(
-                        "{}if __jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n",
+                    out.push_str(&jet_format!(
+                        "{}if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n",
                         range_pad, cx.root_prefix, cx.file
                     ));
                 }
                 for (condition, op) in [(true, ".."), (false, "..=")] {
-                    out.push_str(&format!(
-                        "{}{} __jet_range.exclusive {{\n",
+                    out.push_str(&jet_format!(
+                        "{}{} {jet_prefix}range.exclusive {{\n",
                         range_pad,
                         if condition { "if" } else { "} else if !" }
                     ));
                     let step_suffix = if stride.is_some() {
-                        ".step_by(__jet_loop_stride as usize)"
+                        jet_format!(".step_by({jet_prefix}loop_stride as usize)")
                     } else {
-                        ""
+                        String::new()
                     };
-                    out.push_str(&format!(
-                        "{}{}for {} in (__jet_range.start{op}__jet_range.end){step_suffix} {{\n",
+                    out.push_str(&jet_format!(
+                        "{}{}for {} in ({jet_prefix}range.start{op}{jet_prefix}range.end){step_suffix} {{\n",
                         body_pad,
                         lbl,
                         mangle(var)
@@ -927,12 +929,12 @@ fn emit_tir_stmt(
             match step {
                 Some(step) => {
                     let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                    out.push_str(&format!("{}{{ let __jet_loop_start = {};\n", pad, s));
-                    out.push_str(&format!("{}    let __jet_loop_end = {};\n", pad, e));
-                    out.push_str(&format!("{}    let __jet_loop_stride = {};\n", pad, st));
-                    out.push_str(&format!("{}    if __jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
-                    out.push_str(&format!(
-                        "{}{}for {} in (__jet_loop_start{range_op}__jet_loop_end).step_by(__jet_loop_stride as usize) {{\n",
+                    out.push_str(&jet_format!("{}{{ let {jet_prefix}loop_start = {};\n", pad, s));
+                    out.push_str(&jet_format!("{}    let {jet_prefix}loop_end = {};\n", pad, e));
+                    out.push_str(&jet_format!("{}    let {jet_prefix}loop_stride = {};\n", pad, st));
+                    out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                    out.push_str(&jet_format!(
+                        "{}{}for {} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n",
                         pad,
                         lbl,
                         mangle(var)
@@ -1052,8 +1054,8 @@ fn emit_tir_stmt(
             let subject_str = emit_tir_expr(subject, cx);
             out.push_str(&format!("{}{{\n", pad));
             let inner_pad = "    ".repeat(indent + 1);
-            out.push_str(&format!(
-                "{}let __jet_switch_subject = &({});\n",
+            out.push_str(&jet_format!(
+                "{}let {jet_prefix}switch_subject = &({});\n",
                 inner_pad, subject_str
             ));
             for (i, (lo, hi, body)) in arms.iter().enumerate() {
@@ -1104,34 +1106,34 @@ fn emit_tir_stmt(
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             if *is_map {
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), __jet_v); }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), {jet_prefix}v); }}\n",
                 ));
             } else if *uninit {
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; ({b}).write({i} as usize, __jet_v); }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; ({b}).write({i} as usize, {jet_prefix}v); }}\n",
                 ));
             } else if is_compute_view_mut(&base.ty) {
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; {}jet_compute_window_set_view(&mut ({}), ({}), __jet_v).unwrap_or_else(|__jet_error| jet_panic({:?}, {}, &__jet_error)); }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; {}jet_compute_window_set_view(&mut ({}), ({}), {jet_prefix}v).unwrap_or_else(|{jet_prefix}error| jet_panic({:?}, {}, &{jet_prefix}error)); }}\n",
                     cx.root_prefix, b, i, cx.file, 0
                 ));
             } else if is_float_view(&base.ty) {
                 // Never duplicate Tensor/view validation in the emitter. The
                 // shared Prelude setter owns finite-value and bounds policy for
                 // both AOT and resident/ambient execution.
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; jet_compute_set(&mut *({b}), &[({i})], __jet_v).unwrap_or_else(|__jet_error| jet_panic({:?}, {}, &__jet_error.jet_show())); }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; jet_compute_set(&mut *({b}), &[({i})], {jet_prefix}v).unwrap_or_else(|{jet_prefix}error| jet_panic({:?}, {}, &{jet_prefix}error.jet_show())); }}\n",
                     cx.file, 0
                 ));
             } else if is_view(&base.ty) {
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; jet_view_set(&mut *({b}), {i}, __jet_v, {:?}, {}); }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; jet_view_set(&mut *({b}), {i}, {jet_prefix}v, {:?}, {}); }}\n",
                     cx.file, 0
                 ));
             } else {
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; ({b})[{i} as usize] = __jet_v; }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; ({b})[{i} as usize] = {jet_prefix}v; }}\n",
                 ));
             }
         }
@@ -1151,34 +1153,34 @@ fn emit_tir_stmt(
                 match assign.op.and_then(|op| {
                     prelude_compound_call(
                         op,
-                        "(*__jet_t)",
-                        "__jet_v",
+                        &jet_format!("(*{jet_prefix}t)"),
+                        &mangle_generated("v"),
                         &assign.field_ty,
                         &cx.file,
                         assign.line as u32,
                     )
                 }) {
                     Some(call) => {
-                        format!("let __jet_t = &mut {place}; *__jet_t = {call};")
+                        jet_format!("let {jet_prefix}t = &mut {place}; *{jet_prefix}t = {call};")
                     }
                     None => {
                         let operator = assign
                             .op
                             .map_or("=".to_string(), |op| format!("{}=", op.rust_spell().expect(PRELUDE_CARRIED)));
-                        format!("{place} {operator} __jet_v;")
+                        jet_format!("{place} {operator} {jet_prefix}v;")
                     }
                 }
             };
             let field = emit_field_rust(cx, &assign.base.ty, &assign.field);
             if assign.is_map {
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; let __jet_k = ({i}).clone(); \
-                     let Some(__jet_item) = ({b}).get_mut(&__jet_k) else {{ \
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; let {jet_prefix}k = ({i}).clone(); \
+                     let Some({jet_prefix}item) = ({b}).get_mut(&{jet_prefix}k) else {{ \
                      jet_panic({file:?}, {line}, \"map key not found\"); }}; \
                      {mutation} }}\n",
                     file = cx.file,
                     line = assign.line,
-                    mutation = mutate(&format!("__jet_item.{field}")),
+                    mutation = mutate(&jet_format!("{jet_prefix}item.{field}")),
                 ));
             } else {
                 let index = if assign.index_proven {
@@ -1186,8 +1188,8 @@ fn emit_tir_stmt(
                 } else {
                     format!("{i} as usize")
                 };
-                out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; {mutation} }}\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{ let {jet_prefix}v = {v}; {mutation} }}\n",
                     mutation = mutate(&format!("({b})[{index}].{field}")),
                 ));
             }
@@ -1202,8 +1204,8 @@ fn emit_tir_stmt(
             let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
-            out.push_str(&format!(
-                "{pad}{{ let __jet_v = {v}; <{ty} as __jet_IndexMut>::set(&mut ({b}), {i}, __jet_v); }}\n",
+            out.push_str(&jet_format!(
+                "{pad}{{ let {jet_prefix}v = {v}; <{ty} as __jet_IndexMut>::set(&mut ({b}), {i}, {jet_prefix}v); }}\n",
             ));
         }
         // D-SWIZZLE1: write swizzle — ordered lane stores into the backing array.
@@ -1249,11 +1251,11 @@ fn emit_tir_stmt(
             let collection_str = if let Some(step) = step {
                 stride_wrapper = true;
                 let stride = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                out.push_str(&format!("{}{{ let __jet_loop_source = {};\n", pad, source_rust));
-                out.push_str(&format!("{}    let __jet_loop_stride = {};\n", pad, stride));
-                out.push_str(&format!("{}    if __jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
-                source_storage = "__jet_loop_source".to_string();
-                stride_suffix = ".step_by(__jet_loop_stride as usize)".to_string();
+                out.push_str(&jet_format!("{}{{ let {jet_prefix}loop_source = {};\n", pad, source_rust));
+                out.push_str(&jet_format!("{}    let {jet_prefix}loop_stride = {};\n", pad, stride));
+                out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                source_storage = mangle_generated("loop_source");
+                stride_suffix = jet_format!(".step_by({jet_prefix}loop_stride as usize)");
                 source_storage.as_str()
             } else {
                 stride_suffix = String::new();
@@ -1265,8 +1267,8 @@ fn emit_tir_stmt(
             let mut needs_extra_close = false;
             match method_kind {
                 Some(TForInMethod::Chars) => {
-                    out.push_str(&format!(
-                        "{}{}for __jet_c in ({recv}).chars(){} {{\n    {}let {} = __jet_c;\n",
+                    out.push_str(&jet_format!(
+                        "{}{}for {jet_prefix}c in ({recv}).chars(){} {{\n    {}let {} = {jet_prefix}c;\n",
                         pad,
                         lbl,
                         stride_suffix,
@@ -1276,12 +1278,12 @@ fn emit_tir_stmt(
                     ));
                 }
                 Some(TForInMethod::LinesFile) => {
-                    out.push_str(&format!(
-                        "{}{}for __jet_raw_line in std::io::BufRead::lines(&mut ({}).inner){} {{\n",
+                    out.push_str(&jet_format!(
+                        "{}{}for {jet_prefix}raw_line in std::io::BufRead::lines(&mut ({}).inner){} {{\n",
                         pad, lbl, collection_str, stride_suffix
                     ));
-                    out.push_str(&format!(
-                        "{}    let {} = __jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                    out.push_str(&jet_format!(
+                        "{}    let {} = {jet_prefix}raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1290,17 +1292,17 @@ fn emit_tir_stmt(
                     ));
                 }
                 Some(TForInMethod::LinesStdin) => {
-                    out.push_str(&format!(
-                        "{}{{ let mut __jet_stdin_h = {};\n",
+                    out.push_str(&jet_format!(
+                        "{}{{ let mut {jet_prefix}stdin_h = {};\n",
                         pad, collection_str
                     ));
                     needs_extra_close = true;
-                    out.push_str(&format!(
-                        "{}{}for __jet_raw_line in std::io::BufRead::lines(&mut __jet_stdin_h.inner){} {{\n",
+                    out.push_str(&jet_format!(
+                        "{}{}for {jet_prefix}raw_line in std::io::BufRead::lines(&mut {jet_prefix}stdin_h.inner){} {{\n",
                         pad, lbl, stride_suffix
                     ));
-                    out.push_str(&format!(
-                        "{}    let {} = __jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                    out.push_str(&jet_format!(
+                        "{}    let {} = {jet_prefix}raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1311,16 +1313,16 @@ fn emit_tir_stmt(
                 Some(TForInMethod::LinesProcessStream) => {
                     // D-PROCESS1=A: adapt Result<Option<Line>> into an iterator so
                     // `.step_by` owns pull counting and `next` cannot skip stride pulls.
-                    out.push_str(&format!(
-                        "{}{}for __jet_line_result in std::iter::from_fn(|| {}jet_process_stream_next_line(&({})).transpose()){} {{\n",
+                    out.push_str(&jet_format!(
+                        "{}{}for {jet_prefix}line_result in std::iter::from_fn(|| {}jet_process_stream_next_line(&({})).transpose()){} {{\n",
                         pad,
                         lbl,
                         cx.root_prefix,
                         collection_str,
                         stride_suffix,
                     ));
-                    out.push_str(&format!(
-                        "{}    let {} = __jet_line_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                    out.push_str(&jet_format!(
+                        "{}    let {} = {jet_prefix}line_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1337,8 +1339,8 @@ fn emit_tir_stmt(
                         "CBORReader" => "jet_enc_cbor_reader_next",
                         _ => unreachable!("unknown encoding reader type: {reader_type}"),
                     };
-                    out.push_str(&format!(
-                        "{}{}for __jet_item_result in {}jet_encoding_reader_iter(|| {}{}(&mut ({}))){} {{\n",
+                    out.push_str(&jet_format!(
+                        "{}{}for {jet_prefix}item_result in {}jet_encoding_reader_iter(|| {}{}(&mut ({}))){} {{\n",
                         pad,
                         lbl,
                         cx.root_prefix,
@@ -1347,8 +1349,8 @@ fn emit_tir_stmt(
                         collection_str,
                         stride_suffix,
                     ));
-                    out.push_str(&format!(
-                        "{}    let {} = __jet_item_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                    out.push_str(&jet_format!(
+                        "{}    let {} = {jet_prefix}item_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
                         pad,
                         mangle(var),
                         cx.root_prefix,
@@ -1362,16 +1364,16 @@ fn emit_tir_stmt(
                 }) => {
                     let coll_rust = mangle_path(coll_type);
                     let iter_rust = mangle_path(iter_type);
-                    out.push_str(&format!(
-                        "{}{{ let mut __jet_it = <{coll_rust} as __jet_Iterable>::iter(({collection_str}));\n",
+                    out.push_str(&jet_format!(
+                        "{}{{ let mut {jet_prefix}it = <{coll_rust} as __jet_Iterable>::iter(({collection_str}));\n",
                         pad,
                     ));
-                    out.push_str(&format!(
-                        "{}    {}for __jet_item in std::iter::from_fn(|| <{iter_rust} as __jet_Iterator>::next(&mut __jet_it).ok()){} {{\n",
+                    out.push_str(&jet_format!(
+                        "{}    {}for {jet_prefix}item in std::iter::from_fn(|| <{iter_rust} as __jet_Iterator>::next(&mut {jet_prefix}it).ok()){} {{\n",
                         pad, lbl, stride_suffix,
                     ));
-                    out.push_str(&format!(
-                        "{}        let {} = __jet_item;\n",
+                    out.push_str(&jet_format!(
+                        "{}        let {} = {jet_prefix}item;\n",
                         pad,
                         mangle(var)
                     ));
@@ -1404,39 +1406,39 @@ fn emit_tir_stmt(
                                             if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                                     )
                             ) {
-                                format!(
-                                    "({}).iter_mut().map(|__jet_view| &mut **__jet_view)",
+                                jet_format!(
+                                    "({}).iter_mut().map(|{jet_prefix}view| &mut **{jet_prefix}view)",
                                     collection_str
                                 )
                             } else {
                                 format!("({}).iter().cloned()", collection_str)
                             };
-                            out.push_str(&format!(
-                                "{}{}for (__jet_i, __jet_item) in {}{} .enumerate() {{\n",
+                            out.push_str(&jet_format!(
+                                "{}{}for ({jet_prefix}i, {jet_prefix}item) in {}{} .enumerate() {{\n",
                                 pad, lbl, iter_form, stride_suffix
                             ));
-                            out.push_str(&format!(
-                                "{}    let {} = __jet_i as i64;\n",
+                            out.push_str(&jet_format!(
+                                "{}    let {} = {jet_prefix}i as i64;\n",
                                 pad,
                                 mangle(var)
                             ));
-                            out.push_str(&format!(
-                                "{}    let {} = __jet_item;\n",
+                            out.push_str(&jet_format!(
+                                "{}    let {} = {jet_prefix}item;\n",
                                 pad,
                                 mangle(v2)
                             ));
                         } else {
-                            out.push_str(&format!(
-                                "{}{}for (__jet_k, __jet_v) in ({}).iter(){} {{\n",
+                            out.push_str(&jet_format!(
+                                "{}{}for ({jet_prefix}k, {jet_prefix}v) in ({}).iter(){} {{\n",
                                 pad, lbl, collection_str, stride_suffix
                             ));
-                            out.push_str(&format!(
-                                "{}    let {} = __jet_k.clone();\n",
+                            out.push_str(&jet_format!(
+                                "{}    let {} = {jet_prefix}k.clone();\n",
                                 pad,
                                 mangle(var)
                             ));
-                            out.push_str(&format!(
-                                "{}    let {} = __jet_v.clone();\n",
+                            out.push_str(&jet_format!(
+                                "{}    let {} = {jet_prefix}v.clone();\n",
                                 pad,
                                 mangle(v2)
                             ));
@@ -1449,12 +1451,12 @@ fn emit_tir_stmt(
                                 ("value".to_string(), (**value).clone()),
                             ];
                             let tuple = crate::Codegen::Tuples::tuple_struct_name(&fields);
-                            out.push_str(&format!(
-                                "{}{}for (__jet_k, __jet_v) in ({}).iter(){} {{\n",
+                            out.push_str(&jet_format!(
+                                "{}{}for ({jet_prefix}k, {jet_prefix}v) in ({}).iter(){} {{\n",
                                 pad, lbl, collection_str, stride_suffix
                             ));
-                            out.push_str(&format!(
-                                "{}    let {} = {} {{ {}: __jet_k.clone(), {}: __jet_v.clone() }};\n",
+                            out.push_str(&jet_format!(
+                                "{}    let {} = {} {{ {}: {jet_prefix}k.clone(), {}: {jet_prefix}v.clone() }};\n",
                                 pad,
                                 mangle(var),
                                 tuple,
@@ -1486,15 +1488,15 @@ fn emit_tir_stmt(
                                         if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                                 )
                         ) {
-                            format!(
-                                "({}).iter_mut().map(|__jet_view| &mut **__jet_view)",
+                            jet_format!(
+                                "({}).iter_mut().map(|{jet_prefix}view| &mut **{jet_prefix}view)",
                                 collection_str
                             )
                         } else {
                             format!("({}).iter().cloned()", collection_str)
                         };
-                        out.push_str(&format!(
-                            "{}{}for __jet_item in {} {{\n    {}let {} = __jet_item;\n",
+                        out.push_str(&jet_format!(
+                            "{}{}for {jet_prefix}item in {} {{\n    {}let {} = {jet_prefix}item;\n",
                             pad,
                             lbl,
                             format!("{}{}", iter_form, stride_suffix),
@@ -1733,7 +1735,7 @@ fn emit_tir_stmt(
             // job was the D-TXN2 ceiling).
             let effective_handle: Option<String> = match handle {
                 Some(h) => Some(h.rust_place()),
-                None if !snapshots.is_empty() => Some("__jet_txn".to_string()),
+                None if !snapshots.is_empty() => Some(mangle_generated("txn")),
                 None => None,
             };
             match &effective_handle {
@@ -1818,8 +1820,8 @@ fn emit_tir_stmt(
             let subject_str = emit_tir_expr(subject, cx);
             out.push_str(&format!("{}{{\n", pad));
             let inner_pad = "    ".repeat(indent + 1);
-            out.push_str(&format!(
-                "{}let __jet_switch_subject = &({});\n",
+            out.push_str(&jet_format!(
+                "{}let {jet_prefix}switch_subject = &({});\n",
                 inner_pad, subject_str
             ));
             if matches!(class, crate::Codegen::TIR::BranchClass::Bool2) {
@@ -1834,7 +1836,7 @@ fn emit_tir_stmt(
                     .find(|(cond, _)| !branch_bool_literal(cond))
                     .map(|(_, body)| body.as_slice())
                     .expect("classified bool branch has false arm");
-                out.push_str(&format!("{}if *__jet_switch_subject {{\n", inner_pad));
+                out.push_str(&jet_format!("{}if *{jet_prefix}switch_subject {{\n", inner_pad));
                 emit_tir_stmts_nested(
                     true_body,
                     cx,
@@ -1856,7 +1858,7 @@ fn emit_tir_stmt(
             }
             if matches!(class, crate::Codegen::TIR::BranchClass::DenseInt) {
                 out.push_str(&format!("{}// jet:branch dense-table\n", inner_pad));
-                out.push_str(&format!("{}match *__jet_switch_subject {{\n", inner_pad));
+                out.push_str(&jet_format!("{}match *{jet_prefix}switch_subject {{\n", inner_pad));
                 for (cond, body) in arms {
                     let literal = match &cond.kind {
                         crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match &rhs.kind {

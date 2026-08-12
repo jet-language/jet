@@ -23,7 +23,7 @@ pub use program_imports::{
     walk_imports,
 };
 pub use crate::Names::{
-    mangle, mangle_path, member_name, NameLedger,
+    mangle, mangle_generated, mangle_path, member_name, NameLedger,
 };
 
 #[path = "AST/items.rs"]

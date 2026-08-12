@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{AccessConvention, Type, ViewSource};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
@@ -164,9 +165,9 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
 
 fn add_hidden_view_lifetime(rust_type: String) -> String {
     if let Some(rest) = rust_type.strip_prefix("&mut ") {
-        format!("&'__jet_view mut {rest}")
+        jet_format!("&'{jet_prefix}view mut {rest}")
     } else if let Some(rest) = rust_type.strip_prefix('&') {
-        format!("&'__jet_view {rest}")
+        jet_format!("&'{jet_prefix}view {rest}")
     } else {
         rust_type
     }
@@ -174,9 +175,9 @@ fn add_hidden_view_lifetime(rust_type: String) -> String {
 
 fn add_hidden_view_generic(generics: &str) -> String {
     if generics.is_empty() {
-        "<'__jet_view>".to_string()
+        jet_format!("<'{jet_prefix}view>")
     } else if let Some(rest) = generics.strip_prefix('<') {
-        format!("<'__jet_view, {rest}")
+        jet_format!("<'{jet_prefix}view, {rest}")
     } else {
         generics.to_string()
     }
@@ -201,23 +202,23 @@ fn is_fallible_void_return(ret: &Option<Type>, cx: &Cx) -> bool {
 fn emit_generator_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);
     let inner = indent + 1;
-    out.push_str(&format!(
-        "{}let (mut __jet_yield_tx, __jet_yield_rx) = jet_std::stream();\n",
+    out.push_str(&jet_format!(
+        "{}let (mut {jet_prefix}yield_tx, {jet_prefix}yield_rx) = jet_std::stream();\n",
         pad
     ));
     out.push_str(&format!("{}std::thread::spawn(move || {{\n", pad));
-    out.push_str(&format!(
-        "{}let __jet_stream_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n",
+    out.push_str(&jet_format!(
+        "{}let {jet_prefix}stream_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n",
         "    ".repeat(inner)
     ));
     emit_tir_stmts(body, cx, out, inner + 1);
-    out.push_str(&format!(
-        "{}}}));\n{}if __jet_stream_result.is_err() {{ __jet_yield_tx.fail(); }}\n",
+    out.push_str(&jet_format!(
+        "{}}}));\n{}if {jet_prefix}stream_result.is_err() {{ {jet_prefix}yield_tx.fail(); }}\n",
         "    ".repeat(inner),
         "    ".repeat(inner),
     ));
     out.push_str(&format!("{}}});\n", pad));
-    out.push_str(&format!("{}__jet_yield_rx\n", pad));
+    out.push_str(&jet_format!("{}{jet_prefix}yield_rx\n", pad));
 }
 
 fn emit_reactive_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
@@ -239,7 +240,7 @@ fn render_reactive_tir_closure(body: &[TStmt], cx: &Cx, indent: usize) -> String
 
 /// c109 Phase 7: an inherent method, emitted INSIDE an `impl __jet_<T> { … }` block
 /// (the caller `emit_type_impl` already opened it). Byte-identical to `emit_method`:
-/// `    pub fn user_<name>(<self>, <params>) -> <ret> {\n … \n    }\n`. The `self`
+/// `    pub fn __jet_<name>(<self>, <params>) -> <ret> {\n … \n    }\n`. The `self`
 /// receiver form comes from `self_conv` (`Read`→`&self`, `Mutate`→`&mut self`,
 /// `Move`→`self`); a static method (`self_conv == None`) emits no receiver.
 pub(crate) fn emit_tir_method(
@@ -283,16 +284,16 @@ pub(crate) fn emit_tir_method(
                 AccessConvention::Read
                     if borrows_receiver =>
                 {
-                    "&'__jet_view self"
+                    jet_format!("&'{jet_prefix}view self")
                 }
                 AccessConvention::Write
                     if borrows_receiver =>
                 {
-                    "&'__jet_view mut self"
+                    jet_format!("&'{jet_prefix}view mut self")
                 }
-                AccessConvention::Read => "&self",
-                AccessConvention::Write => "&mut self",
-                AccessConvention::Move => "self",
+                AccessConvention::Read => "&self".to_string(),
+                AccessConvention::Write => "&mut self".to_string(),
+                AccessConvention::Move => "self".to_string(),
             }
             .to_string(),
         );
@@ -337,9 +338,9 @@ pub(crate) fn emit_tir_method(
         });
     let method_generics = if has_view_return {
         if method_generics.is_empty() {
-            "<'__jet_view>".to_string()
+            jet_format!("<'{jet_prefix}view>")
         } else {
-            format!("<'__jet_view, {}", &method_generics[1..])
+            jet_format!("<'{jet_prefix}view, {}", &method_generics[1..])
         }
     } else {
         method_generics.to_string()
@@ -427,16 +428,16 @@ pub(crate) fn emit_tir_trait_method(
     // `self` — matching `emit_trait_method` and the trait declaration (emit_trait_def).
     let self_recv = match self_conv {
         AccessConvention::Read if borrows_receiver => {
-            "&'__jet_view self"
+            jet_format!("&'{jet_prefix}view self")
         }
         AccessConvention::Write if borrows_receiver => {
-            "&'__jet_view mut self"
+            jet_format!("&'{jet_prefix}view mut self")
         }
-        AccessConvention::Read => "&self",
-        AccessConvention::Write => "&mut self",
-        AccessConvention::Move => "self",
+        AccessConvention::Read => "&self".to_string(),
+        AccessConvention::Write => "&mut self".to_string(),
+        AccessConvention::Move => "self".to_string(),
     };
-    let mut params: Vec<String> = vec![self_recv.to_string()];
+    let mut params: Vec<String> = vec![self_recv];
     for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
         let rust = rust_param_type(cx, *conv, ty);
         let rust = if view_provenance.is_some_and(|map| map.values().any(|provenance| {
@@ -456,7 +457,11 @@ pub(crate) fn emit_tir_trait_method(
     out.push_str(&format!(
         "{pad}{unsafe_kw}fn {name}{view_generic}({params}){ret} {{\n",
         name = tir.name,
-        view_generic = if has_view_return { "<'__jet_view>" } else { "" },
+        view_generic = if has_view_return {
+            jet_format!("<'{jet_prefix}view>")
+        } else {
+            String::new()
+        },
         params = params.join(", "),
         ret = ret_clause,
     ));

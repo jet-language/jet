@@ -1518,7 +1518,11 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     .all(|(_, v, _)| resident_safe_expr(v, callees))
         }
         TExprKind::DataEntriesToMap(local) => {
-            local.generated && !local.deref && local.name.starts_with("__jet_obj")
+            local.generated
+                && !local.deref
+                && local
+                    .name
+                    .starts_with(&jet_foundation::Names::mangle_generated("obj"))
         }
         TExprKind::TupleLit { fields, .. } => {
             jit_tuple_type(&expr.ty) && resident_safe_tuple_fields(fields, callees)
@@ -3989,7 +3993,7 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
 
 pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = if program.entry == "__jet_cli_main" {
+    let main_ok = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         program
             .funcs
             .iter()

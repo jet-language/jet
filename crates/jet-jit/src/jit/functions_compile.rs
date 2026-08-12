@@ -1528,7 +1528,7 @@ pub(crate) fn compile_program_tiered(
         spawn_func_ids.push(id);
     }
 
-    let cli_entry = program.entry == "__jet_cli_main";
+    let cli_entry = program.entry == jet_foundation::Names::mangle_generated("cli_main");
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut cli_import_id: Option<FuncId> = None;
     if cli_entry {

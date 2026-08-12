@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use super::*;
 use crate::Generics;
 use crate::AST::{
@@ -56,9 +57,9 @@ fn distinct_has_derive(d: &DistinctDef, name: &str) -> bool {
 
 fn add_view_lifetime_generic(generics: String) -> String {
     if generics.is_empty() {
-        "<'__jet_view>".to_string()
+        jet_format!("<'{jet_prefix}view>")
     } else if let Some(rest) = generics.strip_prefix('<') {
-        format!("<'__jet_view, {rest}")
+        jet_format!("<'{jet_prefix}view, {rest}")
     } else {
         generics
     }
@@ -66,9 +67,9 @@ fn add_view_lifetime_generic(generics: String) -> String {
 
 fn add_view_lifetime_arg(args: String) -> String {
     if args.is_empty() {
-        "<'__jet_view>".to_string()
+        jet_format!("<'{jet_prefix}view>")
     } else if let Some(rest) = args.strip_prefix('<') {
-        format!("<'__jet_view, {rest}")
+        jet_format!("<'{jet_prefix}view, {rest}")
     } else {
         args
     }
@@ -249,8 +250,16 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         // I2: Rust's `{:?}` would leak the mangled `__jet_Point { __jet_x: … }`
         // form. Render Jet-source names instead — the same body `jet_debug` uses.
         let show_body = struct_jet_debug_body(s, has_fn_field);
-        let impl_generic = if has_view_field { "<'__jet_view>" } else { "" };
-        let type_arg = if has_view_field { "<'__jet_view>" } else { "" };
+        let impl_generic = if has_view_field {
+            jet_format!("<'{jet_prefix}view>")
+        } else {
+            String::new()
+        };
+        let type_arg = if has_view_field {
+            jet_format!("<'{jet_prefix}view>")
+        } else {
+            String::new()
+        };
         if cx.auto_printable.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{impl_generic} JetShow for {}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
@@ -615,19 +624,19 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
     }
 
     out.push_str(&format!("impl {base_rust} {{\n"));
-    out.push_str(&format!(
-        "    pub fn __jet_apply(&self, __p: {patch_rust}) -> {base_rust} {{\n        {base_rust} {{ {} }}\n    }}\n",
+    out.push_str(&jet_name_format!(
+        "    pub fn {name_prefix}apply(&self, __p: {patch_rust}) -> {base_rust} {{\n        {base_rust} {{ {} }}\n    }}\n",
         apply_fields.join(", ")
     ));
-    out.push_str(&format!(
-        "    pub fn __jet_diff(__new: {base_rust}, __old: {base_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
+    out.push_str(&jet_name_format!(
+        "    pub fn {name_prefix}diff(__new: {base_rust}, __old: {base_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
         diff_fields.join(", ")
     ));
     out.push_str("}\n\n");
 
     out.push_str(&format!("impl {patch_rust} {{\n"));
-    out.push_str(&format!(
-        "    pub fn __jet_merge(&self, __other: {patch_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
+    out.push_str(&jet_name_format!(
+        "    pub fn {name_prefix}merge(&self, __other: {patch_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
         merge_fields.join(", ")
     ));
     out.push_str("}\n\n");
@@ -776,11 +785,11 @@ fn emit_entry_invocation(
 ) -> String {
     let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
     match entry_error {
-        Some(EntryError::Generic) => format!(
-            "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    eprintln!(\"{{}}\", __jet_err);\n{indent}    std::process::exit(1);\n{indent}}}\n"
+        Some(EntryError::Generic) => jet_format!(
+            "{indent}if let Err({jet_prefix}err) = jet_runtime_boundary(|| {call}) {{\n{indent}    eprintln!(\"{{}}\", {jet_prefix}err);\n{indent}    std::process::exit(1);\n{indent}}}\n"
         ),
-        Some(EntryError::Crypto) => format!(
-            "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    let __jet_internal = matches!(&__jet_err, {crypto_error_type}::Internal {{ .. }});\n{indent}    eprintln!(\"Error [E3001]: unhandled cryptographic error\");\n{indent}    eprintln!(\" Why: {{}}\", __jet_err);\n{indent}    eprintln!(\" Fix: handle the CryptoError in fn run\");\n{indent}    std::process::exit(if __jet_internal {{ 101 }} else {{ 70 }});\n{indent}}}\n"
+        Some(EntryError::Crypto) => jet_format!(
+            "{indent}if let Err({jet_prefix}err) = jet_runtime_boundary(|| {call}) {{\n{indent}    let {jet_prefix}internal = matches!(&{jet_prefix}err, {crypto_error_type}::Internal {{ .. }});\n{indent}    eprintln!(\"Error [E3001]: unhandled cryptographic error\");\n{indent}    eprintln!(\" Why: {{}}\", {jet_prefix}err);\n{indent}    eprintln!(\" Fix: handle the CryptoError in fn run\");\n{indent}    std::process::exit(if {jet_prefix}internal {{ 101 }} else {{ 70 }});\n{indent}}}\n"
         ),
         None => format!("{indent}jet_runtime_boundary(|| {call});\n"),
     }
@@ -1243,9 +1252,9 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
     }
     let view_generic = if has_view_payload {
-        "<'__jet_view>"
+        jet_format!("<'{jet_prefix}view>")
     } else {
-        ""
+        String::new()
     };
     out.push_str(&format!("pub enum {rust_name}{view_generic} {{\n"));
     for v in &e.variants {
@@ -1276,11 +1285,11 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     }
     out.push_str("}\n\n");
     let impl_generic = if has_view_payload {
-        "<'__jet_view>"
+        jet_format!("<'{jet_prefix}view>")
     } else {
-        ""
+        String::new()
     };
-    let type_arg = impl_generic;
+    let type_arg = &impl_generic;
     if !has_shared_guard && cx.auto_printable.contains(&e.name) {
         out.push_str(&format!(
             "impl{impl_generic} JetShow for {rust_name}{type_arg} {{\n    fn jet_show(&self) -> String {{ {body} }}\n}}\n\n",
@@ -2106,8 +2115,8 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     if distinct_has_derive(d, crate::Syntax::MARKER_NUMERIC) {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
             if d.range.is_none() {
-                out.push_str(&format!(
-                    "impl __jet_{trait_name} for {rust_name} {{ fn {method}(&self, rhs: &Self) -> Self {{ {rust_name}(self.0 {op} rhs.0) }} }}\n\n",
+                out.push_str(&jet_name_format!(
+                    "impl {name_prefix}{trait_name} for {rust_name} {{ fn {method}(&self, rhs: &Self) -> Self {{ {rust_name}(self.0 {op} rhs.0) }} }}\n\n",
                     trait_name = trait_name,
                     method = trait_name.to_lowercase(),
                     op = op
@@ -2281,8 +2290,8 @@ fn emit_func_with_contracts(cx: &Cx, tir: &TIR::TFunc, out: &mut String) {
     for clause in &tir.pre_contracts {
         let cond = TIR::emit_tir_expr(&clause.condition, cx);
         let msg = TIR::emit_tir_expr(&clause.message, cx);
-        out.push_str(&format!(
-            "    let __jet_contract_ok = {cond};\n    jet_proof_record(1, if __jet_contract_ok {{ 0 }} else {{ 1 }}, \"Pre\", &{msg}, {file}, {line});\n    if !__jet_contract_ok {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
+        out.push_str(&jet_format!(
+            "    let {jet_prefix}contract_ok = {cond};\n    jet_proof_record(1, if {jet_prefix}contract_ok {{ 0 }} else {{ 1 }}, \"Pre\", &{msg}, {file}, {line});\n    if !{jet_prefix}contract_ok {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
             cond = cond,
             file = escape_rust_str(&clause.file),
             line = clause.line,
@@ -2297,21 +2306,21 @@ fn emit_func_with_contracts(cx: &Cx, tir: &TIR::TFunc, out: &mut String) {
             .clone()
             .unwrap_or(crate::AST::Type::Named("Unit".to_string()));
         let ret_annot = TIR::rust_return_type(cx, &ret_ty);
-        out.push_str(&format!("    let __jet_result = (|| -> {ret_annot} {{\n"));
+        out.push_str(&jet_format!("    let {jet_prefix}result = (|| -> {ret_annot} {{\n"));
         out.push_str(body_only);
         out.push_str("    })();\n");
         for clause in &tir.post_contracts {
             let cond = TIR::emit_tir_expr(&clause.condition, cx);
             let msg = TIR::emit_tir_expr(&clause.message, cx);
-            out.push_str(&format!(
-                "    let __jet_contract_ok = {cond};\n    jet_proof_record(1, if __jet_contract_ok {{ 0 }} else {{ 1 }}, \"Post\", &{msg}, {file}, {line});\n    if !__jet_contract_ok {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
+            out.push_str(&jet_format!(
+                "    let {jet_prefix}contract_ok = {cond};\n    jet_proof_record(1, if {jet_prefix}contract_ok {{ 0 }} else {{ 1 }}, \"Post\", &{msg}, {file}, {line});\n    if !{jet_prefix}contract_ok {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
                 cond = cond,
                 file = escape_rust_str(&clause.file),
                 line = clause.line,
                 msg = msg,
             ));
         }
-        out.push_str("    __jet_result\n");
+        out.push_str(&jet_format!("    {jet_prefix}result\n"));
     }
     out.push_str("}\n\n");
 }
@@ -2324,8 +2333,8 @@ pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut 
     let from_rust = cx.rust_type(&crate::AST::Type::Named(ec.from_ty.clone()));
     let to_rust = cx.rust_type(&crate::AST::Type::Named(ec.to_ty.clone()));
     *cx.current_fn.borrow_mut() = fn_name.clone();
-    out.push_str(&format!(
-        "pub fn {fn_name}(__jet_self: {from}) -> {to} {{\n",
+    out.push_str(&jet_format!(
+        "pub fn {fn_name}({jet_prefix}self: {from}) -> {to} {{\n",
         fn_name = fn_name,
         from = from_rust,
         to = to_rust,

@@ -2360,11 +2360,15 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
     }
 }
 
+fn generated_view_lifetime() -> String {
+    format!("'{}", crate::Names::mangle_generated("view"))
+}
+
 fn add_view_lifetime(rust: String) -> String {
     if let Some(rest) = rust.strip_prefix("&mut ") {
-        format!("&'__jet_view mut {rest}")
+        format!("&{} mut {rest}", generated_view_lifetime())
     } else if let Some(rest) = rust.strip_prefix('&') {
-        format!("&'__jet_view {rest}")
+        format!("&{} {rest}", generated_view_lifetime())
     } else {
         rust
     }
@@ -2418,12 +2422,12 @@ pub fn emit_trait_def(
                         AccessConvention::Write
                             if borrows_receiver =>
                         {
-                            "&'__jet_view mut self".to_string()
+                            format!("&{} mut self", generated_view_lifetime())
                         }
                         AccessConvention::Read
                             if borrows_receiver =>
                         {
-                            "&'__jet_view self".to_string()
+                            format!("&{} self", generated_view_lifetime())
                         }
                         AccessConvention::Write => "&mut self".to_string(),
                         AccessConvention::Move => "self".to_string(),
@@ -2459,7 +2463,11 @@ pub fn emit_trait_def(
         out.push_str(&format!(
             "    fn {}{}({}) -> {};\n",
             m.name,
-            if has_view_return { "<'__jet_view>" } else { "" },
+            if has_view_return {
+                format!("<{}>", generated_view_lifetime())
+            } else {
+                String::new()
+            },
             params.join(", "),
             ret
         ));

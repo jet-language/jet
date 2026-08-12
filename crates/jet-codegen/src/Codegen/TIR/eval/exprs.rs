@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TFnValueKind,
     THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
@@ -4532,7 +4533,7 @@ impl<'a> EvalCtx<'a> {
                                 fields.push(("end".into(), CtValue::Int(end)));
                                 fields.push(("window".into(), CtValue::List(evaluated_args)));
                                 fields.push((
-                                    "__jet_tensor_window_handle".into(),
+                                    mangle_generated("tensor_window_handle"),
                                     crate::Comptime::ComputeLite::tensor_window_handle(
                                         &base_value,
                                         self.span(),
@@ -5165,7 +5166,7 @@ impl<'a> EvalCtx<'a> {
                         });
                 }
                 match r {
-                    // TupleLit stores Rust-mangled `user_<f>` names (emit needs them);
+                    // TupleLit stores Rust-mangled `__jet_<f>` names (emit needs them);
                     // Field TIR keeps Jet names. Accept either so named-tuple reads work.
                     CtValue::Struct {
                         type_name,
@@ -5733,7 +5734,7 @@ impl<'a> EvalCtx<'a> {
                 payload,
             } => {
                 // Positional payloads keep `label: None` so `jet_show` matches
-                // AOT `user_Wrap(user_Num(1))` Debug shape (I2 / #777).
+                // AOT `__jet_Wrap(__jet_Num(1))` Debug shape (I2 / #777).
                 let args = match payload {
                     crate::Codegen::TIR::TEnumPayload::Unit => Vec::new(),
                     crate::Codegen::TIR::TEnumPayload::Positional(pos) => {

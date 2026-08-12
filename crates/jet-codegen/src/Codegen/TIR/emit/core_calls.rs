@@ -1,7 +1,9 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{Type};
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::enc_arg_is_json;
 use crate::Codegen::TIR::enc_arg_is_string_rows;
@@ -97,8 +99,8 @@ fn compute_nested_gradient(
         .iter()
         .enumerate()
         .map(|(index, (field, _))| {
-            format!(
-                "let __jet_state_{index} = jet_compute_vjp_begin((({output}).{}).clone(), ({tape}).clone());",
+            jet_format!(
+                "let {jet_prefix}state_{index} = jet_compute_vjp_begin((({output}).{}).clone(), ({tape}).clone());",
                 mangle(field)
             )
         })
@@ -107,10 +109,10 @@ fn compute_nested_gradient(
     let state_names = output_fields
         .iter()
         .enumerate()
-        .map(|(index, _)| format!("__jet_state_{index}"))
+        .map(|(index, _)| jet_format!("{jet_prefix}state_{index}"))
         .collect::<Vec<_>>();
-    let gradient_defs = format!(
-        "let __jet_nested_gradients = jet_compute_nested_gradient_or_panic(&[{}], &{}, \"compute.gradient\");",
+    let gradient_defs = jet_format!(
+        "let {jet_prefix}nested_gradients = jet_compute_nested_gradient_or_panic(&[{}], &{}, \"compute.gradient\");",
         state_names.join(", "),
         targets
     );
@@ -125,8 +127,8 @@ fn compute_nested_gradient(
                 .iter()
                 .enumerate()
                 .map(|(component_index, _)| {
-                    format!(
-                        "(__jet_nested_gradients[{component_index}])[{target_index}].clone()"
+                    jet_format!(
+                        "({jet_prefix}nested_gradients[{component_index}])[{target_index}].clone()"
                     )
                 })
                 .collect::<Vec<_>>();
@@ -201,44 +203,50 @@ fn emit_compute_transform_call(
                         target_expr,
                     );
                 }
-                Some(format!(
-                    "{{ let __jet_result = jet_compute_transform_or_panic(\"gradient\", &{state}, &[], &{target_expr}, \"compute.gradient\"); let JetComputeTransformResult::Gradient(__jet_gradients) = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.gradient returned the wrong result\") }}; {} }}",
-                    compute_gradient_tuple(gradient_ty, "__jet_gradients")
+                Some(jet_format!(
+                    "{{ let {jet_prefix}result = jet_compute_transform_or_panic(\"gradient\", &{state}, &[], &{target_expr}, \"compute.gradient\"); let JetComputeTransformResult::Gradient({jet_prefix}gradients) = {jet_prefix}result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.gradient returned the wrong result\") }}; {} }}",
+                    compute_gradient_tuple(gradient_ty, &mangle_generated("gradients"))
                 ))
             }
             "value_and_gradient" => {
                 let gradient_ty = gradient_ty.as_ref()?;
-                Some(format!(
-                    "{{ let __jet_result = jet_compute_transform_or_panic(\"value_and_gradient\", &{state}, &[], &{target_expr}, \"compute.value_and_gradient\"); let JetComputeTransformResult::ValueAndGradient {{ value: __jet_value, gradients: __jet_gradients }} = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.value_and_gradient returned the wrong result\") }}; {} }}",
-                    compute_tuple_value(result_ty, &["__jet_value".to_string(), compute_gradient_tuple(gradient_ty, "__jet_gradients")])
+                Some(jet_format!(
+                    "{{ let {jet_prefix}result = jet_compute_transform_or_panic(\"value_and_gradient\", &{state}, &[], &{target_expr}, \"compute.value_and_gradient\"); let JetComputeTransformResult::ValueAndGradient {{ value: {jet_prefix}value, gradients: {jet_prefix}gradients }} = {jet_prefix}result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.value_and_gradient returned the wrong result\") }}; {} }}",
+                    compute_tuple_value(
+                        result_ty,
+                        &[
+                            mangle_generated("value"),
+                            compute_gradient_tuple(gradient_ty, &mangle_generated("gradients")),
+                        ],
+                    )
                 ))
             }
             "vjp" => {
                 let gradient_ty = gradient_ty.as_ref()?;
-                Some(format!(
-                    "{{ let __jet_result = jet_compute_transform_or_panic(\"vjp\", &{state}, &[], &{target_expr}, \"compute.vjp\"); let JetComputeTransformResult::Vjp {{ value: __jet_vjp_value, state: __jet_vjp_state }} = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.vjp returned the wrong result\") }}; let __jet_pull_state = __jet_vjp_state.clone(); let __jet_grads_state = __jet_vjp_state; let __jet_pull_targets = {target_expr}.clone(); let __jet_grads_targets = {target_expr}.clone(); JetComputeVjpRun {{ value: __jet_vjp_value, pull: std::rc::Rc::new(move |__jet_seed: JetTensor| {{ let __jet_gradients = jet_compute_vjp_pull_or_panic(&__jet_pull_state, &__jet_seed, &__jet_pull_targets, \"compute.vjp.pull\"); {} }}), grads: std::rc::Rc::new(move || {{ let __jet_gradients = jet_compute_vjp_unit_grads_or_panic(&__jet_grads_state, &__jet_grads_targets, \"compute.vjp.grads\"); {} }}) }} }}",
-                    compute_gradient_tuple(gradient_ty, "__jet_gradients"),
-                    compute_gradient_tuple(gradient_ty, "__jet_gradients")
+                Some(jet_format!(
+                    "{{ let {jet_prefix}result = jet_compute_transform_or_panic(\"vjp\", &{state}, &[], &{target_expr}, \"compute.vjp\"); let JetComputeTransformResult::Vjp {{ value: {jet_prefix}vjp_value, state: {jet_prefix}vjp_state }} = {jet_prefix}result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.vjp returned the wrong result\") }}; let {jet_prefix}pull_state = {jet_prefix}vjp_state.clone(); let {jet_prefix}grads_state = {jet_prefix}vjp_state; let {jet_prefix}pull_targets = {target_expr}.clone(); let {jet_prefix}grads_targets = {target_expr}.clone(); JetComputeVjpRun {{ value: {jet_prefix}vjp_value, pull: std::rc::Rc::new(move |{jet_prefix}seed: JetTensor| {{ let {jet_prefix}gradients = jet_compute_vjp_pull_or_panic(&{jet_prefix}pull_state, &{jet_prefix}seed, &{jet_prefix}pull_targets, \"compute.vjp.pull\"); {} }}), grads: std::rc::Rc::new(move || {{ let {jet_prefix}gradients = jet_compute_vjp_unit_grads_or_panic(&{jet_prefix}grads_state, &{jet_prefix}grads_targets, \"compute.vjp.grads\"); {} }}) }} }}",
+                    compute_gradient_tuple(gradient_ty, &mangle_generated("gradients")),
+                    compute_gradient_tuple(gradient_ty, &mangle_generated("gradients"))
                 ))
             }
             "jvp" => {
                 let tangents = if transform {
                     (0..primal_count)
-                        .map(|index| format!("__jet_arg{}", index + primal_count))
+                        .map(|index| jet_format!("{jet_prefix}arg{}", index + primal_count))
                         .collect::<Vec<_>>()
                 } else {
                     (0..primal_count)
                         .map(|index| emit_tir_expr(&args[index + 1 + primal_count], cx))
                         .collect::<Vec<_>>()
                 };
-                Some(format!(
-                    "{{ let __jet_result = jet_compute_transform_or_panic(\"jvp\", &{state}, &[{}], &{target_expr}, \"compute.jvp\"); let JetComputeTransformResult::Jvp {{ value: __jet_value, tangent: __jet_tangent }} = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.jvp returned the wrong result\") }}; {} }}",
+                Some(jet_format!(
+                    "{{ let {jet_prefix}result = jet_compute_transform_or_panic(\"jvp\", &{state}, &[{}], &{target_expr}, \"compute.jvp\"); let JetComputeTransformResult::Jvp {{ value: {jet_prefix}value, tangent: {jet_prefix}tangent }} = {jet_prefix}result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.jvp returned the wrong result\") }}; {} }}",
                     tangents.join(", "),
                     compute_tuple_value(
                         result_ty,
                         &[
-                            "__jet_value".to_string(),
-                            "__jet_tangent".to_string(),
+                            mangle_generated("value"),
+                            mangle_generated("tangent"),
                         ]
                     )
                 ))
@@ -252,31 +260,38 @@ fn emit_compute_transform_call(
                 .iter()
                 .chain(base_params.iter())
                 .enumerate()
-                .map(|(index, ty)| format!("__jet_arg{index}: {}", cx.rust_type(ty)))
+                .map(|(index, ty)| jet_format!("{jet_prefix}arg{index}: {}", cx.rust_type(ty)))
                 .collect::<Vec<_>>()
         } else {
             base_params
                 .iter()
                 .enumerate()
-                .map(|(index, ty)| format!("__jet_arg{index}: {}", cx.rust_type(ty)))
+                .map(|(index, ty)| jet_format!("{jet_prefix}arg{index}: {}", cx.rust_type(ty)))
                 .collect::<Vec<_>>()
         };
-        let target = format!("__jet_targets");
+        let target = jet_format!("{jet_prefix}targets");
         let state_setup = if nested_gradient {
             String::new()
         } else {
-            "let __jet_state = jet_compute_vjp_begin(__jet_value.clone(), __jet_tape.clone());".to_string()
+            jet_format!(
+                "let {jet_prefix}state = jet_compute_vjp_begin({jet_prefix}value.clone(), {jet_prefix}tape.clone());"
+            )
         };
-        let result = result_body("__jet_value", "__jet_state", "__jet_tape", &target)?;
-        Some(format!(
-            "{{ let __jet_base = ({f}).clone(); std::rc::Rc::new(move |{}| {{ let (__jet_tape, __jet_inputs) = jet_compute_trace_inputs(vec![{}]); let __jet_value = (__jet_base)({}); {state_setup} let __jet_targets = {}; {} }}) as {} }}",
+        let result = result_body(
+            &mangle_generated("value"),
+            &mangle_generated("state"),
+            &mangle_generated("tape"),
+            &target,
+        )?;
+        Some(jet_format!(
+            "{{ let {jet_prefix}base = ({f}).clone(); std::rc::Rc::new(move |{}| {{ let ({jet_prefix}tape, {jet_prefix}inputs) = jet_compute_trace_inputs(vec![{}]); let {jet_prefix}value = ({jet_prefix}base)({}); {state_setup} let {jet_prefix}targets = {}; {} }}) as {} }}",
             params.join(", "),
             (0..primal_count)
-                .map(|index| format!("__jet_arg{index}.clone()"))
+                .map(|index| jet_format!("{jet_prefix}arg{index}.clone()"))
                 .collect::<Vec<_>>()
                 .join(", "),
             (0..primal_count)
-                .map(|index| format!("(__jet_inputs)[{index}].clone()"))
+                .map(|index| jet_format!("({jet_prefix}inputs)[{index}].clone()"))
                 .collect::<Vec<_>>()
                 .join(", "),
             targets,
@@ -288,15 +303,22 @@ fn emit_compute_transform_call(
             .map(|index| format!("({}).clone()", emit_tir_expr(&args[index + 1], cx)))
             .collect::<Vec<_>>()
             .join(", ");
-        let call = base_call(&f, "__jet_inputs");
+        let call = base_call(&f, &mangle_generated("inputs"));
         let state_setup = if nested_gradient {
             String::new()
         } else {
-            "let __jet_state = jet_compute_vjp_begin(__jet_value.clone(), __jet_tape.clone());".to_string()
+            jet_format!(
+                "let {jet_prefix}state = jet_compute_vjp_begin({jet_prefix}value.clone(), {jet_prefix}tape.clone());"
+            )
         };
-        let result = result_body("__jet_value", "__jet_state", "__jet_tape", "__jet_targets")?;
-        Some(format!(
-            "{{ let (__jet_tape, __jet_inputs) = jet_compute_trace_inputs(vec![{trace_inputs}]); let __jet_value = {call}; {state_setup} let __jet_targets = {targets}; {result} }}"
+        let result = result_body(
+            &mangle_generated("value"),
+            &mangle_generated("state"),
+            &mangle_generated("tape"),
+            &mangle_generated("targets"),
+        )?;
+        Some(jet_format!(
+            "{{ let ({jet_prefix}tape, {jet_prefix}inputs) = jet_compute_trace_inputs(vec![{trace_inputs}]); let {jet_prefix}value = {call}; {state_setup} let {jet_prefix}targets = {targets}; {result} }}"
         ))
     };
     body
@@ -530,8 +552,8 @@ pub(crate) fn emit_tir_core_call(
                     arg(0)
                 )
             };
-            format!(
-                "{{ let __jet_ch = {}; {} {{ {}: __jet_ch.0, {}: __jet_ch.1 }} }}",
+            jet_format!(
+                "{{ let {jet_prefix}ch = {}; {} {{ {}: {jet_prefix}ch.0, {}: {jet_prefix}ch.1 }} }}",
                 ctor,
                 struct_name,
                 mangle("sender"),
@@ -903,8 +925,8 @@ pub(crate) fn emit_tir_core_call(
                 ],
             };
             let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            format!(
-                "{{ let __jet_sc = ({}).sin_cos(); {} {{ {}: __jet_sc.0, {}: __jet_sc.1 }} }}",
+            jet_format!(
+                "{{ let {jet_prefix}sc = ({}).sin_cos(); {} {{ {}: {jet_prefix}sc.0, {}: {jet_prefix}sc.1 }} }}",
                 arg(0),
                 struct_name,
                 mangle("sin"),
@@ -920,8 +942,8 @@ pub(crate) fn emit_tir_core_call(
                 ],
             };
             let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            format!(
-                "{{ let __jet_x = ({0}); {1} {{ {2}: __jet_x.fract(), {3}: __jet_x.trunc() }} }}",
+            jet_format!(
+                "{{ let {jet_prefix}x = ({0}); {1} {{ {2}: {jet_prefix}x.fract(), {3}: {jet_prefix}x.trunc() }} }}",
                 arg(0),
                 struct_name,
                 mangle("fract"),
@@ -937,8 +959,8 @@ pub(crate) fn emit_tir_core_call(
                 ],
             };
             let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            format!(
-                "{{ let __jet_x = ({0}); let __jet_e = {1}jet_std_math_ilogb(__jet_x).unwrap_or(0); let __jet_f = if __jet_x == 0.0 || !__jet_x.is_finite() {{ __jet_x }} else {{ {1}jet_std_math_ldexp(__jet_x, -__jet_e) }}; {2} {{ {3}: __jet_f, {4}: __jet_e }} }}",
+            jet_format!(
+                "{{ let {jet_prefix}x = ({0}); let {jet_prefix}e = {1}jet_std_math_ilogb({jet_prefix}x).unwrap_or(0); let {jet_prefix}f = if {jet_prefix}x == 0.0 || !{jet_prefix}x.is_finite() {{ {jet_prefix}x }} else {{ {1}jet_std_math_ldexp({jet_prefix}x, -{jet_prefix}e) }}; {2} {{ {3}: {jet_prefix}f, {4}: {jet_prefix}e }} }}",
                 arg(0),
                 cx.root_prefix,
                 struct_name,
@@ -957,21 +979,21 @@ pub(crate) fn emit_tir_core_call(
             let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
             let op = if method == "div_mod" {
                 // Floor division + matching remainder (Python divmod).
-                format!(
-                    "let __jet_a = ({0}); let __jet_b = ({1}); let __jet_q = __jet_a.div_euclid(__jet_b); let __jet_r = __jet_a.rem_euclid(__jet_b);",
+                jet_format!(
+                    "let {jet_prefix}a = ({0}); let {jet_prefix}b = ({1}); let {jet_prefix}q = {jet_prefix}a.div_euclid({jet_prefix}b); let {jet_prefix}r = {jet_prefix}a.rem_euclid({jet_prefix}b);",
                     arg(0),
                     arg(1)
                 )
             } else {
                 // Truncating division + remainder (Rust /, %).
-                format!(
-                    "let __jet_a = ({0}); let __jet_b = ({1}); let __jet_q = __jet_a / __jet_b; let __jet_r = __jet_a % __jet_b;",
+                jet_format!(
+                    "let {jet_prefix}a = ({0}); let {jet_prefix}b = ({1}); let {jet_prefix}q = {jet_prefix}a / {jet_prefix}b; let {jet_prefix}r = {jet_prefix}a % {jet_prefix}b;",
                     arg(0),
                     arg(1)
                 )
             };
-            format!(
-                "{{ {op} {struct_name} {{ {}: __jet_q, {}: __jet_r }} }}",
+            jet_format!(
+                "{{ {op} {struct_name} {{ {}: {jet_prefix}q, {}: {jet_prefix}r }} }}",
                 mangle("quot"),
                 mangle("rem"),
             )
@@ -1786,8 +1808,8 @@ pub(crate) fn emit_tir_core_call(
                 _ => Vec::new(),
             };
             let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            format!(
-                "{helper}(&({arg})).map(|(__jet_raw, __jet_prefix, __jet_local, __jet_uri)| {struct_name} {{ {raw}: __jet_raw, {prefix}: __jet_prefix, {local}: __jet_local, {uri}: __jet_uri }})",
+            jet_format!(
+                "{helper}(&({arg})).map(|({jet_prefix}raw, {jet_prefix}prefix, {jet_prefix}local, {jet_prefix}uri)| {struct_name} {{ {raw}: {jet_prefix}raw, {prefix}: {jet_prefix}prefix, {local}: {jet_prefix}local, {uri}: {jet_prefix}uri }})",
                 helper = helper("jet_std_xml_expanded_name"),
                 arg = arg(0),
                 struct_name = struct_name,

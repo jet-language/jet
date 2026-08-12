@@ -730,7 +730,7 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
         );
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = if program.entry == "__jet_cli_main" {
+    let main_ok = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         // Typed CLI entry is a host trampoline; user `run` is the resident body.
         program.funcs.iter().any(|f| {
             f.name == "run" && resident_safe_func(f, &names)
@@ -747,7 +747,7 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
         })
     };
     if !main_ok {
-        if program.entry == "__jet_cli_main" {
+        if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
             for f in &program.funcs {
                 if f.name == "run" {
                     if let Some(d) = resident_safe_func_detail(f, &names) {

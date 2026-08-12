@@ -1,6 +1,7 @@
 use crate::AST::{AccessConvention, ContractClause, Expr, Func, Param, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
 use crate::Codegen::TIR::emit_tir_stmts;
@@ -56,7 +57,7 @@ fn bind_resource_param(
         env.bind(source_name, ordinary_slot, Some(local_ty));
         return;
     }
-    let guard_name = jet_foundation::Names::mangle(&format!("resource_param_{source_name}"));
+    let guard_name = mangle_generated(&format!("resource_param_{source_name}"));
     guards.push(TStmt::Let {
         name: guard_name.clone(),
         kw: "let mut",
@@ -176,7 +177,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
         // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
         // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
-        // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
+        // its source convention (`Read` → `&__jet_Stack<T>`, deref'd place `(*__jet_s)`).
         if reconstruct_web_params {
             if let Type::Named(type_name) = &param_ty {
                 if let Some(fields) = cx.struct_fields.get(type_name) {
@@ -311,10 +312,11 @@ pub(crate) fn lower_contracts(f: &Func, cx: &Cx) -> (Vec<TContract>, Vec<TContra
         .iter()
         .map(|clause| lower_contract_clause(f, clause, None, cx))
         .collect();
+    let result_name = mangle_generated("result");
     let post = f
         .post
         .iter()
-        .map(|clause| lower_contract_clause(f, clause, Some(("__jet_result", &ret_ty)), cx))
+        .map(|clause| lower_contract_clause(f, clause, Some((&result_name, &ret_ty)), cx))
         .collect();
     (pre, post)
 }
@@ -356,15 +358,17 @@ pub(crate) fn emit_tir_property_test_body(
 /// c109: lower + emit an error-conversion `impl Old => New { … }` body through the TIR,
 /// reproducing `emit_error_conv`'s `emit_stmts(cx, body, &mut env, out, 1, false)`
 /// byte-for-byte. `emit_error_conv` already emitted the signature + opening brace and set
-/// `cx.current_fn` to the conversion fn name; it binds `self` to `__jet_self` (Move, the
-/// Old named type — Slot `{rust_name:"__jet_self", deref:false}`), so the env's `self`
-/// place is the bare `__jet_self`. The body's `return <e>` lowers the expr as-is (sema
+/// `cx.current_fn` to the conversion fn name; it binds `self` to its canonical machine name
+/// (Move, the Old named type), so the env's `self` place is that same machine name. The body's
+/// `return <e>` lowers the expr as-is (sema
 /// already inserted any wrapping); emitted at indent 1, the closing brace is the caller's.
 pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
     env.bind(
         Syntax::KW_SELF,
-        TLocal::user(Syntax::KW_SELF),
+        // Error-conversion parameters are ordinary generated locals, not Rust
+        // receiver syntax; keep the binding aligned with `emit_error_conv`.
+        TLocal::generated("__self"),
         Some(Type::Named(from_ty.to_string())),
     );
     prepare_interrupt_callback_locals(body, cx, &mut env);

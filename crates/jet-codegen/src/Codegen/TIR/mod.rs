@@ -468,8 +468,9 @@ pub struct TBindingOrigin {
 /// string. Every engine resolves a slot from these facts alone.
 ///
 /// `name` is the slot's identity: a user binding carries its Jet name, which Rust
-/// spells `__jet_<name>`; a compiler-generated temp (`generated`) carries its own
-/// reserved identifier, which can never collide with a mangled user name.
+/// spells `__jet_<name>`; a compiler-generated temp (`generated`) is allocated
+/// through the reserved machine-name lane, which cannot collide with a mangled
+/// user name.
 /// `deref` records a by-reference slot, which Rust reads through `(*…)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TLocal {
@@ -504,8 +505,14 @@ impl TLocal {
 
     /// A compiler-generated temp slot, read by value.
     pub fn generated(name: impl Into<String>) -> TLocal {
+        let name = name.into();
+        let name = if name == "self" {
+            name
+        } else {
+            super::mangle_generated(&name)
+        };
         TLocal {
-            name: name.into(),
+            name,
             generated: true,
             deref: false,
             origin: None,
@@ -523,7 +530,7 @@ impl TLocal {
 
     /// The compiler-owned STM handle used by `#Transact` Shared edits.
     pub fn stm() -> TLocal {
-        TLocal::generated("__jet_stm").as_mutable()
+        TLocal::generated("stm").as_mutable()
     }
 
     pub fn as_mutable(mut self) -> TLocal {
@@ -569,7 +576,7 @@ impl TLocal {
 
 /// A resolved user method identity. `name` is the Jet method name — the key the
 /// JIT and interpreter dispatch on. `mangled` records the one Rust spelling fact:
-/// an inherent method becomes `user_<name>`, while a trait-impl or dynamic-dispatch
+/// an inherent method becomes `__jet_<name>`, while a trait-impl or dynamic-dispatch
 /// method keeps the bare name the trait owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TMethodRef {
@@ -581,7 +588,7 @@ pub struct TMethodRef {
 }
 
 impl TMethodRef {
-    /// An inherent user method — Rust spells it `user_<name>`.
+    /// An inherent user method — Rust spells it `__jet_<name>`.
     pub fn inherent(name: impl Into<String>) -> TMethodRef {
         TMethodRef {
             name: name.into(),
@@ -1127,7 +1134,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     .flatten();
     let entry_name = match (zero_arg_entry, cli_run) {
         (Some(name), _) => name,
-        (None, Some(_)) => "__jet_cli_main".to_string(),
+        (None, Some(_)) => super::mangle_generated("cli_main"),
         (None, None) => return None,
     };
     cx.jit_spawn_lambdas.borrow_mut().clear();
@@ -1361,7 +1368,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     }
     lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
     specialize_generic_free_functions(&module.items, &cx, &mut funcs);
-    let entry_ok = if entry_name == "__jet_cli_main" {
+    let entry_ok = if entry_name == super::mangle_generated("cli_main") {
         funcs.iter().any(|function| function.name == "run")
     } else {
         funcs.iter().any(|function| function.name == entry_name)
@@ -1467,9 +1474,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut enum_variant_payload_types = std::collections::HashMap::new();
     enum_variants.insert(
         crate::Syntax::TYPE_ORDERING.to_string(),
-        ["__jet_Less", "__jet_Equal", "__jet_Greater"]
+        ["Less", "Equal", "Greater"]
             .into_iter()
-            .map(str::to_string)
+            .map(mangle)
             .collect(),
     );
     // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
@@ -1477,13 +1484,16 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     // `Task<T>.join()` and never constructs a variant explicitly.
     enum_variants.insert(
         crate::Syntax::TYPE_TASK_FAILURE.to_string(),
-        ["user_Cancelled", "user_DeadlineBlown", "user_Panicked"]
+        ["Cancelled", "DeadlineBlown", "Panicked"]
             .into_iter()
             .map(str::to_string)
             .collect(),
     );
     enum_variant_payload_types.insert(
-        format!("user_{}::user_Panicked", crate::Syntax::TYPE_TASK_FAILURE),
+        format!(
+            "{}::Panicked",
+            crate::Syntax::TYPE_TASK_FAILURE
+        ),
         vec![Type::String],
     );
     let mut int_constants = std::collections::HashMap::new();
@@ -1864,12 +1874,13 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
             }
             _ => None,
         })).or_else(|| {
-            jet_foundation::CLISchema::entry_schema(&module.items).map(|_| "__jet_cli_main".to_string())
+            jet_foundation::CLISchema::entry_schema(&module.items)
+                .map(|_| super::mangle_generated("cli_main"))
         });
     let Some(selected) = selected else {
         return "no zero-parameter runnable entry".to_string();
     };
-    let entry_check = if selected == "__jet_cli_main" {
+    let entry_check = if selected == super::mangle_generated("cli_main") {
         "run".to_string()
     } else {
         selected.clone()
@@ -1886,7 +1897,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         }
     }
     if !saw_entry {
-        return if selected == "__jet_cli_main" {
+        return if selected == super::mangle_generated("cli_main") {
             "cli entry missing `run`".to_string()
         } else {
             "selected entry is not a top-level function".to_string()
@@ -1991,7 +2002,7 @@ pub struct TFunc {
     pub post_contracts: Vec<TContract>,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
-    /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
+    /// `pub fn name(…)` at module scope; a method gets `pub fn __jet_name(<self>, …)`
     /// inside an `impl` block (indented), with the `self` receiver form per the
     /// resolved convention (or no receiver for a static method).
     pub kind: TFuncKind,
@@ -2562,8 +2573,8 @@ pub enum TStmt {
         op: Option<BinOp>,
         value: TExpr,
         /// c150: true when the value is a borrowed non-scalar ident (a `Read`-convention
-        /// non-Copy parameter in deref position). Assigning `(*user_s)` directly moves
-        /// out of a shared reference (E0507); emitting `((*user_s)).clone()` is correct.
+        /// non-Copy parameter in deref position). Assigning `(*__jet_s)` directly moves
+        /// out of a shared reference (E0507); emitting `((*__jet_s)).clone()` is correct.
         /// Mirrors the `lower_enum_arg` clone predicate. False for scalars and owned values.
         clone_value: bool,
         /// Source line of the assignment, so a compound operator that traps
@@ -2903,9 +2914,9 @@ pub enum BranchClass {
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
-/// fully-resolved Rust match pattern (`user_Light::user_Red`,
-/// `user_Conn::user_Active(user_id) | user_Conn::user_Reconnecting(user_id)`,
-/// `user_Http::user_Good(__jet_range_0)`); `guard` is the optional `if …` range
+/// fully-resolved Rust match pattern (`__jet_Light::__jet_Red`,
+/// `__jet_Conn::__jet_Active(user_id) | __jet_Conn::__jet_Reconnecting(user_id)`,
+/// `__jet_Http::__jet_Good(__jet_range_0)`); `guard` is the optional `if …` range
 /// guard. Both are computed once at lowering — emit only formats them.
 pub struct TMatchArm {
     pub pattern: TPattern,
@@ -3054,7 +3065,7 @@ pub enum TExprKind {
         base: Type,
     },
     /// D-RANGETYPE1: checked constructor for `distinct Int(lo..hi)` under
-    /// postfix `?`. Emits `user_T::try_new(arg)` returning `Result<user_T,
+    /// postfix `?`. Emits `__jet_T::try_new(arg)` returning `Result<__jet_T,
     /// String>`; the enclosing `Try` node handles propagation.
     RangeCheckedCtor {
         name: String,
@@ -3262,7 +3273,7 @@ pub enum TExprKind {
         ctor: String,
     },
     /// c109 Phase 4: an enum literal `Enum.Variant`, `Variant(args)`, or a
-    /// named-payload `Variant { f: v, … }`. The Rust head (`user_Enum::user_Variant`)
+    /// named-payload `Variant { f: v, … }`. The Rust head (`__jet_Enum::__jet_Variant`)
     /// is resolved at lowering. `payload` carries the resolved arg form. The subset
     /// admits only scalar/Char payload values, so no clone/box decision is ever
     /// needed (a scalar arg is never borrowed-in-env, never a boxed edge — the AST
@@ -3277,7 +3288,7 @@ pub enum TExprKind {
     /// c109 Phase 24: a prelude `JSON` enum construction (`JSON.Null` /
     /// `JSON.Boolean(b)` / `JSON.Number(n)` / `JSON.Text(s)` / `JSON.Array(xs)` /
     /// `JSON.Object(map)`). The JSON enum is FOREIGN: its variants render non-mangled
-    /// (`{root}jet_std::JSON::Object`, NOT `user_…`), distinct from a user enum's
+    /// (`{root}jet_std::JSON::Object`, NOT `__jet_…`), distinct from a user enum's
     /// `EnumLit`. `variant` is the bare variant name (`Object`/`Text`/…). `arg` is the
     /// payload `TExpr` plus the resolved `implicit_clone` flag (sema's `CallArg.flags`,
     /// total) — `true` → `(…).clone()`, reproducing `emit_core_json_lit` (Expression.rs)
@@ -3307,9 +3318,9 @@ pub enum TExprKind {
         parts: Vec<ListSpreadPart>,
     },
     /// D-SOA1: a list literal whose element is a `#layout(columnar)` struct `S`.
-    /// Lowers to `user_<S>_columns::from_aos(vec![…])` — the elements build the
+    /// Lowers to `__jet_<S>_columns::from_aos(vec![…])` — the elements build the
     /// array-of-structs, then `from_aos` distributes them across the columns.
-    /// `columns_ty` is the resolved `user_<S>_columns` Rust path.
+    /// `columns_ty` is the resolved `__jet_<S>_columns` Rust path.
     ColumnarListLit {
         columns_ty: String,
         elems: Vec<TExpr>,
@@ -3323,7 +3334,7 @@ pub enum TExprKind {
         line: usize,
     },
     /// D-SOA1: a fused `xs[i].field` field-read on a columnar list — reads
-    /// directly from the field's column (`jet_index_vec(&(base).user_<field>, i,
+    /// directly from the field's column (`jet_index_vec(&(base).__jet_<field>, i,
     /// …)`), the cache-friendly fast path (no whole-`S` gather).
     ColumnarColumnRead {
         base: Box<TExpr>,
@@ -3335,8 +3346,8 @@ pub enum TExprKind {
     /// struct name (`JetTup_<hash>`) and the CANONICAL field order are resolved at
     /// lowering from the literal's sema-attached `Type::Tuple`; each field's value is
     /// reordered to that canonical order (a `(y: 3, x: 4)` literal becomes
-    /// `JetTup_…{ user_x: 4, user_y: 3 }`). Reproduces `emit_expr`'s `TupleLit` arm
-    /// byte-for-byte — `struct_name { user_<f>: <v>, … }`. `fields` are the already
+    /// `JetTup_…{ __jet_x: 4, __jet_y: 3 }`). Reproduces `emit_expr`'s `TupleLit` arm
+    /// byte-for-byte — `struct_name { __jet_<f>: <v>, … }`. `fields` are the already
     /// mangled-name + lowered-value pairs in canonical order.
     TupleLit {
         struct_name: String,
@@ -3830,7 +3841,7 @@ pub enum TCoreClosureKind {
 /// (see `TExprKind::FnValue`).
 pub enum TFnValueKind {
     /// A bare function name used as a value. `wrapper` is the already-rendered
-    /// `Box::new(move |…| user_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
+    /// `Box::new(move |…| __jet_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
     /// produced at lowering so emit only echoes it.
     NamedFn {
         wrapper: String,
@@ -5047,7 +5058,7 @@ pub struct TCallArg {
     /// copying into a growable list. When true, emit wraps with `.to_vec()`.
     pub widen_to_vec: bool,
     /// D-UNIONTYPE1=A: a member value passed where a union is expected. When
-    /// `Some(union)`, emit wraps as `user_<UnionEnum>::<MemberTag>(value)`.
+    /// `Some(union)`, emit wraps as `__jet_<UnionEnum>::<MemberTag>(value)`.
     pub widen_to_union: Option<Type>,
 }
 

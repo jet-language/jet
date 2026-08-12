@@ -1026,12 +1026,12 @@ fn run() {}
         web.js_app
     );
     assert!(
-        web.js_app.contains("__jet_switch_subject"),
+        web.js_app.contains("__jet___switch_subject"),
         "JS arm tables must bind the switch subject:\n{}",
         web.js_app
     );
     assert!(
-        web.wasm_rust.contains("__jet_switch_subject"),
+        web.wasm_rust.contains("__jet___switch_subject"),
         "Wasm MixedSwitch/RangeSwitch must bind the switch subject:\n{}",
         web.wasm_rust
     );
@@ -1136,7 +1136,7 @@ fn run() {}
     assert!(
         web.js_app.contains("while ((i < n))")
             && web.js_app.contains("continue;")
-            && web.js_app.contains("__jet_loop_first"),
+            && web.js_app.contains("__jet___loop_first"),
         "JS While/Continue/CountedLoop forms were not all emitted:\n{}",
         web.js_app
     );
@@ -1158,7 +1158,7 @@ fn run() {}
     assert!(
         web.wasm_rust.contains("while (__jet_i < __jet_n)")
             && web.wasm_rust.contains("continue;")
-            && web.wasm_rust.contains("__jet_loop_first"),
+            && web.wasm_rust.contains("__jet___loop_first"),
         "Wasm While/Continue/CountedLoop forms were not all emitted:\n{}",
         web.wasm_rust
     );
@@ -1384,12 +1384,12 @@ fn run() { print(classify(2)) }
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert_eq!(
-        js.matches("const __jet_match_subject = toggle;").count(),
+        js.matches("const __jet___match_subject = toggle;").count(),
         1,
         "Matches subject must be bound once before its predicate:\n{js}"
     );
     assert_eq!(
-        js.matches("(__jet_match_subject)").count(),
+        js.matches("(__jet___match_subject)").count(),
         1,
         "the predicate must read only the bound subject:\n{js}"
     );

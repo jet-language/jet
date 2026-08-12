@@ -592,6 +592,14 @@ mod tests {
             Inferior::rust_local_to_jet("__jet_switch_subject"),
             Some("switch_subject".to_string())
         );
+        assert_eq!(
+            Inferior::rust_local_to_jet("__jet___switch_subject"),
+            Some("__switch_subject".to_string())
+        );
+        assert_eq!(
+            Inferior::jet_local_to_rust("__switch_subject"),
+            "__jet___switch_subject"
+        );
     }
 
     #[test]

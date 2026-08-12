@@ -1,13 +1,15 @@
 //! D-WEBBACKEND1 / D-WEBKIND1 / D-DOMGEN1 (c123 M2): WASM + JS web backend emission.
 
+use crate::jet_generated_format as jet_format;
 use super::{
     build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, mangle, mangle_path, Cx, TIR,
+    update_cloneability_with_foreign_types, mangle, mangle_path, Cx, TIR, SOURCE_MAP_MARKER,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
 use crate::AST::{AccessConvention, FfiLink, Func, Item, ProgramBundle, Type};
+use crate::Codegen::mangle_generated;
 use jet_foundation::WebPartition::{partition_key, WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
@@ -1280,11 +1282,11 @@ fn js_source_marker(bundle: &ProgramBundle) -> String {
 /// source records the longest underscore run after the base; the result uses
 /// one more underscore. O(total bytes) and allocation bounded by max run + base.
 fn source_marker_for_texts<'a>(texts: impl Iterator<Item = &'a str>) -> String {
-    const BASE: &str = "//# __jet_source_map";
+    let base = SOURCE_MAP_MARKER;
     let mut max_run = None;
     for source in texts {
-        for (at, _) in source.match_indices(BASE) {
-            let run = source[at + BASE.len()..]
+        for (at, _) in source.match_indices(base) {
+            let run = source[at + base.len()..]
                 .chars()
                 .take_while(|&c| c == '_')
                 .count();
@@ -1292,8 +1294,8 @@ fn source_marker_for_texts<'a>(texts: impl Iterator<Item = &'a str>) -> String {
         }
     }
     match max_run {
-        None => BASE.to_string(),
-        Some(run) => format!("{BASE}{}", "_".repeat(run + 1)),
+        None => base.to_string(),
+        Some(run) => format!("{base}{}", "_".repeat(run + 1)),
     }
 }
 
@@ -2883,14 +2885,14 @@ fn emit_wasm_body(
                     Some(step) => {
                         let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
                         out.push_str(&format!("{pad}{{\n"));
-                        out.push_str(&format!("{pad}    let __jet_loop_start = {start};\n"));
-                        out.push_str(&format!("{pad}    let __jet_loop_end = {end};\n"));
-                        out.push_str(&format!("{pad}    let __jet_loop_stride = {step};\n"));
-                        out.push_str(&format!(
-                            "{pad}    assert!(__jet_loop_stride > 0, \"E0123: loop stride must be positive\");\n"
+                        out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_start = {start};\n"));
+                        out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_end = {end};\n"));
+                        out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_stride = {step};\n"));
+                        out.push_str(&jet_format!(
+                            "{pad}    assert!({jet_prefix}loop_stride > 0, \"E0123: loop stride must be positive\");\n"
                         ));
-                        out.push_str(&format!(
-                            "{pad}    for {loop_var} in (__jet_loop_start{range_op}__jet_loop_end).step_by(__jet_loop_stride as usize) {{\n"
+                        out.push_str(&jet_format!(
+                            "{pad}    for {loop_var} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n"
                         ));
                         emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
                         out.push_str(&format!("{pad}    }}\n"));
@@ -2926,15 +2928,15 @@ fn emit_wasm_body(
                 };
                 match var2 {
                     Some(v2) => {
-                        out.push_str(&format!(
-                            "{pad}for (__jet_i, __jet_item) in {iter}.enumerate() {{\n"
+                        out.push_str(&jet_format!(
+                            "{pad}for ({jet_prefix}i, {jet_prefix}item) in {iter}.enumerate() {{\n"
                         ));
-                        out.push_str(&format!(
-                            "{pad}    let {} = __jet_i as i64;\n",
+                        out.push_str(&jet_format!(
+                            "{pad}    let {} = {jet_prefix}i as i64;\n",
                             mangle(var)
                         ));
-                        out.push_str(&format!(
-                            "{pad}    let {} = __jet_item;\n",
+                        out.push_str(&jet_format!(
+                            "{pad}    let {} = {jet_prefix}item;\n",
                             mangle(v2)
                         ));
                         emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
@@ -2980,7 +2982,7 @@ fn emit_wasm_body(
                 )?;
                 let inner = "    ".repeat(indent + 1);
                 if step.is_some() {
-                    out.push_str(&format!("{inner}let mut __jet_loop_first = true;\n"));
+                    out.push_str(&jet_format!("{inner}let mut {jet_prefix}loop_first = true;\n"));
                 }
                 out.push_str(&format!(
                     "{inner}{}loop {{\n",
@@ -2988,8 +2990,8 @@ fn emit_wasm_body(
                 ));
                 let body_pad = "    ".repeat(indent + 2);
                 if let Some(step) = step {
-                    out.push_str(&format!(
-                        "{body_pad}if __jet_loop_first {{ __jet_loop_first = false; }} else {{\n"
+                    out.push_str(&jet_format!(
+                        "{body_pad}if {jet_prefix}loop_first {{ {jet_prefix}loop_first = false; }} else {{\n"
                     ));
                     emit_wasm_body(
                         std::slice::from_ref(step.as_ref()),
@@ -3039,16 +3041,16 @@ fn emit_wasm_body(
                 let i = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
                 let v = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
                 if *is_map {
-                    out.push_str(&format!(
-                        "{pad}{{ let __jet_v = {v}; ({b}).insert(({i}).clone(), __jet_v); }}\n"
+                    out.push_str(&jet_format!(
+                        "{pad}{{ let {jet_prefix}v = {v}; ({b}).insert(({i}).clone(), {jet_prefix}v); }}\n"
                     ));
                 } else if *uninit {
-                    out.push_str(&format!(
-                        "{pad}{{ let __jet_v = {v}; ({b}).write({i} as usize, __jet_v); }}\n"
+                    out.push_str(&jet_format!(
+                        "{pad}{{ let {jet_prefix}v = {v}; ({b}).write({i} as usize, {jet_prefix}v); }}\n"
                     ));
                 } else {
-                    out.push_str(&format!(
-                        "{pad}{{ let __jet_v = {v}; ({b})[{i} as usize] = __jet_v; }}\n"
+                    out.push_str(&jet_format!(
+                        "{pad}{{ let {jet_prefix}v = {v}; ({b})[{i} as usize] = {jet_prefix}v; }}\n"
                     ));
                 }
             }
@@ -3107,8 +3109,8 @@ fn emit_wasm_body(
                     wasm_emit_expr(subject, funcs, file_prefix, reconstructions)?;
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "    ".repeat(indent + 1);
-                out.push_str(&format!(
-                    "{inner}let __jet_switch_subject = &({subject_str});\n"
+                out.push_str(&jet_format!(
+                    "{inner}let {jet_prefix}switch_subject = &({subject_str});\n"
                 ));
                 for (i, (cond, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
@@ -3164,8 +3166,8 @@ fn emit_wasm_body(
                     wasm_emit_expr(subject, funcs, file_prefix, reconstructions)?;
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "    ".repeat(indent + 1);
-                out.push_str(&format!(
-                    "{inner}let __jet_switch_subject = &({subject_str});\n"
+                out.push_str(&jet_format!(
+                    "{inner}let {jet_prefix}switch_subject = &({subject_str});\n"
                 ));
                 for (i, (lo, hi, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
@@ -3323,8 +3325,8 @@ fn wasm_emit_distinct_convert(
             let Some((lo, hi)) = range else {
                 return Ok(format!("Ok({converted})"));
             };
-            Ok(format!(
-                "{{ let __jet_value = {converted}; if __jet_value >= {lo} && __jet_value <= {hi} {{ Ok(__jet_value) }} else {{ Err({}) }} }}",
+            Ok(jet_format!(
+                "{{ let {jet_prefix}value = {converted}; if {jet_prefix}value >= {lo} && {jet_prefix}value <= {hi} {{ Ok({jet_prefix}value) }} else {{ Err({}) }} }}",
                 error(name)
             ))
         }
@@ -3338,8 +3340,8 @@ fn wasm_emit_distinct_convert(
                 error(dst_spelling)
             );
             if let Some((lo, hi)) = range {
-                Ok(format!(
-                    "({converted}).and_then(|__jet_value| if __jet_value >= {lo} && __jet_value <= {hi} {{ Ok(__jet_value) }} else {{ Err({}) }})",
+                Ok(jet_format!(
+                    "({converted}).and_then(|{jet_prefix}value| if {jet_prefix}value >= {lo} && {jet_prefix}value <= {hi} {{ Ok({jet_prefix}value) }} else {{ Err({}) }})",
                     error(name)
                 ))
             } else {
@@ -3352,12 +3354,12 @@ fn wasm_emit_distinct_convert(
             lower,
             upper_exclusive,
             ..
-        } if fallible => Ok(format!(
-            "{{ let __jet_value = ({input}); if __jet_value.is_finite() && __jet_value >= ({lower} as _) && __jet_value < ({upper_exclusive} as _) {{ Ok(__jet_value.trunc() as {dst_rust}) }} else {{ Err({}) }} }}",
+        } if fallible => Ok(jet_format!(
+            "{{ let {jet_prefix}value = ({input}); if {jet_prefix}value.is_finite() && {jet_prefix}value >= ({lower} as _) && {jet_prefix}value < ({upper_exclusive} as _) {{ Ok({jet_prefix}value.trunc() as {dst_rust}) }} else {{ Err({}) }} }}",
             error(dst_spelling)
         )),
-        TIR::TNumericOp::FloatNarrow { dst_spelling } if fallible => Ok(format!(
-            "{{ let __jet_value = ({input}); if __jet_value.is_finite() && __jet_value >= -(f32::MAX as f64) && __jet_value <= f32::MAX as f64 {{ Ok(__jet_value as f32) }} else {{ Err({}) }} }}",
+        TIR::TNumericOp::FloatNarrow { dst_spelling } if fallible => Ok(jet_format!(
+            "{{ let {jet_prefix}value = ({input}); if {jet_prefix}value.is_finite() && {jet_prefix}value >= -(f32::MAX as f64) && {jet_prefix}value <= f32::MAX as f64 {{ Ok({jet_prefix}value as f32) }} else {{ Err({}) }} }}",
             error(dst_spelling)
         )),
         _ => Err(()),
@@ -3381,11 +3383,11 @@ fn wasm_emit_expr(
                     return Ok(format!("{}.to_string()", json_quote(text)));
                 }
             }
-            let mut value = String::from("{ let mut __jet_s = String::new(); ");
+            let mut value = jet_format!("{{ let mut {jet_prefix}s = String::new(); ");
             for part in parts {
                 match part {
                     TIR::TStrPart::Lit(text) if !text.is_empty() => {
-                        value.push_str(&format!("__jet_s.push_str({}); ", json_quote(text)));
+                        value.push_str(&jet_format!("{jet_prefix}s.push_str({}); ", json_quote(text)));
                     }
                     TIR::TStrPart::Lit(_) => {}
                     TIR::TStrPart::Interp(interp, format) => {
@@ -3399,15 +3401,15 @@ fn wasm_emit_expr(
                                 unreachable!("Unit interpolation lowers to a String")
                             }
                         };
-                        value.push_str(&format!(
-                            "__jet_s.push_str(&format!({:?}, {})); ",
+                        value.push_str(&jet_format!(
+                            "{jet_prefix}s.push_str(&format!({:?}, {})); ",
                             spec,
                             wasm_emit_expr(interp, funcs, file_prefix, reconstructions)?
                         ));
                     }
                 }
             }
-            value.push_str("__jet_s }");
+            value.push_str(&jet_format!("{jet_prefix}s }}"));
             value
         }
         TIR::TExprKind::Local(local) if local.uninit_scalar => {
@@ -3546,8 +3548,8 @@ fn wasm_emit_expr(
                 let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
                 let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
                 let file = file_prefix.unwrap_or_default();
-                format!(
-                    "{{ let __jet_fixed = ({base}); jet_fixed_list_index(__jet_fixed.len(), ({index}).0, |__jet_i| __jet_fixed[__jet_i].clone()).unwrap_or_else(|__jet_error| jet_panic({file:?}, {line}, &__jet_error.message())) }}"
+                jet_format!(
+                    "{{ let {jet_prefix}fixed = ({base}); jet_fixed_list_index({jet_prefix}fixed.len(), ({index}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_panic({file:?}, {line}, &{jet_prefix}error.message())) }}"
                 )
             }
             _ => return Err(()),
@@ -3581,8 +3583,8 @@ fn wasm_emit_expr(
             file_prefix,
             reconstructions,
         )?,
-        TIR::TExprKind::OptionLift2 { f, a, b } => format!(
-            "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || ({}))",
+        TIR::TExprKind::OptionLift2 { f, a, b } => jet_format!(
+            "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |{jet_prefix}value| Ok({jet_prefix}value), || ({}))",
             wasm_emit_expr(a, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(b, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(f, funcs, file_prefix, reconstructions)?
@@ -4170,7 +4172,7 @@ fn local_web_key(file_prefix: Option<&str>, rust_fn: &str) -> String {
 
 fn web_place(name: &str) -> String {
     let name = name.strip_prefix("(*").and_then(|s| s.strip_suffix(')')).unwrap_or(name);
-    if let Some(source) = name.strip_prefix("__jet_cap_") {
+    if let Some(source) = name.strip_prefix(&mangle_generated("cap_")) {
         return source.to_string();
     }
     web_name(name).to_string()
@@ -4325,13 +4327,13 @@ fn emit_js_if_head(
         TIR::TIfCond::IfLet { pattern, subj } => {
             let subj = tir_js_expr(subj, funcs, file_prefix)?;
             let inner = "  ".repeat(indent + 1);
-            out.push_str(&format!(
-                "{pad}{{\n{inner}const __jet_if_subject = {subj};\n{inner}if ({}) {{\n",
-                js_pattern_test(&pattern.pattern, "__jet_if_subject")?
+            out.push_str(&jet_format!(
+                "{pad}{{\n{inner}const {jet_prefix}if_subject = {subj};\n{inner}if ({}) {{\n",
+                js_pattern_test(&pattern.pattern, &mangle_generated("if_subject"))?
             ));
             emit_js_pattern_bindings(
                 &pattern.pattern,
-                "__jet_if_subject",
+                &mangle_generated("if_subject"),
                 out,
                 indent + 2,
             );
@@ -4340,9 +4342,9 @@ fn emit_js_if_head(
         TIR::TIfCond::Matches { pattern, subj } => {
             let subj = tir_js_expr(subj, funcs, file_prefix)?;
             let inner = "  ".repeat(indent + 1);
-            out.push_str(&format!(
-                "{pad}{{\n{inner}const __jet_match_subject = {subj};\n{inner}if ({}) {{\n",
-                js_pattern_test(&pattern.pattern, "__jet_match_subject")?
+            out.push_str(&jet_format!(
+                "{pad}{{\n{inner}const {jet_prefix}match_subject = {subj};\n{inner}if ({}) {{\n",
+                js_pattern_test(&pattern.pattern, &mangle_generated("match_subject"))?
             ));
             Ok(1)
         }
@@ -4576,8 +4578,8 @@ fn emit_tir_js_body(
                         // D-RANGE-EXCL1=C: sequence two-binding → index then item.
                         // `.entries()` yields a Number index; whole-number locals
                         // are BigInt on this tier, so lift the index once.
-                        out.push_str(&format!(
-                            "{pad}for (const [__jet_i, {}] of {}.entries()) {{\n{pad}  let {} = BigInt(__jet_i);\n",
+                        out.push_str(&jet_format!(
+                            "{pad}for (const [{jet_prefix}i, {}] of {}.entries()) {{\n{pad}  let {} = BigInt({jet_prefix}i);\n",
                             web_name(v2),
                             tir_js_expr(collection, funcs, file_prefix)?,
                             web_name(var),
@@ -4630,7 +4632,7 @@ fn emit_tir_js_body(
                 )?;
                 let inner = "  ".repeat(indent + 1);
                 if step.is_some() {
-                    out.push_str(&format!("{inner}let __jet_loop_first = true;\n"));
+                    out.push_str(&jet_format!("{inner}let {jet_prefix}loop_first = true;\n"));
                 }
                 out.push_str(&format!(
                     "{inner}{}while (true) {{\n",
@@ -4638,8 +4640,8 @@ fn emit_tir_js_body(
                 ));
                 let body_pad = "  ".repeat(indent + 2);
                 if let Some(step) = step {
-                    out.push_str(&format!(
-                        "{body_pad}if (__jet_loop_first) {{ __jet_loop_first = false; }} else {{\n"
+                    out.push_str(&jet_format!(
+                        "{body_pad}if ({jet_prefix}loop_first) {{ {jet_prefix}loop_first = false; }} else {{\n"
                     ));
                     emit_tir_js_body(
                         std::slice::from_ref(step.as_ref()),
@@ -4695,8 +4697,8 @@ fn emit_tir_js_body(
                 fallthrough,
                 ..
             } => {
-                out.push_str(&format!(
-                    "{pad}{{\n{pad}  const __jet_match = {};\n",
+                out.push_str(&jet_format!(
+                    "{pad}{{\n{pad}  const {jet_prefix}match = {};\n",
                     tir_js_expr(scrutinee, funcs, file_prefix)?
                 ));
                 let inner = "  ".repeat(indent + 1);
@@ -4704,11 +4706,11 @@ fn emit_tir_js_body(
                     let keyword = if index == 0 { "if" } else { "} else if" };
                     out.push_str(&format!(
                         "{inner}{keyword} ({}) {{\n",
-                        js_pattern_test(&arm.pattern.pattern, "__jet_match")?
+                        js_pattern_test(&arm.pattern.pattern, &mangle_generated("match"))?
                     ));
                     emit_js_pattern_bindings(
                         &arm.pattern.pattern,
-                        "__jet_match",
+                        &mangle_generated("match"),
                         out,
                         indent + 2,
                     );
@@ -4744,8 +4746,8 @@ fn emit_tir_js_body(
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "  ".repeat(indent + 1);
                 // Bind subject for parity with native (HostCall pattern arms stay gated out).
-                out.push_str(&format!(
-                    "{inner}const __jet_switch_subject = {};\n",
+                out.push_str(&jet_format!(
+                    "{inner}const {jet_prefix}switch_subject = {};\n",
                     tir_js_expr(subject, funcs, file_prefix)?
                 ));
                 for (i, (cond, body)) in arms.iter().enumerate() {
@@ -4779,14 +4781,14 @@ fn emit_tir_js_body(
             } => {
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "  ".repeat(indent + 1);
-                out.push_str(&format!(
-                    "{inner}const __jet_switch_subject = {};\n",
+                out.push_str(&jet_format!(
+                    "{inner}const {jet_prefix}switch_subject = {};\n",
                     tir_js_expr(subject, funcs, file_prefix)?
                 ));
                 for (i, (lo, hi, body)) in arms.iter().enumerate() {
                     let kw = if i == 0 { "if" } else { "} else if" };
-                    out.push_str(&format!(
-                        "{inner}{kw} (__jet_switch_subject >= {lo} && __jet_switch_subject <= {hi}) {{\n"
+                    out.push_str(&jet_format!(
+                        "{inner}{kw} ({jet_prefix}switch_subject >= {lo} && {jet_prefix}switch_subject <= {hi}) {{\n"
                     ));
                     emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
                 }
@@ -4950,9 +4952,9 @@ fn tir_js_distinct_convert(
             } else {
                 (lo.to_string(), hi.to_string())
             };
-            Ok(format!(
-                "(() => {{ const __jet_value = {converted}; return __jet_value >= {lo} && __jet_value <= {hi} ? {} : {}; }})()",
-                js_option_result("__jet_value"),
+            Ok(jet_format!(
+                "(() => {{ const {jet_prefix}value = {converted}; return {jet_prefix}value >= {lo} && {jet_prefix}value <= {hi} ? {} : {}; }})()",
+                js_option_result(&mangle_generated("value")),
                 js_option_error(&format!("value doesn't fit in {name}"))
             ))
         }
@@ -4968,10 +4970,10 @@ fn tir_js_distinct_convert(
                         .map(|(lo, hi)| (lo.to_string(), hi.to_string()))
                 })
                 .ok_or(())?;
-            let value = "BigInt(__jet_input)";
-            Ok(format!(
-                "(() => {{ const __jet_input = {input}; const __jet_value = {value}; return __jet_value >= {lo}n && __jet_value <= {hi}n ? {} : {}; }})()",
-                js_option_result("__jet_value"),
+            let value = jet_format!("BigInt({jet_prefix}input)");
+            Ok(jet_format!(
+                "(() => {{ const {jet_prefix}input = {input}; const {jet_prefix}value = {value}; return {jet_prefix}value >= {lo}n && {jet_prefix}value <= {hi}n ? {} : {}; }})()",
+                js_option_result(&mangle_generated("value")),
                 js_option_error(&format!("value doesn't fit in {dst_spelling}"))
             ))
         }
@@ -4980,14 +4982,14 @@ fn tir_js_distinct_convert(
             lower,
             upper_exclusive,
             ..
-        } if fallible => Ok(format!(
-            "(() => {{ const __jet_value = Number({input}); return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? {} : {}; }})()",
-            js_option_result("BigInt(Math.trunc(__jet_value))"),
+        } if fallible => Ok(jet_format!(
+            "(() => {{ const {jet_prefix}value = Number({input}); return Number.isFinite({jet_prefix}value) && {jet_prefix}value >= {lower} && {jet_prefix}value < {upper_exclusive} ? {} : {}; }})()",
+            js_option_result(&jet_format!("BigInt(Math.trunc({jet_prefix}value))")),
             js_option_error(&format!("value doesn't fit in {dst_spelling}"))
         )),
-        TIR::TNumericOp::FloatNarrow { dst_spelling } if fallible => Ok(format!(
-            "(() => {{ const __jet_value = Number({input}); return Number.isFinite(__jet_value) && __jet_value >= -3.4028234663852886e38 && __jet_value <= 3.4028234663852886e38 ? {} : {}; }})()",
-            js_option_result("__jet_value"),
+        TIR::TNumericOp::FloatNarrow { dst_spelling } if fallible => Ok(jet_format!(
+            "(() => {{ const {jet_prefix}value = Number({input}); return Number.isFinite({jet_prefix}value) && {jet_prefix}value >= -3.4028234663852886e38 && {jet_prefix}value <= 3.4028234663852886e38 ? {} : {}; }})()",
+            js_option_result(&mangle_generated("value")),
             js_option_error(&format!("value doesn't fit in {dst_spelling}"))
         )),
         _ => Err(()),
@@ -5282,16 +5284,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 ..
             } => {
                 let value = tir_js_expr(recv, funcs, file_prefix)?;
-                format!(
-                    "(() => {{ const __jet_value = Number({value}); return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? {{ tag: \"Some\", values: [BigInt(Math.trunc(__jet_value))] }} : {{ tag: \"None\", values: [] }}; }})()"
+                jet_format!(
+                    "(() => {{ const {jet_prefix}value = Number({value}); return Number.isFinite({jet_prefix}value) && {jet_prefix}value >= {lower} && {jet_prefix}value < {upper_exclusive} ? {{ tag: \"Some\", values: [BigInt(Math.trunc({jet_prefix}value))] }} : {{ tag: \"None\", values: [] }}; }})()"
                 )
             }
             _ => return Err(()),
         },
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => {
             // Tagged Option/Result unwrap; also accepts legacy nullish from older emit.
-            format!(
-                "(((__jet_v) => (__jet_v != null && (__jet_v.tag === \"Some\" || __jet_v.tag === \"Ok\") ? __jet_v.values[0] : {}))({}))",
+            jet_format!(
+                "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : {}))({}))",
                 tir_js_expr(fallback, funcs, file_prefix)?,
                 tir_js_expr(value, funcs, file_prefix)?
             )
@@ -5765,14 +5767,11 @@ mod source_map_tests {
             name: "main.jet".to_string(),
             content: "first\nsecond\n".to_string(),
         }];
-        let raw = concat!(
-            "const label = \"😀\";\n",
-            "  //# __jet_source_map file 0\n",
-            "  //# __jet_source_map line 2\n",
-            "  run();\n",
+        let raw = format!(
+            "const label = \"😀\";\n  {SOURCE_MAP_MARKER} file 0\n  {SOURCE_MAP_MARKER} line 2\n  run();\n"
         );
 
-        let (js, map) = finish_js_source_map(raw, &sources, "//# __jet_source_map");
+        let (js, map) = finish_js_source_map(raw, &sources, SOURCE_MAP_MARKER);
 
         assert_eq!(js, "const label = \"😀\";\n  run();\n");
         assert!(map.contains("\"mappings\":\";EACA\""), "{map}");
@@ -5785,16 +5784,16 @@ mod source_map_tests {
     #[test]
     fn source_marker_selection_is_bounded_against_underscore_runs() {
         let underscores = "_".repeat(65_536);
-        let hostile = format!("print(\"//# __jet_source_map{underscores}\")\n");
+        let hostile = format!("print(\"{SOURCE_MAP_MARKER}{underscores}\")\n");
         let marker = source_marker_for_texts(std::iter::once(hostile.as_str()));
-        assert_eq!(marker.len(), "//# __jet_source_map".len() + 65_537);
+        assert_eq!(marker.len(), SOURCE_MAP_MARKER.len() + 65_537);
         assert!(
             !hostile.contains(&marker),
             "selected marker must not occur in hostile source"
         );
         assert_eq!(
             source_marker_for_texts(std::iter::once("fn run() {}")),
-            "//# __jet_source_map"
+            SOURCE_MAP_MARKER
         );
     }
 }

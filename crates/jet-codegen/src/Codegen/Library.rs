@@ -235,8 +235,8 @@ fn render_swift(exports: &[LibraryExport]) -> String {
         let args = (0..export.params)
             .map(|index| format!("p{index}"))
             .collect::<Vec<_>>();
-        out.push_str(&format!(
-            "@_silgen_name(\"{symbol}\") private func __jet_{name}({params}) -> {ret}\npublic func {name}({params}) -> {ret} {{ __jet_{name}({args}) }}\n\n",
+        out.push_str(&jet_name_format!(
+            "@_silgen_name(\"{symbol}\") private func {name_prefix}{name}({params}) -> {ret}\npublic func {name}({params}) -> {ret} {{ {name_prefix}{name}({args}) }}\n\n",
             symbol = c_symbol(&export.name),
             name = export.name,
             params = params.join(", "),
