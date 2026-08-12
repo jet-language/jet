@@ -4256,8 +4256,8 @@ impl<'a> Checker<'a> {
                 // wrapper, not as a captured Rc local.
                 continue;
             };
-            if matches!(info.ty, Type::Fn { .. }) {
-                if !info.interrupt_sendable {
+            if matches!(&info.ty, Type::Fn { .. }) {
+                if info.param_conv.is_some() || !info.interrupt_sendable {
                     return false;
                 }
                 continue;
@@ -4326,10 +4326,47 @@ impl<'a> Checker<'a> {
                 _ => false,
             }
         }
+        fn needs_fn_mut(expr: &Expr) -> bool {
+            match expr {
+                Expr::Lambda(lam) => lam.meta.needs_fn_mut,
+                Expr::Paren(inner, _) => needs_fn_mut(inner),
+                _ => false,
+            }
+        }
+        fn lambda_span(expr: &Expr) -> Option<Span> {
+            match expr {
+                Expr::Lambda(lam) => Some(lam.span),
+                Expr::Paren(inner, _) => lambda_span(inner),
+                _ => None,
+            }
+        }
         let Some(name) = ident(expr) else {
             if lambda(expr) {
                 // Lambda capture checking runs while the interrupt callback
                 // depth is active. It owns the detailed Send/'static proof.
+                // A mutable capture is the one callback-specific fact that
+                // capture sendability alone cannot express: it lowers to
+                // `FnMut`, while the retained ABI is `Fn() + Send + Sync`.
+                // Reject it here, before the Arc coercion reaches rustc.
+                if needs_fn_mut(expr)
+                    && !lambda_span(expr).is_some_and(|span| {
+                        self.diags
+                            .iter()
+                            .any(|diag| diag.code == "E1102" && diag.span == Some(span))
+                    })
+                {
+                    self.report_unsendable(
+                        "this callback",
+                        ty,
+                        SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ClosureCaptures,
+                        },
+                        SendCrossing::InterruptCallback,
+                        expr.span(),
+                    );
+                }
                 return;
             }
             self.report_unsendable(
@@ -4347,7 +4384,7 @@ impl<'a> Checker<'a> {
         };
         if self
             .lookup(name)
-            .map(|info| info.interrupt_sendable)
+            .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
             .unwrap_or_else(|| {
                 self.funcs.contains_key(name)
                     || self.unqualified.contains_key(name)

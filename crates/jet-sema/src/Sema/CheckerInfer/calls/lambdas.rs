@@ -162,7 +162,9 @@ use std::collections::HashSet;
                         let problem = if matches!(&cap_ty, Type::Fn { .. }) {
                             let callback_safe = self
                                 .lookup(name)
-                                .map(|info| info.interrupt_sendable)
+                                .map(|info| {
+                                    info.param_conv.is_none() && info.interrupt_sendable
+                                })
                                 .unwrap_or_else(|| {
                                     self.funcs.contains_key(name)
                                         || self.unqualified.contains_key(name)
@@ -605,15 +607,13 @@ use std::collections::HashSet;
             // The builtin table is the authority for mutating receivers. Fold
             // its inferred roots into the same metadata explicit assignments
             // use, so `xs.push(x)` is FnMut just like `xs += [x]`.
-            if !escapes {
-                mut_caps.extend(inferred_mut_caps);
-                lam.meta.needs_fn_mut = !mut_caps.is_empty();
-                lam.meta.mut_captures = mut_caps
-                    .iter()
-                    .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
-                    .cloned()
-                    .collect();
-            }
+            mut_caps.extend(inferred_mut_caps);
+            lam.meta.needs_fn_mut = !mut_caps.is_empty();
+            lam.meta.mut_captures = mut_caps
+                .iter()
+                .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
+                .cloned()
+                .collect();
             self.in_lambda_body = saved_in_lambda_body;
             self.ret = saved_ret;
             self.expected_type = saved_expected;

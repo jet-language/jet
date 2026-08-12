@@ -370,14 +370,6 @@ fn keep_left<F: Clone>(left: Option<&F>, right: Option<&F>) -> Option<F> {
     left.or(right).cloned()
 }
 
-/// A refinement holds after the merge only when every path proved it.
-fn keep_if_both<F: Clone>(left: Option<&F>, right: Option<&F>) -> Option<F> {
-    match (left, right) {
-        (Some(left), Some(_)) => Some(left.clone()),
-        _ => None,
-    }
-}
-
 /// Everything a declaration says about one name.
 pub(crate) enum Binding {}
 
@@ -417,7 +409,18 @@ impl Plane for Narrow {
     type Fact = super::LocalInfo;
 
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
-        keep_if_both(left, right)
+        match (left, right) {
+            (Some(left), Some(right)) => {
+                let mut joined = left.clone();
+                // D-OSINTERRUPT1: a narrowed callback alias is still a
+                // path-sensitive proof. A branch join may retain it only when
+                // both reaching refinements carry the canonical Send form.
+                joined.interrupt_sendable =
+                    left.interrupt_sendable && right.interrupt_sendable;
+                Some(joined)
+            }
+            _ => None,
+        }
     }
 }
 

@@ -794,7 +794,7 @@ impl<'a> Checker<'a> {
             } else {
                 if let Some(name) = interrupt_callback_name(&b.init) {
                     self.lookup(name)
-                        .map(|info| info.interrupt_sendable)
+                        .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
                         .unwrap_or_else(|| {
                             self.funcs.contains_key(name)
                                 || self.unqualified.contains_key(name)

@@ -112,16 +112,7 @@ mod jit_os_interrupt {
 
     #[cfg(unix)]
     fn install_platform_handler() -> Result<(), String> {
-        extern "C" {
-            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-        }
-        const SIGINT: i32 = 2;
-        let previous = unsafe { signal(SIGINT, unix_mark) };
-        if previous == usize::MAX {
-            Err("could not install the SIGINT handler".to_string())
-        } else {
-            Ok(())
-        }
+        interrupt_queue::jet_interrupt_install_unix_handler(unix_mark)
     }
 
     #[cfg(windows)]
@@ -136,22 +127,12 @@ mod jit_os_interrupt {
 
     #[cfg(windows)]
     fn install_platform_handler() -> Result<(), String> {
-        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
-        extern "system" {
-            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
-        }
-        unsafe { SetConsoleCtrlHandler(None, 0) };
-        let installed = unsafe { SetConsoleCtrlHandler(Some(windows_mark), 1) };
-        if installed == 0 {
-            Err("could not install the Windows console Ctrl-C handler".to_string())
-        } else {
-            Ok(())
-        }
+        interrupt_queue::jet_interrupt_install_windows_handler(Some(windows_mark))
     }
 
     #[cfg(not(any(unix, windows)))]
     fn install_platform_handler() -> Result<(), String> {
-        Err("interrupt handling is unavailable on this target".to_string())
+        Err(interrupt_queue::jet_interrupt_unavailable_error().to_string())
     }
 
     fn dispatcher() -> Result<&'static mpsc::Sender<DispatchCommand>, String> {
@@ -163,7 +144,7 @@ mod jit_os_interrupt {
                 .spawn(move || {
                     let mut handlers: Vec<(usize, i64)> = Vec::new();
                     loop {
-                        match rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                        match rx.recv_timeout(interrupt_queue::jet_interrupt_poll_interval()) {
                             Ok(DispatchCommand::Register(command)) => {
                                 handlers.push((command.callback, command.env));
                                 let _ = command.ready.send(());
@@ -189,7 +170,7 @@ mod jit_os_interrupt {
                         });
                     }
                 })
-                .map_err(|e| format!("could not start interrupt dispatcher: {e}"))?;
+                .map_err(interrupt_queue::jet_interrupt_dispatcher_start_error)?;
             Ok(tx)
         }) {
             Ok(tx) => Ok(tx),
@@ -206,7 +187,9 @@ mod jit_os_interrupt {
                 )
             });
             if callback == 0 {
-                return Err("invalid interrupt callback record".to_string());
+                return Err(
+                    interrupt_queue::jet_interrupt_invalid_callback_record_error().to_string(),
+                );
             }
             let tx = dispatcher()?;
             let (ready_tx, ready_rx) = mpsc::sync_channel(0);
@@ -215,14 +198,18 @@ mod jit_os_interrupt {
                 env: environment,
                 ready: ready_tx,
             }))
-            .map_err(|_| "interrupt dispatcher stopped".to_string())?;
+            .map_err(|_| {
+                interrupt_queue::jet_interrupt_dispatcher_stopped_error().to_string()
+            })?;
             ready_rx
                 .recv()
-                .map_err(|_| "interrupt dispatcher stopped".to_string())
+                .map_err(|_| {
+                    interrupt_queue::jet_interrupt_dispatcher_stopped_error().to_string()
+                })
         })();
         if let Err(message) = result {
             Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(&format!("core.os.on_interrupt: {message}"));
+                rt.set_trap(&interrupt_queue::jet_interrupt_core_error(&message));
             });
         }
     }

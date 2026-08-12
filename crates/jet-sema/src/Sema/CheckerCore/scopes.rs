@@ -157,10 +157,10 @@ impl<'a> Checker<'a> {
         /// reassignment must not leave a stale `Send` proof behind.
         pub(crate) fn set_interrupt_sendable(&mut self, name: &str, sendable: bool) {
             if let Some(info) = self.flow.bindings.get_mut(name) {
-                info.interrupt_sendable = sendable;
+                info.interrupt_sendable = sendable && info.param_conv.is_none();
             }
             if let Some(info) = self.flow.narrow.get_mut(name) {
-                info.interrupt_sendable = sendable;
+                info.interrupt_sendable = sendable && info.param_conv.is_none();
             }
         }
     

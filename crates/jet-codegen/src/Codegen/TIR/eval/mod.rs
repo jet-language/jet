@@ -38,6 +38,7 @@ mod disjoint_semantics {
     }
 }
 
+#[allow(dead_code)]
 mod interrupt_queue {
     include!("../../../Prelude/CoreLib/Top/Interrupt.rs");
 }
@@ -100,16 +101,7 @@ extern "C" fn interpreter_unix_mark(_: i32) {
 fn install_interpreter_interrupt_handler() -> Result<(), String> {
     #[cfg(unix)]
     {
-        extern "C" {
-            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-        }
-        const SIGINT: i32 = 2;
-        let previous = unsafe { signal(SIGINT, interpreter_unix_mark) };
-        return if previous == usize::MAX {
-            Err("could not install the SIGINT handler".to_string())
-        } else {
-            Ok(())
-        };
+        return interrupt_queue::jet_interrupt_install_unix_handler(interpreter_unix_mark);
     }
     #[cfg(windows)]
     {
@@ -121,20 +113,11 @@ fn install_interpreter_interrupt_handler() -> Result<(), String> {
                 0
             }
         }
-        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
-        extern "system" {
-            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
-        }
-        unsafe { SetConsoleCtrlHandler(None, 0) };
-        return if unsafe { SetConsoleCtrlHandler(Some(mark), 1) } == 0 {
-            Err("could not install the Windows console Ctrl-C handler".to_string())
-        } else {
-            Ok(())
-        };
+        return interrupt_queue::jet_interrupt_install_windows_handler(Some(mark));
     }
     #[cfg(not(any(unix, windows)))]
     {
-        Err("interrupt handling is unavailable on this target".to_string())
+        Err(interrupt_queue::jet_interrupt_unavailable_error().to_string())
     }
 }
 
@@ -2056,11 +2039,16 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         ensure_interpreter_interrupt_handler().map_err(|message| {
-            unsupported(&format!("core.os.on_interrupt: {message}"), self.span())
+            unsupported(&interrupt_queue::jet_interrupt_core_error(&message), self.span())
         })?;
         let value = self.eval_expr(callback, scope)?;
         let index = Self::callable_index(&value)
-            .ok_or_else(|| unsupported("core.os.on_interrupt callback", self.span()))?;
+            .ok_or_else(|| {
+                unsupported(
+                    interrupt_queue::jet_interrupt_invalid_callback_value_error(),
+                    self.span(),
+                )
+            })?;
         self.runtime
             .lock()
             .expect("evaluator runtime poisoned")
