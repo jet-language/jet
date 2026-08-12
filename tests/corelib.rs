@@ -3488,10 +3488,10 @@ fn comptime_find_glob_records_sorted_lock_inputs() {
     fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
     fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
     let src = r#"
-$paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
+@paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
 
 fn run() {
-    print($paths.join("|"))
+    print(@paths.join("|"))
 }
 "#;
     let path = dir.join("main.jet");
@@ -8839,10 +8839,10 @@ fn summarize() => String {
     return "unreachable"
 }
 
-$expected :: summarize()
+@expected :: summarize()
 
 fn run() {
-    print(expected)
+    print(@expected)
     print(summarize())
 }
 "#;
@@ -8889,17 +8889,17 @@ fn show(result: DataTree ? XMLError) => String {
     return "unreachable"
 }
 
-$numeric :: show(xml.parse("<r>&#0;</r>"))
-$attribute :: show(xml.parse("<r a='&#0;'/>"))
-$namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+@numeric :: show(xml.parse("<r>&#0;</r>"))
+@attribute :: show(xml.parse("<r a='&#0;'/>"))
+@namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
-    print("{$numeric}|{runtime_numeric}")
-    print("{$attribute}|{runtime_attribute}")
-    print("{$namespace}|{runtime_namespace}")
+    print("{@numeric}|{runtime_numeric}")
+    print("{@attribute}|{runtime_attribute}")
+    print("{@namespace}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
@@ -8952,14 +8952,14 @@ fn summarize(source: String) => String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-$cr :: String.from_bytes([13]) ?? panic("CR")
-$close :: "/>"
-$source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{$cr}\nD{$cr}E' b='&#xD;&#xA;&#x9;'{$close}"
-$normalized :: summarize($source)
+@cr :: String.from_bytes([13]) ?? panic("CR")
+@close :: "/>"
+@source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{@cr}\nD{@cr}E' b='&#xD;&#xA;&#x9;'{@close}"
+@normalized :: summarize(@source)
 
 fn run() {
-    runtime := summarize($source)
-    print("{$normalized}|{runtime}")
+    runtime := summarize(@source)
+    print("{@normalized}|{runtime}")
 }
 "#;
     let expected = "true|true|3|true|true|true|3|true\n";
@@ -9032,24 +9032,24 @@ fn show32(text: String) => String {
     return "unreachable"
 }
 
-$standard_ws :: show64("Z g = =\n")
-$standard_unpadded :: show64("Zg")
-$standard_interior :: show64("Zg=A")
-$standard_excess :: show64("Zg====")
-$standard_bits :: show64("Zh==")
-$standard_padding :: show64("=AAA")
-$standard_alphabet :: show64("Zg-=")
-$standard_size :: show64("A")
-$url_outer_ws :: show64url(" \tZg==\n")
-$url_interior :: show64url("Zg=A")
-$url_standard_alphabet :: show64url("+w")
-$url_bits :: show64url("Zh")
-$url_padding :: show64url("=AAA")
-$url_size :: show64url("A")
-$base32_loose :: show32("m=y======\n")
-$base32_bits :: show32("MZ======")
-$base32_short :: show32("A")
-$base32_alphabet :: show32("M0======")
+@standard_ws :: show64("Z g = =\n")
+@standard_unpadded :: show64("Zg")
+@standard_interior :: show64("Zg=A")
+@standard_excess :: show64("Zg====")
+@standard_bits :: show64("Zh==")
+@standard_padding :: show64("=AAA")
+@standard_alphabet :: show64("Zg-=")
+@standard_size :: show64("A")
+@url_outer_ws :: show64url(" \tZg==\n")
+@url_interior :: show64url("Zg=A")
+@url_standard_alphabet :: show64url("+w")
+@url_bits :: show64url("Zh")
+@url_padding :: show64url("=AAA")
+@url_size :: show64url("A")
+@base32_loose :: show32("m=y======\n")
+@base32_bits :: show32("MZ======")
+@base32_short :: show32("A")
+@base32_alphabet :: show32("M0======")
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")
@@ -9070,24 +9070,24 @@ fn run() {
     r_base32_bits := show32("MZ======")
     r_base32_short := show32("A")
     r_base32_alphabet := show32("M0======")
-    print("{$standard_ws}|{r_standard_ws}")
-    print("{$standard_unpadded}|{r_standard_unpadded}")
-    print("{$standard_interior}|{r_standard_interior}")
-    print("{$standard_excess}|{r_standard_excess}")
-    print("{$standard_bits}|{r_standard_bits}")
-    print("{$standard_padding}|{r_standard_padding}")
-    print("{$standard_alphabet}|{r_standard_alphabet}")
-    print("{$standard_size}|{r_standard_size}")
-    print("{$url_outer_ws}|{r_url_outer_ws}")
-    print("{$url_interior}|{r_url_interior}")
-    print("{$url_standard_alphabet}|{r_url_standard_alphabet}")
-    print("{$url_bits}|{r_url_bits}")
-    print("{$url_padding}|{r_url_padding}")
-    print("{$url_size}|{r_url_size}")
-    print("{$base32_loose}|{r_base32_loose}")
-    print("{$base32_bits}|{r_base32_bits}")
-    print("{$base32_short}|{r_base32_short}")
-    print("{$base32_alphabet}|{r_base32_alphabet}")
+    print("{@standard_ws}|{r_standard_ws}")
+    print("{@standard_unpadded}|{r_standard_unpadded}")
+    print("{@standard_interior}|{r_standard_interior}")
+    print("{@standard_excess}|{r_standard_excess}")
+    print("{@standard_bits}|{r_standard_bits}")
+    print("{@standard_padding}|{r_standard_padding}")
+    print("{@standard_alphabet}|{r_standard_alphabet}")
+    print("{@standard_size}|{r_standard_size}")
+    print("{@url_outer_ws}|{r_url_outer_ws}")
+    print("{@url_interior}|{r_url_interior}")
+    print("{@url_standard_alphabet}|{r_url_standard_alphabet}")
+    print("{@url_bits}|{r_url_bits}")
+    print("{@url_padding}|{r_url_padding}")
+    print("{@url_size}|{r_url_size}")
+    print("{@base32_loose}|{r_base32_loose}")
+    print("{@base32_bits}|{r_base32_bits}")
+    print("{@base32_short}|{r_base32_short}")
+    print("{@base32_alphabet}|{r_base32_alphabet}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);
