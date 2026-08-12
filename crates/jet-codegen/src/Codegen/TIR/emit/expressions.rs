@@ -1097,7 +1097,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     _ => unreachable!("operator_line is only set for arithmetic hooks"),
                 };
                 return jet_name_format!(
-                    "{}{name_prefix}{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
+                    "{}::{name_prefix}{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
                     crate::Codegen::mangle(trait_name),
                     emit_tir_expr(recv, cx),
                     cx.file,
