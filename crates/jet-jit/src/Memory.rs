@@ -18,15 +18,9 @@ thread_local! {
 
 struct SharedTransaction {
     transaction: shared_protocol::JetSharedTransaction,
-    entries: Vec<Arc<Mutex<SharedTransactionEntry>>>,
 }
 
-struct SharedTransactionEntry {
-    handle: i64,
-    shared: Arc<SharedState>,
-    staged: i64,
-    record: bool,
-}
+type SharedTransactionCallback = unsafe extern "C" fn(i64, i64) -> i64;
 
 #[derive(Default)]
 pub(crate) struct AllocatorState {
@@ -907,89 +901,52 @@ extern "C" fn jet_jit_shared_txn_begin() {
     SHARED_TRANSACTIONS.with(|transactions| {
         transactions.borrow_mut().push(SharedTransaction {
             transaction: shared_protocol::jet_shared_transaction_begin(),
-            entries: Vec::new(),
         });
     });
 }
 
-extern "C" fn jet_jit_shared_txn_get(handle: i64) -> i64 {
-    let existing = SHARED_TRANSACTIONS.with(|transactions| {
-        transactions.borrow().last().and_then(|transaction| {
-            transaction.entries.iter().find_map(|entry| {
-                let entry = entry.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                (entry.handle == handle).then_some(entry.staged)
-            })
-        })
-    });
-    if let Some(staged) = existing {
-        return staged;
-    }
-    let Some((shared, original, staged, record)) = Concurrency::with_runtime_mut(|rt| {
-        let shared = shared(rt, handle)?;
-        let original = shared.value.load(Ordering::Acquire);
-        let staged = rt.heap.alloc_record(0);
-        let record = rt.heap.record_assign_from(staged, original).is_some();
-        Some((shared, original, if record { staged } else { original }, record))
-    }) else {
+extern "C" fn jet_jit_shared_txn_record(
+    handle: i64,
+    callback_ptr: i64,
+    environment: i64,
+    record: i64,
+) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
     };
-    let entry = Arc::new(Mutex::new(SharedTransactionEntry {
-        handle,
-        shared: Arc::clone(&shared),
-        staged,
-        record,
-    }));
-    let commit_entry = Arc::clone(&entry);
+    if callback_ptr == 0 {
+        return 0;
+    }
+    // The callback address is produced by Cranelift `func_addr` for the fixed
+    // `(environment, current) -> updated` ABI above.
+    let callback: SharedTransactionCallback = unsafe { std::mem::transmute(callback_ptr as usize) };
     let protocol = Arc::clone(&shared.protocol);
     let delta = Box::new(move || {
-        let entry = commit_entry
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let current = shared.value.load(Ordering::Acquire);
+        let updated = unsafe { callback(environment, current) };
         Concurrency::with_runtime_mut(|rt| {
-            if entry.record {
-                let current = entry.shared.value.load(Ordering::Acquire);
+            if record != 0 {
                 if rt
                     .heap
-                    .record_assign_from(current, entry.staged)
+                    .record_assign_from(current, updated)
                     .is_none()
                 {
                     rt.set_trap(shared_protocol::JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED);
                 }
             } else {
-                entry.shared.value.store(entry.staged, Ordering::Release);
+                shared.value.store(updated, Ordering::Release);
             }
         });
     });
-    SHARED_TRANSACTIONS.with(|transactions| {
+    let recorded = SHARED_TRANSACTIONS.with(|transactions| {
         let mut transactions = transactions.borrow_mut();
         let Some(transaction) = transactions.last_mut() else {
-            return 0;
+            return false;
         };
         transaction.transaction.record_edit(protocol, delta);
-        transaction.entries.push(entry);
-        staged
-    })
-}
-
-extern "C" fn jet_jit_shared_txn_set(handle: i64, value: i64) {
-    let entry = SHARED_TRANSACTIONS.with(|transactions| {
-        transactions.borrow().last().and_then(|transaction| {
-            transaction.entries.iter().find_map(|entry| {
-                let matches = entry
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .handle
-                    == handle;
-                matches.then(|| Arc::clone(entry))
-            })
-        })
+        true
     });
-    if let Some(entry) = entry {
-        entry
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .staged = value;
-    }
+    i64::from(recorded)
 }
 
 extern "C" fn jet_jit_shared_txn_commit() {
@@ -1162,8 +1119,7 @@ host_fns! {
     shared_guard_end: "jet_jit_shared_guard_end" => jet_jit_shared_guard_end: unary_void;
     shared_guard_wait_once: "jet_jit_shared_guard_wait_once" => jet_jit_shared_guard_wait_once: binary;
     shared_txn_begin: "jet_jit_shared_txn_begin" => jet_jit_shared_txn_begin: Signature::new(cc);
-    shared_txn_get: "jet_jit_shared_txn_get" => jet_jit_shared_txn_get: unary;
-    shared_txn_set: "jet_jit_shared_txn_set" => jet_jit_shared_txn_set: binary_void;
+    shared_txn_record: "jet_jit_shared_txn_record" => jet_jit_shared_txn_record: quaternary;
     shared_txn_commit: "jet_jit_shared_txn_commit" => jet_jit_shared_txn_commit: Signature::new(cc);
     shared_txn_abort: "jet_jit_shared_txn_abort" => jet_jit_shared_txn_abort: Signature::new(cc);
     expiring_new: "jet_jit_expiring_new" => jet_jit_expiring_new: quaternary;

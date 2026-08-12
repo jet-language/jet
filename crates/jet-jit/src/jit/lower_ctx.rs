@@ -7271,27 +7271,95 @@ impl LowerCtx<'_, '_> {
             {
                 let handle = self.lower_expr(recv)?;
                 let transactional = method == "edit_txn" && self.in_shared_transaction;
-                let begin_id = if transactional {
-                    self.host.memory.shared_txn_get
-                } else {
-                    self.host.memory.shared_begin
-                };
-                let payload = if transactional {
-                    self.call_host(begin_id, &[handle])
-                } else {
-                    let editable = self
-                        .b
-                        .ins()
-                        .iconst(types::I64, i64::from(method == "edit"));
-                    self.call_host(begin_id, &[handle, editable])
-                };
                 let TExprKind::Lambda(lambda) = &args[0].kind else {
                     return Err("jit Shared callback must be a lambda".to_string());
                 };
+                if transactional {
+                    // The Prelude owns participant identity, lock ordering, and
+                    // commit. Retain only a typed JIT callback here; it runs at
+                    // commit against the fresh value supplied by the Prelude.
+                    let sequence = self.runtime.next_shared_txn_thunk;
+                    self.runtime.next_shared_txn_thunk = sequence.saturating_add(1);
+                    let callback_id =
+                        super::functions_compile::lower_shared_transaction_lambda(
+                            self.module,
+                            self.host,
+                            self.meta,
+                            lambda,
+                            self.func_ids,
+                            self.spawn_func_ids,
+                            self.spawn_lambdas,
+                            self.spawn_site,
+                            self.runtime,
+                            sequence,
+                        )?;
+                    let callback_ref =
+                        self.module.declare_func_in_func(callback_id, self.b.func);
+                    let callback = self.b.ins().func_addr(types::I64, callback_ref);
+                    let environment = if lambda.captures.is_empty() {
+                        self.b.ins().iconst(types::I64, 0)
+                    } else {
+                        let environment = self.call_host(self.host.coll.list_new, &[]);
+                        let push = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                        for (outer, _place, ty) in &lambda.captures {
+                            let key = TIR::local_place(outer);
+                            let var = self.vars.get(&key).copied().ok_or_else(|| {
+                                format!("jit shared transaction capture unknown `{outer}`")
+                            })?;
+                            let value = self.b.use_var(var);
+                            let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                                Some(clif) if clif == types::F64 => self.b.ins().bitcast(
+                                    types::I64,
+                                    Self::scalar_bitcast_memflags(),
+                                    value,
+                                ),
+                                Some(clif) if clif == types::I8 || clif == types::I32 => {
+                                    self.b.ins().uextend(types::I64, value)
+                                }
+                                Some(clif) if clif == types::I64 => value,
+                                Some(clif) => {
+                                    return Err(format!(
+                                        "jit shared transaction capture unsupported: {ty:?} ({clif:?})"
+                                    ));
+                                }
+                                None => {
+                                    return Err(format!(
+                                        "jit shared transaction capture unsupported: {ty:?}"
+                                    ));
+                                }
+                            };
+                            self.b.ins().call(push, &[environment, raw]);
+                        }
+                        environment
+                    };
+                    let inner = match &recv.ty {
+                        Type::Shared(inner) => inner.as_ref(),
+                        _ => unreachable!("Shared transaction receiver type disappeared"),
+                    };
+                    let is_record = record_type_key(inner)
+                        .and_then(|key| self.meta.struct_layout(&key))
+                        .is_some();
+                    let record = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(is_record));
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.memory.shared_txn_record, self.b.func);
+                    self.b
+                        .ins()
+                        .call(host, &[handle, callback, environment, record]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                let editable = self
+                    .b
+                    .ins()
+                    .iconst(types::I64, i64::from(method == "edit"));
+                let payload = self.call_host(self.host.memory.shared_begin, &[handle, editable]);
                 let (result, updated) = self.lower_inline_lambda(lambda, payload)?;
-                let host_id = if transactional {
-                    self.host.memory.shared_txn_set
-                } else if method == "read" {
+                let host_id = if method == "read" {
                     self.host.memory.shared_end_read
                 } else {
                     self.host.memory.shared_end_write

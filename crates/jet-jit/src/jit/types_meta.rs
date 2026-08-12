@@ -1470,6 +1470,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 
 fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [Type])> {
     let layout: &(Vec<String>, Vec<Type>) = match type_name {
+        "FieldError" => &*FIELD_ERROR_LAYOUT,
         "Envelope" => &*EMAIL_ENVELOPE_LAYOUT,
         "RecipientReport" => &*EMAIL_RECIPIENT_REPORT_LAYOUT,
         "SendReport" => &*EMAIL_SEND_REPORT_LAYOUT,
@@ -1768,6 +1769,13 @@ fn email_layout(fields: &[(&str, Type)]) -> (Vec<String>, Vec<Type>) {
         .map(|(name, ty)| ((*name).to_string(), ty.clone()))
         .unzip()
 }
+
+static FIELD_ERROR_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    (
+        vec!["path".to_string(), "reason".to_string()],
+        vec![Type::String, Type::String],
+    )
+});
 
 static EMAIL_ENVELOPE_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
     email_layout(&[

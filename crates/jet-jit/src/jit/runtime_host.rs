@@ -118,6 +118,8 @@ pub(crate) struct JitRuntime {
     /// These functions are only ABI thunks; the operation they serve lives in
     /// the shared Option Prelude.
     pub(crate) next_option_lift2_thunk: u64,
+    /// Unique names for deferred Shared transaction lambda callbacks.
+    pub(crate) next_shared_txn_thunk: u64,
     /// Runtime function values. Negative words are explicit callable handles;
     /// raw Cranelift addresses are normalized at the boundary before a call.
     pub(crate) jit_callables: Vec<JitCallableSlot>,

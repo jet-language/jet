@@ -6,6 +6,7 @@
 //! Experts use `--trace-tiers`.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
@@ -121,13 +122,14 @@ fn function_at(items: &[Item], definition: crate::Diagnostics::Span) -> Option<&
 /// skips the E2201 boundary scan and attempts execution with no guarantees.
 pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
+    let started = Instant::now();
     if !try_anyway {
         if let Some(diagnostic) = jet_driver::InterpreterBoundary::dev_boundary_scan(bundle) {
             return RunOutcome::Problems(vec![diagnostic]);
         }
     }
     let mut sink = crate::Comptime::DevSink::new();
-    match crate::Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
+    let outcome = match crate::Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
         Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
             let rendered = error
                 .to_jet_err()
@@ -157,7 +159,16 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         // not comptime build failures — match AOT exit 70 + `panic:` wording.
         Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
+    };
+    if jet_jit::trace_tiers_enabled() && matches!(&outcome, RunOutcome::Ran { .. }) {
+        jet_jit::record_trace(vec![jet_jit::TierRow {
+            function: "run".to_string(),
+            tier: jet_jit::Tier::Interp,
+            reason: String::new(),
+            millis: started.elapsed().as_secs_f64() * 1000.0,
+        }]);
     }
+    outcome
 }
 
 fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) -> RunOutcome {
