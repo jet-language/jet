@@ -9659,8 +9659,8 @@ fn json_decode_lenient_surfaces_coercions() {
 use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
-    if data == Object(m) {
-        if m["port"] == Int(n) {
+    if data == .Object(m) {
+        if m["port"] == .Int(n) {
             print(n + 1)
         }
     }
@@ -9689,8 +9689,8 @@ fn run() {
 use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
-    if data == Object(m) {
-        if m["port"] == Int(n) {
+    if data == .Object(m) {
+        if m["port"] == .Int(n) {
             print(n)
         }
     }
@@ -9714,11 +9714,11 @@ fn run() {
 use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
-    if data == Object(m) {
-        if m["port"] == Int(n) {
+    if data == .Object(m) {
+        if m["port"] == .Int(n) {
             print(n)
         }
-        if m["enabled"] == Bool(b) {
+        if m["enabled"] == .Bool(b) {
             print(b)
         }
     }
@@ -11170,14 +11170,14 @@ use core.encoding.yaml as yaml
 fn run() {
     raw :: "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
     d :: yaml.parse(raw) ?? panic("bad yaml")
-    if d == Object(top) {
-        if top["flowlist"] == Array(xs) {
+    if d == .Object(top) {
+        if top["flowlist"] == .Array(xs) {
             print(xs.len())
         }
-        if top["use"] == Object(u) {
+        if top["use"] == .Object(u) {
             print(u.len())
         }
-        if top["note"] == Text(s) {
+        if top["note"] == .Text(s) {
             print(s.contains("one"))
         }
     }

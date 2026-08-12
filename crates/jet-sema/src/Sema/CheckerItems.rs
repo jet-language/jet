@@ -29,13 +29,24 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
-        if let Some(sig) = self.registry.method(type_name, method) {
-            return Some((self.module_idx, sig.clone()));
+        let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+        if import_ns.is_none() {
+            if let Some(sig) = self.registry.method(lookup_name, method) {
+                return Some((self.module_idx, sig.clone()));
+            }
         }
         let mods = self.modules?;
+        if let Some(alias) = import_ns {
+            let idx = *self.imports.get(alias)?;
+            return self
+                .type_is_pub_in(idx, lookup_name)
+                .then(|| mods[idx].registry.method(lookup_name, method).cloned())
+                .flatten()
+                .map(|sig| (idx, sig));
+        }
         self.imports.values().find_map(|&idx| {
-            self.type_is_pub_in(idx, type_name)
-                .then(|| mods[idx].registry.method(type_name, method).cloned())
+            self.type_is_pub_in(idx, lookup_name)
+                .then(|| mods[idx].registry.method(lookup_name, method).cloned())
                 .flatten()
                 .map(|sig| (idx, sig))
         })
@@ -43,15 +54,28 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn instantiate_method_sig(
         &self,
+        owner_mod: usize,
         type_name: &str,
         sig: &mut MethodSig,
         args: &[Type],
     ) {
-        let declared = self
-            .trait_reg
-            .struct_params
-            .get(type_name)
-            .or_else(|| self.trait_reg.enum_params.get(type_name));
+        let (_, lookup_name) = self.struct_type_name_parts(type_name);
+        let declared = if owner_mod == self.module_idx {
+            self.trait_reg
+                .struct_params
+                .get(lookup_name)
+                .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+        } else {
+            self.modules.and_then(|modules| {
+                modules.get(owner_mod).and_then(|module| {
+                    module
+                        .trait_reg
+                        .struct_params
+                        .get(lookup_name)
+                        .or_else(|| module.trait_reg.enum_params.get(lookup_name))
+                })
+            })
+        };
         let Some(params) = declared else {
             return;
         };
@@ -205,7 +229,8 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
-        let method_name = format!("{type_name}.{method}");
+        let (_, method_type_name) = self.struct_type_name_parts(type_name);
+        let method_name = format!("{method_type_name}.{method}");
         if owner_mod != self.module_idx
             && !self
                 .name_ledger
@@ -220,8 +245,8 @@ impl<'a> Checker<'a> {
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
-                .get(type_name)
-                .or_else(|| self.trait_reg.enum_params.get(type_name))
+                .get(method_type_name)
+                .or_else(|| self.trait_reg.enum_params.get(method_type_name))
                 .cloned()
         } else {
             self.modules.and_then(|modules| {
@@ -229,8 +254,8 @@ impl<'a> Checker<'a> {
                     module
                         .trait_reg
                         .struct_params
-                        .get(type_name)
-                        .or_else(|| module.trait_reg.enum_params.get(type_name))
+                        .get(method_type_name)
+                        .or_else(|| module.trait_reg.enum_params.get(method_type_name))
                         .cloned()
                 })
             })

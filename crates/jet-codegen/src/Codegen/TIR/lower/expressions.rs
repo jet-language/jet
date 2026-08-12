@@ -2681,8 +2681,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
             }
-            // Sema's IndexKind::Unknown must not abort the interpreter path;
-            // treat it as a list index and let runtime miss if wrong.
+            // Sema's IndexKind::Unknown violates the handoff invariant. Catch it
+            // in debug builds; release builds retain the list fallback so an
+            // interpreter path remains total if an unresolved kind leaks through.
+            debug_assert!(
+                !matches!(kind, IndexKind::Unknown),
+                "sema-to-TIR handoff violated"
+            );
             let kind = if matches!(kind, IndexKind::Unknown) {
                 &IndexKind::List
             } else {
@@ -3402,6 +3407,7 @@ impl OrderedArg for TExpr {
                     | TExprKind::Clone(_)
                     | TExprKind::ExplicitCopy(_)
                     | TExprKind::StrLit(_)
+                    | TExprKind::Print(_)
             )
     }
 

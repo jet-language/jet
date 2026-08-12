@@ -618,6 +618,10 @@ impl<'a> Checker<'a> {
                         .contains(&(type_name.clone(), trait_name.to_string()))
                         || self.type_param_has_bound(&lt, trait_name)
                     {
+                        // `lt` and `rt` are the typed operands that selected this
+                        // exact hook. Do not inspect source shape here: a field,
+                        // call, literal, or other expression of the same type
+                        // dispatches back to this hook just like an identifier.
                         if self.fn_name == method
                             && self
                                 .lookup(crate::Syntax::KW_SELF)

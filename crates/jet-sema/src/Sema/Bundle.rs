@@ -313,6 +313,21 @@ fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
     });
 }
 
+/// D-SHAPE-INTERNAL1: one resolved soft-public name use is one lint, even when
+/// overlapping sema resolution paths report the same source occurrence.
+fn dedupe_soft_public_lints(diagnostics: &mut Vec<Diagnostic>) {
+    let mut seen = HashSet::new();
+    diagnostics.retain(|diagnostic| {
+        if diagnostic.code != "L0601" {
+            return true;
+        }
+        let Some(span) = diagnostic.span else {
+            return true;
+        };
+        seen.insert((diagnostic.code.clone(), diagnostic.what.clone(), span.start, span.end))
+    });
+}
+
 fn check_fact_tags_and_states(
     bundle: &ProgramBundle,
     states: &[ModuleState],
@@ -3202,6 +3217,7 @@ fn check_bundle_opts_for_output_inner(
             incremental.as_deref_mut(),
         );
         dedupe_unknown_names(&mut module_diags);
+        dedupe_soft_public_lints(&mut module_diags);
         diags.extend(module_diags);
         for pending in &mut local_pending_diagnostics {
             pending.function_key = name_ledger
@@ -3581,6 +3597,58 @@ mod structure_tests {
         dedupe_unknown_names(&mut first_module);
         dedupe_unknown_names(&mut second_module);
         let diagnostics = [first_module, second_module].concat();
+        assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn duplicate_soft_public_lint_at_one_occurrence_is_reported_once() {
+        let span = Span::new(4, 8);
+        let soft_public = || {
+            Diagnostic::lint(
+                "L0601",
+                "`_x` is a soft-public API".to_string(),
+                "a leading underscore allows outside use".to_string(),
+                "use a public name".to_string(),
+                Some(span),
+            )
+        };
+        let mut diagnostics = vec![soft_public(), soft_public()];
+        dedupe_soft_public_lints(&mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn distinct_soft_public_names_at_one_occurrence_are_preserved() {
+        let span = Span::new(4, 8);
+        let soft_public = |name: &str| {
+            Diagnostic::lint(
+                "L0601",
+                format!("`{name}` is a soft-public API"),
+                "a leading underscore allows outside use".to_string(),
+                "use a public name".to_string(),
+                Some(span),
+            )
+        };
+        let mut diagnostics = vec![soft_public("_x"), soft_public("_y")];
+        dedupe_soft_public_lints(&mut diagnostics);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].what, "`_x` is a soft-public API");
+        assert_eq!(diagnostics[1].what, "`_y` is a soft-public API");
+    }
+
+    #[test]
+    fn soft_public_lints_at_distinct_occurrences_are_preserved() {
+        let soft_public = |span| {
+            Diagnostic::lint(
+                "L0601",
+                "`_x` is a soft-public API".to_string(),
+                "a leading underscore allows outside use".to_string(),
+                "use a public name".to_string(),
+                Some(span),
+            )
+        };
+        let mut diagnostics = vec![soft_public(Span::new(4, 8)), soft_public(Span::new(12, 16))];
+        dedupe_soft_public_lints(&mut diagnostics);
         assert_eq!(diagnostics.len(), 2);
     }
 
