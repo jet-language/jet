@@ -155,8 +155,12 @@ module.exports = grammar({
         optional("pub"),
         "use",
         field("path", choice($.module_path, $.string_literal)),
-        optional(field("group", $.use_group)),
-        optional(seq("as", field("alias", $.identifier))),
+        optional(
+          choice(
+            field("group", $.use_group),
+            seq("as", field("alias", $.identifier)),
+          ),
+        ),
       ),
 
     // `.[ a, b as c ]` member-list suffix on every `use` path, including

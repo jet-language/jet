@@ -281,7 +281,7 @@ impl<'a> Parser<'a> {
         /// D-PUBPKG1=A: parse an optional `pub` or `pub(package)` qualifier.
         /// Returns `(is_pub, is_package_pub)`. On `pub(other)` pushes E0411 and returns `(true, false)`.
         /// Non-failing: never returns Err.
-        pub(super) fn parse_pub_qualifier(&mut self) -> (bool, bool) {
+        pub(in crate::Parser) fn parse_pub_qualifier(&mut self) -> (bool, bool) {
             if !matches!(self.peek().kind, TokKind::KwPub) {
                 return (false, false);
             }

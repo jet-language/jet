@@ -2076,24 +2076,30 @@ pub(crate) fn expand_generic_module_aliases(
         for import in &mut module.imports {
             let ImportKind::Unqualified {
                 module_alias,
-                items,
                 ..
-            } = &mut import.kind
+            } = &import.kind
             else {
                 continue;
             };
-            let Some(source_idx) = import_bindings[module_idx].get(module_alias).copied() else {
+            let Some(source_idx) = import_bindings[module_idx]
+                .get(module_alias.as_str())
+                .copied()
+            else {
                 continue;
             };
+            let bindings = import.walk_bindings();
             let mut consumed = HashSet::new();
-            for (original, alias) in items.iter() {
+            for binding in &bindings {
+                let original = binding
+                    .original
+                    .expect("member walker returned a binding without a member");
                 let Some(source) = template_snapshots[source_idx].get(original) else {
                     continue;
                 };
-                consumed.insert(original.clone());
-                let local = alias.as_deref().unwrap_or(original);
+                consumed.insert(original.to_string());
+                let local = binding.local.clone();
                 if !source.def.is_pub && !source.def.is_package_pub {
-                    denied_templates.insert(local.to_string());
+                    denied_templates.insert(local.clone());
                     diags.push(Diagnostic::error(
                         "E0609",
                         format!("`{original}` is private in module `{}`", module_aliases[source_idx]),
@@ -2103,11 +2109,13 @@ pub(crate) fn expand_generic_module_aliases(
                     ));
                     continue;
                 }
-                templates.insert(local.to_string(), source.clone());
+                templates.insert(local, source.clone());
             }
             // Generic templates are compile-time namespace inputs, not runtime
             // values for the ordinary unqualified-import pass below.
-            items.retain(|(original, _)| !consumed.contains(original));
+            if let ImportKind::Unqualified { items, .. } = &mut import.kind {
+                items.retain(|(original, _)| !consumed.contains(original));
+            }
         }
 
         let aliases: HashMap<String, &ModuleAliasDef> = module

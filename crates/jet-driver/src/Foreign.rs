@@ -8,21 +8,17 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use crate::AST::{ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule, ProgramBundle};
-use std::collections::HashMap;
+use crate::AST::{
+    ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule, ProgramBundle,
+};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
-    module.imports.iter().chain(
-        module
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::CodeModule(code_module) => Some(code_module.imports.iter()),
-                _ => None,
-            })
-            .flatten(),
-    )
+    let mut seen = HashSet::new();
+    crate::AST::walk_imports(module)
+        .into_iter()
+        .filter_map(move |(_, import)| seen.insert(import.span).then_some(import))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,13 +373,18 @@ pub fn route_plan(
     })
 }
 
-pub fn is_active_namespace_import(imp: &ImportDecl) -> bool {
-    imp.foreign_imports().into_iter().any(|(ns, _)| {
-        binder_for(ns.language)
-            .map(|binder| {
-                binder.surface == BinderSurface::Namespace && binder.status == BinderStatus::Active
-            })
-            .unwrap_or(false)
+pub fn is_active_namespace_import(
+    imp: &ImportDecl,
+) -> Result<bool, crate::AST::ForeignImportError> {
+    imp.foreign_imports().map(|imports| {
+        imports.into_iter().any(|(ns, _)| {
+            binder_for(ns.language)
+                .map(|binder| {
+                    binder.surface == BinderSurface::Namespace
+                        && binder.status == BinderStatus::Active
+                })
+                .unwrap_or(false)
+        })
     })
 }
 
@@ -419,7 +420,17 @@ pub fn assemble_active_namespaces_with_provenance(
     for idx in 0..user_module_count {
         let imports: Vec<_> = all_imports(&bundle.modules[idx]).cloned().collect();
         for imp in &imports {
-            for (ns, _) in imp.foreign_imports() {
+            let foreign = match imp.foreign_imports() {
+                Ok(foreign) => foreign,
+                Err(error) => {
+                    return Err(vec![ForeignDiagnostic {
+                        file: bundle.modules[idx].display.clone(),
+                        source: bundle.modules[idx].source.clone(),
+                        diagnostic: error.diagnostic(),
+                    }]);
+                }
+            };
+            for (ns, _) in foreign {
                 if ns.language == ForeignLanguage::C {
                     continue;
                 }

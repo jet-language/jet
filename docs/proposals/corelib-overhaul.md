@@ -336,12 +336,11 @@ Single-module form stays as today: `use core.files as fs`.
 
 **What this replaces for groups**
 
-The retired selective *item* import spelling was brace-based:
-`use math.{sin, cos as c}` (D-SELIMPORT1). The shipped group form uses the
-same list:
+The retired selective *item* import spelling was a different delimiter
+(D-SELIMPORT1). The shipped group form uses the canonical list:
 
 ```jet
-use math.[sin, cos as c]    // items (was braces)
+use math.[sin, cos as c]    // items
 use core.[files as fs, http] // modules
 ```
 

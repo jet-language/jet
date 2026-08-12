@@ -1287,34 +1287,36 @@ impl<'a> Fmt<'a> {
                     self.write(&imp.alias);
                 }
             }
-            ImportKind::Unqualified {
-                module_alias,
-                items,
-                ..
-            } => {
-                let fmt_item = |(orig, alias): &(String, Option<String>)| {
-                    if let Some(a) = alias {
-                        format!("{orig} as {a}")
-                    } else {
-                        orig.clone()
-                    }
+            ImportKind::Unqualified { .. } => {
+                let bindings = imp.walk_bindings();
+                let Some(first) = bindings.first() else {
+                    return;
                 };
                 // The dotless single-item spelling (`use math.clamp`) only means
                 // the same thing when nothing else in the path carries a dot or
                 // an alias: `use core.math.[abs]` and `use math.[abs as a]`
                 // would both re-read as a module import.
-                let collapses = items.len() == 1
-                    && items[0].1.is_none()
-                    && !items[0].0.contains('.')
-                    && !module_alias.contains('.');
+                let collapses = bindings.len() == 1
+                    && first.alias.is_none()
+                    && first.original.is_some_and(|original| !original.contains('.'))
+                    && !first.module_alias.contains('.');
                 if collapses {
-                    self.write(module_alias);
-                    self.write(".");
-                    self.write(&fmt_item(&items[0]));
+                    self.write(&first.path());
                 } else {
-                    self.write(module_alias);
+                    self.write(first.module_alias);
                     self.write(".[");
-                    let rendered: Vec<String> = items.iter().map(fmt_item).collect();
+                    let rendered: Vec<String> = bindings
+                        .iter()
+                        .map(|binding| {
+                            let original = binding
+                                .original
+                                .expect("member walker returned a binding without a member");
+                            binding
+                                .alias
+                                .map(|alias| format!("{original} as {alias}"))
+                                .unwrap_or_else(|| original.to_string())
+                        })
+                        .collect();
                     self.write(&rendered.join(", "));
                     self.write("]");
                 }

@@ -145,15 +145,6 @@ impl<'a> Parser<'a> {
                         }
                     } else {
                         // No dot: use module_name (optionally `as alias`)
-                        if matches!(self.peek().kind, TokKind::LBrace) {
-                            return Err(Diagnostic::error(
-                                "E0003",
-                                "selective imports use the `.[…]` member-list form".to_string(),
-                                "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
-                                "write `use alias.[item, other as local]`".to_string(),
-                                Some(self.peek().span),
-                            ));
-                        }
                         // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` — an inline
                         // script dependency. Only the bare (no-dot) module-name
                         // form takes a version; `use core.files#1.0;` is nonsensical
@@ -221,7 +212,7 @@ impl<'a> Parser<'a> {
             first_span: Span,
         ) -> Result<crate::AST::ImportDecl, Diagnostic> {
             // Continue eating dots to build the full dotted name. A dot that
-            // introduces `[` (the member list), `{` (the retired group), or `*`
+            // introduces `[` (the member list) or `*`
             // (a wildcard) belongs to that suffix, not to the path — otherwise
             // `use core.math.[abs, min]` would demand a name after the last dot.
             let mut name = first;
@@ -229,7 +220,7 @@ impl<'a> Parser<'a> {
             while matches!(self.peek().kind, TokKind::Dot)
                 && !matches!(
                     self.peek2().kind,
-                    TokKind::LBracket | TokKind::LBrace | TokKind::Star
+                    TokKind::LBracket | TokKind::Star
                 )
             {
                 self.bump();
@@ -240,7 +231,7 @@ impl<'a> Parser<'a> {
             }
             let module_span = Span::new(first_span.start, end);
             if matches!(self.peek().kind, TokKind::Dot) {
-                self.bump(); // the dot of `.[`, `.{`, or `.*`
+                self.bump(); // the dot of `.[` or `.*`
             }
             if matches!(self.peek().kind, TokKind::Star) {
                 let star_span = self.bump().span;
@@ -250,15 +241,6 @@ impl<'a> Parser<'a> {
                     format!("`use {name}.*` would hide where each name comes from"),
                     format!("list each item instead: `use {name}.[item, other]`"),
                     Some(star_span),
-                ));
-            }
-            if matches!(self.peek().kind, TokKind::LBrace) {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "selective imports use the `.[…]` member-list form".to_string(),
-                    "`.[…]` is the one member-list form after `use` (D-CORE-USELIST1)".to_string(),
-                    "write `use alias.[item, other as local]`".to_string(),
-                    Some(self.peek().span),
                 ));
             }
             if matches!(self.peek().kind, TokKind::LBracket) {
@@ -300,6 +282,15 @@ impl<'a> Parser<'a> {
             module_alias_span: Span,
         ) -> Result<crate::AST::ImportDecl, Diagnostic> {
             let lbracket_span = self.bump().span;
+            if matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "an import member list cannot be empty".to_string(),
+                    "the canonical `.[…]` form must name at least one member".to_string(),
+                    "write `use prefix.[member]`".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
             let mut items = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
                 let (first, _) = self.expect_ident("inside `use prefix.[…]`")?;
@@ -323,6 +314,15 @@ impl<'a> Parser<'a> {
                 items.push((item, alias));
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
+                    if matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "an import member list cannot end with a comma".to_string(),
+                            "the canonical `.[…]` form separates named members with commas".to_string(),
+                            "remove the trailing comma or add another member".to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
                 } else {
                     break;
                 }

@@ -24,68 +24,74 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    CModule, CModuleKind, ExternFn, ForeignLanguage, ImportDecl, ImportKind, Item, LoadedModule,
-    ProgramBundle,
+    CModule, CModuleKind, ExternFn, ForeignImportError, ForeignLanguage, ImportDecl, ImportKind,
+    Item, LoadedModule, ProgramBundle,
 };
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 // Struct defs live in AST for cross-seam sharing; re-export for callers.
 pub use crate::AST::{CFfi, CImportLink, CLib};
 
-fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
-    module.imports.iter().chain(
-        module
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::CodeModule(code_module) => Some(code_module.imports.iter()),
-                _ => None,
-            })
-            .flatten(),
-    )
-}
-
-fn all_imports_scoped(
+fn all_imports(
     module: &LoadedModule,
 ) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
-    module.imports.iter().map(|import| (None, import)).chain(
-        module
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::CodeModule(code_module) => Some(
-                    code_module
-                        .imports
-                        .iter()
-                        .map(|import| (Some(code_module.name.as_str()), import)),
-                ),
-                _ => None,
-            })
-            .flatten(),
-    )
+    let mut seen = HashSet::new();
+    crate::AST::walk_imports(module)
+        .into_iter()
+        .filter_map(move |(scope, import)| {
+            seen.insert((scope, import.span)).then_some((scope, import))
+        })
+}
+
+fn invalid_foreign_import_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut seen = HashSet::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for (_, import) in all_imports(module) {
+            if !seen.insert((module_idx, import.span)) {
+                continue;
+            }
+            if let Err(error) = import.foreign_imports() {
+                diagnostics.push(error.diagnostic());
+            }
+        }
+    }
+    diagnostics
 }
 
 /// Resolve every C library in a logical-module import, including
 /// `use c.[raylib as rl, sqlite3]`.
-pub fn c_module_imports(imp: &ImportDecl) -> Vec<(String, String)> {
+pub fn c_module_imports(
+    imp: &ImportDecl,
+) -> Result<Vec<(String, String)>, ForeignImportError> {
     imp.foreign_imports()
-        .into_iter()
-        .filter_map(|(namespace, alias)| {
-            (namespace.language == ForeignLanguage::C).then_some((namespace.lib, alias))
+        .map(|imports| {
+            imports
+                .into_iter()
+                .filter(|(namespace, _)| namespace.language == ForeignLanguage::C)
+                .map(|(namespace, alias)| (namespace.lib, alias))
+                .collect()
         })
-        .collect()
+}
+
+fn c_module_imports_after_preflight(imp: &ImportDecl) -> Vec<(String, String)> {
+    c_module_imports(imp).unwrap_or_else(|error| {
+        unreachable!(
+            "invalid foreign import reached CFFI after preflight: {}",
+            error.path
+        )
+    })
 }
 
 /// `Module("c.<lib>")` → `Some("<lib>")` (the logical-module C `use` form).
 /// For a member list this returns the first library; callers that need every
 /// library must use `c_module_imports`.
-pub fn c_module_lib(imp: &ImportDecl) -> Option<String> {
-    c_module_imports(imp)
-        .into_iter()
-        .next()
-        .map(|(lib, _)| lib)
+pub fn c_module_lib(imp: &ImportDecl) -> Result<Option<String>, ForeignImportError> {
+    c_module_imports(imp).map(|imports| {
+        imports.into_iter().next().map(|(lib, _)| lib)
+    })
 }
 
 /// `File("<…>.h")` → `Some((header, lib))` (the header-path C `use` form). The
@@ -103,8 +109,8 @@ pub fn c_header_lib(imp: &ImportDecl) -> Option<(String, String)> {
 }
 
 /// Is this import any C `use` form?
-pub fn is_c_import(imp: &ImportDecl) -> bool {
-    !c_module_imports(imp).is_empty() || c_header_lib(imp).is_some()
+pub fn is_c_import(imp: &ImportDecl) -> Result<bool, ForeignImportError> {
+    Ok(!c_module_imports(imp)?.is_empty() || c_header_lib(imp).is_some())
 }
 
 fn import_alias(imp: &ImportDecl) -> String {
@@ -254,7 +260,8 @@ pub fn rustc_link_args_for_target(
 /// `Item::CModule`s from user files, merges them, appends synthetic modules,
 /// and resolves C `use` forms. Returns the artifacts, or diagnostics.
 pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
-    let mut diags = duplicate_use_form_diagnostics(bundle);
+    let mut diags = invalid_foreign_import_diagnostics(bundle);
+    diags.extend(duplicate_use_form_diagnostics(bundle));
     if !diags.is_empty() {
         return Err(diags);
     }
@@ -460,11 +467,18 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
     //    on demand so the alias still resolves and link discovery still runs.
     let n_user_modules = bundle.modules.len();
     for idx in 0..n_user_modules {
-        let imports: Vec<_> = all_imports_scoped(&bundle.modules[idx])
+        let imports: Vec<_> = crate::AST::walk_imports(&bundle.modules[idx])
+            .into_iter()
             .map(|(scope, import)| (scope.map(str::to_owned), import.clone()))
             .collect();
         for (scope, imp) in &imports {
-            let mut requested = c_module_imports(imp);
+            let mut requested = match c_module_imports(imp) {
+                Ok(requested) => requested,
+                Err(error) => {
+                    diags.push(error.diagnostic());
+                    continue;
+                }
+            };
             if let Some((_, lib)) = c_header_lib(imp) {
                 requested.push((lib, import_alias(imp)));
             }
@@ -549,6 +563,14 @@ struct OriginSurface {
 pub fn assemble_with_provenance(
     bundle: &mut ProgramBundle,
 ) -> Result<CFfi, Vec<CffiDiagnostic>> {
+    let invalid_diagnostics = invalid_foreign_import_diagnostics(bundle);
+    if !invalid_diagnostics.is_empty() {
+        return Err(map_diagnostics(
+            bundle,
+            assembly_origins(bundle),
+            invalid_diagnostics,
+        ));
+    }
     // `assemble` rejects duplicate C imports before it discovers generated
     // caches. Preserve that order in the provenance path as well.
     let duplicate_diagnostics = duplicate_use_form_diagnostics(bundle);
@@ -662,8 +684,8 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
         let origin = (module.display.clone(), module.source.clone());
         let generated_language = generated_cache_language(&module.path.to_string_lossy());
         let generated = generated_language.is_some();
-        let mut seen: HashMap<String, (bool, String)> = HashMap::new();
-        for import in all_imports(module) {
+        let mut seen: HashMap<(Option<String>, String), (bool, String)> = HashMap::new();
+        for (scope, import) in all_imports(module) {
             origins
                 .spans
                 .entry(import.span)
@@ -674,7 +696,16 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
                 .entry(import.alias_span)
                 .or_insert_with(Vec::new)
                 .push(origin.clone());
-            let mut uses: Vec<(String, bool, String)> = c_module_imports(import)
+            let c_imports = match c_module_imports(import) {
+                Ok(imports) => imports,
+                Err(error) => {
+                    // The frontend preflight reports this before provenance
+                    // is consumed; there is no library key to attribute here.
+                    let _ = error;
+                    continue;
+                }
+            };
+            let mut uses: Vec<(String, bool, String)> = c_imports
                 .into_iter()
                 .map(|(lib, _)| (lib, false, String::new()))
                 .collect();
@@ -682,16 +713,17 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
                 uses.push((lib, true, header));
             }
             for (lib, is_header, header) in uses {
+                let key = (scope.map(str::to_owned), lib.clone());
                 if !library_order.contains(&lib) {
                     library_order.push(lib.clone());
                 }
-                if let Some((previous_is_header, previous_header)) = seen.get(&lib) {
+                if let Some((previous_is_header, previous_header)) = seen.get(&key) {
                     if *previous_is_header != is_header {
                         let _header = if is_header { &header } else { previous_header };
                         origins.duplicate_uses.push(origin.clone());
                     }
                 } else {
-                    seen.insert(lib.clone(), (is_header, header));
+                    seen.insert(key, (is_header, header));
                 }
                 if is_header {
                     header_origins_by_lib.entry(lib).or_insert_with(|| origin.clone());
@@ -783,8 +815,12 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
 fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
     let mut libs = Vec::new();
     for module in &bundle.modules {
-        for import in all_imports(module) {
-            for (lib, _) in c_module_imports(import) {
+        for (_, import) in all_imports(module) {
+            let c_imports = match c_module_imports(import) {
+                Ok(imports) => imports,
+                Err(_) => continue,
+            };
+            for (lib, _) in c_imports {
                 if !libs.contains(&lib) {
                     libs.push(lib);
                 }
@@ -830,10 +866,11 @@ fn same_diagnostic(left: &Diagnostic, right: &Diagnostic) -> bool {
 
 fn duplicate_use_form_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    for module in &bundle.modules {
-        let mut seen: HashMap<String, (bool, String)> = HashMap::new();
-        for import in all_imports(module) {
-            let mut uses: Vec<(String, bool, String)> = c_module_imports(import)
+    let mut reported = HashSet::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let mut seen: HashMap<(Option<String>, String), (bool, String)> = HashMap::new();
+        for (scope, import) in all_imports(module) {
+            let mut uses: Vec<(String, bool, String)> = c_module_imports_after_preflight(import)
                 .into_iter()
                 .map(|(lib, _)| (lib, false, String::new()))
                 .collect();
@@ -841,13 +878,16 @@ fn duplicate_use_form_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
                 uses.push((lib, true, header));
             }
             for (lib, is_header, header) in uses {
-                if let Some((previous_is_header, previous_header)) = seen.get(&lib) {
-                    if *previous_is_header != is_header {
+                let key = (scope.map(str::to_owned), lib.clone());
+                if let Some((previous_is_header, previous_header)) = seen.get(&key) {
+                    if *previous_is_header != is_header
+                        && reported.insert((module_idx, import.span, lib.clone()))
+                    {
                         let header = if is_header { &header } else { previous_header };
                         diagnostics.push(e3204(&lib, header, import.span));
                     }
                 } else {
-                    seen.insert(lib, (is_header, header));
+                    seen.insert(key, (is_header, header));
                 }
             }
         }
@@ -871,8 +911,15 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
         std::collections::HashMap::new();
 
     for module in &bundle.modules {
-        for imp in all_imports(module) {
-            for (lib, _) in c_module_imports(imp) {
+        for (_, imp) in all_imports(module) {
+            let c_imports = match c_module_imports(imp) {
+                Ok(imports) => imports,
+                Err(error) => {
+                    diags.push(error.diagnostic());
+                    continue;
+                }
+            };
+            for (lib, _) in c_imports {
                 if !libs.contains(&lib) {
                     libs.push(lib);
                 }

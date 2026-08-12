@@ -349,6 +349,22 @@ fn run() { }
 }
 
 #[test]
+fn foreign_member_list_rejects_one_invalid_member_without_partial_import() {
+    let root = common::unique_tmp("jet_foreign_member_list_fail_closed");
+    fs::create_dir_all(&root).unwrap();
+    let main = root.join("main.jet");
+    let source = "use c.[raylib.missing, sqlite3]\nfn run() { }\n";
+    fs::write(&main, source).unwrap();
+
+    let diagnostics = jet::compile_with_path(source, main.to_str().unwrap())
+        .expect_err("one malformed member must reject the entire foreign import group");
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "E0611");
+    assert!(diagnostics[0].what.contains("foreign library namespace"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn inline_foreign_alias_collision_is_rejected_in_one_scope() {
     let root = common::unique_tmp("jet_cffi_member_alias_collision");
     fs::create_dir_all(&root).unwrap();
