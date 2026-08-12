@@ -296,7 +296,7 @@ fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, Bin
 }
 fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> { let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=(limit-out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out) }
 fn ident(v: &str) -> bool { let mut chars=v.chars();matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')&&chars.all(|c|c.is_ascii_alphanumeric()||c=='_') }
-fn reserved(v: &str) -> bool { matches!(v,"open"|"cancel"|"close"|"PhpPool"|"PhpError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v) }
+fn reserved(v: &str) -> bool { matches!(v,"open"|"take_error"|"cancel"|"close"|"abi"|"json"|"PhpPool"|"PhpError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v) }
 fn require_supported_host(unix: bool) -> Result<(), BindError> { if unix { Ok(()) } else { Err(BindError::Source("persistent PHP bindings require a POSIX host process supervisor".into())) } }
 
 #[cfg(test)]

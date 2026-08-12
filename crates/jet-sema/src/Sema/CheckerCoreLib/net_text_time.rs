@@ -1,4 +1,4 @@
-use crate::AST::{CallArg, Type};
+use crate::AST::{AccessConvention, CallArg, ParamZone, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Effects::Effect;
@@ -441,7 +441,7 @@ pub fn net_method_return(
 pub fn require_net_method_labels(
     type_name: &str,
     method: &str,
-    args: &[crate::AST::CallArg],
+    args: &mut Vec<crate::AST::CallArg>,
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -463,35 +463,35 @@ pub fn require_net_method_labels(
 /// are label-only and use the same D-APILABEL1 diagnostics as user calls.
 pub fn require_exact_labels(
     api: &str,
-    args: &[crate::AST::CallArg],
+    args: &mut Vec<crate::AST::CallArg>,
     required: &[(usize, &str)],
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) {
-    for &(index, expected) in required {
-        let Some(arg) = args.get(index) else { continue };
-        match &arg.label {
-            Some((actual, _)) if actual == expected => {}
-            // D-APILABEL1=A: a Core named form publishes label-only parameters,
-            // so a wrong label is an unknown one and a missing label is a
-            // label-only parameter passed by position — the same two codes a
-            // user-defined call reports.
-            Some((actual, label_span)) => diags.push(Diagnostic::error(
-                "E0764",
-                format!("`{api}` has no parameter labelled `{actual}`"),
-                "a label binds an argument to the parameter of that name".to_string(),
-                format!("write `{expected}:` here"),
-                Some(*label_span),
-            )),
-            None => diags.push(Diagnostic::error(
-                "E0769",
-                format!("`{expected}` is a label-only parameter of `{api}`"),
-                "this Core form publishes its labels, so the call says what each value means".to_string(),
-                format!("write `{expected}: …` for this argument"),
-                Some(span),
-            )),
-        }
-    }
+    let slot_count = required.iter().map(|(index, _)| *index).max().map_or(0, |index| index + 1);
+    let params = (0..slot_count)
+        .map(|index| {
+            let label = required
+                .iter()
+                .find(|(required_index, _)| *required_index == index)
+                .map_or("", |(_, label)| *label);
+            crate::Sema::CallBinder::BindParam {
+                label,
+                name: label,
+                zone: if label.is_empty() {
+                    ParamZone::PositionalOnly
+                } else {
+                    ParamZone::LabelOnly
+                },
+                default: None,
+                convention: AccessConvention::Read,
+                ty: None,
+                variadic: false,
+                core_default: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let _ = crate::Sema::CallBinder::bind_call_args(api, &params, args, span, diags);
 }
 
 /// D-REGEXENGINE1=A: method return types for std-only regex values.

@@ -28,6 +28,9 @@ fn architecture_classifies_every_comptime_core_namespace() {
         "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
     ));
     namespaces.extend(dispatched_namespaces(&read(
+        "crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs",
+    )));
+    namespaces.extend(dispatched_namespaces(&read(
         "crates/jet-comptime/src/Comptime/CorePureParity.rs",
     )));
     // Solver construction enters through type-method dispatch rather than a

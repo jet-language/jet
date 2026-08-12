@@ -70,6 +70,66 @@ pub(crate) fn jet_seeded_rng_bytes(state: &mut u64, count: i64) -> Vec<u8> {
     out
 }
 
+pub(crate) fn jet_seeded_rng_pick<T: Clone>(state: &mut u64, items: &Vec<T>) -> Option<T> {
+    if items.is_empty() {
+        None
+    } else {
+        Some(items[jet_seeded_rng_int(state, 0, items.len() as i64 - 1) as usize].clone())
+    }
+}
+
+pub(crate) fn jet_seeded_rng_weighted_pick<T: Clone>(
+    state: &mut u64,
+    items: &Vec<T>,
+    weights: &Vec<f64>,
+) -> Option<T> {
+    if items.is_empty() || items.len() != weights.len() {
+        return None;
+    }
+    let total = weights
+        .iter()
+        .filter(|weight| weight.is_finite() && **weight > 0.0)
+        .sum::<f64>();
+    if total <= 0.0 {
+        return None;
+    }
+    let mut needle = jet_seeded_rng_float_range(state, 0.0, total);
+    for (item, weight) in items.iter().zip(weights) {
+        let weight = if weight.is_finite() && *weight > 0.0 {
+            *weight
+        } else {
+            0.0
+        };
+        if needle < weight {
+            return Some(item.clone());
+        }
+        needle -= weight;
+    }
+    items.last().cloned()
+}
+
+pub(crate) fn jet_seeded_rng_sample<T: Clone>(
+    state: &mut u64,
+    items: &Vec<T>,
+    count: i64,
+) -> Vec<T> {
+    let want = (count.max(0) as usize).min(items.len());
+    let mut pool = items.clone();
+    for index in 0..want {
+        let picked = jet_seeded_rng_int(state, index as i64, pool.len() as i64 - 1) as usize;
+        pool.swap(index, picked);
+    }
+    pool.truncate(want);
+    pool
+}
+
+pub(crate) fn jet_seeded_rng_shuffle<T>(state: &mut u64, items: &mut Vec<T>) {
+    for index in (1..items.len()).rev() {
+        let picked = jet_seeded_rng_int(state, 0, index as i64) as usize;
+        items.swap(index, picked);
+    }
+}
+
 pub(crate) fn jet_seeded_rng_split(state: &mut u64) -> u64 {
     jet_seeded_rng_next(state)
 }

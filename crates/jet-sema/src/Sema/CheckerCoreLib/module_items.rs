@@ -518,8 +518,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ServiceDelivery",
         ],
         "core.tasks" => &[
-            "join_all",
-            "wait_any",
             "yield_now",
             "current_task",
             "channel",

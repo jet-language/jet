@@ -278,10 +278,10 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
     let mut parts = manifest_partitions(&web.manifest_json);
     parts.sort();
     let mut expected = [
-        ("left__helper".into(), "JS".into()),
-        ("left__value".into(), "JS".into()),
-        ("right__helper".into(), "Wasm".into()),
-        ("right__value".into(), "Wasm".into()),
+        ("__jet_left__helper".into(), "JS".into()),
+        ("__jet_left__value".into(), "JS".into()),
+        ("__jet_right__helper".into(), "Wasm".into()),
+        ("__jet_right__value".into(), "Wasm".into()),
         ("run".into(), "JS".into()),
     ];
     expected.sort();

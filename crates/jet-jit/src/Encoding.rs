@@ -8,14 +8,29 @@ use super::Concurrency;
 use crate::JetShow;
 use jet_foundation::base_encoding_dispatch;
 use jet_foundation::PackageEdition;
-use jet_foundation::AST::{CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart};
+use jet_foundation::AST::{CtFloat, CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
+use crate::Time::TimeValue;
 
 mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
 }
+
+mod codec_rt {
+    pub(crate) mod jet_std {
+        pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
+    }
+    include!("../../jet-codegen/src/Prelude/Core/Codec.rs");
+}
+
+pub(crate) const CODEC_KIND_DATE: i64 = 0;
+pub(crate) const CODEC_KIND_LOCAL_DATE: i64 = 1;
+pub(crate) const CODEC_KIND_LOCAL_TIME: i64 = 2;
+pub(crate) const CODEC_KIND_DATETIME: i64 = 3;
+pub(crate) const CODEC_KIND_DURATION: i64 = 4;
+pub(crate) const CODEC_KIND_DECIMAL: i64 = 5;
 
 /// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
@@ -30,6 +45,7 @@ pub(crate) mod json_rt {
         Null,
         Boolean(bool),
         Number(f64),
+        Integer(i64),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),
@@ -716,27 +732,7 @@ extern "C" fn jet_jit_csv_tree_to_string(tree: i64) -> i64 {
     })
 }
 
-// ── UUID (mirrors jet_std_uuid_v4 / jet_std_uuid_v7) ─────────────────────────
-
-fn uuid_fill_random(out: &mut [u8]) {
-    use std::io::Read;
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if f.read_exact(out).is_ok() {
-            return;
-        }
-    }
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64;
-    let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
-    for b in out.iter_mut() {
-        state = state.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = (state ^ (state >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        *b = (z ^ (z >> 31)) as u8;
-    }
-}
+// ── UUID (marshals through the shared Prelude entropy seam) ─────────────────
 
 fn uuid_format(b: &[u8; 16]) -> String {
     format!(
@@ -849,34 +845,34 @@ extern "C" fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_uuid_v4() -> i64 {
-    let mut bytes = [0u8; 16];
-    uuid_fill_random(&mut bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let s = uuid_format(&bytes);
+    let s = crate::Crypto::runtime::jet_crypto_uuid_v4();
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 /// `clock` is a 1-based index into `JitRuntime::clocks` (manual ms).
 extern "C" fn jet_jit_uuid_v7(clock: i64) -> i64 {
-    let ts_ms = Concurrency::with_runtime_mut(|rt| {
-        if clock <= 0 {
-            return 0i64;
+    let timestamp = Concurrency::with_runtime_mut(|rt| {
+        Some(if clock <= 0 {
+            Err("invalid clock handle".to_string())
+        } else {
+            let idx = (clock as usize).saturating_sub(1);
+            rt.clocks
+                .get(idx)
+                .copied()
+                .ok_or_else(|| "invalid clock handle".to_string())
+        })
+    });
+    let ts_ms = match timestamp {
+        Some(Ok(timestamp)) => timestamp,
+        Some(Err(message)) => {
+            return Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap(&message);
+                rt.heap.alloc_string(String::new())
+            });
         }
-        let idx = (clock as usize).saturating_sub(1);
-        rt.clocks.get(idx).copied().unwrap_or(0)
-    }) as u64;
-    let mut bytes = [0u8; 16];
-    bytes[0] = (ts_ms >> 40) as u8;
-    bytes[1] = (ts_ms >> 32) as u8;
-    bytes[2] = (ts_ms >> 24) as u8;
-    bytes[3] = (ts_ms >> 16) as u8;
-    bytes[4] = (ts_ms >> 8) as u8;
-    bytes[5] = ts_ms as u8;
-    uuid_fill_random(&mut bytes[6..]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x70;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let s = uuid_format(&bytes);
+        None => return 0,
+    };
+    let s = crate::Crypto::runtime::jet_crypto_uuid_v7(ts_ms);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
@@ -1252,289 +1248,7 @@ extern "C" fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
     }
 }
 
-// ── CBOR (mirrors EncodingCodecs jet_cbor_* for DataTree; safe options) ─────
-
-fn cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
-    if n < 24 {
-        out.push((major << 5) | n as u8);
-    } else if n <= u8::MAX as u64 {
-        out.extend_from_slice(&[(major << 5) | 24, n as u8]);
-    } else if n <= u16::MAX as u64 {
-        out.push((major << 5) | 25);
-        out.extend_from_slice(&(n as u16).to_be_bytes());
-    } else if n <= u32::MAX as u64 {
-        out.push((major << 5) | 26);
-        out.extend_from_slice(&(n as u32).to_be_bytes());
-    } else {
-        out.push((major << 5) | 27);
-        out.extend_from_slice(&n.to_be_bytes());
-    }
-}
-
-fn cbor_f32_to_half_bits(value: f32) -> u16 {
-    let bits = value.to_bits();
-    let sign = ((bits >> 16) & 0x8000) as u16;
-    let exp = ((bits >> 23) & 255) as i32;
-    let frac = bits & 0x7fffff;
-    if exp == 255 {
-        return sign | 0x7c00 | if frac == 0 { 0 } else { 0x0200 };
-    }
-    let half_exp = exp - 127 + 15;
-    if half_exp >= 31 {
-        return sign | 0x7c00;
-    }
-    if half_exp <= 0 {
-        if half_exp < -10 {
-            return sign;
-        }
-        let mant = frac | 0x800000;
-        let shift = (14 - half_exp) as u32;
-        let mut rounded = mant >> shift;
-        let rem = mant & ((1u32 << shift) - 1);
-        let halfway = 1u32 << (shift - 1);
-        if rem > halfway || (rem == halfway && rounded & 1 != 0) {
-            rounded += 1;
-        }
-        return sign | rounded as u16;
-    }
-    let mut rounded = frac >> 13;
-    let rem = frac & 0x1fff;
-    if rem > 0x1000 || (rem == 0x1000 && rounded & 1 != 0) {
-        rounded += 1;
-    }
-    if rounded == 0x0400 {
-        return sign | (((half_exp + 1) as u16) << 10);
-    }
-    sign | ((half_exp as u16) << 10) | rounded as u16
-}
-
-fn cbor_half_exact(value: f64) -> Option<u16> {
-    if value.is_nan() {
-        return Some(0x7e00);
-    }
-    let narrowed = value as f32;
-    if (narrowed as f64).to_bits() != value.to_bits() {
-        return None;
-    }
-    let bits = cbor_f32_to_half_bits(narrowed);
-    (cbor_half_to_f64(bits).to_bits() == value.to_bits()).then_some(bits)
-}
-
-fn cbor_push_preferred_float(out: &mut Vec<u8>, value: f64) {
-    if let Some(bits) = cbor_half_exact(value) {
-        out.push(0xf9);
-        out.extend_from_slice(&bits.to_be_bytes());
-    } else if ((value as f32) as f64).to_bits() == value.to_bits() {
-        out.push(0xfa);
-        out.extend_from_slice(&(value as f32).to_bits().to_be_bytes());
-    } else {
-        out.push(0xfb);
-        out.extend_from_slice(&value.to_bits().to_be_bytes());
-    }
-}
-
-fn cbor_encode_val(
-    v: &json_rt::DataTree,
-    out: &mut Vec<u8>,
-    canonical: bool,
-) -> Result<(), String> {
-    match v {
-        json_rt::DataTree::Null => out.push(0xf6),
-        json_rt::DataTree::Bool(false) => out.push(0xf4),
-        json_rt::DataTree::Bool(true) => out.push(0xf5),
-        json_rt::DataTree::Int(n) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
-        json_rt::DataTree::Int(n) => cbor_push_len(out, 1, (-1 - *n) as u64),
-        json_rt::DataTree::Float(f) => cbor_push_preferred_float(out, *f),
-        json_rt::DataTree::Text(s) => {
-            cbor_push_len(out, 3, s.len() as u64);
-            out.extend_from_slice(s.as_bytes());
-        }
-        json_rt::DataTree::Bytes(bs) => {
-            cbor_push_len(out, 2, bs.len() as u64);
-            out.extend_from_slice(bs);
-        }
-        json_rt::DataTree::Array(xs) => {
-            cbor_push_len(out, 4, xs.len() as u64);
-            for x in xs {
-                cbor_encode_val(x, out, canonical)?;
-            }
-        }
-        json_rt::DataTree::Object(es) => {
-            let mut encoded = Vec::with_capacity(es.len());
-            for (k, v) in es {
-                let mut key = Vec::new();
-                cbor_encode_val(
-                    &json_rt::DataTree::Text(k.clone()),
-                    &mut key,
-                    canonical,
-                )?;
-                let mut value = Vec::new();
-                cbor_encode_val(v, &mut value, canonical)?;
-                encoded.push((key, value));
-            }
-            if canonical {
-                encoded.sort_by(|a, b| a.0.cmp(&b.0));
-            }
-            if encoded.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-                return Err("duplicate encoded CBOR map key".to_string());
-            }
-            cbor_push_len(out, 5, encoded.len() as u64);
-            for (key, value) in encoded {
-                out.extend_from_slice(&key);
-                out.extend_from_slice(&value);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn cbor_read_len(input: &[u8], i: &mut usize, add: u8) -> Result<u64, String> {
-    let need = match add {
-        n @ 0..=23 => return Ok(n as u64),
-        24 => 1,
-        25 => 2,
-        26 => 4,
-        27 => 8,
-        _ => return Err("indefinite/reserved CBOR length unsupported".to_string()),
-    };
-    if *i + need > input.len() {
-        return Err("CBOR length argument is truncated".to_string());
-    }
-    let mut n = 0u64;
-    for _ in 0..need {
-        n = (n << 8) | input[*i] as u64;
-        *i += 1;
-    }
-    Ok(n)
-}
-
-fn cbor_decode_val(input: &[u8], i: &mut usize, depth: i64) -> Result<json_rt::DataTree, String> {
-    const MAX_DEPTH: i64 = 256;
-    if depth > MAX_DEPTH {
-        return Err(format!("max_depth {MAX_DEPTH} exceeded"));
-    }
-    if *i >= input.len() {
-        return Err("CBOR value is missing".to_string());
-    }
-    let b = input[*i];
-    *i += 1;
-    let major = b >> 5;
-    let add = b & 31;
-    match major {
-        0 => i64::try_from(cbor_read_len(input, i, add)?)
-            .map(json_rt::DataTree::Int)
-            .map_err(|_| "CBOR integer outside Jet Int".to_string()),
-        1 => i64::try_from(cbor_read_len(input, i, add)?)
-            .ok()
-            .and_then(|n| n.checked_neg()?.checked_sub(1))
-            .map(json_rt::DataTree::Int)
-            .ok_or_else(|| "CBOR integer outside Jet Int".to_string()),
-        2 => {
-            let n = usize::try_from(cbor_read_len(input, i, add)?)
-                .map_err(|_| "CBOR byte string too large".to_string())?;
-            if n > input.len() - *i {
-                return Err("CBOR byte string truncated".to_string());
-            }
-            let bytes = input[*i..*i + n].to_vec();
-            *i += n;
-            Ok(json_rt::DataTree::Bytes(bytes))
-        }
-        3 => {
-            let n = usize::try_from(cbor_read_len(input, i, add)?)
-                .map_err(|_| "CBOR text too large".to_string())?;
-            if n > input.len() - *i {
-                return Err("CBOR text truncated".to_string());
-            }
-            let s = std::str::from_utf8(&input[*i..*i + n])
-                .map_err(|_| "CBOR text is not UTF-8".to_string())?
-                .to_string();
-            *i += n;
-            Ok(json_rt::DataTree::Text(s))
-        }
-        4 => {
-            let n = usize::try_from(cbor_read_len(input, i, add)?)
-                .map_err(|_| "CBOR array too large".to_string())?;
-            let mut xs = Vec::with_capacity(n);
-            for _ in 0..n {
-                xs.push(cbor_decode_val(input, i, depth + 1)?);
-            }
-            Ok(json_rt::DataTree::Array(xs))
-        }
-        5 => {
-            let n = usize::try_from(cbor_read_len(input, i, add)?)
-                .map_err(|_| "CBOR map too large".to_string())?;
-            let mut es = Vec::with_capacity(n);
-            for _ in 0..n {
-                let k = match cbor_decode_val(input, i, depth + 1)? {
-                    json_rt::DataTree::Text(s) => s,
-                    _ => return Err("CBOR map key must be text".to_string()),
-                };
-                let v = cbor_decode_val(input, i, depth + 1)?;
-                es.push((k, v));
-            }
-            Ok(json_rt::DataTree::Object(es))
-        }
-        7 => match add {
-            20 => Ok(json_rt::DataTree::Bool(false)),
-            21 => Ok(json_rt::DataTree::Bool(true)),
-            22 => Ok(json_rt::DataTree::Null),
-            25 => {
-                if *i + 2 > input.len() {
-                    return Err("CBOR Float16 truncated".to_string());
-                }
-                let bits = u16::from_be_bytes([input[*i], input[*i + 1]]);
-                *i += 2;
-                Ok(json_rt::DataTree::Float(cbor_half_to_f64(bits)))
-            }
-            26 => {
-                if *i + 4 > input.len() {
-                    return Err("CBOR Float32 truncated".to_string());
-                }
-                let mut buf = [0u8; 4];
-                buf.copy_from_slice(&input[*i..*i + 4]);
-                *i += 4;
-                Ok(json_rt::DataTree::Float(f32::from_be_bytes(buf) as f64))
-            }
-            27 => {
-                if *i + 8 > input.len() {
-                    return Err("CBOR Float64 truncated".to_string());
-                }
-                let mut buf = [0u8; 8];
-                buf.copy_from_slice(&input[*i..*i + 8]);
-                *i += 8;
-                Ok(json_rt::DataTree::Float(f64::from_bits(u64::from_be_bytes(
-                    buf,
-                ))))
-            }
-            _ => Err(format!("unsupported CBOR simple value {add}")),
-        },
-        6 => Err("CBOR tags are unsupported".to_string()),
-        _ => Err(format!("unsupported CBOR major type {major}")),
-    }
-}
-
-fn cbor_half_to_f64(bits: u16) -> f64 {
-    let sign = ((bits >> 15) as u64) << 63;
-    let exp = (bits >> 10) & 31;
-    let frac = bits & 1023;
-    if exp == 0 {
-        if frac == 0 {
-            return f64::from_bits(sign);
-        }
-        let mut mant = frac as u64;
-        let mut exponent = -14i32;
-        while mant & 1024 == 0 {
-            mant <<= 1;
-            exponent -= 1;
-        }
-        mant &= 1023;
-        f64::from_bits(sign | (((exponent + 1023) as u64) << 52) | (mant << 42))
-    } else if exp == 31 {
-        f64::from_bits(sign | (0x7ffu64 << 52) | ((frac as u64) << 42))
-    } else {
-        f64::from_bits(sign | (((exp as i32 - 15 + 1023) as u64) << 52) | ((frac as u64) << 42))
-    }
-}
+// ── CBOR (shared whole-value Prelude through the comptime seam) ─────────────
 
 extern "C" fn jet_jit_cbor_to_bytes(tree: i64) -> i64 {
     jet_jit_cbor_to_bytes_impl(tree, false)
@@ -1547,13 +1261,47 @@ extern "C" fn jet_jit_cbor_to_bytes_canonical(tree: i64) -> i64 {
 fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
     match read_datatree(tree) {
         Some(t) => {
-            let mut out = Vec::new();
-            match cbor_encode_val(&t, &mut out, canonical) {
-                Ok(()) => result_ok(alloc_byte_list(&out) as u64),
-                Err(e) => result_err_msg(&e),
+            let value = cbor_datatree_to_ct(&t);
+            match jet_codegen::Comptime::cbor_encode_for_tir(&value, canonical) {
+                Ok(out) => result_ok(alloc_byte_list(&out) as u64),
+                Err(error) => result_err_cbor(error),
             }
         }
         None => result_err_msg("invalid DataTree"),
+    }
+}
+
+fn cbor_datatree_to_ct(value: &json_rt::DataTree) -> CtValue {
+    let variant = |variant: &str, payload: Option<CtValue>| CtValue::Enum {
+        type_name: "JSON".to_string(),
+        variant: variant.to_string(),
+        args: payload.into_iter().map(|value| (None, value)).collect(),
+    };
+    match value {
+        json_rt::DataTree::Null => variant("Null", None),
+        json_rt::DataTree::Bool(value) => variant("Bool", Some(CtValue::Bool(*value))),
+        json_rt::DataTree::Int(value) => variant("Int", Some(CtValue::Int(*value))),
+        json_rt::DataTree::Float(value) => {
+            variant("Float", Some(CtValue::Float(CtFloat::f64(*value))))
+        }
+        json_rt::DataTree::Text(value) => variant("Text", Some(CtValue::Str(value.clone()))),
+        json_rt::DataTree::Bytes(value) => CtValue::Bytes(value.clone()),
+        json_rt::DataTree::Array(values) => variant(
+            "Array",
+            Some(CtValue::List(
+                values.iter().map(cbor_datatree_to_ct).collect(),
+            )),
+        ),
+        json_rt::DataTree::Object(entries) => variant(
+            "Object",
+            Some(CtValue::Struct {
+                type_name: "JSONObject".to_string(),
+                fields: entries
+                    .iter()
+                    .map(|(key, value)| (key.clone(), cbor_datatree_to_ct(value)))
+                    .collect(),
+            }),
+        ),
     }
 }
 
@@ -1691,28 +1439,28 @@ fn cbor_decode_fields(value: CtValue) -> Vec<json_rt::FieldError> {
 fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) -> i64 {
     let input = clone_bytes(bytes);
     let options = options.map(|handle| {
-        let (max_depth, max_items, max_bytes, require_canonical) =
-            Concurrency::with_runtime_mut(|rt| {
-                (
-                    rt.heap.record_get_int(handle, 0).unwrap_or(256),
-                    rt.heap.record_get_int(handle, 1).unwrap_or(1_000_000),
-                    rt.heap
-                        .record_get_int(handle, 2)
-                        .unwrap_or(1_073_741_824),
-                    rt.heap.record_get_bool(handle, 3).unwrap_or(false),
-                )
-            });
+        let fields = Concurrency::with_runtime_mut(|rt| {
+            let mut fields = Vec::new();
+            if let Some(value) = rt.heap.record_get_int(handle, 0) {
+                fields.push(("max_depth".to_string(), CtValue::Int(value)));
+            }
+            if let Some(value) = rt.heap.record_get_int(handle, 1) {
+                fields.push(("max_items".to_string(), CtValue::Int(value)));
+            }
+            if let Some(value) = rt.heap.record_get_int(handle, 2) {
+                fields.push(("max_bytes".to_string(), CtValue::Int(value)));
+            }
+            if let Some(value) = rt.heap.record_get_bool(handle, 3) {
+                fields.push((
+                    "require_canonical".to_string(),
+                    CtValue::Bool(value),
+                ));
+            }
+            fields
+        });
         CtValue::Struct {
             type_name: "CBOROptions".to_string(),
-            fields: vec![
-                ("max_depth".to_string(), CtValue::Int(max_depth)),
-                ("max_items".to_string(), CtValue::Int(max_items)),
-                ("max_bytes".to_string(), CtValue::Int(max_bytes)),
-                (
-                    "require_canonical".to_string(),
-                    CtValue::Bool(require_canonical),
-                ),
-            ],
+            fields,
         }
     });
     match jet_codegen::Comptime::cbor_parse_for_tir(&input, options.as_ref(), allow_bytes) {
@@ -2063,6 +1811,142 @@ extern "C" fn jet_jit_bytes_datatree(bytes: i64) -> i64 {
     alloc_dt_record(DT_BYTES, bytes)
 }
 
+fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, String> {
+    match kind {
+        CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE => {
+            let text = crate::Time::with_time(value, |value| match value {
+                TimeValue::Date(date) => Some(codec_rt::jet_codec_date_encode(
+                    date.year(),
+                    date.month(),
+                    date.day(),
+                )),
+                _ => None,
+            });
+            text.map(json_rt::DataTree::Text)
+                .ok_or_else(|| "invalid Date codec value".to_string())
+        }
+        CODEC_KIND_LOCAL_TIME => {
+            let text = crate::Time::with_time(value, |value| match value {
+                TimeValue::LocalTime(time) => Some(codec_rt::jet_codec_local_time_encode(
+                    time.hour(),
+                    time.minute(),
+                    time.second(),
+                )),
+                _ => None,
+            });
+            text.map(json_rt::DataTree::Text)
+                .ok_or_else(|| "invalid LocalTime codec value".to_string())
+        }
+        CODEC_KIND_DATETIME => {
+            let text = crate::Time::with_time(value, |value| match value {
+                TimeValue::DateTime(datetime) => {
+                    Some(codec_rt::jet_codec_datetime_encode(
+                        datetime.to_timestamp(),
+                        datetime.nanosecond() as u32,
+                    ))
+                }
+                _ => None,
+            });
+            text.map(json_rt::DataTree::Text)
+                .ok_or_else(|| "invalid DateTime codec value".to_string())
+        }
+        CODEC_KIND_DURATION => Ok(json_rt::DataTree::Int(codec_rt::jet_codec_duration_encode(value))),
+        CODEC_KIND_DECIMAL => {
+            let decimal = Concurrency::with_runtime_mut(|rt| {
+                let index = value.saturating_sub(1) as usize;
+                rt.decimal_values
+                    .get(index)
+                    .and_then(|decimal| decimal.as_ref())
+                    .cloned()
+            })
+            .ok_or_else(|| "invalid Decimal codec value".to_string())?;
+            Ok(json_rt::DataTree::Text(codec_rt::jet_codec_decimal_encode(
+                &decimal,
+            )))
+        }
+        _ => Err(format!("unknown codec kind {kind}")),
+    }
+}
+
+extern "C" fn jet_jit_codec_encode(kind: i64, value: i64) -> i64 {
+    let tree = match jit_codec_encode_tree(kind, value) {
+        Ok(tree) => tree,
+        Err(error) => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap(&error));
+            json_rt::DataTree::Null
+        }
+    };
+    alloc_datatree(&tree)
+}
+
+extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
+    let Some(tree) = read_datatree(tree) else {
+        return result_err_decode("", "invalid DataTree");
+    };
+    match (kind, tree) {
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_date_decode(&text) {
+                Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
+                    crate::Time::time_rt::JetDate::new(year, month, day),
+                )) as u64),
+                Err(error) => result_err_decode("", &format!("expected Date: {error}")),
+            }
+        }
+        (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_local_time_decode(&text) {
+                Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
+                    crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
+                )) as u64),
+                Err(error) => result_err_decode("", &format!("expected LocalTime: {error}")),
+            }
+        }
+        (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_datetime_decode(&text) {
+                Ok((secs, nanos)) => result_ok(crate::Time::push(TimeValue::DateTime(
+                    crate::Time::time_rt::JetDateTime::from_timestamp_ns(secs, nanos),
+                )) as u64),
+                Err(error) => result_err_decode("", &format!("expected DateTime: {error}")),
+            }
+        }
+        (CODEC_KIND_DURATION, json_rt::DataTree::Int(ns)) => {
+            result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
+        }
+        (CODEC_KIND_DECIMAL, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_decimal_decode_text(&text) {
+                Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
+                Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
+            }
+        }
+        (CODEC_KIND_DECIMAL, json_rt::DataTree::Int(value)) => {
+            match codec_rt::jet_codec_decimal_decode_int(value) {
+                Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
+                Err(error) => result_err_decode("", &error),
+            }
+        }
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, other) => result_err_decode(
+            "",
+            &format!("expected Date, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_LOCAL_TIME, other) => result_err_decode(
+            "",
+            &format!("expected LocalTime, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_DATETIME, other) => result_err_decode(
+            "",
+            &format!("expected DateTime, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_DURATION, other) => result_err_decode(
+            "",
+            &format!("expected Duration, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_DECIMAL, other) => result_err_decode(
+            "",
+            &format!("expected Decimal, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (_, _) => result_err_decode("", "unknown codec kind"),
+    }
+}
+
 host_fns! {
     struct EncodingHostFns;
     register: register_encoding_symbols;
@@ -2132,6 +2016,8 @@ host_fns! {
     cbor_decode_tree: "jet_jit_cbor_decode_tree" => jet_jit_cbor_decode_tree: sig_unary;
     cbor_decode_tree_options: "jet_jit_cbor_decode_tree_options" => jet_jit_cbor_decode_tree_options: sig_binary;
     bytes_datatree: "jet_jit_bytes_datatree" => jet_jit_bytes_datatree: sig_unary;
+    codec_encode: "jet_jit_codec_encode" => jet_jit_codec_encode: sig_binary;
+    codec_decode: "jet_jit_codec_decode" => jet_jit_codec_decode: sig_binary;
     csv_decode_trees: "jet_jit_csv_decode_trees" => jet_jit_csv_decode_trees: sig_unary;
     datatree_field: "jet_jit_datatree_field" => jet_jit_datatree_field: sig_binary;
     datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;

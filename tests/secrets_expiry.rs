@@ -9,7 +9,6 @@ fn expiring_secret_lends_then_zeroizes_on_expiry() {
 
     let src = r#"
 use core.crypto as crypto
-use core.tasks as tasks
 use core.time as time
 use core.vault as vault
 
@@ -19,31 +18,31 @@ fn run() {
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
 
-    if secret.with((borrowed) => borrowed.public_key()) == Ok(_) {
+    if secret.with((borrowed) => borrowed.public_key()) == .Ok(_) {
         print("available")
     }
     fork := ~clock
     fork.tick(1001)
-    if secret.with((borrowed) => borrowed.public_key()) == Ok(_) {
+    if secret.with((borrowed) => borrowed.public_key()) == .Ok(_) {
         print("forked")
     }
     clock.tick(1001)
-    if secret.with((borrowed) => borrowed.public_key()) == Err(_) {
+    if secret.with((borrowed) => borrowed.public_key()) == .Err(_) {
         print("expired")
     }
     clock.advance(0)
-    if secret.with((borrowed) => borrowed.public_key()) == Err(_) {
+    if secret.with((borrowed) => borrowed.public_key()) == .Err(_) {
         print("sticky")
     }
 
     thread_key := crypto.SigningKey.new_random() ?? panic("thread key")
     threaded := vault.ExpiringSecret.new(^thread_key, ttl, clock)
-    task := tasks.spawn(() => {
-        if threaded.with((borrowed) => borrowed.public_key()) == Ok(_) {
+    handle := task {
+        if threaded.with((borrowed) => borrowed.public_key()) == .Ok(_) {
             print("threaded")
         }
-    })
-    task.join()
+    }
+    handle.join() ?? panic("task failed")
 }
 "#;
     let (code, stdout, stderr) =
@@ -252,7 +251,7 @@ use core.crypto as crypto
 use core.vault as vault
 
 fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) =[]=> Bool {
-    return secret.with((borrowed) => borrowed.public_key()) == Ok(_)
+    return secret.with((borrowed) => borrowed.public_key()) == .Ok(_)
 }
 fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")

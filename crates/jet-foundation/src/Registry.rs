@@ -253,7 +253,83 @@ pub struct DiagnosticRow {
     pub fix: &'static str,
     pub template_holes: &'static [&'static str],
     pub detail: bool,
-    pub structured_fix: Option<&'static str>,
+    pub structured_fix: Option<StructuredFix>,
+}
+
+/// Machine-applicable behavior declared by a diagnostic row.
+///
+/// The source spelling stays a small, inspectable marker in
+/// `Diagnostics.jet`; this typed projection is what emitters consume. Human
+/// Fix prose is never parsed to recover one of these facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuredFix {
+    CryptoMisuse,
+    Replace {
+        from: &'static str,
+        to: &'static str,
+    },
+    Remove {
+        text: &'static str,
+    },
+    GeneratedMarkerGroup,
+    GeneratedMissingArms,
+    GeneratedScriptRun,
+}
+
+impl StructuredFix {
+    pub fn source_marker(self) -> String {
+        match self {
+            Self::CryptoMisuse => "crypto_misuse".to_string(),
+            Self::Replace { from, to } => format!("replace:{from}=>{to}"),
+            Self::Remove { text } => format!("remove:{text}"),
+            Self::GeneratedMarkerGroup => "generated:marker_group".to_string(),
+            Self::GeneratedMissingArms => "generated:missing_arms".to_string(),
+            Self::GeneratedScriptRun => "generated:script_run".to_string(),
+        }
+    }
+}
+
+/// The three user-facing messages after a row's named holes are filled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderedDiagnostic {
+    pub what: String,
+    pub why: String,
+    pub fix: String,
+}
+
+impl DiagnosticRow {
+    /// Fill this row's What/Why/Fix templates from named values.
+    ///
+    /// A value must name a hole declared by the row, and every declared hole
+    /// must be supplied. This keeps emit sites from silently inventing a
+    /// second template protocol.
+    pub fn render(&self, holes: &[(&str, &str)]) -> RenderedDiagnostic {
+        for &(name, _) in holes {
+            assert!(
+                self.template_holes.iter().any(|hole| *hole == name),
+                "diagnostic `{}` has no template hole `{name}`",
+                self.code
+            );
+            assert_eq!(
+                holes.iter().filter(|entry| entry.0 == name).count(),
+                1,
+                "diagnostic `{}` receives template hole `{name}` more than once",
+                self.code
+            );
+        }
+        for &name in self.template_holes {
+            assert!(
+                holes.iter().any(|entry| entry.0 == name),
+                "diagnostic `{}` is missing template hole `{name}`",
+                self.code
+            );
+        }
+        RenderedDiagnostic {
+            what: render_template(self.what, holes),
+            why: render_template(self.why, holes),
+            fix: render_template(self.fix, holes),
+        }
+    }
 }
 
 /// D-FACT-LAW1=B / D-FACTDECL1=A: the non-code rows are read from Prelude
@@ -348,7 +424,10 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     };
     let structured_fix = match fields[11] {
         "-" => None,
-        value => Some(leak(&unescape_source(value))),
+        value => {
+            let marker = leak(&unescape_source(value));
+            Some(structured_fix_from_source(marker, line))
+        }
     };
     DiagnosticRow {
         code,
@@ -366,7 +445,95 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     }
 }
 
+fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix {
+    if value == "crypto_misuse" {
+        return StructuredFix::CryptoMisuse;
+    }
+    if let Some(text) = value.strip_prefix("remove:") {
+        assert!(!text.is_empty(), "empty structured remove fix in {line}");
+        return StructuredFix::Remove { text };
+    }
+    if let Some(replacement) = value.strip_prefix("replace:") {
+        let (from, to) = replacement
+            .split_once("=>")
+            .unwrap_or_else(|| panic!("structured replace fix needs `=>` in {line}"));
+        assert!(
+            !from.is_empty() && !to.is_empty(),
+            "structured replace fix needs non-empty sides in {line}"
+        );
+        return StructuredFix::Replace {
+            from: leak(from),
+            to: leak(to),
+        };
+    }
+    if let Some(kind) = value.strip_prefix("generated:") {
+        return match kind {
+            "marker_group" => StructuredFix::GeneratedMarkerGroup,
+            "missing_arms" => StructuredFix::GeneratedMissingArms,
+            "script_run" => StructuredFix::GeneratedScriptRun,
+            _ => panic!("unknown generated structured fix `{kind}` in {line}"),
+        };
+    }
+    panic!("unknown structured diagnostic fix `{value}` in {line}");
+}
+
+fn render_template(template: &str, holes: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'{' && bytes.get(index + 1) == Some(&b'{') {
+            out.push('{');
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'}' && bytes.get(index + 1) == Some(&b'}') {
+            out.push('}');
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'{' {
+            if let Some(close_offset) = template[index + 1..].find('}') {
+                let close = index + 1 + close_offset;
+                let name = &template[index + 1..close];
+                if !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                {
+                    let value = holes
+                        .iter()
+                        .find(|entry| entry.0 == name)
+                        .map(|entry| entry.1)
+                        .unwrap_or_else(|| panic!("missing diagnostic template hole `{name}`"));
+                    out.push_str(value);
+                    index = close + 1;
+                    continue;
+                }
+            }
+        }
+        let character = template[index..]
+            .chars()
+            .next()
+            .expect("template index is on a character boundary");
+        out.push(character);
+        index += character.len_utf8();
+    }
+    out
+}
+
+/// A row field whose text itself contains backticks is written as a markdown
+/// code span (`` … ``) in Diagnostics.jet. The fence is table notation, not
+/// product copy — strip it before the template is stored.
+fn strip_code_span_fence(value: &str) -> &str {
+    value
+        .strip_prefix("`` ")
+        .and_then(|rest| rest.strip_suffix(" ``"))
+        .unwrap_or(value)
+}
+
 fn unescape_source(value: &str) -> String {
+    let value = strip_code_span_fence(value);
     let mut out = String::with_capacity(value.len());
     let mut escaped = false;
     for character in value.chars() {
@@ -938,7 +1105,7 @@ mod tests {
     use super::{
         diagnostic, diagnostic_registry_rows, diagnostic_rows, law_violations, row, rows,
         RowKind, RowTarget, SafeDirection, TYPE_PLANE_INTERVAL, TYPE_PLANE_OBLIGATION,
-        TYPE_PLANE_ROWS,
+        TYPE_PLANE_ROWS, StructuredFix,
     };
 
     #[test]
@@ -1120,5 +1287,31 @@ mod tests {
             diagnostic_rows().len(),
             "every typed row must be in the shared registration table"
         );
+    }
+
+    #[test]
+    fn row_templates_and_structured_fixes_are_typed() {
+        let layout = diagnostic("E0959").expect("E0959 row");
+        let rendered = layout.render(&[("type", "Point"), ("member", "size")]);
+        assert!(rendered.what.contains("Point.size"));
+
+        let crypto = diagnostic("E2702").expect("E2702 row");
+        assert_eq!(
+            crypto.structured_fix,
+            Some(StructuredFix::CryptoMisuse)
+        );
+        assert_eq!(
+            diagnostic("E0999").and_then(|row| row.structured_fix),
+            Some(StructuredFix::GeneratedMarkerGroup)
+        );
+        let rendered = crypto.render(&[("why", "the bound is 32 bytes"), ("fix", "pass 32 bytes")]);
+        assert_eq!(rendered.why, "the bound is 32 bytes");
+        assert_eq!(rendered.fix, "pass 32 bytes");
+
+        for row in diagnostic_rows() {
+            if let Some(fix) = row.structured_fix {
+                assert!(!fix.source_marker().is_empty(), "{} has an empty typed fix", row.code);
+            }
+        }
     }
 }

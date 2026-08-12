@@ -1,6 +1,5 @@
 // D-SHIELDNAME1=A / R12: AOT and dev both defer race cancellation until the
 // shielded commit finishes. Code after the block never runs.
-use core.tasks as tasks
 use core.time as time
 
 fn shielded_commit() => Int {
@@ -15,7 +14,10 @@ fn shielded_commit() => Int {
 fn fast_seven() => Int = 7
 fn run() {
     task.group g {
-        winner :: task.race { shielded_commit(), fast_seven() }
+        winner :: task.race {
+            shielded_commit(),
+            fast_seven()
+        } ?? panic("race failed")
         print(winner)
     }
 }

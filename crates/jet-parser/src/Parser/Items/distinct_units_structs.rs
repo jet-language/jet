@@ -165,7 +165,7 @@ impl<'a> Parser<'a> {
                     Some(span),
                 );
                 if type_markers.iter().all(|marker| marker.args.is_empty()) {
-                    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+                    diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
                         span,
                         new_text: format!(
                             "#[{}]",

@@ -33,6 +33,10 @@ pub mod RegexSyntax;
 pub mod Registry;
 pub mod SHA256;
 pub mod MatchScan;
+/// One monotonic epoch for every in-process adapter. AOT embeds the same
+/// source once; JIT, TIR, and comptime call this Foundation module instead of
+/// creating textual copies of the state.
+pub mod Monotonic;
 pub mod Names;
 pub mod StreamCursor;
 pub mod StructuralDebug;
@@ -40,12 +44,15 @@ pub mod Syntax;
 pub mod TargetMachine;
 pub mod Terminal;
 pub mod Traits;
-pub mod TypedHeads;
 pub mod WasmDebug;
 pub mod WebApp;
 pub mod WebPartition;
 pub mod XmlPull;
 pub mod XmlKernel;
+#[path = "CborBudget.rs"]
+pub mod CborBudget;
+#[path = "CborKernel.rs"]
+pub mod CborKernel;
 #[path = "BaseEncodingStrict.rs"]
 pub mod base_encoding_strict;
 #[path = "BaseEncodingDispatch.rs"]

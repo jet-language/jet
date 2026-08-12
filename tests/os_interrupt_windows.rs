@@ -3,7 +3,7 @@
 mod common;
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -103,10 +103,21 @@ fn windows_console_ctrl_c_runs_all_handlers_in_order() {
         thread::sleep(Duration::from_millis(10));
     };
     assert!(status.success(), "generated child failed: {status}");
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
     let second = lines_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("second handler produced no output")
         .unwrap();
     assert_eq!(second, "second");
     assert!(lines_rx.try_recv().is_err(), "unexpected handler output");
+    assert!(
+        stderr.contains("panic: first handler failed"),
+        "first handler panic lost its interrupt boundary diagnostic: {stderr:?}"
+    );
 }

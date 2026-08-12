@@ -93,22 +93,32 @@ pub(crate) fn lambda_body_ty_expecting(
         }
         lam_env
     }
-    match &lam.body {
+    // Type probing lowers the expression to recover its total type, but the
+    // probe is not the executable TIR pass. Do not publish spawn callbacks it
+    // discovers into the shared JIT lambda table; the real lowering pass that
+    // follows owns those entries and their site indexes.
+    let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    let body_ty = match &lam.body {
         LambdaBody::Expr(e) => {
             let mut lam_env = bind_params(lam, env, expected_params);
             lower_expr(e, cx, &mut lam_env).ty
         }
         LambdaBody::Block(stmts) => {
-            let Some((_, tail)) = lambda_block_tail(stmts) else {
-                return unit_type();
-            };
-            let mut lam_env = bind_params(lam, env, expected_params);
-            match tail {
-                Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
-                _ => unit_type(),
+            if let Some((_, tail)) = lambda_block_tail(stmts) {
+                let mut lam_env = bind_params(lam, env, expected_params);
+                match tail {
+                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => {
+                        lower_expr(e, cx, &mut lam_env).ty
+                    }
+                    _ => unit_type(),
+                }
+            } else {
+                unit_type()
             }
         }
-    }
+    };
+    *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
+    body_ty
 }
 
 /// c109 Phase 6/13: lower method-call arguments. The clone/Arc, borrow, and mut-borrow
@@ -138,16 +148,20 @@ pub(crate) fn lower_method_args(
 ///      ` as <fn-type>` when already wrapped);
 ///   3. the borrow wrapper (`&(…)` for a `Read` non-scalar non-Fn, `&mut (…)` for a
 ///      `Mutate`).
-pub(crate) fn lower_one_call_arg(
+pub(crate) fn lower_call_arg_value(
     a: &crate::AST::CallArg,
     conv: Option<(AccessConvention, Type)>,
     env: &mut LowerEnv,
     cx: &Cx,
-) -> TCallArg {
-    let resource_move = matches!(
-        (&a.expr, &conv),
-        (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
-    );
+) -> TExpr {
+    let saved_binder_refs = env.binder_refs.clone();
+    let site = a.flags.binder_site.unwrap_or(a.span.start as u32);
+    for (name, slot, ty) in &a.flags.binder_refs {
+        env.binder_refs.insert(
+            name.clone(),
+            (format!("__jet_arg{site}_{slot}"), ty.clone()),
+        );
+    }
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
@@ -189,6 +203,22 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
+    env.binder_refs = saved_binder_refs;
+    value
+}
+
+pub(crate) fn lower_one_call_arg(
+    a: &crate::AST::CallArg,
+    conv: Option<(AccessConvention, Type)>,
+    env: &mut LowerEnv,
+    cx: &Cx,
+) -> TCallArg {
+    let resource_move = matches!(
+        (&a.expr, &conv),
+        (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
+    );
+    let value = super::take_scheduled_expr(&a.expr)
+        .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx));
     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
     let value = match (&conv, value) {
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {

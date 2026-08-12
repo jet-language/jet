@@ -355,15 +355,13 @@ fn run() {
 fn allocator_handles_are_thread_confined() {
     let src = r#"
 use core.mem
-use core.tasks as tasks
-
 fn run() {
     arena :: mem.Arena.new()
-    task :: tasks.spawn(() => {
+    handle :: task {
         value :: arena.alloc(1)
         print(value)
-    })
-    task.join()
+    }
+    handle.join() ?? panic("task failed")
 }
 "#;
     let diags = compile_jet(src).expect_err("allocators must not cross task boundaries");

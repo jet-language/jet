@@ -16,10 +16,10 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address failed")
     mux :: server.mux()
     mux.get("/", (req: HTTPRequest) => handle(req))
-    t :: tasks.spawn(() => {
+    t :: task {
         server.serve_once_listener(listener, mux) ?? panic("serve failed")
-    })
+    }
     resp :: http.get("http://{addr}/") ?? panic("http get failed")
     print(resp.body().text(8388608) ?? panic("body failed"))
-    t.join()
+    t.join() ?? panic("server failed")
 }

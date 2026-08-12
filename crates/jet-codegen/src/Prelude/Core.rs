@@ -18,7 +18,7 @@ impl JetShow for JetPeriod {
 
 impl JetShow for JetInstant {
     fn jet_show(&self) -> String {
-        "Instant".to_string()
+        self.to_string_fmt()
     }
 }
 
@@ -30,12 +30,96 @@ impl JetShow for JetDateTime {
 
 impl JetShow for JetZone {
     fn jet_show(&self) -> String {
-        self.name.clone()
+        self.to_string_fmt()
     }
 }
 
 impl JetShow for JetZonedDateTime {
     fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetDate {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetDate {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetLocalTime {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetLocalTime {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetPeriod {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetPeriod {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetInstant {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetInstant {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetDateTime {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetDateTime {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetZone {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetZone {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetZonedDateTime {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetZonedDateTime {
+    fn jet_debug(&self) -> String {
         self.to_string_fmt()
     }
 }
@@ -572,6 +656,9 @@ fn jet_panic_rich(
         }));
     }
     jet_proof_record(2, 1, "panic", msg, file, line);
+    if jet_runtime_should_unwind() {
+        panic!("{} (at {}:{})", msg, file, line);
+    }
     let line_s = line.to_string();
     let margin = line_s.len();
     let pad = " ".repeat(margin);
@@ -584,9 +671,6 @@ fn jet_panic_rich(
     eprintln!("   {}| {}{}", pad, " ".repeat(col_offset), caret);
     if !locals.is_empty() {
         eprintln!("locals: {}", locals);
-    }
-    if jet_runtime_should_unwind() {
-        panic!("{} (at {}:{})", msg, file, line);
     }
     jet_runtime_exit();
 }
@@ -630,18 +714,8 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
-    let len = xs.len() as i64;
-    if i < 0 || i >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "the list has {} items, so position {} doesn't exist",
-                len, i
-            ),
-        );
-    }
-    xs[i as usize].clone()
+    jet_fixed_list_index(xs.len(), i, |index| xs[index].clone())
+        .unwrap_or_else(|error| jet_panic(file, line, &error.message()))
 }
 fn jet_index_vec_mut<'a, T>(
     xs: &'a mut [T],
@@ -649,18 +723,8 @@ fn jet_index_vec_mut<'a, T>(
     file: &str,
     line: u32,
 ) -> &'a mut T {
-    let len = xs.len() as i64;
-    if i < 0 || i >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "the list has {} items, so position {} doesn't exist",
-                len, i
-            ),
-        );
-    }
-    &mut xs[i as usize]
+    jet_fixed_list_index(xs.len(), i, |index| &mut xs[index])
+        .unwrap_or_else(|error| jet_panic(file, line, &error.message()))
 }
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
@@ -726,16 +790,23 @@ fn jet_slice_range<T: Clone>(
 // Their bounds share `jet_range_bounds` with owned slicing and every engine.
 // The returned lifetime is tied to `xs`; sema proves the window cannot outlive
 // the owner or survive a storage-changing mutation.
-fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'a [T] {
-    let len = xs.len() as i64;
-    if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(
-            file,
-            line,
-            &format!("can't view {} items from {} to {} (inclusive)", len, a, b),
-        );
+fn jet_checked_view_window(
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    len: i64,
+    file: &str,
+    line: u32,
+) -> (i64, i64) {
+    match jet_checked_view_bounds(start, end, exclusive, len) {
+        Ok(bounds) => bounds,
+        Err(message) => jet_panic(file, line, &message),
     }
-    &xs[a as usize..=b as usize]
+}
+
+fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'a [T] {
+    let (start, end) = jet_checked_view_window(a, b, false, xs.len() as i64, file, line);
+    &xs[start as usize..end as usize]
 }
 
 fn jet_view_mut_new<'a, T>(
@@ -745,15 +816,8 @@ fn jet_view_mut_new<'a, T>(
     file: &str,
     line: u32,
 ) -> &'a mut [T] {
-    let len = xs.len() as i64;
-    if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(
-            file,
-            line,
-            &format!("can't view {} items from {} to {} (inclusive)", len, a, b),
-        );
-    }
-    &mut xs[a as usize..=b as usize]
+    let (start, end) = jet_checked_view_window(a, b, false, xs.len() as i64, file, line);
+    &mut xs[start as usize..end as usize]
 }
 
 fn jet_views_mut_new<'a, T>(
@@ -764,18 +828,17 @@ fn jet_views_mut_new<'a, T>(
     let len = xs.len() as i64;
     let mut ordered = Vec::with_capacity(ranges.len());
     for (index, &(start, end, line)) in ranges.iter().enumerate() {
-        if start < 0 || end < 0 || start > end || end >= len {
-            jet_panic(
-                file,
-                line,
-                &format!(
-                    "can't view {} items from {} to {} (inclusive)",
-                    len, start, end
-                ),
-            );
-        }
-        ordered.push((start as usize, end as usize + 1, index));
+        let (start, end) = jet_checked_view_window(start, end, false, len, file, line);
+        ordered.push((start as usize, end as usize, index));
     }
+    jet_views_mut_from_windows(xs, ordered, file)
+}
+
+fn jet_views_mut_from_windows<'a, T>(
+    xs: &'a mut [T],
+    mut ordered: Vec<(usize, usize, usize)>,
+    file: &str,
+) -> Vec<&'a mut [T]> {
     ordered.sort_by_key(|&(start, end, _)| (start, end));
     if ordered.windows(2).any(|pair| pair[0].1 > pair[1].0) {
         jet_panic(file, 0, "mutable view ranges overlap");
@@ -800,15 +863,23 @@ fn jet_views_mut_range_new<'a, T>(
     ranges: &[(JetRange, u32)],
     file: &str,
 ) -> Vec<&'a mut [T]> {
-    let bounds = ranges
+    let len = xs.len() as i64;
+    let windows = ranges
         .iter()
-        .map(|(range, line)| {
-            let checked =
-                jet_checked_range_bounds(xs.len() as i64, range, "view", file, *line);
-            (checked.start as i64, checked.end as i64 - 1, *line)
+        .enumerate()
+        .map(|(index, (range, line))| {
+            let (start, end) = jet_checked_view_window(
+                range.start,
+                range.end,
+                range.exclusive,
+                len,
+                file,
+                *line,
+            );
+            (start as usize, end as usize, index)
         })
         .collect::<Vec<_>>();
-    jet_views_mut_new(xs, &bounds, file)
+    jet_views_mut_from_windows(xs, windows, file)
 }
 
 // D-MEMDISJOINT1=A: runtime disjointness is proved once, before any mutable
@@ -861,7 +932,15 @@ fn jet_view_range_new<'a, T>(
     file: &str,
     line: u32,
 ) -> &'a [T] {
-    &xs[jet_checked_range_bounds(xs.len() as i64, range, "view", file, line)]
+    let (start, end) = jet_checked_view_window(
+        range.start,
+        range.end,
+        range.exclusive,
+        xs.len() as i64,
+        file,
+        line,
+    );
+    &xs[start as usize..end as usize]
 }
 
 fn jet_view_mut_range_new<'a, T>(
@@ -870,18 +949,19 @@ fn jet_view_mut_range_new<'a, T>(
     file: &str,
     line: u32,
 ) -> &'a mut [T] {
-    let bounds = jet_checked_range_bounds(xs.len() as i64, range, "view", file, line);
-    &mut xs[bounds]
+    let (start, end) = jet_checked_view_window(
+        range.start,
+        range.end,
+        range.exclusive,
+        xs.len() as i64,
+        file,
+        line,
+    );
+    &mut xs[start as usize..end as usize]
 }
 
 fn jet_check_view_bounds(len: i64, a: i64, b: i64, file: &str, line: u32) {
-    if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(
-            file,
-            line,
-            &format!("can't view {} items from {} to {} (inclusive)", len, a, b),
-        );
-    }
+    let _ = jet_checked_view_window(a, b, false, len, file, line);
 }
 // D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
 // (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family

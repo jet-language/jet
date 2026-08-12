@@ -179,10 +179,10 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
     }
-    // D-CONC-SPAWN1=D: canonical task nodes lower through the same scoped
-    // spawn/select TIR shapes as the pre-existing task implementation.
+    // D-CONC-SPAWN1=D: canonical task nodes lower through the same spawn/select
+    // TIR shapes as the pre-existing task implementation.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-        && method == "spawn"
+        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
     {
         return args.len() == 1
             && args[0].label.is_none()
@@ -190,7 +190,12 @@ pub(crate) fn method_call_in_subset(
             && expr_in_subset(&args[0].expr, cx, locals);
     }
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-        && matches!(method, "all" | "race" | "any")
+        && matches!(
+            method,
+            Syntax::INTERNAL_TASK_ALL_METHOD
+                | Syntax::INTERNAL_TASK_RACE_METHOD
+                | Syntax::INTERNAL_TASK_ANY_METHOD
+        )
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
@@ -199,7 +204,7 @@ pub(crate) fn method_call_in_subset(
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     );
     if task_group_receiver
-        && method == Syntax::TASKGROUP_SPAWN_METHOD
+        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
     {
         return args.len() == 1
             && args[0].label.is_none()
@@ -209,13 +214,14 @@ pub(crate) fn method_call_in_subset(
     // D-CONC-SPAWN1=D: canonical `task.group` combinators use the same TIR
     // nodes as top-level `task.all`/`task.race`/`task.any`.
     if task_group_receiver
-        && method == Syntax::TASKGROUP_ALL_METHOD
+        && method == Syntax::INTERNAL_TASK_ALL_METHOD
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
     // D-CONC-SPAWN1=D: `task.race { … }` / `task.any { … }` — nested child combinators.
     if task_group_receiver
-        && (method == Syntax::TASKGROUP_RACE_METHOD || method == Syntax::TASKGROUP_ANY_METHOD)
+        && (method == Syntax::INTERNAL_TASK_RACE_METHOD
+            || method == Syntax::INTERNAL_TASK_ANY_METHOD)
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
@@ -411,12 +417,26 @@ pub(crate) fn method_call_in_subset(
                 return core_call_covered(&submodule, method)
                     && core_call_args_in_subset(&submodule, method, args, cx, locals);
             }
+            if let Expr::Field(base, leaf, _) = receiver {
+                if let Expr::Ident(owner, _) = base.as_ref() {
+                    if cx
+                        .inline_reexport_foreign
+                        .contains_key(&(owner.clone(), leaf.clone()))
+                    {
+                        return args.iter().all(|a| {
+                            !a.flags.shared_auto_clone
+                                && arg_conv_in_subset(a)
+                                && expr_in_subset(&a.expr, cx, locals)
+                        });
+                    }
+                }
+            }
         }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
                 if let Some(module) = cx.any_core_import_module(alias) {
-                    // c109 Phase 13: the two closure-taking core calls (`http.serve`/
-                    // `scope.guard`) — NOT in `core_fixed_sig`, each a
+                    // c109 Phase 13: closure-taking core calls (`tasks.spawn`,
+                    // `http.serve`, `scope.guard`) — NOT in `core_fixed_sig`, each a
                     // bespoke emit shape with a literal-lambda closure arg.
                     if core_closure_call_in_subset(module, method, args, cx, locals) {
                         return true;
@@ -430,6 +450,13 @@ pub(crate) fn method_call_in_subset(
                 {
                     return core_call_covered(module, real_method)
                         && core_call_args_in_subset(module, real_method, args, cx, locals);
+                }
+                if cx.any_foreign_import_module(alias).is_some() {
+                    return args.iter().all(|a| {
+                        !a.flags.shared_auto_clone
+                            && arg_conv_in_subset(a)
+                            && expr_in_subset(&a.expr, cx, locals)
+                    });
                 }
                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
@@ -675,9 +702,7 @@ pub(crate) fn method_call_in_subset(
     // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
     // `task`-produced. Tried after the collection builtins so a
     // list/map/string method can't be misclaimed.
-    if recv_type.is_none()
-        && (is_concurrency_method_name(method, args.len())
-            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
+    if recv_type.is_none() && is_concurrency_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -1129,7 +1154,17 @@ pub(crate) fn method_call_in_subset(
         .extern_funcs
         .contains_key(&foreign_binding_method_key(ty, method));
     let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()));
-    if sig.is_none() && !binding_method {
+    let distinct_numeric_operator = cx
+        .distinct_types
+        .get(ty)
+        .is_some_and(|(_, numeric)| *numeric)
+        && !cx.distinct_ranges.contains_key(ty)
+        && matches!(method, "add" | "sub" | "mul" | "div")
+        && args.len() == 1;
+    let distinct_trait_method = cx.distinct_types.contains_key(ty)
+        && (cx.trait_methods.contains(&(ty.clone(), method.to_string()))
+            || distinct_numeric_operator);
+    if sig.is_none() && !binding_method && !distinct_trait_method {
         // No user method: a name a core/stdlib/builtin/special lowering would intercept
         // *before* the user dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/
         // alloc special cases) has bespoke name-keyed lowering — exclude it (those are
@@ -1149,6 +1184,7 @@ pub(crate) fn method_call_in_subset(
     if !is_covered_struct_ty(&recv_ty, cx)
         && !is_covered_enum_ty(&recv_ty, cx)
         && !is_covered_foreign_value_ty(&recv_ty, cx)
+        && !distinct_trait_method
     {
         return false;
     }

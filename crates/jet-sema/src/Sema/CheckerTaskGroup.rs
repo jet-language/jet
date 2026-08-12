@@ -64,11 +64,35 @@ impl TaskGroupCtx {
     fn next_synth(&mut self) -> String {
         let n = self.synth_counter;
         self.synth_counter += 1;
-        Syntax::generated_name(&format!("tg_{n}"))
+        jet_foundation::Names::mangle(&format!("tg_{n}"))
     }
 }
 
 impl<'a> Checker<'a> {
+    /// D-CONC-FAIL1=A: every task surface operation reports the same typed
+    /// failure rail. The combinator's successful payload remains its natural
+    /// value; cancellation, deadline, and child panic use TaskFailure.
+    fn task_failure_result(ok: Type) -> Type {
+        Type::Result {
+            ok: Box::new(ok),
+            err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
+        }
+    }
+
+    fn reject_empty_task_branches(&mut self, method_label: &str, expr: &Expr) -> bool {
+        if !matches!(expr, Expr::ListLit(branches, _) if branches.is_empty()) {
+            return false;
+        }
+        self.diags.push(Diagnostic::error(
+            "E1112",
+            format!("{method_label} needs at least one task branch"),
+            "a task combinator must have a child to join or select".to_string(),
+            format!("write {method_label} {{ work() }} with one or more branches"),
+            Some(expr.span()),
+        ));
+        true
+    }
+
     pub(crate) fn active_taskgroup(&self) -> Option<&TaskGroupCtx> {
         self.taskgroup_stack.last()
     }
@@ -83,7 +107,7 @@ impl<'a> Checker<'a> {
 
     /// D-CONC-SPAWN1=D: resolve parser-created `task` nodes without exposing
     /// the compiler-private receiver to ordinary name lookup. A lexical or
-    /// parameter group reuses the existing scoped-task machinery; a detached
+    /// parameter group reuses the existing canonical task machinery; a detached
     /// spawn and the top-level combinators use the same core task implementation.
     pub(crate) fn infer_task_surface_method(
         &mut self,
@@ -102,10 +126,12 @@ impl<'a> Checker<'a> {
                 _ => unreachable!("canonical task group receiver is an identifier"),
             };
             let ret = match method {
-                "spawn" => self.infer_task_spawn(Some(&group_name), args, span),
-                "all" => self.infer_taskgroup_all(args, span),
-                "race" => self.infer_taskgroup_race(args, span),
-                "any" => self.infer_taskgroup_any(args, span),
+                Syntax::INTERNAL_TASK_SPAWN_METHOD => {
+                    self.infer_task_spawn(Some(&group_name), args, span)
+                }
+                Syntax::INTERNAL_TASK_ALL_METHOD => self.infer_taskgroup_all(args, span),
+                Syntax::INTERNAL_TASK_RACE_METHOD => self.infer_taskgroup_race(args, span),
+                Syntax::INTERNAL_TASK_ANY_METHOD => self.infer_taskgroup_any(args, span),
                 _ => None,
             };
             *recv_type_out = Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE.to_string());
@@ -113,7 +139,7 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
-        if method == "spawn" {
+        if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             let ret = self.infer_task_spawn(None, args, span);
             *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
             *resolved_ret_out = ret.clone();
@@ -121,9 +147,9 @@ impl<'a> Checker<'a> {
         }
 
         let ret = match method {
-            "all" => self.infer_taskgroup_all(args, span),
-            "race" => self.infer_taskgroup_race(args, span),
-            "any" => self.infer_taskgroup_any(args, span),
+            Syntax::INTERNAL_TASK_ALL_METHOD => self.infer_taskgroup_all(args, span),
+            Syntax::INTERNAL_TASK_RACE_METHOD => self.infer_taskgroup_race(args, span),
+            Syntax::INTERNAL_TASK_ANY_METHOD => self.infer_taskgroup_any(args, span),
             _ => None,
         };
         *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
@@ -276,8 +302,9 @@ impl<'a> Checker<'a> {
     ///
     /// The ordinary view rules cannot see this. They end a borrow at the view
     /// binding's last lexical use, which is right, but a child holds its loan
-    /// past that point — it is still running. `spawn_scoped` erases the lifetime
-    /// inside a vetted-unsafe region, so rustc will not catch it either (I1).
+    /// past that point — it is still running. The canonical group `spawn` path
+    /// erases the lifetime inside a vetted-unsafe region, so rustc will not
+    /// catch it either (I1).
     ///
     /// Returns true when a conflict was reported.
     pub(crate) fn report_scoped_loan_conflict(
@@ -391,6 +418,34 @@ impl<'a> Checker<'a> {
         }
     }
 
+    pub(crate) fn mark_taskgroup_spawns_owned(&mut self, origin: TaskGroupOrigin) {
+        let contexts: Vec<&TaskGroupCtx> = match origin {
+            TaskGroupOrigin::Lexical => self.taskgroup_stack.last().into_iter().collect(),
+            TaskGroupOrigin::Parameter => self
+                .taskgroup_stack
+                .iter()
+                .filter(|ctx| ctx.origin == origin)
+                .collect(),
+        };
+        let pending: Vec<(String, Span)> = contexts
+            .into_iter()
+            .flat_map(|ctx| {
+                ctx.pending.iter().filter_map(|spawn| {
+                    (!spawn.consumed)
+                        .then(|| spawn.binding.clone())
+                        .flatten()
+                        .map(|name| (name, spawn.span))
+                })
+            })
+            .collect();
+        for (name, span) in pending {
+            if !self.flow.moved.contains(&name) {
+                self.mark_moved(name.clone(), span);
+            }
+            self.mark_taskgroup_spawn_consumed(&name);
+        }
+    }
+
     pub(crate) fn taskgroup_spawn_from_expr(expr: &Expr) -> Option<(&Expr, Span)> {
         match expr {
             Expr::MethodCall {
@@ -398,7 +453,7 @@ impl<'a> Checker<'a> {
                 method,
                 method_span,
                 ..
-            } if method == Syntax::TASKGROUP_SPAWN_METHOD => Some((receiver, *method_span)),
+            } if method == Syntax::INTERNAL_TASK_SPAWN_METHOD => Some((receiver, *method_span)),
             _ => None,
         }
     }
@@ -453,23 +508,6 @@ impl<'a> Checker<'a> {
                 gc_transferred: false,
         });
         true
-    }
-
-    pub(crate) fn append_taskgroup_auto_joins(&mut self, body: &mut Vec<Stmt>) {
-        let Some(ctx) = self.taskgroup_stack.last() else {
-            return;
-        };
-        for spawn in &ctx.pending {
-            if spawn.consumed {
-                continue;
-            }
-            let Some(name) = spawn.binding.clone() else {
-                continue;
-            };
-            body.push(Stmt::Expr(cancel_call(&name, spawn.span)));
-            body.push(Stmt::Expr(join_call(&name, spawn.span)));
-            self.flow.moved.set(&name, spawn.span);
-        }
     }
 
     pub(crate) fn infer_taskgroup_method(
@@ -533,6 +571,10 @@ impl<'a> Checker<'a> {
         let saved_esc = self.lambda_escapes;
         let saved_task = self.is_task_spawn;
         let saved_tg = self.in_taskgroup_spawn;
+        let binding = self.current_binding_name.clone();
+        let saved_binding = self.current_binding_name.take();
+        let saved_spawn_binding = self.task_spawn_binding_name.take();
+        self.task_spawn_binding_name = binding.clone();
         self.lambda_escapes = true;
         self.is_task_spawn = true;
         self.in_taskgroup_spawn = true;
@@ -540,6 +582,8 @@ impl<'a> Checker<'a> {
         self.lambda_escapes = saved_esc;
         self.is_task_spawn = saved_task;
         self.in_taskgroup_spawn = saved_tg;
+        self.current_binding_name = saved_binding;
+        self.task_spawn_binding_name = saved_spawn_binding;
 
         let t = match lam_ty {
             Some(Type::Fn { params, ret, .. }) => {
@@ -581,9 +625,14 @@ impl<'a> Checker<'a> {
                 args[0].expr.span(),
             );
         }
-        let binding = self.current_binding_name.clone();
         if let Some(receiver) = receiver {
-            self.register_taskgroup_spawn(receiver, binding, span);
+            // A task created while checking another task body belongs to the
+            // runtime group, not the outer task/result binding. The outer
+            // spawn is registered below its own binding after this lambda
+            // returns; nested branches must never create an auto-join for it.
+            if !saved_tg {
+                self.register_taskgroup_spawn(receiver, binding, span);
+            }
         }
         Some(Type::Apply {
             name: "Task".to_string(),
@@ -610,18 +659,13 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        // D-CONC-SPAWN1=D: each branch desugars into its own anonymous `task`
-        // spawn (see `task_surface_expr` in the parser). Those spawns belong
-        // to the combinator, not to whatever name the combinator's own result
-        // is bound to — inferring them under the outer binding name would
-        // register phantom pending group spawns under that name (harmless
-        // for a detached `task.all`, but `append_taskgroup_auto_joins` then
-        // tries to auto-`.cancel()`/`.join()` the combinator's own plain
-        // result value inside a lexical `task.group`). Clear it for the
-        // branch walk, exactly as a nested `check_binding` would.
-        let prev_binding_name = self.current_binding_name.take();
-        let arg_ty = self.infer(&mut args[0].expr);
-        self.current_binding_name = prev_binding_name;
+        if self.reject_empty_task_branches("`task.all`", &args[0].expr) {
+            return None;
+        }
+        // Branch spawns belong to the combinator, not to the binding that
+        // receives its result. Keep that outer binding out of the spawn
+        // registration while inferring the branch list.
+        let arg_ty = self.infer_taskgroup_branches(&mut args[0].expr);
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
@@ -658,7 +702,7 @@ impl<'a> Checker<'a> {
             None => return None,
         };
         self.mark_taskgroup_all_consumed(&args[0].expr);
-        Some(Type::List(Box::new(elem)))
+        Some(Self::task_failure_result(Type::List(Box::new(elem))))
     }
 
     fn infer_taskgroup_race(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
@@ -703,12 +747,10 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        // D-CONC-SPAWN1=D: see the matching comment in `infer_taskgroup_all` —
-        // each branch's anonymous spawn must not inherit the combinator
-        // result's own binding name.
-        let prev_binding_name = self.current_binding_name.take();
-        let arg_ty = self.infer(&mut args[0].expr);
-        self.current_binding_name = prev_binding_name;
+        if self.reject_empty_task_branches(method_label, &args[0].expr) {
+            return None;
+        }
+        let arg_ty = self.infer_taskgroup_branches(&mut args[0].expr);
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
@@ -744,7 +786,14 @@ impl<'a> Checker<'a> {
             None => return None,
         };
         self.mark_taskgroup_all_consumed(&args[0].expr);
-        Some(elem)
+        Some(Self::task_failure_result(elem))
+    }
+
+    fn infer_taskgroup_branches(&mut self, expr: &mut Expr) -> Option<Type> {
+        let saved_binding = self.current_binding_name.take();
+        let ty = self.infer(expr);
+        self.current_binding_name = saved_binding;
+        ty
     }
 
     fn mark_taskgroup_all_consumed(&mut self, expr: &Expr) {
@@ -1038,34 +1087,6 @@ impl<'a> Checker<'a> {
             Some(t) => t.clone(),
             None => Type::Named("Unit".to_string()),
         })
-    }
-}
-
-fn cancel_call(name: &str, span: Span) -> Expr {
-    Expr::MethodCall {
-        receiver: Box::new(Expr::Ident(name.to_string(), span)),
-        method: Syntax::METHOD_TASK_CANCEL.to_string(),
-        method_span: span,
-        owner_type_args: Vec::new(),
-        type_args: Vec::new(),
-        args: Vec::new(),
-        recv_type: None,
-        resolved_ret: None,
-        checked_widen: false,
-    }
-}
-
-fn join_call(name: &str, span: Span) -> Expr {
-    Expr::MethodCall {
-        receiver: Box::new(Expr::Ident(name.to_string(), span)),
-        method: Syntax::METHOD_TASK_SCOPE_JOIN.to_string(),
-        method_span: span,
-        owner_type_args: Vec::new(),
-        type_args: Vec::new(),
-        args: Vec::new(),
-        recv_type: None,
-        resolved_ret: None,
-        checked_widen: false,
     }
 }
 

@@ -17,9 +17,20 @@ use std::collections::HashSet;
             let collecting_loop = lam.meta.collecting_loop;
             let result_loop = lam.meta.result_loop;
             let inline_loop = collecting_loop || result_loop;
-            let (exp_params, exp_ret) = match expected {
-                Some(Type::Fn { params, ret, .. }) => (Some(params.as_slice()), ret.as_ref()),
-                _ => (None, None),
+            let (exp_params, exp_ret, exp_contract, exp_metadata) = match expected {
+                Some(Type::Fn {
+                    params,
+                    ret,
+                    param_contract,
+                    call_metadata,
+                    ..
+                }) => (
+                    Some(params.as_slice()),
+                    ret.as_ref(),
+                    param_contract.as_ref(),
+                    call_metadata.as_ref(),
+                ),
+                _ => (None, None, None, None),
             };
     
             if let Some(ep) = exp_params {
@@ -116,7 +127,7 @@ use std::collections::HashSet;
                     continue;
                 }
                 // D-TASKBORROW1=A: a write borrow (`&place`) is already a
-                // changeable place. Inside a taskgroup child it stays one; the
+                // changeable place. Inside a task group child it stays one; the
                 // disjointness proof below is what keeps the writes safe.
                 if self.in_taskgroup_spawn && self.is_write_borrow(name) {
                     continue;
@@ -162,8 +173,14 @@ use std::collections::HashSet;
                         let problem = if matches!(&cap_ty, Type::Fn { .. }) {
                             let callback_safe = self
                                 .lookup(name)
-                                .map(|info| info.interrupt_sendable)
-                                .unwrap_or(false);
+                                .map(|info| {
+                                    info.param_conv.is_none() && info.interrupt_sendable
+                                })
+                                .unwrap_or_else(|| {
+                                    self.funcs.contains_key(name)
+                                        || self.unqualified.contains_key(name)
+                                        || self.unqualified_file.contains_key(name)
+                                });
                             if callback_safe {
                                 None
                             } else {
@@ -213,7 +230,7 @@ use std::collections::HashSet;
                         self.diags.push(Diagnostic::error(
                             "E1110",
                             format!("`{name}` is a `TaskGroup` and cannot escape in a lambda"),
-                            "a taskgroup is a scoped spawn authority that may flow only through direct named-function calls"
+                            "a task group is a scoped spawn authority that may flow only through direct named-function calls"
                                 .to_string(),
                             format!(
                                 "move this work to `fn helper({name}: TaskGroup)` and call the helper directly"
@@ -224,10 +241,10 @@ use std::collections::HashSet;
                     }
                     let taken = take_set.contains(name);
                     let cloneable = is_cloneable(&cap_ty, self.registry);
-                    // D-TASKBORROW1=A: a `taskgroup` child is joined by its group,
+                    // D-TASKBORROW1=A: a `task.group` child is joined by its group,
                     // so it may borrow places the owner still holds. Reads are free;
                     // writes need proven-disjoint places. Detached tasks, channels,
-                    // and `tasks.spawn` keep the ownership-only rules below.
+                    // and detached tasks keep the ownership-only rules below.
                     if self.in_taskgroup_spawn {
                         let fallback = match cap_conv {
                             Some(AccessConvention::Write) => Some(ViewAccess::Write),
@@ -236,7 +253,15 @@ use std::collections::HashSet;
                         };
                         match self.admit_scoped_borrow(name, fallback, lam.span) {
                             Some(true) => {
-                                lam.meta.scoped_task_borrow = true;
+                                if self.is_task_spawn {
+                                    if let Some(binding) = self
+                                        .current_binding_name
+                                        .as_ref()
+                                        .or(self.task_spawn_binding_name.as_ref())
+                                    {
+                                        self.view_borrow_escape_tasks.insert(binding.clone());
+                                    }
+                                }
                                 continue;
                             }
                             Some(false) => continue,
@@ -352,8 +377,8 @@ use std::collections::HashSet;
                         // clone into the closure. Lock-ordered storage makes the clone
                         // Send without leaning on rustc.
                         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
-                        // Arc-backed "copyable door" meant to be captured freely across
-                        // `tasks.spawn` closures with no `take`; suppress the same lint.
+                                // Arc-backed "copyable door" meant to be captured freely across
+                                // `task` closures with no `take`; suppress the same lint.
                         if is_reactive_handle_ty(&cap_ty) {
                             if let Some(info) = self.lookup(name) {
                                 if info.reactive_local {
@@ -601,15 +626,13 @@ use std::collections::HashSet;
             // The builtin table is the authority for mutating receivers. Fold
             // its inferred roots into the same metadata explicit assignments
             // use, so `xs.push(x)` is FnMut just like `xs += [x]`.
-            if !escapes {
-                mut_caps.extend(inferred_mut_caps);
-                lam.meta.needs_fn_mut = !mut_caps.is_empty();
-                lam.meta.mut_captures = mut_caps
-                    .iter()
-                    .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
-                    .cloned()
-                    .collect();
-            }
+            mut_caps.extend(inferred_mut_caps);
+            lam.meta.needs_fn_mut = !mut_caps.is_empty();
+            lam.meta.mut_captures = mut_caps
+                .iter()
+                .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
+                .cloned()
+                .collect();
             self.in_lambda_body = saved_in_lambda_body;
             self.ret = saved_ret;
             self.expected_type = saved_expected;
@@ -684,11 +707,13 @@ use std::collections::HashSet;
             Some(Type::Fn {
                 params: param_types,
                 ret: ret_ty.map(Box::new),
-                // A lambda value is a concrete callback, not a demand for one — it
-                // carries no effect bound (D-EFF2 bounds ride callback *parameter*
-                // types, checked against this value at the call site).
-                effect_bound: None,
-                param_contract: None,
+                // A lambda value is a concrete callback, not a demand for one.
+                // A body sema proves effect-free publishes the empty bound so it
+                // satisfies `=[]=>` positions; anything else stays unbounded and
+                // the call-site D-EFF2 obligation solver decides.
+                effect_bound: crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new),
+                param_contract: exp_contract.cloned(),
+                call_metadata: exp_metadata.cloned(),
                 return_view_provenance: lambda_return_view_provenance,
             })
         }
@@ -788,7 +813,7 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
 }
 
 fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Diagnostics::Span) {
-    let target = Syntax::generated_name(&format!("collect_{}", span.start));
+    let target = jet_foundation::Names::mangle(&format!("collect_{}", span.start));
     rewrite_collect_yields(stmts, &target);
     stmts.insert(
         0,

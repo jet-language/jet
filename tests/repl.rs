@@ -2563,13 +2563,9 @@ fn repl_core_encoding_base32_and_base64url_dispatch() {
 
 // ── card #392 pass 3: `core.url` (D-URL1=A) now dispatches at comptime,
 // ported verbatim from AOT's `JetURL`/`jet_url_*` (`UrlMime.rs` +
-// `MathRandomTime.rs`, see `UrlLite.rs`). `Url` instance methods
-// (`.scheme()`/`.host()`/`.join()`/...) are a separate, pre-existing gap
-// (`net_text_time.rs`'s sema dispatch, not `fixed_sigs.rs`'s `"core.url"`
-// module table) — out of this pass's scope, so this transcript only
-// exercises the module-level free functions and reads their result via
-// plain string transforms (`percent_encode`/`percent_decode`/`query`) that
-// don't require an instance method to observe.
+// `MathRandomTime.rs`, see `UrlLite.rs`). `Url` instance methods use the same
+// canonical marshalled value path, so this transcript also observes their
+// rendered round trips rather than a Rust-shaped record fallback.
 #[test]
 fn repl_core_url_dispatch() {
     let inputs = &[
@@ -2590,16 +2586,14 @@ fn repl_core_url_dispatch() {
     assert!(out.contains("\"a%20b%2Fc\" : String"), "got: {out}");
     assert!(out.contains("a b : Result"), "got: {out}");
     assert!(out.contains("\"a=1&b=2%20c\" : String"), "got: {out}");
-    assert!(out.contains("Url(scheme: https"), "got: {out}");
-    // dot-segment normalization: `/a/../b` -> `/b`
-    assert!(out.contains("path: /b,"), "got: {out}");
+    assert!(out.contains("https://ex.com/b?x=1#f"), "got: {out}");
     // invalid scheme-less input takes the `Failed` branch (not E0956/panic) —
     // `jet_show`'s generic `Result` display collapses any `Failed` payload to
     // the literal `err` (`AST/comptime.rs`), so the specific message isn't
     // observable through plain auto-print; this only confirms the parser
     // rejected it rather than silently accepting garbage.
     assert!(out.contains("err : Result"), "got: {out}");
-    assert!(out.contains("Url(scheme: file"), "got: {out}");
+    assert!(out.contains("file:///tmp/x.txt"), "got: {out}");
 }
 
 // ── card #392 pass 3: `core.data`'s fixed-signature stats/plot surface now

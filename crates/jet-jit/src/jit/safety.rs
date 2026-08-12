@@ -25,6 +25,42 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
     })
 }
 
+fn resident_safe_compute_call(
+    method: &str,
+    args: &[TExpr],
+    callees: &HashSet<String>,
+) -> bool {
+    match (method, args) {
+        ("from_list", [values]) if jit_list_float_type(&values.ty) => {
+            resident_safe_expr(values, callees)
+        }
+        ("to_list", [tensor]) if tensor.ty.is_compute_tensor_family() => {
+            resident_safe_expr(tensor, callees)
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn is_packed_process_signal(expr: &TExpr) -> bool {
+    // Sema inserts `Expr::Copy` for this non-scalar field when it is used as
+    // an owning pattern subject. TIR represents that copy as `Clone`; it is a
+    // bitwise copy because the field's erased TIR type is Int. Keep the
+    // unwrap exact so no other cloned field becomes a packed Option carrier.
+    let field = match &expr.kind {
+        TExprKind::Clone(inner) => inner,
+        _ => expr,
+    };
+    match &field.kind {
+        TExprKind::Field {
+            recv,
+            field,
+            boxed: false,
+        } if field == "signal"
+            && matches!(&recv.ty, Type::Named(name) if name == "ProcessResult") => true,
+        _ => false,
+    }
+}
+
 fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
     use jet_foundation::AST::{CtReport, CtValue};
     match value {
@@ -107,6 +143,26 @@ pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
     )
 }
 
+fn jit_float_view_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.len() == 1
+                && matches!(&args[0], Type::Float)
+    )
+}
+
+fn jit_float_view_mut_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                && args.len() == 1
+                && matches!(&args[0], Type::Float)
+    )
+}
+
 pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::String))
         || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::String))
@@ -166,7 +222,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
             if matches!(
                 inner.as_ref(),
                 Type::Apply { name, args }
-                    if name == "ViewMut"
+                    if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                         && args.len() == 1
                         && (matches!(
                             &args[0],
@@ -195,7 +251,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         // handles — scalar elems share list for-in / join / len; record elems too.
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
-                || matches!(name.as_str(), "View" | "ViewMut"))
+                || matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
                 && args.len() == 1
                 && jit_list_native_type(&args[0]) =>
         {
@@ -204,7 +260,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         // Iterators produced by chunks/windows carry list-valued elements.
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
-                || matches!(name.as_str(), "View" | "ViewMut"))
+                || matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
                 && args.len() == 1
                 && (matches!(
                     &args[0],
@@ -230,7 +286,7 @@ pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
         }
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
-                || matches!(name.as_str(), "View" | "ViewMut"))
+                || matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
                 && args.len() == 1
                 && record_type_key(&args[0]).is_some() =>
         {
@@ -292,6 +348,15 @@ fn jit_map_intn_value_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { value, .. } if matches!(value.as_ref(), Type::IntN { .. }))
 }
 
+pub(crate) fn jit_list_task_type(ty: &Type) -> bool {
+    if let Type::List(inner) = ty {
+        if let Type::Apply { name, args } = inner.as_ref() {
+            return name == "Task" && args.len() == 1 && jit_concurrency_elem(&args[0]);
+        }
+    }
+    false
+}
+
 pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
     if let Type::List(inner) = ty {
         if let Type::Apply { name, args } = inner.as_ref() {
@@ -311,7 +376,11 @@ pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
             if jit_scalar_type(inner)
                 || matches!(
                     inner.as_ref(),
-                    Type::Named(_) | Type::String | Type::Tuple(_) | Type::List(_)
+                    Type::Named(_)
+                        | Type::String
+                        | Type::Tuple(_)
+                        | Type::List(_)
+                        | Type::FixedList { .. }
                 )
     )
 }
@@ -373,16 +442,20 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
                             | Type::Tuple(_)
                             | Type::List(_)
                         )
-                        || matches!(
-                            t.as_ref(),
-                            Type::Apply { name, .. }
-                                if matches!(
-                                    name.as_str(),
-                                    "CellReadGuard" | "CellEditGuard" | "ViewMut"
-                                )
-                        )
+                        || jit_tuple_handle_field(t)
                 })
     )
+}
+
+fn jit_tuple_handle_field(ty: &Type) -> bool {
+    match ty {
+        Type::Apply { name, .. } => matches!(
+            name.as_str(),
+            "CellReadGuard" | "CellEditGuard" | "SharedGuard" | "ViewMut"
+        ),
+        Type::Tagged { inner, .. } => jit_tuple_handle_field(inner),
+        _ => false,
+    }
 }
 
 pub(crate) fn jit_enum_type(ty: &Type) -> bool {
@@ -392,7 +465,7 @@ pub(crate) fn jit_enum_type(ty: &Type) -> bool {
 fn jit_compound_type(ty: &Type) -> bool {
     jit_list_native_type(ty)
         || jit_list_of_int_list_type(ty)
-        || jit_list_task_int_type(ty)
+        || jit_list_task_type(ty)
         || jit_list_record_type(ty)
         || jit_map_string_type(ty)
         || jit_struct_type(ty)
@@ -419,7 +492,9 @@ fn jit_compound_type(ty: &Type) -> bool {
                     ) || (name == "Bag" && jit_bag_raw_key_candidate(&args[0])))
         )
         || matches!(ty, Type::Apply { name, args }
-            if name == "View" && args.len() == 1 && jit_value_type(&args[0]))
+            if matches!(name.as_str(), "View" | "ComputeViewMut")
+                && args.len() == 1
+                && jit_value_type(&args[0]))
         || matches!(ty, Type::Named(name) if matches!(name.as_str(), "BitSet" | "ByteBuffer"))
         || matches!(ty, Type::Shared(_))
 }
@@ -438,6 +513,9 @@ pub(crate) fn jit_concurrency_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_value_type(ty: &Type) -> bool {
+    if ty.is_compute_tensor_family() {
+        return true;
+    }
     if let Some((base, _)) = ty.quantity_parts() {
         return jit_value_type(base);
     }
@@ -511,7 +589,7 @@ fn jit_cell_value_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR)
+    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR || n == jet_foundation::Syntax::TYPE_TASK_FAILURE)
         || jit_value_type(ty)
 }
 
@@ -926,6 +1004,31 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return (3..=7).contains(&args.len())
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
+            if module == "core.auth" {
+                return match method.as_str() {
+                    "register_user" if args.len() == 2 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "oauth_begin" if args.len() == 1 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "password_login" | "oauth_finish" if args.len() == 4 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "session_validate" if args.len() == 2 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "magic_link_issue" | "magic_link_consume" if args.len() == 3 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "session_show" | "session_user" | "session_cookie" | "session_id"
+                        if args.len() == 1 =>
+                    {
+                        resident_safe_expr(&args[0], callees)
+                    }
+                    _ => false,
+                };
+            }
             if module == "core.vault" || module == "core.vault.expert" {
                 return !args.is_empty()
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
@@ -1056,13 +1159,25 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 };
             }
             if module == "core.compute" {
-                // Tensor heap ABI is interpreter-owned until Cranelift hosts
-                // marshal the same Prelude symbols (I9 deopt path).
-                return false;
+                return resident_safe_compute_call(method, args, callees);
             }
             if module == "core.services" {
                 // ServiceTree mutates through Prelude; deopt to ambient (I9).
                 return false;
+            }
+            if (module == "app" || module == "core.web")
+                && matches!(
+                    method.as_str(),
+                    "auth" | "auth_oauth" | "auth_routes" | "auth_show"
+                )
+            {
+                return match (method.as_str(), args.len()) {
+                    ("auth", 1) | ("auth_routes" | "auth_show", 1) => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    ("auth_oauth", 2) => args.iter().all(|arg| resident_safe_expr(arg, callees)),
+                    _ => false,
+                };
             }
             if module == "app"
                 || (module == "core.web"
@@ -1144,6 +1259,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         TIR::TLambdaBody::Block(stmts) => {
                             stmts.iter().all(|s| resident_safe_stmt(s, callees))
                         }
+                        TIR::TLambdaBody::SharedBlock(stmts) => {
+                            stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                        }
                     }
             }
             TCoreClosureKind::ReactiveDerived { executable, .. }
@@ -1162,6 +1280,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
                 }
             }
             TCoreClosureKind::Guard { executable, .. }
@@ -1170,6 +1291,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 match &executable.executable {
                     TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
                     TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
                     }
                 }
@@ -1252,7 +1376,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     Type::List(inner) if jit_list_native_type(inner)
                         && matches!(inner.as_ref(), Type::List(elem) if matches!(elem.as_ref(), Type::String))
                 ) && elems.iter().all(|e| resident_safe_expr(e, callees)))
-                || (jit_list_task_int_type(&expr.ty)
+                || (jit_list_task_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_record_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
@@ -1292,7 +1416,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 (jit_list_native_type(&base.ty)
                     || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
-                    || jit_closure_elem_type(&base.ty).is_some())
+                    || jit_closure_elem_type(&base.ty).is_some()
+                    || jit_float_view_type(&base.ty))
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
@@ -1305,7 +1430,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             range,
             ..
         } => {
-            (jit_list_native_type(&base.ty) || jit_list_record_type(&base.ty))
+            (jit_list_native_type(&base.ty)
+                || jit_list_record_type(&base.ty)
+                || base.ty.is_compute_tensor_family())
                 && resident_safe_expr(base, callees)
                 && range.as_deref().map_or_else(
                     || {
@@ -1402,7 +1529,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && matches!(
                         &expr.ty,
                         Type::Apply { name, args }
-                            if name == "ViewMut" && args.len() == 1
+                            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                                && args.len() == 1
                     ) =>
             {
                 true
@@ -1418,7 +1546,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         || matches!(
                             &base.ty,
                             Type::Apply { name, args }
-                                if name == "View"
+                                if matches!(name.as_str(), "View" | "ComputeViewMut")
                                     && args.len() == 1
                                     && record_type_key(&args[0]).is_some()
                         ))
@@ -1528,6 +1656,21 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
             }
+            // ProcessResult.signal is the one packed Option<Int> comparison
+            // resident lowering supports. TIR may erase this CORE field to
+            // Int, so key the admission on the exact field shape, not its
+            // reported type. Other Option producers use mixed packed/result-
+            // arena carriers, so do not admit them here.
+            if is_packed_process_signal(lhs) || is_packed_process_signal(rhs) {
+                return matches!(op, BinOp::Eq | BinOp::Ne)
+                    && is_packed_process_signal(lhs)
+                    && is_packed_process_signal(rhs)
+                    && resident_safe_expr(lhs, callees)
+                    && resident_safe_expr(rhs, callees);
+            }
+            if matches!(&lhs.ty, Type::Option(_)) || matches!(&rhs.ty, Type::Option(_)) {
+                return false;
+            }
             if *overflow {
                 let lhs_int = intish_ty(&lhs.ty) || reactive_get_intish(lhs);
                 let rhs_int = intish_ty(&rhs.ty) || reactive_get_intish(rhs);
@@ -1565,15 +1708,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
                 }
                 TIfCond::IfLet { pattern, subj } => {
-                    matches!(&pattern.pattern, Pattern::Variant { .. })
-                        && !matches!(
-                            &subj.ty,
-                            Type::Named(n)
-                                if matches!(
-                                    n.as_str(),
-                                    "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-                                )
-                        )
+                    matches!(
+                        &pattern.pattern,
+                        Pattern::Variant { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
+                    )
                         && resident_safe_expr(subj, callees)
                 }
                 TIfCond::IsNone { .. } | TIfCond::Matches { .. } | TIfCond::And { .. } => false,
@@ -1584,7 +1722,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
                 && resident_safe_expr(else_value, callees)
         }
-        TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
+        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+            resident_safe_expr(inner, callees)
+        }
         TExprKind::Borrow { place, .. } => resident_safe_expr(place, callees),
         TExprKind::InlineBlock(stmts) => {
             (jit_value_type(&expr.ty)
@@ -1596,9 +1736,16 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::Lambda(lam) => {
             lam.param_types.iter().all(jit_value_type)
                 && lam.ret.as_ref().is_none_or(jit_value_type)
+                && lam
+                    .captures
+                    .iter()
+                    .all(|(_, _, ty)| jit_value_type(ty))
                 && match &lam.executable {
                     TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
                     TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                    }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
                         stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                     }
                 }
@@ -1607,24 +1754,63 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             TIR::TFnValueKind::NamedFn {
                 name: Some(name), ..
             } => callees.contains(name),
-            TIR::TFnValueKind::NamedFn { name: None, .. } => false,
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: Some(lambda),
+                ..
+            } => {
+                lambda.param_types.iter().all(jit_value_type)
+                    && lambda.ret.as_ref().is_none_or(jit_value_type)
+                    && lambda
+                        .captures
+                        .iter()
+                        .all(|(_, _, ty)| jit_value_type(ty))
+                    && match &lambda.executable {
+                        TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
+                        TIR::TLambdaBody::Block(stmts) => {
+                            stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        }
+                        TIR::TLambdaBody::SharedBlock(stmts) => {
+                            stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        }
+                    }
+            }
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: None,
+                ..
+            } => false,
             TIR::TFnValueKind::Call { callee, args } => {
                 resident_safe_expr(callee, callees)
                     && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
             }
+            TIR::TFnValueKind::Interrupt { value } => resident_safe_expr(value, callees),
         },
         TExprKind::PatternMatches { subj, .. } => resident_safe_expr(subj, callees),
         TExprKind::OptionLift2 { f, a, b } => {
-            matches!(
-                &f.kind,
-                TExprKind::Lambda(lam)
-                    if lam.prep.is_empty()
-                        && lam.source_params.len() == 2
+            let f_safe = match &f.kind {
+                TExprKind::Lambda(lam) => {
+                    lam.source_params.len() == 2
+                        && lam.captures.iter().all(|(_, _, ty)| jit_value_type(ty))
                         && matches!(
                             &lam.executable,
                             TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
                         )
-            ) && resident_safe_expr(a, callees)
+                }
+                _ => {
+                    matches!(
+                        &f.ty,
+                        Type::Fn {
+                            params,
+                            ret: Some(ret),
+                            ..
+                        } if params.len() == 2
+                            && params.iter().all(jit_value_type)
+                            && jit_value_type(ret)
+                    ) && resident_safe_expr(f, callees)
+                }
+            };
+            f_safe && resident_safe_expr(a, callees)
                 && resident_safe_expr(b, callees)
                 && matches!(&expr.ty, Type::Option(inner) if jit_scalar_type(inner) || matches!(inner.as_ref(), Type::Named(_)|Type::Tuple(_)))
         }
@@ -1645,10 +1831,28 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             resident_safe_closure_method(recv, op, args, callees)
         }
         TExprKind::TaskGroupAll { tasks } => {
-            jit_list_int_type(&expr.ty) && resident_safe_task_list_expr(tasks, callees)
+            matches!(
+                &expr.ty,
+                Type::Result { ok, err }
+                    if matches!(
+                        err.as_ref(),
+                        Type::Named(name) if name == jet_foundation::Syntax::TYPE_TASK_FAILURE
+                    )
+                        && jit_list_native_type(ok)
+            ) && resident_safe_task_list_expr(tasks, callees)
         }
         TExprKind::TaskGroupRace { tasks } | TExprKind::TaskGroupAny { tasks } => {
-            matches!(&expr.ty, Type::Int) && resident_safe_task_list_expr(tasks, callees)
+            matches!(
+                &expr.ty,
+                Type::Result { ok, err }
+                    if matches!(
+                        ok.as_ref(),
+                        ty if jit_value_type(ty)
+                        && matches!(
+                            err.as_ref(),
+                            Type::Named(name) if name == jet_foundation::Syntax::TYPE_TASK_FAILURE
+                        )
+            )) && resident_safe_task_list_expr(tasks, callees)
         }
         TExprKind::SelectStart => true,
         TExprKind::SelectRecv { builder, channel } => {
@@ -1698,7 +1902,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     || (matches!(ty, Type::Float)
                         && matches!(member.as_str(), "INFINITY" | "NAN" | "EPSILON"))
             }
-            THostCall::FixedListIndex { base, index } => {
+            THostCall::FixedListIndex { base, index, .. } => {
                 resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
                     && matches!(&index.ty, Type::Int | Type::IntN { .. } | Type::Named(_))
@@ -1861,6 +2065,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
                 }
         }
         TExprKind::ConditionNotify { condition, .. } => resident_safe_expr(condition, callees),
@@ -1980,6 +2187,9 @@ fn resident_safe_map_callback(args: &[TExpr], index: usize, callees: &HashSet<St
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                    }
                 }
     )
 }
@@ -2011,6 +2221,10 @@ fn resident_safe_each_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool 
                     && match &lam.executable {
                         TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
                         TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|stmt| {
+                            matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
+                                && resident_safe_stmt(stmt, callees)
+                        }),
+                        TIR::TLambdaBody::SharedBlock(stmts) => stmts.iter().all(|stmt| {
                             matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
                                 && resident_safe_stmt(stmt, callees)
                         }),
@@ -2087,6 +2301,9 @@ fn resident_safe_closure_method(
                             && match &lambda.executable {
                                 TIR::TLambdaBody::Expr(body) => resident_safe_expr(body, callees),
                                 TIR::TLambdaBody::Block(stmts) => {
+                                    stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                                }
+                                TIR::TLambdaBody::SharedBlock(stmts) => {
                                     stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                                 }
                             }
@@ -2166,6 +2383,7 @@ fn resident_safe_closure_method(
                         TExprKind::Lambda(lam) => match &lam.executable {
                             TIR::TLambdaBody::Expr(body) => Some(&body.ty),
                             TIR::TLambdaBody::Block(_) => None,
+                            TIR::TLambdaBody::SharedBlock(_) => None,
                         },
                         _ => None,
                     }),
@@ -2183,6 +2401,7 @@ fn resident_safe_closure_method(
                         TExprKind::Lambda(lam) => match &lam.executable {
                             TIR::TLambdaBody::Expr(body) => Some(&body.ty),
                             TIR::TLambdaBody::Block(_) => None,
+                            TIR::TLambdaBody::SharedBlock(_) => None,
                         },
                         _ => None,
                     }),
@@ -2197,6 +2416,7 @@ fn resident_safe_closure_method(
                         TExprKind::Lambda(lam) => match &lam.executable {
                             TIR::TLambdaBody::Expr(body) => Some(&body.ty),
                             TIR::TLambdaBody::Block(_) => None,
+                            TIR::TLambdaBody::SharedBlock(_) => None,
                         },
                         _ => None,
                     }),
@@ -2294,7 +2514,8 @@ fn enum_payload_value_type(ty: &Type) -> bool {
 
 fn resident_safe_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
     fields.iter().all(|(_, value)| {
-        matches!(&value.ty, Type::Int | Type::Float) && resident_safe_expr(value, callees)
+        jit_value_type(&value.ty)
+            && resident_safe_expr(value, callees)
     })
 }
 
@@ -2350,6 +2571,7 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_closure_elem_type(recv_ty).is_some()
+                || jit_float_view_type(recv_ty)
                 || jit_map_resident_type(recv_ty)
                 || matches!(
                     recv_ty,
@@ -2456,6 +2678,7 @@ fn resident_safe_builtin_op(
         TBuiltinOp::IsEmpty => {
             (jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
+                || jit_float_view_type(recv_ty)
                 || jit_list_record_type(recv_ty)
                 || jit_map_resident_type(recv_ty)
                 || matches!(recv_ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))
@@ -2581,10 +2804,23 @@ fn resident_safe_builtin_op(
                     _ => false,
                 }
         }
-        // Tensor values stay in the ambient ABI. Their view operations must
-        // deopt so the interpreter calls the canonical Prelude symbols rather
-        // than inventing a second tensor representation in Cranelift.
-        TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => false,
+        TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => {
+            recv_ty.is_compute_tensor_family()
+                && match args {
+                    [range]
+                        if matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+                    {
+                        resident_safe_expr(range, callees)
+                    }
+                    [start, end] => {
+                        matches!(&start.ty, Type::Int)
+                            && matches!(&end.ty, Type::Int)
+                            && resident_safe_expr(start, callees)
+                            && resident_safe_expr(end, callees)
+                    }
+                    _ => false,
+                }
+        }
         TBuiltinOp::SplitWrite { .. } => {
             (jit_list_native_type(recv_ty) || jit_list_record_type(recv_ty))
                 && args.len() == 1
@@ -3076,7 +3312,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         | BinOp::FloorDiv
                         | BinOp::Mod
                 ),
-                Type::Float => {
+                Type::Float | Type::Float32 => {
                     matches!(
                         op,
                         BinOp::Add
@@ -3104,9 +3340,14 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             TExprKind::PoolSlot { field: Some(_), .. }
                         )
                 );
+            let shared_guard_value = matches!(
+                place,
+                TIR::TPlace::Expr(expr)
+                    if matches!(&expr.kind, TExprKind::SharedGuardValue { .. })
+            );
             (!clone_value || jit_value_type(&value.ty))
                 && compound
-                && (local || field)
+                && (local || field || shared_guard_value)
                 && resident_safe_expr(value, callees)
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
@@ -3242,7 +3483,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             } else {
                 (jit_list_native_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
-                    || jit_closure_elem_type(&base.ty).is_some())
+                    || jit_closure_elem_type(&base.ty).is_some()
+                    || jit_float_view_mut_type(&base.ty))
                     && matches!(&index.ty, Type::Int)
                     && matches!(
                         &value.ty,
@@ -3264,7 +3506,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 || matches!(
                     &assign.base.ty,
                     Type::Apply { name, args }
-                        if name == "ViewMut"
+                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                             && args.len() == 1
                             && (record_type_key(&args[0]).is_some()
                                 || matches!(&args[0], Type::TraitObject(_)))
@@ -3387,10 +3629,19 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::EnumMatch {
-            arms, else_body, ..
+            scrutinee,
+            arms,
+            else_body,
+            ..
         } => {
-            arms.iter()
-                .all(|a| a.body.iter().all(|s| resident_safe_stmt(s, callees)))
+            let scrutinee_ok = resident_safe_expr(scrutinee, callees)
+                && (is_packed_process_signal(scrutinee)
+                    || matches!(&scrutinee.ty, Type::Option(_) | Type::Result { .. })
+                    || jit_enum_type(&scrutinee.ty));
+            scrutinee_ok
+                && arms
+                    .iter()
+                    .all(|a| a.body.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
@@ -3438,6 +3689,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::Reactive { executable, .. } => match &executable.executable {
             TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
             TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|s| resident_safe_stmt(s, callees)),
+            TIR::TLambdaBody::SharedBlock(stmts) => {
+                stmts.iter().all(|s| resident_safe_stmt(s, callees))
+            }
         },
         TStmt::Layout { body, .. } => body.iter().all(|s| resident_safe_stmt(s, callees)),
         TStmt::IndexHookAssign {
@@ -3576,6 +3830,9 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
                             TIR::TLambdaBody::Block(stmts) => {
                                 tag.push_str(&format!(" block_len={}", stmts.len()));
                             }
+                            TIR::TLambdaBody::SharedBlock(stmts) => {
+                                tag.push_str(&format!(" block_len={}", stmts.len()));
+                            }
                         }
                     }
                     tag
@@ -3613,6 +3870,7 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
         TExprKind::Binary { .. } => "Binary",
         TExprKind::Local(_) => "Local",
         TExprKind::Clone(_) => "Clone",
+        TExprKind::ExplicitCopy(_) => "ExplicitCopy",
         _ => "OtherExpr",
     }
 }
@@ -3700,6 +3958,11 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                                 detail.push_str(&format!(" block>{b}"));
                             }
                         }
+                        TIR::TLambdaBody::SharedBlock(inner) => {
+                            if let Some(b) = first_unsafe_stmt_detail(&inner[..], callees) {
+                                detail.push_str(&format!(" block>{b}"));
+                            }
+                        }
                     }
                 }
                 if let TExprKind::HandleMethod { op, .. } = &init.kind {
@@ -3762,6 +4025,24 @@ pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
     let mut n = 0usize;
     for f in &program.funcs {
         count_spawn_sites_stmts(&f.body, &mut n);
+    }
+    // A task lambda can contain another task/combinator. Its spawn expression
+    // lives in the lambda table rather than in the enclosing function body,
+    // so count those nested sites as well. Each table entry is visited once;
+    // the enclosing expression still accounts for the entry that launched it.
+    for lambda in &program.spawn_lambdas {
+        match &lambda.body {
+            TJitSpawnBody::Expr(expr) => count_spawn_sites_expr(expr, &mut n),
+            TJitSpawnBody::Block { prefix, tail } => {
+                count_spawn_sites_stmts(prefix, &mut n);
+                if let Some(tail) = tail {
+                    count_spawn_sites_expr(tail, &mut n);
+                }
+            }
+            TJitSpawnBody::SharedBlock { body, .. } => {
+                count_spawn_sites_stmts(body, &mut n);
+            }
+        }
     }
     n
 }
@@ -3842,8 +4123,12 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             | TStmt::StructDestructure { init, .. }
             | TStmt::ListDestructure { init, .. } => count_spawn_sites_expr(init, n),
             TStmt::EnumMatch {
-                arms, else_body, ..
+                scrutinee,
+                arms,
+                else_body,
+                ..
             } => {
+                count_spawn_sites_expr(scrutinee, n);
                 for arm in arms {
                     count_spawn_sites_stmts(&arm.body, n);
                 }
@@ -3920,6 +4205,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         TExprKind::Print(inner)
         | TExprKind::Unary { operand: inner, .. }
         | TExprKind::Clone(inner)
+        | TExprKind::ExplicitCopy(inner)
         | TExprKind::Ok(inner)
         | TExprKind::Err(inner) => count_spawn_sites_expr(inner, n),
         TExprKind::ListLit(elems) | TExprKind::ColumnarListLit { elems, .. } => {
@@ -3977,10 +4263,96 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
             }
         }
         TExprKind::OrFallback { value, .. } => count_spawn_sites_expr(value, n),
+        TExprKind::ListLit(elems) => {
+            for elem in elems {
+                count_spawn_sites_expr(elem, n);
+            }
+        }
         TExprKind::TaskGroupAll { tasks }
         | TExprKind::TaskGroupRace { tasks }
         | TExprKind::TaskGroupAny { tasks } => count_spawn_sites_expr(tasks, n),
         _ => {}
+    }
+}
+
+/// Return the first global callback site referenced by a nested spawn lambda.
+///
+/// Top-level functions share one traversal cursor. A nested lambda has its own
+/// compiler pass, so it must start that cursor at the first site in its body;
+/// otherwise the second nested task/combinator resolves to the first lambda's
+/// callback. The TIR site is already authoritative; this helper only locates
+/// it for the JIT adapter.
+pub(crate) fn first_spawn_site(lambda: &TJitSpawnLambda) -> Option<usize> {
+    fn find_expr(node: &TExpr) -> Option<usize> {
+        match &node.kind {
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Spawn { site, .. },
+            } => Some(*site),
+            TExprKind::Print(inner)
+            | TExprKind::Unary { operand: inner, .. }
+            | TExprKind::Clone(inner)
+            | TExprKind::Ok(inner)
+            | TExprKind::Err(inner)
+            | TExprKind::Try { inner, .. } => find_expr(inner),
+            TExprKind::Binary { lhs, rhs, .. } => find_expr(lhs).or_else(|| find_expr(rhs)),
+            TExprKind::Call { args, .. } => args.iter().find_map(|arg| find_expr(&arg.value)),
+            TExprKind::HandleMethod { recv, args, .. }
+            | TExprKind::BuiltinMethod { recv, args, .. }
+            | TExprKind::ClosureMethod { recv, args, .. } => find_expr(recv)
+                .or_else(|| args.iter().find_map(find_expr)),
+            TExprKind::CoreCall { args, .. } => args.iter().find_map(find_expr),
+            TExprKind::OrFallback { value, fallback } => find_expr(value).or_else(|| match fallback {
+                TOrFallback::Value(inner) | TOrFallback::Return(Some(inner)) => find_expr(inner),
+                TOrFallback::Panic { msg, .. } => find_expr(msg),
+                TOrFallback::Return(None)
+                | TOrFallback::Break
+                | TOrFallback::Continue
+                | TOrFallback::BreakLabel(_)
+                | TOrFallback::ContinueLabel(_) => None,
+            }),
+            TExprKind::ListLit(elems) => elems.iter().find_map(find_expr),
+            TExprKind::TaskGroupAll { tasks }
+            | TExprKind::TaskGroupRace { tasks }
+            | TExprKind::TaskGroupAny { tasks } => find_expr(tasks),
+            _ => None,
+        }
+    }
+    fn find_stmts(stmts: &[TStmt]) -> Option<usize> {
+        stmts.iter().find_map(|stmt| match stmt {
+            TStmt::Let { init, .. }
+            | TStmt::Assign { value: init, .. }
+            | TStmt::ExprStmt(init)
+            | TStmt::Return(Some(init)) => find_expr(init),
+            TStmt::TaskGroup { body, .. }
+            | TStmt::Region(body)
+            | TStmt::Impure(body)
+            | TStmt::Inline(body)
+            | TStmt::Unsafe(body)
+            | TStmt::Shield { body }
+            | TStmt::DebugOnly(body)
+            | TStmt::Layout { body, .. } => find_stmts(body),
+            TStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => find_stmts(then_body).or_else(|| else_body.as_deref().and_then(find_stmts)),
+            TStmt::EnumMatch {
+                scrutinee,
+                arms,
+                else_body,
+                ..
+            } => find_expr(scrutinee)
+                .or_else(|| arms.iter().find_map(|arm| find_stmts(&arm.body)))
+                .or_else(|| else_body.as_deref().and_then(find_stmts)),
+            _ => None,
+        })
+    }
+    match &lambda.body {
+        TJitSpawnBody::Expr(expr) => find_expr(expr),
+        TJitSpawnBody::Block { prefix, tail } => {
+            find_stmts(prefix).or_else(|| tail.as_deref().and_then(find_expr))
+        }
+        TJitSpawnBody::SharedBlock { body, .. } => find_stmts(body),
     }
 }
 
@@ -4002,7 +4374,7 @@ fn resident_safe_expr_list(exprs: &[TExpr], callees: &HashSet<String>) -> bool {
 }
 
 fn resident_safe_task_list_expr(tasks: &TExpr, callees: &HashSet<String>) -> bool {
-    jit_list_task_int_type(&tasks.ty) && resident_safe_expr(tasks, callees)
+    jit_list_task_type(&tasks.ty) && resident_safe_expr(tasks, callees)
 }
 
 fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool {
@@ -4076,6 +4448,17 @@ pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSe
             prefix.iter().all(|s| resident_safe_stmt(s, callees))
                 && tail.as_ref().is_none_or(|t| resident_safe_expr(t, callees))
         }
+        TJitSpawnBody::SharedBlock { body, tail } => {
+            body.iter().all(|s| resident_safe_stmt(s, callees))
+                && (!tail
+                    || body
+                        .last()
+                        .and_then(|stmt| match stmt {
+                            TStmt::ExprStmt(expr) | TStmt::Return(Some(expr)) => Some(expr),
+                            _ => None,
+                        })
+                        .is_some_and(|expr| resident_safe_expr(expr, callees)))
+        }
     }
 }
 
@@ -4134,6 +4517,7 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "GameScene"
                 | "GameFrame"
                 | "GameBackend"
+                | "Condition"
                 | "RaylibWindow"
                 | "RaylibColor"
                 | "RaylibSound"
@@ -4283,20 +4667,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::TaskCancel
         | THandleOp::TaskDetach
         | THandleOp::TaskPause
-        | THandleOp::TaskResume
-        | THandleOp::TaskTrace
-        | THandleOp::TaskException => {
+        | THandleOp::TaskResume => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
-        }
-        // D-VERDICT-1323-1: the list twins take a list of task handles.
-        THandleOp::TaskDetachAll
-        | THandleOp::TaskCancelAll
-        | THandleOp::TaskPauseAll
-        | THandleOp::TaskResumeAll
-        | THandleOp::TaskTraceAll => {
-            args.is_empty()
-                && matches!(&recv.ty, Type::List(inner)
-                    if matches!(inner.as_ref(), Type::Apply { name, .. } if name == "Task"))
         }
         THandleOp::ChannelReceive => {
             args.is_empty() && matches!(&recv.ty, Type::Apply { name, .. } if name == "Receiver")
@@ -4471,8 +4843,22 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
         THandleOp::DurationDifference => args.len() == 1,
         THandleOp::AllocAlloc => args.len() == 1,
-        THandleOp::AllocReset | THandleOp::ClockNow | THandleOp::RngBool => args.is_empty(),
+        THandleOp::AllocReset
+        | THandleOp::ClockNow
+        | THandleOp::StopwatchElapsedMillis
+        | THandleOp::RngBool
+        | THandleOp::RngFloat
+        | THandleOp::RngSplit => args.is_empty(),
         THandleOp::RngInt => args.len() == 2,
+        THandleOp::RngFloatRange
+        | THandleOp::RngNormal
+        | THandleOp::RngWeightedPick
+        | THandleOp::RngSample => {
+            args.len() == 2
+        }
+        THandleOp::RngBoolP | THandleOp::RngExponential | THandleOp::RngBytes => {
+            args.len() == 1
+        }
         THandleOp::ClockTick
         | THandleOp::ClockAdvance
         | THandleOp::ClockWait
@@ -4651,24 +5037,31 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             args.is_empty()
         }
         THandleOp::ReflectValueTypeName
+        | THandleOp::ReflectValuePath
         | THandleOp::ReflectValueDisplay
         | THandleOp::ReflectValueFields
         | THandleOp::ReflectFieldName
         | THandleOp::ReflectFieldValue => args.is_empty(),
         THandleOp::UrlMimeMethod { method, .. } => match method.as_str() {
-            "to_string" | "host" | "path" | "query_pairs" | "path_segments" | "fragment"
-            | "essence" | "username" | "password" | "userinfo" | "authority" | "default_port"
+            "to_string" | "scheme" | "host" | "port" | "path" | "query" | "query_pairs"
+            | "path_segments" | "fragment" | "essence" | "username" | "password"
+            | "userinfo" | "authority" | "default_port" | "normalize"
                 if args.is_empty() =>
             {
                 true
             }
             "join" | "param" if args.len() == 1 => true,
+            "set_query" | "add_query" if args.len() == 2 => true,
             _ => false,
         },
         THandleOp::TcpListenerAccept
         | THandleOp::TcpListenerLocalAddr
-        | THandleOp::TcpStreamClose => args.is_empty(),
+        | THandleOp::TcpStreamClose
+        | THandleOp::UdpSocketClose => args.is_empty(),
         THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes if args.len() == 1 => true,
+        THandleOp::TcpStreamReady | THandleOp::UdpSocketReady if args.len() == 2 => true,
+        THandleOp::UdpSocketReceiveDeadline if args.len() == 2 => true,
+        THandleOp::UdpSocketSendToDeadline if args.len() == 3 => true,
         THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
             ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
             ("HTTPResponse", "header") if args.len() == 1 => true,

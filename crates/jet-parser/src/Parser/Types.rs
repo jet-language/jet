@@ -918,11 +918,21 @@ impl<'a> Parser<'a> {
             })
             .collect();
         let return_view_provenance = self.parse_opt_declared_view_from(&from_params);
+        let call_metadata = Some(crate::AST::FunctionCallMetadata {
+            names: from_params.iter().map(|param| param.name.clone()).collect(),
+            defaults: from_params
+                .iter()
+                .map(|param| param.default.as_deref().cloned())
+                .collect(),
+            variadic: from_params.iter().map(|param| param.variadic).collect(),
+            conventions: from_params.iter().map(|param| param.convention).collect(),
+        });
         Ok(Type::Fn {
             params,
             ret,
             effect_bound,
             param_contract,
+            call_metadata,
             return_view_provenance,
         })
     }

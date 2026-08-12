@@ -10,11 +10,46 @@ use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::render_lambda_str;
 use crate::Codegen::TIR::render_lambda_str_expecting_value;
 use crate::Codegen::TIR::render_lambda_str_sync;
+use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
+
+fn interrupt_callback_value(value: TExpr) -> TExpr {
+    let ty = value.ty.clone();
+    TExpr {
+        ty,
+        kind: TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::Interrupt {
+                value: Box::new(value),
+            },
+        },
+    }
+}
+
+fn normalize_interrupt_named_value(mut value: TExpr, cx: &Cx) -> TExpr {
+    let name = match &value.kind {
+        TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+                name: Some(name), ..
+            },
+        } => Some(name.clone()),
+        _ => None,
+    };
+    if let Some(name) = name {
+        let ty = value.ty.clone();
+        value.kind = TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+                wrapper: crate::Codegen::emit_named_fn_value_sync(cx, &name, &ty),
+                name: Some(name),
+                lambda: None,
+            },
+        };
+    }
+    value
+}
 
 fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match expr {
@@ -28,12 +63,13 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ret: tl.ret.clone().map(Box::new),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: lam.meta.return_view_provenance.clone(),
             };
-            TExpr {
+            interrupt_callback_value(TExpr {
                 ty,
                 kind: TExprKind::Lambda(Box::new(tl)),
-            }
+            })
         }
         Expr::Ident(name, _)
             if !env.locals.contains_key(name)
@@ -45,23 +81,28 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .get(name)
                 .cloned()
                 .expect("function type checked before interrupt lowering");
-            TExpr {
+            interrupt_callback_value(TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::FnValue {
                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
                         wrapper: crate::Codegen::emit_named_fn_value_sync(cx, name, &ty),
                         name: Some(name.clone()),
+                        lambda: None,
                     },
                 },
-            }
+            })
         }
-        _ => lower_expr(expr, cx, env),
+        _ => interrupt_callback_value(normalize_interrupt_named_value(
+            lower_expr(expr, cx, env),
+            cx,
+        )),
     }
 }
 
-/// c109 Phase 13: lower a closure-taking core call (`http.serve`/`scope.guard`)
+/// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`, `http.serve`,
+/// or `scope.guard`)
 /// into a bespoke `CoreClosureCall` node. Returns `None` when `(module, method)`
-/// isn't one of the two (so the caller falls through to the plain
+/// isn't one of these (so the caller falls through to the plain
 /// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
 /// in-subset lambda in the closure-arg position.
 pub(super) fn core_module_path_from_receiver(
@@ -94,6 +135,30 @@ pub(crate) fn lower_core_closure_call(
         Some(Expr::Lambda(lam)) => Some(lam),
         _ => None,
     };
+    if module == "core.tasks" && method == "spawn" {
+        let lam = lam_at(0)?;
+        let body_ty = lambda_body_ty(lam, cx, env);
+        let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+        let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
+        let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
+        let site = existing.unwrap_or_else(|| {
+            let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            cx.jit_spawn_sites.borrow_mut().insert(key, site);
+            site
+        });
+        let spawn_closure = render_spawn_lambda(lam, cx, env);
+        return Some(TExpr {
+            ty: core_closure_call_return_ty(module, method, body_ty),
+            kind: TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Spawn {
+                    group: None,
+                    site,
+                    spawn_closure,
+                },
+            },
+        });
+    }
     let data_err = || Type::Named("DataError".to_string());
     let data_checked = jet_foundation::PackageEdition::edition_at_least(&cx.package_edition, "2027");
     let wrap_data = |ok: Type| -> Type {

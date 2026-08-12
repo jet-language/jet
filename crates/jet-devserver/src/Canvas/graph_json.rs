@@ -728,7 +728,7 @@ fn rails_json(g: &GraphBuilder) -> String {
     }
     if g.regions
         .iter()
-        .any(|r| r.contains("\"kind\":\"taskgroup\""))
+        .any(|r| r.contains("\"kind\":\"task.group\""))
         || g.nodes
             .iter()
             .any(|n| n.title == ".task" || n.title == "spawn" || n.title.ends_with(".spawn"))

@@ -50,6 +50,33 @@ impl __jet_Encode for char {
         jet_std::DataTree::Text(self.to_string())
     }
 }
+impl __jet_Encode for JetDate {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(jet_codec_date_encode(self.year(), self.month(), self.day()))
+    }
+}
+impl __jet_Encode for JetLocalTime {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(jet_codec_local_time_encode(
+            self.hour(),
+            self.minute(),
+            self.second(),
+        ))
+    }
+}
+impl __jet_Encode for JetDateTime {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(jet_codec_datetime_encode(
+            self.to_timestamp(),
+            self.nanosecond() as u32,
+        ))
+    }
+}
+impl __jet_Encode for jet_std::Duration {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Int(jet_codec_duration_encode(self.ns))
+    }
+}
 impl __jet_Encode for u8 {
     fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
 }
@@ -71,7 +98,7 @@ impl __jet_Encode for f32 {
 impl __jet_Encode for jet_std::JetDecimal {
     fn jet_encode(&self) -> jet_std::DataTree {
         // Decimal stays exact through the shared tree; text preserves scale.
-        jet_std::DataTree::Text(self.to_string_rep())
+        jet_std::DataTree::Text(jet_codec_decimal_encode(self))
     }
 }
 impl<T: __jet_Encode> __jet_Encode for Vec<T> {
@@ -168,6 +195,43 @@ impl __jet_Decode for char {
         }
     }
 }
+impl __jet_Decode for JetDate {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        let value = String::jet_decode(t)?;
+        jet_codec_date_decode(&value)
+            .map(|(year, month, day)| JetDate::new(year, month, day))
+            .map_err(|error| jet_std::FieldError::one(format!("expected Date: {error}")))
+    }
+}
+impl __jet_Decode for JetLocalTime {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        let value = String::jet_decode(t)?;
+        jet_codec_local_time_decode(&value)
+            .map(|(hour, minute, second)| JetLocalTime::new(hour, minute, second))
+            .map_err(|error| jet_std::FieldError::one(format!("expected LocalTime: {error}")))
+    }
+}
+impl __jet_Decode for JetDateTime {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        let value = String::jet_decode(t)?;
+        jet_codec_datetime_decode(&value)
+            .map(|(secs, nanos)| JetDateTime::from_timestamp_ns(secs, nanos))
+            .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
+    }
+}
+impl __jet_Decode for jet_std::Duration {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        match t {
+            jet_std::DataTree::Int(ns) => Ok(jet_std::Duration {
+                ns: jet_codec_duration_decode(*ns),
+            }),
+            other => Err(jet_std::FieldError::one(format!(
+                "expected Duration, found {}",
+                jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
 impl __jet_Decode for u8 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
@@ -212,9 +276,9 @@ impl __jet_Decode for f32 {
 impl __jet_Decode for jet_std::JetDecimal {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Text(s) => jet_std::JetDecimal::from_str(s)
+            jet_std::DataTree::Text(s) => jet_codec_decimal_decode_text(s)
                 .map_err(|e| jet_std::FieldError::one(format!("expected Decimal: {e}"))),
-            jet_std::DataTree::Int(n) => jet_std::JetDecimal::from_str(&n.to_string())
+            jet_std::DataTree::Int(n) => jet_codec_decimal_decode_int(*n)
                 .map_err(jet_std::FieldError::one),
             other => Err(jet_std::FieldError::one(format!(
                 "expected Decimal, found {}", jet_std::datatree_kind(other)
@@ -227,14 +291,17 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
         match t {
             jet_std::DataTree::Bytes(bytes) if std::any::type_name::<T>() == "u8" => {
                 let mut out = Vec::with_capacity(bytes.len());
-                let mut errors = Vec::new();
+                let mut errors = Vec::with_capacity(bytes.len());
                 for (index, byte) in bytes.iter().enumerate() {
                     match T::jet_decode(&jet_std::DataTree::Int(*byte as i64)) {
                         Ok(value) => out.push(value),
-                        Err(error) => errors.extend(jet_std::FieldError::under_errors(
-                            &format!("[{}]", index),
-                            error,
-                        )),
+                        Err(error) => {
+                            let mut framed = jet_std::FieldError::under_errors(
+                                &format!("[{}]", index),
+                                error,
+                            );
+                            errors.append(&mut framed);
+                        }
                     }
                 }
                 if !errors.is_empty() {
@@ -244,14 +311,17 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
             }
             jet_std::DataTree::Array(items) => {
                 let mut out = Vec::with_capacity(items.len());
-                let mut errors = Vec::new();
+                let mut errors = Vec::with_capacity(items.len());
                 for (i, item) in items.iter().enumerate() {
                     match T::jet_decode(item) {
                         Ok(value) => out.push(value),
-                        Err(error) => errors.extend(jet_std::FieldError::under_errors(
-                            &format!("[{}]", i),
-                            error,
-                        )),
+                        Err(error) => {
+                            let mut framed = jet_std::FieldError::under_errors(
+                                &format!("[{}]", i),
+                                error,
+                            );
+                            errors.append(&mut framed);
+                        }
                     }
                 }
                 if !errors.is_empty() {

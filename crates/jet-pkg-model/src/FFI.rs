@@ -916,15 +916,9 @@ mod net_tls_close_tests {
     }
 
     mod smtp_adapter {
-        fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
-            let mut out = [0u8; 32];
-            for (index, byte) in data.iter().enumerate() {
-                out[index % 32] = out[index % 32].wrapping_mul(31).wrapping_add(*byte);
-            }
-            out
-        }
         #[allow(unused_imports)]
-        pub use jet_foundation::Outcome::*;
+        pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
+        include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
         include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
     }
 
@@ -1106,7 +1100,7 @@ mod net_tls_close_tests {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
             limits: email::Limits::safe(),
-            dkim: Err(jet_foundation::Outcome::JetAbsent),
+            dkim: Err(smtp_adapter::JetAbsent),
         }
     }
 
@@ -1431,6 +1425,7 @@ pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "=2.6.1");
 /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
+const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
 const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
@@ -2347,6 +2342,7 @@ fn cache_key_full(
     }
     if needs_crypto {
         needs_crypto.hash(&mut h);
+        OUTCOME_RUNTIME.hash(&mut h);
         CRYPTO_RUNTIME.hash(&mut h);
         CRYPTO_ENTROPY_RUNTIME.hash(&mut h);
         // The helper is a separately cached binary. Its closed status protocol
@@ -2836,8 +2832,11 @@ fn emit_wrapper_lib(
     }
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
+        out.push_str(OUTCOME_RUNTIME);
+        out.push('\n');
         out.push_str(CRYPTO_ENTROPY_RUNTIME);
         out.push('\n');
+        out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");
         out.push_str(CRYPTO_RUNTIME);
         out.push('\n');
     }
@@ -3472,11 +3471,11 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         ),
         Type::Fn { .. } => "Box<dyn std::any::Any>".to_string(),
         Type::Named(name) if name == "Error" => "String".to_string(),
-        Type::Named(name) if user_types.contains(name) => crate::AST::user_type_rust(name),
+        Type::Named(name) if user_types.contains(name) => crate::AST::mangle_path(name),
         Type::Named(name) => name.clone(),
         Type::Apply { name, args } if user_types.contains(name) => format!(
             "{}<{}>",
-            crate::AST::user_type_rust(name),
+            crate::AST::mangle_path(name),
             args.iter()
                 .map(|a| rust_type(a, user_types))
                 .collect::<Vec<_>>()

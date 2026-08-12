@@ -1331,13 +1331,13 @@ fn run() {}
 #[test]
 fn workspace_subject_grant_authorizes_a_package_without_cli_flags() {
     let root = project("workspace-grant");
-    let entry = root.join("main.jet");
+    let entry = root.join("run.jet");
     write(
         &root.join("package.jet"),
         "name: \"workspace-app\"\nversion: \"0.1.0\"\n",
     );
     write(
-        &root.join("workspace.jet"),
+        &root.join("authority.jet"),
         "module workspace { policy: .{ grants: .{ \"workspace-app\": #(Exec) } } }\n",
     );
     write(
@@ -1346,7 +1346,7 @@ fn workspace_subject_grant_authorizes_a_package_without_cli_flags() {
 fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
     #Impure("workspace grant test") {
         action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf workspace > stamp"], ["Exec"])?
-        app :: b.add_executable("app", ["main.jet"], [action])?
+        app :: b.add_executable("app", ["run.jet"], [action])?
         return b.plan(app)
     }
     return b.plan()
@@ -1371,12 +1371,12 @@ fn run() {}
 #[test]
 fn malformed_package_and_workspace_build_policy_fail_closed() {
     let root = project("malformed-policy");
-    let entry = root.join("main.jet");
+    let entry = root.join("run.jet");
     write(&entry, r#"
 fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
     #Impure("must never run under malformed policy") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    app :: b.add_executable("app", ["run.jet"], [action])?
     return b.plan(app)
     }
     return b.plan()
@@ -1389,10 +1389,125 @@ fn run() {}
     assert!(!root.join("stamp").exists());
 
     write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
-    write(&root.join("workspace.jet"), "module workspace { policy: .{ trust: .{ note: \"nested } text\" }, deny: #(Exec) }\n");
+    write(&root.join("workspace.jet"), "module workspace { policy: .{ deny: Exec } }\n");
     let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
-    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503" && diagnostic.what.contains("malformed")), "{errors:#?}");
+    assert!(errors.iter().any(|diagnostic| {
+        diagnostic.code == "E3503"
+            && diagnostic.what == "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
+            && diagnostic.why == "Build authority must pass all three independent checks before any probe or action executes."
+            && diagnostic.fix == "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy."
+    }), "{errors:#?}");
     assert!(!root.join("stamp").exists());
+
+    fs::remove_file(root.join("workspace.jet")).unwrap();
+    fs::create_dir(root.join("workspace.jet")).unwrap();
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| {
+        diagnostic.code == "E3503" && diagnostic.why.contains("present but unavailable")
+    }), "{errors:#?}");
+}
+
+#[test]
+fn unsupported_workspace_policy_allow_is_e3503() {
+    let root = project("unsupported-workspace-policy");
+    let entry = root.join("run.jet");
+    write(
+        &root.join("authority.jet"),
+        "module workspace { policy: .{ allow: #(Exec) } }\n",
+    );
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    #Impure("unsupported workspace policy must block build") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
+        app :: b.add_executable("app", ["run.jet"], [action])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(errors.iter().any(|diagnostic| {
+        diagnostic.code == "E3503" && diagnostic.why.contains("policy.allow")
+    }), "{errors:#?}");
+    assert!(!root.join("stamp").exists());
+}
+
+#[test]
+fn nested_workspace_is_the_module_import_root() {
+    let root = project("nested-workspace-import-root");
+    let child = root.join("child");
+    fs::create_dir_all(&child).unwrap();
+    write(
+        &root.join("package.jet"),
+        "name: \"outer\"\nversion: \"0.1.0\"\n",
+    );
+    write(
+        &root.join("outside.jet"),
+        "module _outside { pub fn fixture() {} }\n",
+    );
+    write(
+        &child.join("boundary.jet"),
+        "module workspace { policy: .{ deny: #(FS) } }\n",
+    );
+    let entry = child.join("run.jet");
+    write(
+        &entry,
+        "use project._outside as outside\nfn run() { outside.fixture() }\n",
+    );
+
+    let errors = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0603")
+        .expect("project-local import must fail at the nested workspace root");
+    assert_eq!(diagnostic.what, "can't find a project module named `_outside`");
+    assert_eq!(
+        diagnostic.why,
+        "project-local imports resolve declared module names, not filenames"
+    );
+    assert_eq!(
+        diagnostic.fix,
+        "declare `module _outside { ... }` under this project"
+    );
+}
+
+#[test]
+fn module_directory_entry_requires_run_jet_not_main_jet() {
+    let root = project("module-run-entry");
+    let module = root.join("tool");
+    fs::create_dir_all(&module).unwrap();
+    write(&module.join("main.jet"), "pub fn run() {}\n");
+    let entry = root.join("run.jet");
+    write(&entry, "use tool\nfn run() {}\n");
+
+    let errors = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0603")
+        .expect("retired main.jet must not resolve a module directory");
+    assert_eq!(diagnostic.what, "can't find a module named `tool`");
+    assert_eq!(
+        diagnostic.why,
+        "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`"
+    );
+    assert_eq!(diagnostic.fix, "add `tool.jet` under this project, or fix the `use` name");
+    assert!(diagnostic.why.contains("run.jet"));
+    assert!(!diagnostic.why.contains("main.jet"));
 }
 
 #[test]
@@ -1401,13 +1516,13 @@ fn outer_package_grant_cannot_override_inner_workspace_deny() {
     let child = root.join("child");
     fs::create_dir_all(&child).unwrap();
     write(&root.join("package.jet"), "name: \"parent\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
-    write(&child.join("workspace.jet"), "module workspace { policy_note: .{ deny: #(FS) }, policy: .{ trust: .{ nested: .{ deny: #(FS) } }, deny: #(Exec) } }\n");
-    let entry = child.join("main.jet");
+    write(&child.join("boundary.jet"), "module workspace { policy_note: .{ deny: #(FS) }, policy: .{ trust: .{ nested: .{ deny: #(FS) } }, deny: #(Exec) } }\n");
+    let entry = child.join("run.jet");
     write(&entry, r#"
 fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
     #Impure("workspace ceiling wins last") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    app :: b.add_executable("app", ["run.jet"], [action])?
     return b.plan(app)
     }
     return b.plan()
@@ -1417,6 +1532,97 @@ fn run() {}
     let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"), "{errors:#?}");
     assert!(!child.join("stamp").exists());
+}
+
+#[test]
+fn outer_workspace_grant_does_not_cross_inner_workspace_boundary() {
+    let root = project("workspace-grant-boundary");
+    let child = root.join("child");
+    fs::create_dir_all(&child).unwrap();
+    write(
+        &root.join("outer-authority.jet"),
+        "module workspace { policy: .{ grants: .{ \"run\": #(Exec) } } }\n",
+    );
+    write(
+        &child.join("inner-authority.jet"),
+        "module workspace { policy: .{ deny: #(FS) } }\n",
+    );
+    let entry = child.join("run.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    #Impure("outer workspace grant must not apply") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
+    app :: b.add_executable("app", ["run.jet"], [action])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"), "{errors:#?}");
+    assert!(!child.join("stamp").exists());
+}
+
+#[test]
+fn inner_workspace_grant_overrides_outer_workspace_deny_from_canonical_run() {
+    let root = project("workspace-grant-precedence");
+    let child = root.join("child");
+    fs::create_dir_all(&child).unwrap();
+    write(
+        &root.join("outer-authority.jet"),
+        "module workspace { policy: .{ deny: #(Exec) } }\n",
+    );
+    write(
+        &child.join("package.jet"),
+        "name: \"run\"\nversion: \"0.1.0\"\n",
+    );
+    write(
+        &child.join("authority.jet"),
+        "module workspace { policy: .{ grants: .{ \"run\": #(Exec) } } }\n",
+    );
+    let entry = child.join("run.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    #Impure("inner workspace grant must apply") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf inner > stamp"], ["Exec"])?
+        app :: b.add_executable("app", ["run.jet"], [action])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .expect("inner workspace grant should be the only active workspace policy");
+    assert_eq!(fs::read_to_string(child.join("stamp")).unwrap(), "inner");
 }
 
 #[test]

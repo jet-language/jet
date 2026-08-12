@@ -4,11 +4,12 @@ use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
 use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
 use crate::Sema::FFI::e3301;
-use crate::Sema::Purity::{e3401, e3403, is_impure_core, is_nondeterministic_core};
+use crate::Sema::Purity::{e3401, is_impure_core};
 use crate::Sema::SendCrossing;
 use crate::Syntax;
+use jet_foundation::Effects::is_nondeterministic_core;
 use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
-use super::core_types::{game_run_label_error, decode_error_ty, u8_ty, unit_ty};
+use super::core_types::{decode_error_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
     freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
@@ -48,20 +49,6 @@ fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
         }
         crate::AST::Expr::Paren(inner, _) => literal_list_len(inner),
         _ => None,
-    }
-}
-
-fn collect_task_handles(expr: &Expr, out: &mut std::collections::HashSet<String>) {
-    match expr {
-        Expr::Ident(name, _) => {
-            out.insert(name.clone());
-        }
-        Expr::ListLit(items, _) => {
-            for item in items {
-                collect_task_handles(item, out);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -529,6 +516,8 @@ impl<'a> Checker<'a> {
                 params,
                 ret,
                 effect_bound,
+                param_contract,
+                call_metadata,
                 ..
             }) = f_ty
             else {
@@ -739,6 +728,48 @@ impl<'a> Checker<'a> {
             } else {
                 params.clone()
             };
+            let transform_contract = param_contract.map(|contract| {
+                if name == "jvp" {
+                    contract
+                        .iter()
+                        .cloned()
+                        .chain(contract.iter().cloned())
+                        .collect()
+                } else {
+                    contract
+                }
+            });
+            let transform_metadata = call_metadata.map(|metadata| {
+                if name != "jvp" {
+                    return metadata;
+                }
+                crate::AST::FunctionCallMetadata {
+                    names: metadata
+                        .names
+                        .iter()
+                        .cloned()
+                        .chain(metadata.names.iter().cloned())
+                        .collect(),
+                    defaults: metadata
+                        .defaults
+                        .iter()
+                        .cloned()
+                        .chain(metadata.defaults.iter().cloned())
+                        .collect(),
+                    variadic: metadata
+                        .variadic
+                        .iter()
+                        .copied()
+                        .chain(metadata.variadic.iter().copied())
+                        .collect(),
+                    conventions: metadata
+                        .conventions
+                        .iter()
+                        .copied()
+                        .chain(metadata.conventions.iter().copied())
+                        .collect(),
+                }
+            });
             let transform_return = match name {
                 "gradient" => gradient_ty.clone(),
                 "value_and_gradient" => Type::Tuple(vec![
@@ -756,12 +787,8 @@ impl<'a> Checker<'a> {
                 params: transform_params,
                 ret: Some(Box::new(transform_return)),
                 effect_bound: effect_bound.clone(),
-                param_contract: Some(
-                    names
-                        .iter()
-                        .map(|name| (name.clone(), ParamZone::Either))
-                        .collect(),
-                ),
+                param_contract: transform_contract,
+                call_metadata: transform_metadata,
                 return_view_provenance: None,
             })
         }
@@ -904,7 +931,7 @@ impl<'a> Checker<'a> {
             // determinism rejection — the expert escape hatch.
             if self.in_pure && self.det_suppress == 0 && is_nondeterministic_core(module, name) {
                 let api = format!("{}.{}", module_short_name(module), name);
-                self.diags.push(e3403(&api, Some(span)));
+                self.diags.push(Diagnostic::e3403(&api, Some(span)));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
@@ -1081,6 +1108,10 @@ impl<'a> Checker<'a> {
                             .and_then(|(params, _)| params.get(index))
                             .map(|(convention, _)| *convention)
                             .unwrap_or(AccessConvention::Read),
+                        ty: sig
+                            .as_ref()
+                            .and_then(|(params, _)| params.get(index))
+                            .map(|(_, ty)| ty),
                         variadic: false,
                         core_default: param.default,
                     })
@@ -1099,6 +1130,7 @@ impl<'a> Checker<'a> {
                     }
                     return sig.and_then(|(_, ret)| ret);
                 }
+                self.register_binder_refs(args);
             }
             match (module, name) {
                 ("core.vault", "current" | "versions" | "load" | "status"
@@ -1388,73 +1420,32 @@ impl<'a> Checker<'a> {
                     return ret.clone();
                 }
                 ("core.game", "run") => {
+                    if args.len() != 3 {
+                        self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!("`game.run` expects 1 to 3 arguments, got {}", args.len()),
+                            "`game.run` accepts a scene plus optional replay and backend handles"
+                                .to_string(),
+                            "write `game.run(scene)`, `game.run(scene, replay: replay)`, or `game.run(scene, replay: replay, backend: backend)`".to_string(),
+                            Some(span),
+                        ));
+                    }
                     if let Some(scene) = args.get_mut(0) {
                         self.check_game_run_scene_edit(&scene.expr);
-                        self.expect_core_arg("run", 0, &Type::Named("GameScene".to_string()), scene);
                     }
-                    match args.len() {
-                        1 => {}
-                        2 => {
-                            let label = args[1].label.as_ref().map(|(l, _)| l.clone());
-                            match label.as_deref() {
-                                Some("backend") => self.expect_core_arg(
-                                    "run",
-                                    1,
-                                    &Type::Named("GameBackend".to_string()),
-                                    &mut args[1],
-                                ),
-                                Some("replay") | None => self.expect_core_arg(
-                                    "run",
-                                    1,
-                                    &Type::Named("GameReplay".to_string()),
-                                    &mut args[1],
-                                ),
-                                Some(label) => {
-                                    game_run_label_error(&mut self.diags, label, &args[1], 1, span);
-                                    self.infer(&mut args[1].expr);
-                                }
-                            }
-                        }
-                        3 => {
-                            let label1 = args[1].label.as_ref().map(|(l, _)| l.clone());
-                            match label1.as_deref() {
-                                Some("replay") | None => self.expect_core_arg(
-                                    "run",
-                                    1,
-                                    &Type::Named("GameReplay".to_string()),
-                                    &mut args[1],
-                                ),
-                                Some(label) => {
-                                    game_run_label_error(&mut self.diags, label, &args[1], 1, span);
-                                    self.infer(&mut args[1].expr);
-                                }
-                            }
-                            let label2 = args[2].label.as_ref().map(|(l, _)| l.clone());
-                            match label2.as_deref() {
-                                Some("backend") | None => self.expect_core_arg(
-                                    "run",
-                                    2,
-                                    &Type::Named("GameBackend".to_string()),
-                                    &mut args[2],
-                                ),
-                                Some(label) => {
-                                    game_run_label_error(&mut self.diags, label, &args[2], 2, span);
-                                    self.infer(&mut args[2].expr);
-                                }
-                            }
-                        }
-                        _ => {
-                            self.diags.push(Diagnostic::error(
-                                "E0104",
-                                format!("`game.run` expects 1 to 3 arguments, got {}", args.len()),
-                                "`game.run` accepts a scene plus optional replay and backend handles"
-                                    .to_string(),
-                                "write `game.run(scene)`, `game.run(scene, replay: replay)`, or `game.run(scene, replay: replay, backend: backend)`".to_string(),
-                                Some(span),
-                            ));
-                            for a in args.iter_mut().skip(1) {
-                                self.infer(&mut a.expr);
-                            }
+                    for (index, ((_, param_ty), arg)) in sig
+                        .as_ref()
+                        .map(|(params, _)| params.as_slice())
+                        .unwrap_or(&[])
+                        .iter()
+                        .zip(args.iter_mut())
+                        .enumerate()
+                    {
+                        let inserted_absent = arg.flags.source_index.is_none()
+                            && arg.flags.binder_slot == Some(index)
+                            && matches!(arg.expr, Expr::Absent(_));
+                        if !inserted_absent {
+                            self.expect_core_arg("run", index, param_ty, arg);
                         }
                     }
                     return Some(Type::String);
@@ -1873,6 +1864,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(ret)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1914,6 +1906,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(ret)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1962,6 +1955,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(name, 1, &key_fn, key_arg);
                     }
@@ -1972,6 +1966,7 @@ impl<'a> Checker<'a> {
                                 ret: Some(Box::new(Type::Float)),
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             };
                             self.expect_core_arg(name, 2, &value_fn, value_arg);
                         }
@@ -2027,6 +2022,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(name, 2, &key_fn, left_key);
                     }
@@ -2036,6 +2032,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(name, 3, &key_fn, right_key);
                     }
@@ -2083,6 +2080,7 @@ impl<'a> Checker<'a> {
                                 ret: Some(Box::new(Type::String)),
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             };
                             self.expect_core_arg(name, idx, &key_fn, arg);
                         }
@@ -2093,6 +2091,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(Type::Float)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(name, 3, &value_fn, value_arg);
                     }
@@ -3093,157 +3092,6 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                // D-FANOUT3=C: consume a list of task handles and join them in
-                // list order. Runtime meaning reuses TaskGroupAll/jet_task_all.
-                ("core.tasks", "join_all") => {
-                    if args.len() != 1 {
-                        self.diags.push(wrong_core_arity(
-                            "join_all",
-                            1,
-                            args.len(),
-                            span,
-                        ));
-                        for arg in args.iter_mut() {
-                            self.infer(&mut arg.expr);
-                        }
-                        return None;
-                    }
-                    let literal_handles = matches!(&args[0].expr, Expr::ListLit(..));
-                    if !literal_handles && args[0].convention != AccessConvention::Move {
-                        self.diags.push(Diagnostic::error(
-                            "E0201",
-                            "`tasks.join_all` consumes its list of task handles".to_string(),
-                            "each task handle can be joined only once".to_string(),
-                            format!(
-                                "pass ownership with the move-capability marker `^`: `tasks.join_all({}handles)`",
-                                Syntax::SIGIL_MOVE
-                            ),
-                            Some(args[0].span),
-                        ));
-                    }
-                    let elem = match self.infer(&mut args[0].expr) {
-                        Some(Type::List(inner)) => match *inner {
-                            Type::Apply {
-                                ref name,
-                                ref args,
-                                ..
-                            } if name == "Task" && args.len() == 1 => args[0].clone(),
-                            other => {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!(
-                                        "`tasks.join_all` needs a list of task handles, not `[{}]`",
-                                        other.show()
-                                    ),
-                                    "each element must be a `Task<T>` handle".to_string(),
-                                    "pass a list such as `[first, second]` where each value came from `tasks.spawn`".to_string(),
-                                    Some(args[0].expr.span()),
-                                ));
-                                return None;
-                            }
-                        },
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`tasks.join_all` needs a list of task handles, not {}",
-                                    other.show()
-                                ),
-                                "the call waits for and consumes each `Task<T>` in one list"
-                                    .to_string(),
-                                "pass a `[Task<T>]` list".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
-                            return None;
-                        }
-                        None => return None,
-                    };
-                    let mut names = std::collections::HashSet::new();
-                    collect_task_handles(&args[0].expr, &mut names);
-                    for name in names {
-                        self.mark_taskgroup_spawn_consumed(&name);
-                    }
-                    if let Expr::Ident(name, name_span) = &args[0].expr {
-                        self.mark_moved(name.clone(), *name_span);
-                    }
-                    return Some(Type::List(Box::new(elem)));
-                }
-                // First finished task wins (consumes the list). Runtime meaning
-                // reuses TaskGroupAny/jet_task_any — twin of join_all.
-                ("core.tasks", "wait_any") => {
-                    if args.len() != 1 {
-                        self.diags.push(wrong_core_arity(
-                            "wait_any",
-                            1,
-                            args.len(),
-                            span,
-                        ));
-                        for arg in args.iter_mut() {
-                            self.infer(&mut arg.expr);
-                        }
-                        return None;
-                    }
-                    let literal_handles = matches!(&args[0].expr, Expr::ListLit(..));
-                    if !literal_handles && args[0].convention != AccessConvention::Move {
-                        self.diags.push(Diagnostic::error(
-                            "E0201",
-                            "`tasks.wait_any` consumes its list of task handles".to_string(),
-                            "each task handle can be joined only once".to_string(),
-                            format!(
-                                "pass ownership with the move-capability marker `^`: `tasks.wait_any({}handles)`",
-                                Syntax::SIGIL_MOVE
-                            ),
-                            Some(args[0].span),
-                        ));
-                    }
-                    let elem = match self.infer(&mut args[0].expr) {
-                        Some(Type::List(inner)) => match *inner {
-                            Type::Apply {
-                                ref name,
-                                ref args,
-                                ..
-                            } if name == "Task" && args.len() == 1 => args[0].clone(),
-                            other => {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!(
-                                        "`tasks.wait_any` needs a list of task handles, not `[{}]`",
-                                        other.show()
-                                    ),
-                                    "each element must be a `Task<T>` handle".to_string(),
-                                    "pass a list such as `[first, second]` where each value came from `tasks.spawn`".to_string(),
-                                    Some(args[0].expr.span()),
-                                ));
-                                return None;
-                            }
-                        },
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`tasks.wait_any` needs a list of task handles, not {}",
-                                    other.show()
-                                ),
-                                "the call waits for the first finished `Task<T>` in one list"
-                                    .to_string(),
-                                "pass a `[Task<T>]` list".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
-                            return None;
-                        }
-                        None => return None,
-                    };
-                    let mut names = std::collections::HashSet::new();
-                    collect_task_handles(&args[0].expr, &mut names);
-                    for name in names {
-                        self.mark_taskgroup_spawn_consumed(&name);
-                    }
-                    if let Expr::Ident(name, name_span) = &args[0].expr {
-                        self.mark_moved(name.clone(), *name_span);
-                    }
-                    return Some(elem);
-                }
-                // L2501 is reserved for "whole-file read advisory" but intentionally not
                 // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call
                 // site is too noisy (breaks showcase golden tests via path-specific output).
                 // Revisit when the test harness can normalise paths in exact comparisons.
@@ -4400,24 +4248,7 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("bind", 1, &Type::Named("HTTPMux".to_string()), &mut args[1]);
-                    if args.len() == 3 {
-                        match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
-                            Some(("tls", _)) => {}
-                            Some((label, label_span)) => self.diags.push(Diagnostic::error(
-                                "E0764",
-                                format!("`bind` has no option named `{label}` here"),
-                                "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
-                                "write `tls: Server.tls(cert, key)`".to_string(),
-                                Some(label_span),
-                            )),
-                            None => self.diags.push(Diagnostic::error(
-                                "E0769",
-                                "`bind` needs `tls:` before the third argument".to_string(),
-                                "the label makes the transport switch explicit at the call site".to_string(),
-                                "write `Server.bind(addr, mux, tls: Server.tls(cert, key))`".to_string(),
-                                Some(args[2].span),
-                            )),
-                        }
+                    if args.len() == 3 && !matches!(&args[2].expr, Expr::Absent(_)) {
                         self.expect_core_arg(
                             "bind",
                             2,
@@ -4447,24 +4278,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
                     // second arg is a Mux — just infer it
                     self.infer(&mut args[1].expr);
-                    if args.len() == 3 {
-                        match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
-                            Some(("tls", _)) => {}
-                            Some((label, label_span)) => self.diags.push(Diagnostic::error(
-                                "E0764",
-                                format!("`serve` has no option named `{label}` here"),
-                                "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
-                                "write `tls: Server.tls(cert, key)`".to_string(),
-                                Some(label_span),
-                            )),
-                            None => self.diags.push(Diagnostic::error(
-                                "E0769",
-                                "`serve` needs `tls:` before the third argument".to_string(),
-                                "the label makes the transport switch explicit at the call site".to_string(),
-                                "write `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
-                                Some(args[2].span),
-                            )),
-                        }
+                    if args.len() == 3 && !matches!(&args[2].expr, Expr::Absent(_)) {
                         self.expect_core_arg(
                             "serve",
                             2,
@@ -4965,27 +4779,52 @@ impl<'a> Checker<'a> {
                             return Some(Type::Int);
                         }
                         2 => {
-                            self.expect_core_arg("display_width", 0, &Type::String, &mut args[0]);
-                            let label = args[1].label.as_ref().map(|(l, _)| l.clone());
-                            match label.as_deref() {
-                                Some("policy") | None => self.expect_core_arg(
-                                    "display_width",
-                                    1,
-                                    &Type::Named("TextWidth".to_string()),
-                                    &mut args[1],
-                                ),
-                                Some(label) => {
-                                    let label_span = args[1].label.as_ref().map(|(_, s)| *s).unwrap_or(span);
-                                    self.diags.push(Diagnostic::error(
-                                        "E0764",
-                                        format!("`display_width` has no parameter labelled `{label}`"),
-                                        "this position accepts a `TextWidth` policy".to_string(),
-                                        "write `policy:` here, or drop the label".to_string(),
-                                        Some(label_span),
-                                    ));
-                                    self.infer(&mut args[1].expr);
+                            let params = vec![
+                                crate::Sema::CallBinder::BindParam {
+                                    label: "text",
+                                    name: "text",
+                                    zone: ParamZone::PositionalOnly,
+                                    default: None,
+                                    convention: AccessConvention::Read,
+                                    ty: None,
+                                    variadic: false,
+                                    core_default: None,
+                                },
+                                crate::Sema::CallBinder::BindParam {
+                                    label: "policy",
+                                    name: "policy",
+                                    zone: ParamZone::Either,
+                                    default: None,
+                                    convention: AccessConvention::Read,
+                                    ty: None,
+                                    variadic: false,
+                                    core_default: None,
+                                },
+                            ];
+                            if crate::Sema::CallBinder::bind_call_args(
+                                "display_width",
+                                &params,
+                                args,
+                                span,
+                                &mut self.diags,
+                            )
+                            .is_none()
+                            {
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
                                 }
+                                return Some(Type::Result {
+                                    ok: Box::new(Type::Int),
+                                    err: Box::new(Type::Named("TextError".to_string())),
+                                });
                             }
+                            self.expect_core_arg("display_width", 0, &Type::String, &mut args[0]);
+                            self.expect_core_arg(
+                                "display_width",
+                                1,
+                                &Type::Named("TextWidth".to_string()),
+                                &mut args[1],
+                            );
                             return Some(Type::Result {
                                 ok: Box::new(Type::Int),
                                 err: Box::new(Type::Named("TextError".to_string())),
@@ -5058,21 +4897,27 @@ impl<'a> Checker<'a> {
                 return None;
             };
             if module == "core.os" && name == "on_interrupt" {
+                // D-OSINTERRUPT1/I3: this is the one fixed callback crossing.
+                // Keep the callback expectation tied to the complete one-slot
+                // signature. Do not silently type-check only `params.first()`
+                // if the registry row ever drifts to another shape.
+                debug_assert_eq!(params.len(), 1);
                 if args.len() != params.len() {
                     self.diags
                         .push(wrong_core_arity(name, params.len(), args.len(), span));
                 }
-                if let (Some((conv, param_ty)), Some(arg)) =
-                    (params.first(), args.get_mut(0))
-                {
-                    debug_assert_eq!(*conv, AccessConvention::Read);
-                    let saved_lambda_escapes = self.lambda_escapes;
-                    let saved_callback_depth = self.interrupt_callback_depth;
-                    self.lambda_escapes = true;
-                    self.interrupt_callback_depth += 1;
-                    self.expect_core_arg(name, 0, param_ty, arg);
-                    self.interrupt_callback_depth = saved_callback_depth;
-                    self.lambda_escapes = saved_lambda_escapes;
+                if params.len() == 1 {
+                    let (conv, param_ty) = &params[0];
+                    if let Some(arg) = args.get_mut(0) {
+                        debug_assert_eq!(*conv, AccessConvention::Read);
+                        let saved_lambda_escapes = self.lambda_escapes;
+                        let saved_callback_depth = self.interrupt_callback_depth;
+                        self.lambda_escapes = true;
+                        self.interrupt_callback_depth += 1;
+                        self.expect_core_arg(name, 0, param_ty, arg);
+                        self.interrupt_callback_depth = saved_callback_depth;
+                        self.lambda_escapes = saved_lambda_escapes;
+                    }
                 }
                 for arg in args.iter_mut().skip(params.len()) {
                     self.infer(&mut arg.expr);

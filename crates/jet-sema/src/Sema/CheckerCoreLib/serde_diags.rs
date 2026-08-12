@@ -332,6 +332,7 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         // A non-local type (imported) is trusted; a local one must derive Encode.
         Type::Named(n) => {
             n == "Decimal"
+                || matches!(n.as_str(), "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration")
                 || is_json_type_name(n)
                 || !reg.local_types.contains(n)
                 || reg.implements_trait(n, crate::Generics::ENCODE)
@@ -359,7 +360,10 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_decodable_ty(value, reg),
         Type::Named(n) => {
-            n == "Decimal" || !reg.local_types.contains(n) || reg.implements_trait(n, crate::Generics::DECODE)
+            n == "Decimal"
+                || matches!(n.as_str(), "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration")
+                || !reg.local_types.contains(n)
+                || reg.implements_trait(n, crate::Generics::DECODE)
         }
         Type::Apply { name, args } => {
             apply_serde_ok(name, args, reg, crate::Generics::DECODE, &|t| {
@@ -578,11 +582,9 @@ pub(super) fn literal_string_value(expr: &Expr) -> Option<String> {
 /// D-A11YGATE1=B (c134 Phase 6, E2930): an interactive-role `UiNode` with an
 /// empty accessible label.
 pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "E2930",
-        format!("this {role} has no accessible label"),
-        "screen readers announce a control by its accessible label — an empty label is invisible to assistive tech".to_string(),
-        "pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`".to_string(),
+        &[("role", role)],
         Some(span),
     )
 }
@@ -590,11 +592,9 @@ pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
 /// D-A11YGATE1=B (c134 Phase 6, E2931): two interactive nodes in the same
 /// inline focus group share an accessible label.
 pub(crate) fn a11y_duplicate_label(label: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "E2931",
-        format!("two interactive nodes both have the label \"{label}\""),
-        "assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3)".to_string(),
-        "give each interactive node a distinct, descriptive label".to_string(),
+        &[("label", label)],
         Some(span),
     )
 }

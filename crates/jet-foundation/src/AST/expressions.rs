@@ -46,6 +46,16 @@ pub struct CallArgFlags {
     /// supplied expressions run left to right in source order. `None` means the
     /// call reads in the order it was written and needs no temporaries.
     pub source_index: Option<usize>,
+    /// Declaration slot assigned by the shared binder. Present for supplied
+    /// and inserted slots so source-order lowering can materialize one value
+    /// for defaults that refer to it.
+    pub binder_slot: Option<usize>,
+    /// Default-expression references rewritten to compiler-private slot names.
+    /// The supplied AST is never copied into a default; lowering resolves these
+    /// names to the slot temporary instead.
+    pub binder_refs: Vec<(String, usize, Type)>,
+    /// Stable call-site identity used to name declaration-slot temporaries.
+    pub binder_site: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -268,10 +278,6 @@ pub struct LambdaMeta {
     /// projector. Later tiers consume this fact instead of reinterpreting the
     /// lambda body.
     pub cell_projection_path: Option<Vec<String>>,
-    /// D-TASKBORROW1=A: this lambda is a `taskgroup` child that captures one or
-    /// more borrowed places sema proved disjoint. Every tier spawns it through
-    /// the scoped path whose loan the group closes at join.
-    pub scoped_task_borrow: bool,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.
@@ -473,7 +479,9 @@ pub enum Expr {
     /// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb. Produces a fresh,
     /// independent value from `x` (a temporary; never needs `^`, never trips
     /// E0209). Legal on any expression, most useful on a named binding.
-    /// Lowers to Rust `x.clone()` (E0211 if the type isn't cloneable).
+    /// Lowers to the canonical Prelude copy operation for Tensor values and
+    /// to ordinary clone/materialization for other cloneable values (E0211 if
+    /// the type is not cloneable).
     Copy(Box<Expr>, Span),
     /// Bare place acquisition is elaborated to `Read` by sema; written
     /// `&place` parses as `Write`. This never carries call-argument meaning.
@@ -673,6 +681,16 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// D-FMTPARENS1=A: author grouping is transparent to semantic shape.
+    /// Keep the unwrapping in the AST so every consumer shares one helper.
+    pub fn without_parens(&self) -> &Expr {
+        let mut expr = self;
+        while let Expr::Paren(inner, _) = expr {
+            expr = inner.as_ref();
+        }
+        expr
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Expr::Str(_, s)
@@ -736,5 +754,332 @@ impl Func {
 
     pub fn is_static_method(&self) -> bool {
         self.self_param().is_none()
+    }
+}
+
+impl Expr {
+    /// Visit this expression and every expression nested in it.  Binder
+    /// defaults are ordinary expressions, not a special mini-language: calls,
+    /// indexes, collections, literals, lambdas, and typed/enum bodies all use
+    /// this one recursive walk.
+    pub fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut Expr)) {
+        fn walk(e: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
+            f(e);
+            match e {
+                Expr::Str(parts, _) => {
+                    for part in parts {
+                        match part {
+                            StrPart::Lit(_) => {}
+                            StrPart::Interp(inner, _) => walk(inner, f),
+                        }
+                    }
+                }
+                Expr::ListLit(items, _) => items.iter_mut().for_each(|item| walk(item, f)),
+                Expr::MemberSpread { base, .. }
+                | Expr::Spread(base, _)
+                | Expr::Deref(base, _)
+                | Expr::RawOf(base, _)
+                | Expr::Copy(base, _)
+                | Expr::Place(base, _, _)
+                | Expr::Field(base, _, _)
+                | Expr::Present(base, _)
+                | Expr::Ok(base, _)
+                | Expr::Err(base, _)
+                | Expr::Try(base, _, _)
+                | Expr::Paren(base, _) => walk(base, f),
+                Expr::MapLit(entries, _) => entries.iter_mut().for_each(|(key, value)| {
+                    walk(key, f);
+                    walk(value, f);
+                }),
+                Expr::Index { base, index, .. } => {
+                    walk(base, f);
+                    walk(index, f);
+                }
+                Expr::Slice { base, start, end, range, .. } => {
+                    walk(base, f);
+                    walk(start, f);
+                    walk(end, f);
+                    if let Some(range) = range {
+                        walk(range, f);
+                    }
+                }
+                Expr::Range { start, end, .. } => {
+                    walk(start, f);
+                    walk(end, f);
+                }
+                Expr::Call(call) => walk_args(&mut call.args, f),
+                Expr::Unary(_, inner, _) => walk(inner, f),
+                Expr::Binary(_, lhs, rhs, _) => {
+                    walk(lhs, f);
+                    walk(rhs, f);
+                }
+                Expr::CompareChain { operands, .. } => {
+                    operands.iter_mut().for_each(|operand| walk(operand, f));
+                }
+                Expr::OptField { base, .. } => walk(base, f),
+                Expr::MethodCall { receiver, args, .. } => {
+                    walk(receiver, f);
+                    walk_args(args, f);
+                }
+                Expr::StructLit { fields, .. } => {
+                    fields.iter_mut().for_each(|(_, _, value)| walk(value, f));
+                }
+                Expr::TypedLit { body, .. } => body.for_each_expr_mut(|value| walk(value, f)),
+                Expr::EnumLit { args, .. } => {
+                    for arg in args {
+                        match arg {
+                            EnumLitArg::Positional(value)
+                            | EnumLitArg::Named { expr: value, .. } => walk(value, f),
+                        }
+                    }
+                }
+                Expr::Tainted(inner, _, _) => walk(inner, f),
+                Expr::PatternTest { subject, pattern, .. } => {
+                    walk(subject, f);
+                    walk_pattern(pattern, f);
+                }
+                Expr::OrFallback { value, fallback, .. } => {
+                    walk(value, f);
+                    walk_fallback(fallback, f);
+                }
+                Expr::If {
+                    cond,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    ..
+                } => {
+                    walk(cond, f);
+                    walk_stmts(then_body, f);
+                    walk(then_value, f);
+                    walk_stmts(else_body, f);
+                    walk(else_value, f);
+                }
+                Expr::TupleLit(fields, _, _) => {
+                    fields.iter_mut().for_each(|(_, value)| walk(value, f));
+                }
+                Expr::Lambda(lambda) => match &mut lambda.body {
+                    LambdaBody::Expr(value) => walk(value, f),
+                    LambdaBody::Block(body) => walk_stmts(body, f),
+                },
+                Expr::CallValue { callee, args, .. } => {
+                    walk(callee, f);
+                    walk_args(args, f);
+                }
+                Expr::PtrFromAddr { addr, .. } => walk(addr, f),
+                Expr::IncDec { operand, .. } => walk(operand, f),
+                Expr::StrMatchLit(..)
+                | Expr::BinMatchLit(..)
+                | Expr::Int(..)
+                | Expr::Float(..)
+                | Expr::Bool(..)
+                | Expr::Char(..)
+                | Expr::Ident(..)
+                | Expr::UnitLit { .. }
+                | Expr::Absent(..)
+                | Expr::Todo { .. }
+                | Expr::NoElse(..)
+                | Expr::ReduceMarker(..)
+                | Expr::ComptimeName { .. } => {}
+            }
+        }
+
+        fn walk_args(args: &mut [CallArg], f: &mut impl FnMut(&mut Expr)) {
+            for arg in args {
+                walk(&mut arg.expr, f);
+            }
+        }
+
+        fn walk_stmts(stmts: &mut [Stmt], f: &mut impl FnMut(&mut Expr)) {
+            for stmt in stmts {
+                walk_stmt(stmt, f);
+            }
+        }
+
+        fn walk_stmt(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
+            match stmt {
+                Stmt::Expr(expr) => walk(expr, f),
+                Stmt::Val(binding) => walk(&mut binding.init, f),
+                Stmt::Assign { target, value, .. } => {
+                    walk_lvalue(target, f);
+                    walk(value, f);
+                }
+                Stmt::Return(value, _) => {
+                    if let Some(value) = value {
+                        walk(value, f);
+                    }
+                }
+                Stmt::While { cond, body, .. } => {
+                    walk(cond, f);
+                    walk_stmts(body, f);
+                }
+                Stmt::For { kind, body, .. } => {
+                    walk_for_kind(kind, f);
+                    walk_stmts(body, f);
+                }
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                }
+                | Stmt::ComptimeSwitch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    walk(subject, f);
+                    for arm in arms {
+                        walk(&mut arm.cond, f);
+                        walk_stmts(&mut arm.body, f);
+                    }
+                    if let Some(body) = else_body {
+                        walk_stmts(body, f);
+                    }
+                }
+                Stmt::BreakValue(value, _) | Stmt::Yield(value, _) => walk(value, f),
+                Stmt::BreakLabelValue(_, _, value, _) => walk(value, f),
+                Stmt::Loop { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Switched { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::ComptimeBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::Transact { body, .. } => walk_stmts(body, f),
+                Stmt::Unsafe {
+                    audit_expr, body, ..
+                } => {
+                    if let Some(expr) = audit_expr {
+                        walk(expr, f);
+                    }
+                    walk_stmts(body, f);
+                }
+                Stmt::Impure {
+                    reason_expr, body, ..
+                } => {
+                    if let Some(expr) = reason_expr {
+                        walk(expr, f);
+                    }
+                    walk_stmts(body, f);
+                }
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    walk(&mut init.init, f);
+                    walk(cond, f);
+                    if let Some(step) = step {
+                        walk_stmt(step, f);
+                    }
+                    walk_stmts(body, f);
+                }
+                Stmt::TaskGroup { limit, body, .. } => {
+                    if let Some(limit) = limit {
+                        walk(limit, f);
+                    }
+                    walk_stmts(body, f);
+                }
+                Stmt::Layout { body, .. } => walk_stmts(body, f),
+                Stmt::ContextBlock { fields, body, .. } => {
+                    for (_, value, _) in fields {
+                        walk(value, f);
+                    }
+                    walk_stmts(body, f);
+                }
+                Stmt::AssumeDet {
+                    reason_expr, body, ..
+                } => {
+                    walk(reason_expr, f);
+                    walk_stmts(body, f);
+                }
+                Stmt::ComptimeIf {
+                    cond,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    walk(cond, f);
+                    walk_stmts(then_body, f);
+                    if let Some(body) = else_body {
+                        walk_stmts(body, f);
+                    }
+                }
+                Stmt::ScopeMember { args, body, .. } => {
+                    for arg in args {
+                        walk(arg, f);
+                    }
+                    walk_stmts(body, f);
+                }
+                Stmt::Break(_)
+                | Stmt::Continue(_)
+                | Stmt::BreakLabel(..)
+                | Stmt::ContinueLabel(..) => {}
+            }
+        }
+
+        fn walk_lvalue(lvalue: &mut super::LValue, f: &mut impl FnMut(&mut Expr)) {
+            match lvalue {
+                super::LValue::Local { .. } => {}
+                super::LValue::Index { base, index, .. } => {
+                    walk(base, f);
+                    walk(index, f);
+                }
+                super::LValue::Field { base, .. } => walk(base, f),
+            }
+        }
+
+        fn walk_for_kind(kind: &mut super::ForKind, f: &mut impl FnMut(&mut Expr)) {
+            match kind {
+                super::ForKind::Range {
+                    start, end, step, ..
+                } => {
+                    walk(start, f);
+                    walk(end, f);
+                    if let Some(step) = step {
+                        walk(step, f);
+                    }
+                }
+                super::ForKind::In { collection, step } => {
+                    walk(collection, f);
+                    if let Some(step) = step {
+                        walk(step, f);
+                    }
+                }
+            }
+        }
+
+        fn walk_pattern(pattern: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
+            match pattern {
+                Pattern::Or(alts, _) => alts.iter_mut().for_each(|alt| walk_pattern(alt, f)),
+                Pattern::Struct { fields, .. } => {
+                    for field in fields {
+                        if let super::StructPatField::Value { value, .. } = field {
+                            walk(value, f);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn walk_fallback(fallback: &mut OrFallback, f: &mut impl FnMut(&mut Expr)) {
+            match fallback {
+                OrFallback::Value(value) => walk(value, f),
+                OrFallback::Return(Some(value), _) => walk(value, f),
+                OrFallback::Panic { args, .. } => walk_args(args, f),
+                _ => {}
+            }
+        }
+
+        walk(self, &mut f);
     }
 }

@@ -25,6 +25,19 @@ use std::collections::HashSet;
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
+    // D-CRYPTO-API1=A: expert crypto calls have total fixed signatures and a
+    // typed CoreCall emitter, but their registry rows intentionally do not
+    // advertise a beginner direct symbol. The expert import and #Unsafe gate
+    // are sema-owned; keep this coverage decision on the same fixed signature.
+    if module == "core.crypto.expert" && crate::Sema::core_fixed_sig(module, method).is_some() {
+        return true;
+    }
+    // The AOT emitter uses the typed `JetLocalTime::parse` expression, while
+    // the resident JIT has an explicit Result<LocalTime, String> adapter.
+    // Keep this special route out of the generic direct-symbol table.
+    if module == "core.time" && method == "parse_time" {
+        return true;
+    }
     // Plain Core calls are rows in the foundation registry. Their argument
     // expressions and resolved value types are checked by the callers below;
     // this lookup owns the call-key coverage decision.
@@ -341,7 +354,8 @@ pub(super) fn core_call_args_in_subset(
         .all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
-/// c109 Phase 13: is a closure-taking core call (`http.serve`/`scope.guard`)
+/// c109 Phase 13: is a closure-taking core call (`tasks.spawn`, `http.serve`, or
+/// `scope.guard`)
 /// inside the subset? These are NOT in `core_fixed_sig` — each has a
 /// bespoke emit shape. We cover only
 /// the cleanest, byte-reproducible case for each, where the closure arg is a LITERAL
@@ -351,6 +365,7 @@ pub(super) fn core_call_args_in_subset(
 ///     router-handler branch needs an HTTPRouter value, which can only come from
 ///     `http.router()` (not in `core_fixed_sig`) — so it can't arise in a covered fn.
 ///   - `scope.guard(<lambda>)` — 1 arg, a literal zero-param lambda.
+///   - `tasks.spawn(<lambda>)` — 1 arg, a literal zero-param lambda.
 pub(crate) fn core_closure_call_in_subset(
     module: &str,
     method: &str,
@@ -361,6 +376,7 @@ pub(crate) fn core_closure_call_in_subset(
     let lambda_arg = |i: usize| matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals));
     let no_labels = args.iter().all(|a| a.label.is_none());
     match (module, method) {
+        ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
         ("core.http", "serve") => {
             args.len() == 2
                 && no_labels
@@ -368,6 +384,12 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
         }
         ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-OSINTERRUPT1: the callback itself is canonicalized by lowering;
+        // admit all in-subset callback shapes so inline, named, and indirect
+        // values use the same `CoreClosureCall` path in every tier.
+        ("core.os", "on_interrupt") => {
+            args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
+        }
         // D-DATA-SURFACE1=A: typed table selectors. Rows arg is in subset; selector
         // args must be literal lambdas so lowering can seed row param types.
         ("core.data", "filter" | "sort_by") => {

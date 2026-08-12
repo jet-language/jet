@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::SHA256;
+use jet_env_model::Authority::AuthorityResolver;
 
 use super::graph_projection::project_checked;
 use super::project_transactions::{diagnostic_json, rel_path};
@@ -28,11 +29,31 @@ fn project_file_with_runtime_on_compiler_stack(
     runtime_events: Option<&str>,
 ) -> Result<Projection, Vec<Diagnostic>> {
     let path_str = path.to_string_lossy();
-    let src = fs::read_to_string(path).unwrap_or_default();
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = AuthorityResolver::open(root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let Some(file_name) = path.file_name() else {
+        return Err(vec![jet_env_model::Authority::AuthorityError::Invalid {
+            path: path.to_path_buf(),
+            detail: "source entry has no file name".to_string(),
+        }
+        .diagnostic()]);
+    };
+    let checked = resolver
+        .checked_file(std::path::Path::new(file_name))
+        .map_err(|error| vec![error.diagnostic()])?;
+    resolver
+        .revalidate_file(&checked)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let src = checked.text().map_err(|error| vec![error.diagnostic()])?;
     let package_facts = jet_semindex::package_facts_for_entry(path).map_err(|error| {
         vec![jet_semindex::package_facts_diagnostic(path, &error)]
     })?;
-    let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(&path_str, None, true);
+    let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
+        &path_str,
+        Some((&checked.path, &src)),
+        true,
+    );
     let errors: Vec<Diagnostic> = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -46,6 +67,9 @@ fn project_file_with_runtime_on_compiler_stack(
     };
     let workspace_overlay_policy = jet_semindex::workspace_overlay_policy_for_entry(path)
         .map_err(|diagnostic| vec![diagnostic])?;
+    resolver
+        .revalidate_file(&checked)
+        .map_err(|error| vec![error.diagnostic()])?;
     Ok(project_checked(
         path,
         &src,
@@ -75,6 +99,7 @@ pub(super) struct ProjectContext {
     pub(super) files: Vec<ProjectFileRec>,
     pub(super) parts: jet_driver::ProjectParts::ProjectPartsReport,
     pub(super) project_revision: String,
+    pub(super) authority_diagnostic: Option<Diagnostic>,
 }
 
 pub(super) struct TouchedProjectFile {
@@ -93,6 +118,7 @@ struct WorkspaceBoundary {
     root: PathBuf,
     member_root: Option<PathBuf>,
     malformed: bool,
+    diagnostic: Option<Diagnostic>,
 }
 
 pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
@@ -104,7 +130,11 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
             || boundary.member_root.is_some()
             || same_path(entry_dir, &boundary.root))
         .map(|boundary| boundary.root.clone());
-    let manifest_root = jet_driver::Loader::find_manifest_root(entry_dir).filter(|manifest| {
+    let (manifest_root, manifest_diagnostic) = match jet_driver::Loader::find_manifest_root_checked(entry_dir) {
+        Ok(root) => (root, None),
+        Err(diagnostic) => (None, Some(diagnostic)),
+    };
+    let manifest_root = manifest_root.filter(|manifest| {
         let Some(boundary) = &workspace_boundary else {
             return true;
         };
@@ -117,18 +147,29 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
             }
         }
     });
-    let ecosystem_root = workspace_root
-        .as_deref()
-        .filter(|root| root.join(jet_driver::Syntax::PACKAGE_FILE).is_file())
-        .map(Path::to_path_buf)
-        .or_else(|| manifest_root.clone());
+    let (workspace_ecosystem_root, ecosystem_diagnostic) = match workspace_root {
+        Some(ref root) => match AuthorityResolver::open(root) {
+            Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
+                Ok(manifest) => match resolver.revalidate_file(&manifest.file) {
+                    Ok(()) => (Some(root.to_path_buf()), None),
+                    Err(error) => (None, Some(error.diagnostic())),
+                },
+                Err(error) if error.is_missing() => (None, None),
+                Err(error) => (None, Some(error.diagnostic())),
+            },
+            Err(error) if error.is_missing() => (None, None),
+            Err(error) => (None, Some(error.diagnostic())),
+        },
+        None => (None, None),
+    };
+    let ecosystem_root = workspace_ecosystem_root.or_else(|| manifest_root.clone());
     let project_root = workspace_root
         .as_deref()
         .or(manifest_root.as_deref())
         .or(ecosystem_root.as_deref())
         .unwrap_or(entry_dir)
         .to_path_buf();
-    let files = collect_project_files(
+    let (files, collection_diagnostic) = collect_project_files(
         &project_root,
         path,
         manifest_root.as_deref(),
@@ -146,29 +187,115 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         files,
         parts,
         project_revision,
+        // File inventory is also an authority read. Keep its error visible to
+        // the caller instead of turning a failed read into an empty project.
+        authority_diagnostic: collection_diagnostic
+            .or(manifest_diagnostic)
+            .or(ecosystem_diagnostic)
+            .or_else(|| {
+            workspace_boundary
+                .as_ref()
+                .and_then(|boundary| boundary.diagnostic.clone())
+        }),
     }
 }
 
 fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {
-    let mut dir = start.to_path_buf();
+    let mut dir = match AuthorityResolver::open(start) {
+        Ok(resolver) => resolver.root().to_path_buf(),
+        Err(error) if error.is_missing() => return None,
+        Err(error) => {
+            return Some(WorkspaceBoundary {
+                root: start.to_path_buf(),
+                member_root: None,
+                malformed: true,
+                diagnostic: Some(error.diagnostic()),
+            })
+        }
+    };
     loop {
-        match jet_env_model::WorkspaceFile::load(&dir) {
-            Some(Ok(plan)) => {
-                let member_root = matching_member_root(&dir, start, &plan);
-                return Some(WorkspaceBoundary {
-                    root: dir,
-                    member_root,
-                    malformed: false,
-                });
+        let resolver = match AuthorityResolver::open(&dir) {
+            Ok(resolver) => resolver,
+            Err(error) if error.is_missing() => {
+                match dir.parent() {
+                    Some(parent) => {
+                        dir = parent.to_path_buf();
+                        continue;
+                    }
+                    None => return None,
+                }
             }
-            Some(Err(_)) => {
+            Err(error) => {
                 return Some(WorkspaceBoundary {
                     root: dir,
                     member_root: None,
                     malformed: true,
+                    diagnostic: Some(error.diagnostic()),
+                })
+            }
+        };
+        dir = resolver.root().to_path_buf();
+        match resolver.resolve_workspace_source() {
+            Ok(Some(source)) => {
+                let evaluation = resolver
+                    .revalidate_source(&source)
+                    .map_err(|error| error.diagnostic())
+                    .and_then(|_| {
+                        jet_env_model::WorkspaceFile::evaluate_checked_source(
+                            &source,
+                            &resolver,
+                        )
+                    });
+                let (plan, diagnostic) = match evaluation {
+                    Ok(plan) => match resolver.revalidate_source(&source) {
+                        Ok(()) => (Some(plan), None),
+                        Err(error) => (None, Some(error.diagnostic())),
+                    },
+                    Err(diagnostic) => (None, Some(diagnostic)),
+                };
+                if source.role == jet_env_model::WorkspaceFile::WorkspaceSourceRole::Authority {
+                    return Some(WorkspaceBoundary {
+                        root: dir,
+                        member_root: None,
+                        malformed: diagnostic.is_some(),
+                        diagnostic,
+                    });
+                }
+                let Some(plan) = plan else {
+                    return Some(WorkspaceBoundary {
+                        root: dir,
+                        member_root: None,
+                        malformed: true,
+                        diagnostic,
+                    })
+                };
+                let member_root = match matching_member_root(&resolver, start, &plan) {
+                    Ok(member_root) => member_root,
+                    Err(diagnostic) => {
+                        return Some(WorkspaceBoundary {
+                            root: dir,
+                            member_root: None,
+                            malformed: true,
+                            diagnostic: Some(diagnostic),
+                        })
+                    }
+                };
+                return Some(WorkspaceBoundary {
+                    root: dir,
+                    member_root,
+                    malformed: false,
+                    diagnostic: None,
                 });
             }
-            None => {}
+            Ok(None) => {}
+            Err(error) => {
+                return Some(WorkspaceBoundary {
+                    root: dir,
+                    member_root: None,
+                    malformed: true,
+                    diagnostic: Some(error.workspace_diagnostic()),
+                })
+            }
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
@@ -178,35 +305,55 @@ fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {
 }
 
 fn matching_member_root(
-    workspace_root: &Path,
+    resolver: &AuthorityResolver,
     entry_dir: &Path,
     plan: &jet_env_model::WorkspaceFile::WorkspacePlan,
-) -> Option<PathBuf> {
-    plan.members
+) -> Result<Option<PathBuf>, Diagnostic> {
+    let entry_resolver = AuthorityResolver::open(entry_dir)
+        .map_err(|error| error.diagnostic())?;
+    let entry_path = entry_resolver.root().to_path_buf();
+    let mut matches = plan
+        .members
         .iter()
-        .map(|member| workspace_root.join(&member.path))
-        .filter(|member_root| path_is_within(entry_dir, member_root))
-        .max_by_key(|member_root| member_root.components().count())
+        .map(|member| {
+            resolver
+                .checked_directory(Path::new(&member.path))
+                .map_err(|error| error.diagnostic())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    for member in &matches {
+        resolver
+            .revalidate_directory(member)
+            .map_err(|error| error.diagnostic())?;
+    }
+    matches.sort_by_key(|member| member.path.components().count());
+    let result = matches
+        .into_iter()
+        .filter(|member| entry_path.starts_with(&member.path))
+        .map(|member| member.path)
+        .last();
+    resolver
+        .revalidate_root()
+        .map_err(|error| error.diagnostic())?;
+    Ok(result)
 }
 
 fn path_is_within(path: &Path, root: &Path) -> bool {
-    comparable_path(path).starts_with(comparable_path(root))
+    comparable_path(path)
+        .zip(comparable_path(root))
+        .is_some_and(|(path, root)| path.starts_with(root))
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
-    comparable_path(left) == comparable_path(right)
+    comparable_path(left)
+        .zip(comparable_path(right))
+        .is_some_and(|(left, right)| left == right)
 }
 
-fn comparable_path(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join(path)
-        }
-    })
+fn comparable_path(path: &Path) -> Option<PathBuf> {
+    AuthorityResolver::open(path)
+        .ok()
+        .map(|resolver| resolver.root().to_path_buf())
 }
 
 fn collect_project_files(
@@ -215,93 +362,162 @@ fn collect_project_files(
     manifest_root: Option<&Path>,
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
-) -> Vec<ProjectFileRec> {
+) -> (Vec<ProjectFileRec>, Option<Diagnostic>) {
     let mut paths = Vec::new();
+    let mut authority_diagnostic = None;
+    let mut workspace_source_failed = false;
+    let resolver = match AuthorityResolver::open(project_root) {
+        Ok(resolver) => Some(resolver),
+        Err(error) => {
+            authority_diagnostic = Some(error.diagnostic());
+            None
+        }
+    };
+    let workspace_source = if let Some(root) = workspace_root {
+        match workspace_source_path(root) {
+            Ok(source) => source,
+            Err(diagnostic) => {
+                authority_diagnostic = Some(diagnostic);
+                workspace_source_failed = true;
+                None
+            }
+        }
+    } else {
+        None
+    };
     push_existing(&mut paths, entry_path);
     push_existing(&mut paths, &project_root.join(jet_driver::Syntax::ENV_FILE));
     if let Some(root) = manifest_root {
-        push_existing(&mut paths, &root.join(jet_driver::Syntax::PAYLOAD_FILE));
+        push_existing(&mut paths, &root.join(jet_driver::Syntax::PACKAGE_FILE));
     }
     if let Some(root) = ecosystem_root {
         push_existing(&mut paths, &root.join(jet_driver::Syntax::PACKAGE_FILE));
     }
     if let Some(root) = workspace_root {
-        push_existing(&mut paths, &root.join(jet_driver::Syntax::WORKSPACE_FILE));
+        if let Some((_, source)) = workspace_source.as_ref() {
+            push_existing(&mut paths, &source.path);
+        }
         push_existing(&mut paths, &root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE));
-        if let Some(Ok(plan)) = jet_env_model::WorkspaceFile::load(root) {
-            for member in plan.members {
-                let member_dir = root.join(member.path);
-                push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PAYLOAD_FILE));
-                push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PACKAGE_FILE));
-                collect_jet_files(&member_dir, &mut paths);
+        // A failed source resolution is already an authority diagnostic. Do
+        // not reopen `workspace.jet` as a fallback authority path.
+        if let Some((source_resolver, source)) = workspace_source.as_ref() {
+            if source.role == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index {
+                match workspace_snapshot_for_source(source_resolver, source) {
+                    Ok(snapshot) => {
+                        for member in snapshot.plan.members {
+                            let member_dir = root.join(member.path);
+                            push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PACKAGE_FILE));
+                        }
+                    }
+                    Err(diagnostic) => authority_diagnostic = Some(diagnostic),
+                }
             }
         }
     }
-    if workspace_root.is_none() {
-        collect_jet_files(manifest_root.unwrap_or(project_root), &mut paths);
+    if let Some(resolver) = resolver.as_ref() {
+        match resolver.discover_source_files() {
+            Ok(source_files) => paths.extend(source_files.into_iter().filter_map(|file| {
+                let is_fallback_workspace = workspace_source_failed
+                    && workspace_root.is_some_and(|root| {
+                        file.path == root.join(jet_driver::Syntax::WORKSPACE_FILE)
+                    });
+                (!is_fallback_workspace).then_some(file.path)
+            })),
+            Err(error) => {
+                authority_diagnostic.get_or_insert_with(|| error.diagnostic());
+            }
+        }
     }
+    let authority_root = resolver
+        .as_ref()
+        .map(|resolver| resolver.root())
+        .unwrap_or(project_root);
     paths.sort();
     paths.dedup();
-    paths
-        .into_iter()
-        .filter_map(|path| {
-            let bytes = fs::read(&path).ok()?;
-            let kind = if path.file_name().and_then(|n| n.to_str())
-                == Some(jet_driver::Syntax::PAYLOAD_FILE)
-            {
-                "manifest"
-            } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::PACKAGE_FILE) {
+    let mut files = Vec::new();
+    for path in paths {
+        let Some(resolver) = resolver.as_ref() else {
+            break;
+        };
+        let relative = match path.strip_prefix(authority_root) {
+            Ok(relative) => relative,
+            Err(_) => {
+                authority_diagnostic.get_or_insert_with(|| {
+                    jet_env_model::Authority::AuthorityError::Escapes(path.clone()).diagnostic()
+                });
+                continue;
+            }
+        };
+        let checked = match resolver.checked_file(relative) {
+            Ok(checked) => checked,
+            Err(error) => {
+                authority_diagnostic.get_or_insert_with(|| error.diagnostic());
+                continue;
+            }
+        };
+        if let Err(error) = resolver.revalidate_file(&checked) {
+            authority_diagnostic.get_or_insert_with(|| error.diagnostic());
+            continue;
+        }
+        let bytes = checked.bytes.clone();
+            let kind = if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::PACKAGE_FILE) {
                 "package"
-            } else if path.file_name().and_then(|n| n.to_str())
-                == Some(jet_driver::Syntax::WORKSPACE_FILE)
+            } else if workspace_source
+                .as_ref()
+                .is_some_and(|(_, source)| path.as_path() == source.path.as_path())
             {
                 "workspace"
             } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::ENV_FILE) {
                 "env"
-            } else if rel_path(project_root, &path) == jet_driver::Syntax::UNIFIED_LOCK_FILE {
+            } else if rel_path(authority_root, &path) == jet_driver::Syntax::UNIFIED_LOCK_FILE {
                 "lock"
             } else {
                 "source"
             };
-            Some(ProjectFileRec {
-                path: rel_path(project_root, &path),
+        if let Err(error) = resolver.revalidate_file(&checked) {
+            authority_diagnostic.get_or_insert_with(|| error.diagnostic());
+            continue;
+        }
+        files.push(ProjectFileRec {
+                path: rel_path(authority_root, &path),
                 revision: format!("sha256-{}", SHA256::sha256_hex(&bytes)),
                 kind: kind.to_string(),
-            })
-        })
-        .collect()
+        });
+    }
+    (files, authority_diagnostic)
 }
 
-fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
-    if path.is_file() {
-        paths.push(path.to_path_buf());
+fn workspace_source_path(
+    root: &Path,
+) -> Result<
+    Option<(
+        AuthorityResolver,
+        jet_env_model::WorkspacePlan::WorkspaceSource,
+    )>,
+    Diagnostic,
+> {
+    let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
+    match resolver
+        .resolve_workspace_source()
+        .map_err(|error| error.workspace_diagnostic())?
+    {
+        Some(source) => Ok(Some((resolver, source))),
+        None => Ok(None),
     }
 }
 
-fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    // Watch every source so import edits immediately change project-part state.
-    // Semantic consumers filter with ProjectPartsReport::should_index.
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name == ".git" || name == ".jet" || name == "target" || name == "build" {
-            continue;
-        }
-        if path.is_dir() {
-            collect_jet_files(&path, out);
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) == Some(jet_driver::Syntax::FILE_EXT)
-            && path.file_name().and_then(|n| n.to_str()) != Some(jet_driver::Syntax::PAYLOAD_FILE)
-        {
-            out.push(path);
-        }
+fn workspace_snapshot_for_source(
+    resolver: &AuthorityResolver,
+    source: &jet_env_model::WorkspacePlan::WorkspaceSource,
+) -> Result<jet_env_model::WorkspaceFile::WorkspaceSnapshot, Diagnostic> {
+    jet_env_model::WorkspaceFile::load_checked_source(resolver, source.clone())
+}
+
+fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
+    match fs::symlink_metadata(path) {
+        Ok(_) => paths.push(path.to_path_buf()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => paths.push(path.to_path_buf()),
     }
 }
 
@@ -322,8 +538,26 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     let Some(root) = workspace_root else {
         return "null".to_string();
     };
-    let members = match jet_env_model::WorkspaceFile::load(root) {
-        Some(Ok(plan)) => plan
+    let source = match workspace_source_path(root) {
+        Ok(source) => source,
+        Err(diagnostic) => {
+            return format!(
+                "{{\"path\":\"\",\"members\":[],\"diagnostics\":[{}]}}",
+                diagnostic_json(&diagnostic)
+            );
+        }
+    };
+    let source_path = source
+        .as_ref()
+        .map(|(_, source)| rel_path(project_root, &source.path))
+        .unwrap_or_default();
+    let members = match source.as_ref() {
+        Some((resolver, source))
+            if source.role
+                == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index => {
+            match workspace_snapshot_for_source(resolver, source) {
+                Ok(snapshot) => snapshot
+                    .plan
             .members
             .iter()
             .map(|m| {
@@ -335,18 +569,20 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
             })
             .collect::<Vec<_>>()
             .join(","),
-        Some(Err(d)) => {
-            return format!(
-                "{{\"path\":{},\"members\":[],\"diagnostics\":[{}]}}",
-                json_str(&rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE))),
-                diagnostic_json(&d)
-            );
+                Err(diagnostic) => {
+                    return format!(
+                        "{{\"path\":{},\"members\":[],\"diagnostics\":[{}]}}",
+                        json_str(&source_path),
+                        diagnostic_json(&diagnostic)
+                    );
+                }
+            }
         }
-        None => String::new(),
+        Some(_) | None => String::new(),
     };
     format!(
         "{{\"path\":{},\"members\":[{}],\"diagnostics\":[]}}",
-        json_str(&rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE))),
+        json_str(&source_path),
         members
     )
 }
@@ -358,7 +594,11 @@ pub(super) fn packages_project_json(
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
-    package_dirs(manifest_root, ecosystem_root, workspace_root)
+    let dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
+        Ok(dirs) => dirs,
+        Err(diagnostic) => return projection_diagnostic_json(&diagnostic),
+    };
+    dirs
         .iter()
         .filter_map(|dir| package_project_json(project_root, entry_path, dir))
         .collect::<Vec<_>>()
@@ -369,7 +609,7 @@ fn package_dirs(
     manifest_root: Option<&Path>,
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
-) -> Vec<PathBuf> {
+) -> Result<Vec<PathBuf>, Diagnostic> {
     let mut dirs = Vec::new();
     if let Some(root) = manifest_root {
         dirs.push(root.to_path_buf());
@@ -378,127 +618,66 @@ fn package_dirs(
         dirs.push(root.to_path_buf());
     }
     if let Some(root) = workspace_root {
-        if let Some(Ok(plan)) = jet_env_model::WorkspaceFile::load(root) {
-            for member in plan.members {
-                dirs.push(root.join(member.path));
+        if let Some((resolver, source)) = workspace_source_path(root)? {
+            if source.role == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index {
+                let snapshot = workspace_snapshot_for_source(&resolver, &source)?;
+                for member in snapshot.plan.members {
+                    dirs.push(root.join(member.path));
+                }
             }
         }
     }
     dirs.sort();
     dirs.dedup();
-    dirs
+    Ok(dirs)
 }
 
 pub(super) fn targets_project_json(
     project_root: &Path,
+    entry_path: &Path,
     manifest_root: Option<&Path>,
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
-    package_dirs(manifest_root, ecosystem_root, workspace_root)
+    let dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
+        Ok(dirs) => dirs,
+        Err(diagnostic) => return projection_diagnostic_json(&diagnostic),
+    };
+    dirs
         .iter()
-        .filter_map(|dir| package_targets_project_json(project_root, dir))
+        .filter_map(|dir| package_targets_project_json(project_root, entry_path, dir))
         .flatten()
         .collect::<Vec<_>>()
         .join(",")
 }
 
-fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
-    if dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file() {
-        return canonical_package_targets_project_json(project_root, dir);
-    }
-    let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
-    let raw = fs::read_to_string(&manifest_path).ok()?;
-    let manifest = jet_driver::Package::PackageFacts::parse(&raw, manifest_path.display().to_string()).ok()?;
-    let package_path = rel_path(project_root, dir);
-    let manifest_rel = rel_path(project_root, &manifest_path);
-    Some(
-        manifest
-            .packages
-            .iter()
-            .flat_map(|package| {
-                let package_path = package_path.clone();
-                let manifest_rel = manifest_rel.clone();
-                package.targets.iter().map(move |target| {
-                    format!(
-                        "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{}}}",
-                        json_str(&package.name),
-                        json_str(&package_path),
-                        json_str(&manifest_rel),
-                        json_str(&target_label(target))
-                    )
-                })
-            })
-            .collect(),
-    )
+fn package_targets_project_json(
+    project_root: &Path,
+    entry_path: &Path,
+    dir: &Path,
+) -> Option<Vec<String>> {
+    canonical_package_targets_project_json(project_root, entry_path, dir)
 }
 
 fn package_project_json(project_root: &Path, entry_path: &Path, dir: &Path) -> Option<String> {
-    if dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file() {
-        return canonical_package_project_json(project_root, entry_path, dir);
-    }
-    let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
-    let raw = fs::read_to_string(&manifest_path).ok()?;
-    match jet_driver::Package::PackageFacts::parse(&raw, manifest_path.display().to_string()) {
-        Ok(manifest) => {
-            let deps = manifest
-                .deps
-                .iter()
-                .map(|(name, source)| {
-                    format!(
-                        "{{\"name\":{},\"source\":{}}}",
-                        json_str(name),
-                        json_str(&dep_source_label(source))
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            let targets = manifest
-                .packages
-                .iter()
-                .flat_map(|p| {
-                    p.targets.iter().map(move |t| {
-                        format!(
-                            "{{\"package\":{},\"target\":{}}}",
-                            json_str(&p.name),
-                            json_str(&target_label(t))
-                        )
-                    })
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            Some(format!(
-                "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":{},\"deps\":[{}],\"targets\":[{}],\"effects_enabled\":{},\"diagnostics\":[]}}",
-                json_str(&rel_path(project_root, dir)),
-                json_str(&rel_path(project_root, &manifest_path)),
-                json_str(&manifest.name),
-                json_str(manifest.version.as_deref().unwrap_or("")),
-                json_str(manifest.target.as_deref().unwrap_or("native")),
-                deps,
-                targets,
-                if manifest.effects_enabled { "true" } else { "false" }
-            ))
-        }
-        Err(err) => Some(format!(
-            "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"effects_enabled\":false,\"diagnostics\":[{{\"code\":\"manifest\",\"what\":{},\"why\":\"pkg.jet did not parse as a package manifest\",\"fix\":\"fix pkg.jet before Canvas uses package facts\"}}]}}",
-            json_str(&rel_path(project_root, dir)),
-            json_str(&rel_path(project_root, &manifest_path)),
-            json_str(
-                dir.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("package")
-            ),
-            json_str(&format!("{:?}", err))
-        )),
-    }
+    canonical_package_project_json(project_root, entry_path, dir)
 }
 
 fn canonical_package_facts(
     dir: &Path,
 ) -> Result<jet_driver::Package::PackageFacts, String> {
-    jet_driver::Package::PackageFacts::load(dir)
-        .ok_or_else(|| format!("canonical Package `{}` is missing", dir.join(jet_driver::Syntax::PACKAGE_FILE).display()))?
-        .map_err(|error| error.to_string())
+    jet_driver::Package::PackageFacts::load_checked(dir)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            format!(
+                "canonical Package `{}` is missing",
+                dir.join(jet_driver::Syntax::PACKAGE_FILE).display()
+            )
+        })
+}
+
+fn projection_diagnostic_json(diagnostic: &Diagnostic) -> String {
+    format!("{{\"diagnostics\":[{}]}}", diagnostic_json(diagnostic))
 }
 
 fn canonical_package_error(
@@ -637,8 +816,15 @@ fn canonical_environments_json(facts: &jet_driver::Package::PackageFacts) -> Str
         .join(",")
 }
 
-fn canonical_package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
-    let facts = canonical_package_facts(dir).ok()?;
+fn canonical_package_targets_project_json(
+    project_root: &Path,
+    entry_path: &Path,
+    dir: &Path,
+) -> Option<Vec<String>> {
+    let facts = match canonical_package_facts(dir) {
+        Ok(facts) => facts,
+        Err(error) => return Some(vec![canonical_package_error(project_root, entry_path, dir, &error)]),
+    };
     let package_path = rel_path(project_root, dir);
     let manifest_rel = rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE));
     Some(
@@ -737,16 +923,75 @@ pub(super) struct EnvProjectJson {
 }
 
 pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
-    let path = project_root.join(jet_driver::Syntax::ENV_FILE);
-    let Ok(src) = fs::read_to_string(&path) else {
+    let resolver = match AuthorityResolver::open(project_root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: String::new(),
+            }
+        }
+        Err(error) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&error.diagnostic()),
+            }
+        }
+    };
+    let checked = match resolver.checked_file(Path::new(jet_driver::Syntax::ENV_FILE)) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: String::new(),
+            }
+        }
+        Err(error) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&error.diagnostic()),
+            }
+        }
+    };
+    let src = match checked.text() {
+        Ok(src) => src,
+        Err(error) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&error.diagnostic()),
+            }
+        }
+    };
+    if let Err(error) = resolver.revalidate_file(&checked) {
         return EnvProjectJson {
             envs: String::new(),
             services: String::new(),
-            diagnostics: String::new(),
+            diagnostics: diagnostic_json(&error.diagnostic()),
         };
+    }
+    let plan = match jet_env_model::ModuleEval::evaluate_env(&src, project_root) {
+        Ok(plan) => plan,
+        Err(d) => {
+            return EnvProjectJson {
+                envs: String::new(),
+                services: String::new(),
+                diagnostics: diagnostic_json(&d),
+            }
+        }
     };
-    match jet_env_model::ModuleEval::evaluate_env(&src, project_root) {
-        Ok(plan) => {
+    if let Err(error) = resolver.revalidate_file(&checked) {
+        return EnvProjectJson {
+            envs: String::new(),
+            services: String::new(),
+            diagnostics: diagnostic_json(&error.diagnostic()),
+        };
+    }
+    {
             let packages = plan
                 .package_refs
                 .iter()
@@ -810,12 +1055,6 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
                 services,
                 diagnostics: String::new(),
             }
-        }
-        Err(d) => EnvProjectJson {
-            envs: String::new(),
-            services: String::new(),
-            diagnostics: diagnostic_json(&d),
-        },
     }
 }
 
@@ -890,42 +1129,21 @@ fn dev_service_project_json(service: &jet_env_model::ModuleEval::DevServicePlan)
 }
 
 pub(super) fn lock_project_json(project_root: &Path) -> String {
-    let lock_path = project_root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE);
-    if !lock_path.is_file() {
+    let Ok(resolver) = AuthorityResolver::open(project_root) else {
+        return String::new();
+    };
+    let Ok(lock) = resolver.checked_file(Path::new(jet_driver::Syntax::UNIFIED_LOCK_FILE)) else {
+        return String::new();
+    };
+    let revision = format!("sha256-{}", SHA256::sha256_hex(&lock.bytes));
+    if resolver.revalidate_file(&lock).is_err() {
         return String::new();
     }
-    let revision = fs::read(&lock_path)
-        .map(|bytes| format!("sha256-{}", SHA256::sha256_hex(&bytes)))
-        .unwrap_or_else(|_| source_revision(""));
     format!(
         "{{\"path\":{},\"revision\":{},\"kind\":\"unified\"}}",
-        json_str(&rel_path(project_root, &lock_path)),
+        json_str(&rel_path(project_root, &lock.path)),
         json_str(&revision)
     )
 }
 
-fn dep_source_label(source: &jet_driver::Package::DepSource) -> String {
-    match source {
-        jet_driver::Package::DepSource::Version(v) => format!("version:{v}"),
-        jet_driver::Package::DepSource::Provider { provider, target } => {
-            format!("{provider:?}@{target}")
-        }
-        jet_driver::Package::DepSource::Git { url, selector } => {
-            format!("git:{url}@{selector:?}")
-        }
-        jet_driver::Package::DepSource::CLib { target } => {
-            format!("c:{target}")
-        }
-    }
-}
 
-fn target_label(target: &jet_driver::Package::Target) -> String {
-    match target {
-        jet_driver::Package::Target::Library => "library".to_string(),
-        jet_driver::Package::Target::Executable => "executable".to_string(),
-        jet_driver::Package::Target::Test => "test".to_string(),
-        jet_driver::Package::Target::Example => "example".to_string(),
-        jet_driver::Package::Target::Benchmark => "benchmark".to_string(),
-        jet_driver::Package::Target::Plugin { .. } => "plugin".to_string(),
-    }
-}

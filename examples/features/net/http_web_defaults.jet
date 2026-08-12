@@ -35,12 +35,12 @@ fn run() {
     // Serve a whole folder under /assets. Dot-files stay hidden, and a
     // directory request serves its index.html.
     http_server.static_files(mux, "/assets", "/tmp/jet_http_public")
-    t :: tasks.spawn(() => {
+    t :: task {
         http_server.serve_once_listener(listener, mux) ?? panic("serve1")
         http_server.serve_once_listener(listener, mux) ?? panic("serve2")
         http_server.serve_once_listener(listener, mux) ?? panic("serve3")
         http_server.serve_once_listener(listener, mux) ?? panic("serve4")
-    })
+    }
     post :: http_client.request("POST", "http://{addr}/readings")
     sent :: post.header("origin", "https://app.example").body("{{\"city\":\"Reno\",\"degrees\":31}}")
     answer :: sent.send() ?? panic("readings")
@@ -56,5 +56,5 @@ fn run() {
     print(asset.header("content-type") ?? "missing")
     hidden :: http_client.get("http://{addr}/assets/.env") ?? panic("hidden")
     print(hidden.status())
-    t.join()
+    t.join() ?? panic("server failed")
 }

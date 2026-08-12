@@ -134,6 +134,34 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| fallback.to_string())
     }
 
+    /// D-BOUND-HEAD1: every typed-literal hole is sent through the same
+    /// `JetShow` capability gate. A typed head is not ordinary Display
+    /// interpolation; AOT, JIT, and the evaluator all marshal its value to
+    /// the shared show path.
+    fn validate_typed_hole_printable(&mut self, inner: &mut Expr) -> bool {
+        let was_borrow_ctx = self.borrow_ctx;
+        self.borrow_ctx = true;
+        let was_view_read = self.allow_string_view_read;
+        self.allow_string_view_read = true;
+        let ty = self.infer(inner);
+        self.borrow_ctx = was_borrow_ctx;
+        self.allow_string_view_read = was_view_read;
+        let Some(ty) = ty else {
+            return false;
+        };
+        if is_printable(&ty, self.registry, self.trait_reg) {
+            return true;
+        }
+        self.diags.push(Diagnostic::error(
+            "E0112",
+            format!("{} can't be used in a typed literal hole", ty.show()),
+            "typed literal holes use the shared JetShow rendering contract".to_string(),
+            "use a printable value, or convert it to String before the hole".to_string(),
+            Some(inner.span()),
+        ));
+        false
+    }
+
     pub(crate) fn rewrite_typed_text_literal(
         &mut self,
         e: &mut Expr,
@@ -141,7 +169,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         let old = std::mem::replace(e, Expr::Absent(span));
-        let Expr::Str(parts, _) = old else {
+        let Expr::Str(mut parts, _) = old else {
             *e = old;
             self.diags.push(Diagnostic::error(
                 "E0112",
@@ -154,6 +182,16 @@ impl<'a> Checker<'a> {
             ));
             return None;
         };
+        let mut holes_printable = true;
+        for part in parts.iter_mut() {
+            if let StrPart::Interp(inner, _) = part {
+                holes_printable &= self.validate_typed_hole_printable(inner);
+            }
+        }
+        if !holes_printable {
+            *e = Expr::Str(parts, span);
+            return None;
+        }
         let mk_lit = |s: String, span: Span| CallArg {
             convention: AccessConvention::Read,
             expr: Expr::Str(vec![StrPart::Lit(s)], span),
@@ -167,13 +205,8 @@ impl<'a> Checker<'a> {
         for p in parts {
             match p {
                 StrPart::Lit(s) => cur_lit.push_str(&s),
-                StrPart::Interp(mut inner, _fmt) => {
+                StrPart::Interp(inner, _fmt) => {
                     args.push(mk_lit(std::mem::take(&mut cur_lit), span));
-                    self.borrow_ctx = true;
-                    let was_view_read = self.allow_string_view_read;
-                    self.allow_string_view_read = true;
-                    self.infer(&mut inner);
-                    self.allow_string_view_read = was_view_read;
                     args.push(CallArg {
                         convention: AccessConvention::Read,
                         span: inner.span(),
@@ -208,18 +241,17 @@ impl<'a> Checker<'a> {
         type_name: String,
         span: Span,
     ) -> Option<Type> {
+        let Some(kind) = Syntax::typed_head_kind(&type_name).filter(|kind| kind.is_boundary())
+        else {
+            return None;
+        };
         let Expr::Str(parts, literal_span) = e else {
-            let internal_type = if type_name == Syntax::TYPE_URL {
-                "Url".to_string()
-            } else {
-                type_name.clone()
-            };
             return self
-                .rewrite_typed_text_literal(e, type_name, span)
-                .map(|_| Type::Named(internal_type));
+                .rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
+                .map(|_| Type::Named(kind.internal_type_name().to_string()));
         };
         let has_holes = parts.iter().any(|part| matches!(part, StrPart::Interp(..)));
-        if type_name == Syntax::TYPE_DATETIME && has_holes {
+        if kind.forbids_holes() && has_holes {
             self.diags.push(Diagnostic::error(
                 "E0155",
                 "a `DateTime` literal cannot contain interpolation".to_string(),
@@ -229,27 +261,14 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        let mut validation_text = String::new();
+        let mut literals = vec![String::new()];
         for part in parts.iter() {
             match part {
-                StrPart::Lit(text) => validation_text.push_str(text),
-                StrPart::Interp(..) => {
-                    validation_text.push_str(jet_foundation::TypedHeads::HOLE_PLACEHOLDER)
-                }
+                StrPart::Lit(text) => literals.last_mut().unwrap().push_str(text),
+                StrPart::Interp(..) => literals.push(String::new()),
             }
         }
-        let validation = match type_name.as_str() {
-            Syntax::TYPE_URL => crate::Comptime::validate_url_literal(&validation_text),
-            Syntax::TYPE_PATH => {
-                if validation_text.contains('\0') {
-                    Err("a Path cannot contain a NUL character".to_string())
-                } else {
-                    Ok(())
-                }
-            }
-            Syntax::TYPE_DATETIME => crate::Comptime::validate_datetime_literal(&validation_text),
-            _ => unreachable!("typed boundary helper called for another type"),
-        };
+        let validation = crate::Comptime::validate_typed_boundary_literal(kind, &literals);
         if let Err(reason) = validation {
             self.diags.push(Diagnostic::error(
                 "E0155",
@@ -262,12 +281,8 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        self.rewrite_typed_text_literal(e, type_name.clone(), span)
-            .map(|_| Type::Named(if type_name == Syntax::TYPE_URL {
-                "Url".to_string()
-            } else {
-                type_name
-            }))
+        self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
+            .map(|_| Type::Named(kind.internal_type_name().to_string()))
     }
 
     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
@@ -1283,6 +1298,9 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::Ident(name, span) => {
+                if let Some(ty) = self.binder_ref_types.get(name) {
+                    return Some(ty.clone());
+                }
                 // D-LOOPLABEL3=A: loop labels share the ordinary namespace but
                 // are control names, not runtime values.
                 if self.loop_labels.iter().any(|label| label == name) {
@@ -1528,7 +1546,9 @@ impl<'a> Checker<'a> {
                     match base_ty {
                         Type::List(inner) => Some(Type::List(inner)),
                         Type::String => Some(Type::String),
-                        Type::Named(name) if name == "Tensor" => Some(Type::Named(name)),
+                        ty if ty.is_compute_tensor_family() => {
+                            Some(Type::Named("Tensor".to_string()))
+                        }
                         other => {
                             self.diags.push(Diagnostic::error(
                                 "E0505",
@@ -1817,7 +1837,7 @@ impl<'a> Checker<'a> {
                     let elem = match ty {
                         Type::List(elem) => *elem,
                         Type::FixedList { elem, .. } => *elem,
-                        Type::Named(name) if name == "Tensor" => Type::Float,
+                        ty if ty.is_compute_tensor_family() => Type::Float,
                         other => return Some(other),
                     };
                     Some(Type::Apply {
@@ -2122,6 +2142,37 @@ impl<'a> Checker<'a> {
                 span,
                 ..
             } => {
+                // D-UITREE1/D-DOTCTOR1: the explicit named-payload enum form
+                // (`Event.Named.{ field: value }`) is parsed as a dotted
+                // struct head because the parser cannot know which dotted
+                // names are enum variants. Resolve the head here, where the
+                // registry is authoritative, and lower it to the same
+                // EnumLit node as `.Named.{ ... }`.
+                if !*inferred && type_args.is_empty() && import_ns.is_none() {
+                    if let Some((enum_name, variant)) = type_name.split_once('.') {
+                        let is_variant = self
+                            .resolve_enum_variants_cloned(enum_name)
+                            .is_some_and(|variants| variants.contains_key(variant));
+                        if is_variant {
+                            let args = std::mem::take(fields)
+                                .into_iter()
+                                .map(|(label, _, expr)| crate::AST::EnumLitArg::Named {
+                                    label,
+                                    expr,
+                                })
+                                .collect();
+                            let enum_lit = Expr::EnumLit {
+                                type_name: enum_name.to_string(),
+                                variant: variant.to_string(),
+                                args,
+                                leading_dot: false,
+                                span: *span,
+                            };
+                            *e = enum_lit;
+                            return self.infer(e);
+                        }
+                    }
+                }
                 // D-DOTCTOR1: inferred `.{ … }` form — resolve type_name from context
                 // and write it back so later passes (TIR lowering, codegen) see it.
                 if *inferred {
@@ -2334,6 +2385,7 @@ impl<'a> Checker<'a> {
                         })),
                         effect_bound: None, return_view_provenance: None,
                         param_contract: None,
+                call_metadata: None,
                     }),
                     _ => self.expected_type.clone(),
                 };
@@ -2504,7 +2556,8 @@ impl<'a> Checker<'a> {
             (
                 Type::Named(ref type_name),
                 TypedLitBody::Value(inner),
-            ) if Syntax::is_typed_text_type(type_name) =>
+            ) if Syntax::typed_head_kind(type_name)
+                .is_some_and(|kind| kind.is_typed_text()) =>
             {
                 *e = *inner;
                 return self.rewrite_typed_text_literal(e, type_name.clone(), span);
@@ -2520,10 +2573,9 @@ impl<'a> Checker<'a> {
             (
                 Type::Named(ref type_name),
                 TypedLitBody::Value(inner),
-            ) if matches!(
-                type_name.as_str(),
-                Syntax::TYPE_URL | Syntax::TYPE_PATH | Syntax::TYPE_DATETIME
-            ) => {
+            ) if Syntax::typed_head_kind(type_name)
+                .is_some_and(|kind| kind.is_boundary()) =>
+            {
                 *e = *inner;
                 return self.rewrite_typed_boundary_literal(e, type_name.clone(), span);
             }
@@ -2971,15 +3023,9 @@ impl<'a> Checker<'a> {
         // distinct integer must not hide the interval proof from fixed-list
         // indexing. Preserve compiler-owned tags; some carry nominal or
         // access policy that is not a user refinement.
-        let mut index_value_ty = &idx_ty;
-        while let Type::Tagged {
-            marker: crate::AST::TagMarker::User(_),
-            inner,
-        } = index_value_ty
-        {
-            index_value_ty = inner.as_ref();
-        }
-        match &base_ty {
+        let index_value_ty = idx_ty.without_user_tags();
+        let collection_ty = base_ty.without_user_tags();
+        match collection_ty {
             Type::List(inner) => {
                 *kind = IndexKind::List;
                 if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
@@ -3106,8 +3152,7 @@ impl<'a> Checker<'a> {
             // window. Keep the range fact explicit so TIR can select the
             // owned-copy or mutable-view Prelude path; scalar indexing has no
             // one-axis result type and is not part of this surface.
-            Type::Named(name) if name == "Tensor"
-                || matches!(&base_ty, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")) => {
+            ty if ty.is_compute_tensor_family() => {
                 if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
                     Some(Type::Named("Tensor".to_string()))
@@ -3279,7 +3324,9 @@ impl<'a> Checker<'a> {
                 Some(Type::List(inner))
             }
             Type::String => Some(Type::String),
-            Type::Named(name) if name == "Tensor" => Some(Type::Named(name)),
+            ty if ty.is_compute_tensor_family() => {
+                Some(Type::Named("Tensor".to_string()))
+            }
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0505",
@@ -3395,6 +3442,7 @@ impl<'a> Checker<'a> {
                             ret: sig.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.diags.push(crate::Sema::FFI::e3203(&ty, span));
                         return Some(ty);
@@ -3403,6 +3451,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(type_name, type_span) = &**inner {
+            let display_type_name = self.display_type_name(type_name, None);
             // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.
             if type_name == "Data" {
                 self.diags.push(data_renamed_to_datatree(*type_span));
@@ -3454,21 +3503,21 @@ impl<'a> Checker<'a> {
                     .is_some_and(|states| states.iter().any(|state| state == member));
                 let (what, why, fix) = if is_declared_state {
                     (
-                        format!("`{type_name}.{member}` is not a value"),
+                        format!("`{display_type_name}.{member}` is not a value"),
                         "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values"
                             .to_string(),
                         format!(
-                            "use a `{type_name}` value before a field, or call a static method on `{type_name}`"
+                            "use a `{display_type_name}` value before a field, or call a static method on `{display_type_name}`"
                         ),
                     )
                 } else {
                     (
-                        format!("`{type_name}` has no static member `{member}`"),
+                        format!("`{display_type_name}` has no static member `{member}`"),
                         format!(
-                            "`{type_name}` names a struct type; fields need a value before the dot"
+                            "`{display_type_name}` names a struct type; fields need a value before the dot"
                         ),
                         format!(
-                            "use a `{type_name}` value before an instance field, or call a static method that exists on `{type_name}`"
+                            "use a `{display_type_name}` value before an instance field, or call a static method that exists on `{display_type_name}`"
                         ),
                     )
                 };
@@ -3553,6 +3602,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Named(type_name) = t {
+            let display_type_name = self.display_type_name(type_name, None);
             // D-LAYOUT-FACTS1=B: `None(Int)` preserves the ratified wall, but
             // reading a byte fact must identify the missing canonical target
             // layout engine instead of becoming a silent absent value.
@@ -3560,7 +3610,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0956",
                     format!(
-                        "`{type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
+                        "`{display_type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
                     ),
                     "D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists".to_string(),
                     "read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts".to_string(),
@@ -3583,12 +3633,12 @@ impl<'a> Checker<'a> {
                         };
                         self.diags.push(Diagnostic::error(
                             "E3110",
-                            format!("lane `{}` isn't valid on `{}`", lane, type_name),
+                            format!("lane `{}` isn't valid on `{}`", lane, display_type_name),
                             format!(
                                 "swizzle members name lanes with x/y/z/w — `{}` only has {}",
-                                type_name, valid
+                                display_type_name, valid
                             ),
-                            format!("use only the lanes defined for `{}`", type_name),
+                            format!("use only the lanes defined for `{}`", display_type_name),
                             Some(span),
                         ));
                         return None;
@@ -3606,20 +3656,21 @@ impl<'a> Checker<'a> {
             // values" (E0302) even though the value genuinely is a struct.
             let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
             if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
+                let display_type_name = self.display_type_name(lookup_name, Some(owner_mod));
                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
-                            if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, lookup_name, member)
-                            {
-                                self.diags.push(private_item(member, span));
-                                return None;
-                            } else if owner_mod != self.module_idx
-                                && Syntax::classify_identifier(member)
-                                    == Syntax::IdentifierClass::SoftPublic
-                            {
-                                self.diags.push(soft_public_use(member, span));
-                            }
+                        if owner_mod != self.module_idx
+                            && !self.field_is_pub_in(owner_mod, lookup_name, member)
+                        {
+                            self.diags.push(private_item(member, span));
+                            return None;
+                        } else if owner_mod != self.module_idx
+                            && Syntax::classify_identifier(member)
+                                == Syntax::IdentifierClass::SoftPublic
+                        {
+                            self.diags.push(soft_public_use(member, span));
+                        }
                         self.record_field_reference(owner_mod, lookup_name, member, span);
                         return Some(fty);
                     }
@@ -3633,13 +3684,13 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
-                    let mut fix = format!("check the field names on `{}`", type_name);
+                    let mut fix = format!("check the field names on `{}`", display_type_name);
                     if let Some(suggest) = suggest_field(member, &field_names) {
                         fix = format!("did you mean `{}`?", suggest);
                     }
                     self.diags.push(Diagnostic::error(
                         "E0302",
-                        format!("`{}` has no field `{}`", type_name, member),
+                        format!("`{}` has no field `{}`", display_type_name, member),
                         "field access only works on names declared in the struct".to_string(),
                         fix,
                         Some(span),
@@ -3652,13 +3703,14 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Apply { name, args } = t {
-            if let Some(owner_mod) = self.struct_owner_module(name, None) {
-                if let Some(fields) = self.struct_fields_of(owner_mod, name) {
-                    let subst = self.struct_subst(name, args);
+            let (owner_import_ns, leaf) = Self::split_type_name(name);
+            if let Some(owner_mod) = self.struct_owner_module(leaf, owner_import_ns) {
+                if let Some(fields) = self.struct_fields_of(owner_mod, leaf) {
+                    let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, name, member)
+                                && !self.field_is_pub_in(owner_mod, leaf, member)
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
@@ -3668,15 +3720,15 @@ impl<'a> Checker<'a> {
                             {
                                 self.diags.push(soft_public_use(member, span));
                             }
-                        self.record_field_reference(owner_mod, name, member, span);
-                        return Some(self.trait_reg.instantiate_type(&fty, &subst));
+                        self.record_field_reference(owner_mod, leaf, member, span);
+                        return Some(self.instantiate_type_for_owner(owner_mod, &fty, &subst));
                     }
                     // D-FIELDPOL1: see the `Type::Named` branch above — a
                     // computed field resolves for reads even though it's
                     // absent from `fields`.
-                    if let Some(computed) = self.computed_field_types_of(owner_mod, name) {
+                    if let Some(computed) = self.computed_field_types_of(owner_mod, leaf) {
                         if let Some((_, cty)) = computed.get(member) {
-                            return Some(self.trait_reg.instantiate_type(cty, &subst));
+                            return Some(self.instantiate_type_for_owner(owner_mod, cty, &subst));
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
@@ -3693,12 +3745,14 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-            } else if let Some(fty) = core_generic_struct_field(name, member, args) {
-                // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
-                // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
-                // precedent: `Reader`/`Cursor`) means this fallback only runs when
-                // no user struct claimed the name above.
-                return Some(fty);
+            } else if owner_import_ns.is_none() {
+                if let Some(fty) = core_generic_struct_field(leaf, member, args) {
+                    // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
+                    // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
+                    // precedent: `Reader`/`Cursor`) means this fallback only runs when
+                    // no user struct claimed the name above.
+                    return Some(fty);
+                }
             }
         }
         if let Type::Tuple(fields) = t {

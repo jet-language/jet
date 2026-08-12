@@ -56,7 +56,7 @@ fn bind_resource_param(
         env.bind(source_name, ordinary_slot, Some(local_ty));
         return;
     }
-    let guard_name = Syntax::generated_name(&format!("resource_param_{source_name}"));
+    let guard_name = jet_foundation::Names::mangle(&format!("resource_param_{source_name}"));
     guards.push(TStmt::Let {
         name: guard_name.clone(),
         kw: "let mut",
@@ -386,7 +386,7 @@ pub(crate) fn render_generics(
         type_params.iter().map(|p| p.name.as_str()).collect();
     let mut cloned = std::collections::HashSet::new();
     for ty in cloned_types {
-        crate::Generics::collect_type_param_mentions(ty, &names, &mut cloned);
+        crate::Generics::collect_clone_type_param_mentions(ty, &names, &mut cloned);
     }
     let extra = cloned
         .into_iter()
@@ -395,37 +395,37 @@ pub(crate) fn render_generics(
     crate::Generics::rust_type_param_list(type_params, &extra)
 }
 
+/// Collect the concrete arguments that a derived `Clone` implementation
+/// requires. A generic nominal can be nested under any container or another
+/// generic nominal, so the walk is structural and uses only canonical Cx keys.
 fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
-    match ty {
+    let expanded = cx.expand_type_aliases(ty);
+    match &expanded {
         Type::Apply { name, args } => {
-            let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
-            if cx.cloneable.contains(name) || cx.cloneable.contains(leaf) {
-                out.push(ty.clone());
+            let carries_clone_bound = cx
+                .struct_type_params
+                .get(name)
+                .is_some_and(|params| !params.is_empty())
+                && cx.cloneable.contains(name);
+            if carries_clone_bound {
+                out.extend(args.iter().cloned());
             }
             for arg in args {
                 collect_signature_clone_types(arg, cx, out);
             }
         }
         Type::List(inner)
-        | Type::Shared(inner)
         | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
         | Type::Tagged { inner, .. }
-        | Type::Quantity { base: inner, .. }
-        | Type::FixedList { elem: inner, .. } => {
+        | Type::Quantity { base: inner, .. } => {
             collect_signature_clone_types(inner, cx, out);
         }
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             collect_signature_clone_types(key, cx, out);
             collect_signature_clone_types(value, cx, out);
         }
-        Type::Fn { params, ret, .. } => {
-            for param in params {
-                collect_signature_clone_types(param, cx, out);
-            }
-            if let Some(ret) = ret {
-                collect_signature_clone_types(ret, cx, out);
-            }
-        }
+        Type::Shared(_) | Type::Fn { .. } | Type::TraitObject(_) => {}
         Type::Tuple(fields) => {
             for (_, field) in fields {
                 collect_signature_clone_types(field, cx, out);
@@ -439,7 +439,6 @@ fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
         _ => {}
     }
 }
-
 /// c109 Phase 17: `param_place` for a (possibly generic) free function.
 /// Generic parameters preserve their declared access convention exactly like
 /// concrete parameters; `&stream: T` therefore dereferences its Rust `&mut T`.
@@ -532,7 +531,14 @@ pub(crate) fn lower_method_for_owner(
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
-    let clone_types = env.cloned_types.borrow().clone();
+    let mut clone_types = env.cloned_types.borrow().clone();
+    collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
+    for param in &f.params {
+        collect_signature_clone_types(&param.ty, cx, &mut clone_types);
+    }
+    if let Some(return_type) = &f.return_type {
+        collect_signature_clone_types(return_type, cx, &mut clone_types);
+    }
     let generics = render_generics(&f.type_params, &clone_types);
     cx.current_type_params.replace(previous_type_params);
     // An instance method carries `Some(conv)`; a static method carries `None`.
@@ -597,6 +603,13 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         crate::Generics::DECODE => Some(SerdeCodec::Decode),
         _ => None,
     };
+    let owner_ty = match cx.struct_type_param_order.get(type_name) {
+        Some(params) if !params.is_empty() => Type::Apply {
+            name: type_name.to_string(),
+            args: params.iter().cloned().map(Type::Named).collect(),
+        },
+        _ => Type::Named(type_name.to_string()),
+    };
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.clone();
@@ -618,7 +631,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             env.bind(
                 Syntax::KW_SELF,
                 place,
-                Some(Type::Named(type_name.to_string())),
+                Some(owner_ty.clone()),
             );
             if matches!(p.convention, AccessConvention::Read) {
                 env.mark_borrowed(Syntax::KW_SELF);
@@ -649,7 +662,15 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
-    let clone_types = env.cloned_types.borrow().clone();
+    let mut clone_types = env.cloned_types.borrow().clone();
+    collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
+    for param in &f.params {
+        collect_signature_clone_types(&param.ty, cx, &mut clone_types);
+    }
+    if let Some(return_type) = &f.return_type {
+        collect_signature_clone_types(return_type, cx, &mut clone_types);
+    }
+    let generics = render_generics(&f.type_params, &clone_types);
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -661,7 +682,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             .map(|t| resolve_self_ty(t, type_name)),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
-        generics: String::new(),
+        generics,
         clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),

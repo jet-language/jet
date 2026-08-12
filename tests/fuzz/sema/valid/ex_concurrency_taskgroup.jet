@@ -9,10 +9,10 @@ fn fast_val() => Int = 42
 fn slow_val() => Int = sum_range(1, 500000)
 fn run() {
     task.group g {
-        print("inside taskgroup")
-        results :: task.all { sum_range(1, 25), sum_range(26, 50) }
+        print("inside task.group")
+        results :: task.all { sum_range(1, 25), sum_range(26, 50) } ?? panic("task.all failed")
         print((results[0] + results[1]))
-        winner :: task.race { slow_val(), fast_val() }
+        winner :: task.race { sum_range(1, 500000), fast_val() } ?? panic("race failed")
         print(winner)
     }
 }

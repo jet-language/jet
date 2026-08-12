@@ -673,32 +673,36 @@ pub(crate) fn emit_tir_core_call(
         // tuples, lists) gets an empty list, never a guess.
         ("core.reflect", "of") => {
             let arg_ty = args.first().map(|a| &a.ty);
-            let type_name = arg_ty.map(|t| t.name()).unwrap_or_default();
+            let type_name = arg_ty.map(Type::leaf_name).unwrap_or_default();
+            let path = arg_ty.map(|t| cx.reflect_path(t)).unwrap_or_default();
             let fields_code = match arg_ty {
-                Some(Type::Named(struct_name)) => match cx.struct_fields.get(struct_name) {
-                    Some(fields) if !fields.is_empty() => {
-                        let items: Vec<String> = fields
-                            .iter()
-                            .map(|(fname, _)| {
-                                format!(
-                                    "{root}JetReflectField {{ name: \"{fname}\".to_string(), value: (__reflect_v.{mangled}).jet_show() }}",
-                                    root = cx.root_prefix,
-                                    fname = fname,
-                                    mangled = mangle(fname)
-                                )
-                            })
-                            .collect();
-                        format!("vec![{}]", items.join(", "))
+                Some(Type::Named(struct_name) | Type::Apply { name: struct_name, .. }) => {
+                    match cx.struct_fields.get(struct_name) {
+                        Some(fields) if !fields.is_empty() => {
+                            let items: Vec<String> = fields
+                                .iter()
+                                .map(|(fname, _)| {
+                                    format!(
+                                        "{root}JetReflectField {{ name: \"{fname}\".to_string(), value: (__reflect_v.{mangled}).jet_show() }}",
+                                        root = cx.root_prefix,
+                                        fname = fname,
+                                        mangled = mangle(fname)
+                                    )
+                                })
+                                .collect();
+                            format!("vec![{}]", items.join(", "))
+                        }
+                        _ => "Vec::new()".to_string(),
                     }
-                    _ => "Vec::new()".to_string(),
-                },
+                }
                 _ => "Vec::new()".to_string(),
             };
             format!(
-                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: \"{type_name}\".to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
+                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: {type_name}.to_string(), path: {path}.to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
                 arg0 = arg(0),
                 root = cx.root_prefix,
-                type_name = type_name,
+                type_name = escape_rust_str(&type_name),
+                path = escape_rust_str(&path),
                 fields_code = fields_code
             )
         }
@@ -1056,25 +1060,15 @@ pub(crate) fn emit_tir_core_call(
         // D-DET1: deterministic injected Clock capability constructor.
         
         ("core.game", "run") => {
-            let replay = if args.len() >= 2
-                && matches!(args[1].ty, Type::Named(ref n) if n == "GameReplay")
-            {
-                format!("Some(&({}))", arg(1))
-            } else {
-                "None".to_string()
+            let optional_ref = |index: usize| {
+                if matches!(args.get(index).map(|arg| &arg.ty), Some(Type::Option(_))) {
+                    format!("({}).as_ref().ok()", arg(index))
+                } else {
+                    format!("Some(&({}))", arg(index))
+                }
             };
-            let backend_idx = if args.len() >= 2
-                && matches!(args[1].ty, Type::Named(ref n) if n == "GameBackend")
-            {
-                Some(1)
-            } else if args.len() >= 3 {
-                Some(2)
-            } else {
-                None
-            };
-            let backend = backend_idx
-                .map(|i| format!("Some(&({}))", arg(i)))
-                .unwrap_or_else(|| "None".to_string());
+            let replay = optional_ref(1);
+            let backend = optional_ref(2);
             format!(
                 "{root}jet_game_run(&mut ({scene}), {replay}, {backend})",
                 root = cx.root_prefix,
@@ -2140,14 +2134,14 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "shared_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_shared_secret_bytes_impl"), arg(0)),
         // D-AUTH-TOKENPOLICY1=A: fixed HS256 with required labelled key and
-        // audience. Optional issuer and clock_skew remain suffix controls in this
-        // API; omitted suffixes lower to their safe defaults here.
+        // audience. This bridge only marshals optional suffixes; Auth.rs owns
+        // the omitted-value policy for every execution tier.
         ("core.auth", "verify_jwt") => {
             let issuer = if args.len() >= 4 { format!("Some(&({}))", arg(3)) } else { "None".to_string() };
-            let skew = if args.len() >= 5 { format!("{}jet_duration_ms_value(&({}))", cx.root_prefix, arg(4)) } else { "0".to_string() };
+            let skew = if args.len() >= 5 { format!("Some({}jet_duration_ns_value(&({})))", cx.root_prefix, arg(4)) } else { "None".to_string() };
             format!(
                 "{}(&({}), &({}), &({}), {}, {})",
-                helper("jet_auth_verify_jwt_impl"),
+                helper("jet_auth_verify_jwt_defaulted"),
                 arg(0),
                 arg(1),
                 arg(2),
@@ -2157,12 +2151,12 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.auth", "verify_paseto") => {
             let issuer = if args.len() >= 4 { format!("Some(&({}))", arg(3)) } else { "None".to_string() };
-            let skew = if args.len() >= 5 { format!("{}jet_duration_ms_value(&({}))", cx.root_prefix, arg(4)) } else { "0".to_string() };
-            let footer = if args.len() >= 6 { arg(5) } else { "Vec::<u8>::new()".to_string() };
-            let implicit = if args.len() >= 7 { arg(6) } else { "Vec::<u8>::new()".to_string() };
+            let skew = if args.len() >= 5 { format!("Some({}jet_duration_ns_value(&({})))", cx.root_prefix, arg(4)) } else { "None".to_string() };
+            let footer = if args.len() >= 6 { format!("Some(&({}))", arg(5)) } else { "None".to_string() };
+            let implicit = if args.len() >= 7 { format!("Some(&({}))", arg(6)) } else { "None".to_string() };
             format!(
-                "{}(&({}), &({}), &({}), {}, {}, &({}), &({}), {})",
-                helper("jet_auth_verify_paseto_impl"), arg(0), arg(1), arg(2), issuer, skew,
+                "{}(&({}), &({}), &({}), {}, {}, {}, {}, {})",
+                helper("jet_auth_verify_paseto_defaulted"), arg(0), arg(1), arg(2), issuer, skew,
                 footer, implicit, regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"),
             )
         }
@@ -2844,7 +2838,9 @@ pub(crate) fn emit_tir_core_call(
         
         
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
-        ("core.http.server", "bind") if args.len() == 3 => {
+        ("core.http.server", "bind")
+            if args.len() == 3 && !matches!(&args[2].ty, Type::Option(_)) =>
+        {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
                 "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHTTPError::IO {{ operation: e }})",
@@ -2855,7 +2851,9 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         
-        ("core.http.server", "serve") if args.len() == 3 => {
+        ("core.http.server", "serve")
+            if args.len() == 3 && !matches!(&args[2].ty, Type::Option(_)) =>
+        {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
                 "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHTTPError::IO {{ operation: e }})",

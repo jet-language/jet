@@ -6,7 +6,7 @@ use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 
 /// Canonical JSON values for additive tooling projections. Keeping this small
 /// value model in the semantic-index crate prevents CLI consumers from
@@ -150,6 +150,9 @@ pub enum SymbolKind {
     Module,
     Function {
         params: Vec<(String, String)>,
+        /// Declaration-ordered public call contract. Local parameter names
+        /// stay compiler-internal and are not part of this projection.
+        call_contract: Vec<(String, String, bool)>,
         ret: Option<String>,
     },
     Struct {
@@ -265,6 +268,8 @@ pub struct TypeDossier {
 pub struct SymbolDef {
     pub identity: String,
     pub name: String,
+    /// Canonical typeable spelling from the sema name ledger.
+    pub qualified_name: String,
     pub module_path: String,
     pub def_span: SourceSpan,
     pub kind: SymbolKind,
@@ -662,14 +667,23 @@ fn origin_rank(origin: &MemberOrigin) -> u8 {
 fn structural_signature(def: &SymbolDef) -> String {
     match &def.kind {
         SymbolKind::Module => "module".to_string(),
-        SymbolKind::Function { params, ret } => {
+        SymbolKind::Function {
+            params,
+            call_contract,
+            ret,
+        } => {
             let params = params
                 .iter()
-                .map(|(n, t)| format!("{n}:{t}"))
+                .map(|(_, t)| t.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            let call_contract = call_contract
+                .iter()
+                .map(|(label, zone, variadic)| format!("{label}:{zone}:{variadic}"))
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "fn({params})=>{};view_source={}",
+                "fn({params});call_contract=[{call_contract}]=>{};view_source={}",
                 ret.as_deref().unwrap_or("()"),
                 def.view_provenance
                     .iter()

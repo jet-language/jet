@@ -4,7 +4,8 @@
 #[path = "AST/types.rs"]
 mod types;
 pub use types::{
-    AccessConvention, CompositeTypePairError, Dimension, FunctionObligations, InternalTag,
+    AccessConvention, CompositeTypePairError, Dimension, FunctionCallMetadata,
+    FunctionObligations, InternalTag,
     KnowledgeEntry,
     KnowledgeFact, KnowledgeVector, Measure, TagMarker, Type, TypeIdentity, int_spelling,
     numeric_type_from_name, int_range, canonicalize_tuple_fields, canonicalize_union,
@@ -15,12 +16,14 @@ pub use types::{
 mod program_imports;
 pub use program_imports::{
     AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
-    ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
+    ForeignImportError, ForeignNamespace, ImportBinding, ImportDecl, ImportKind, InlineVersion,
+    LoadedModule, MigrationDecl,
     MigrationOp, Program, ProgramBundle, TryConvert, CoreListPath, core_list_path,
-    core_list_prefix, import_item_alias,
+    core_list_prefix, member_import_local,
+    walk_imports,
 };
 pub use crate::Names::{
-    mangle, mangle_path, mangle_variant, member_name, user_trait_rust, user_type_rust, NameLedger,
+    mangle, mangle_path, member_name, NameLedger,
 };
 
 #[path = "AST/items.rs"]

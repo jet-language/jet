@@ -541,13 +541,13 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
 
 /// Visit every expression, including nested suppressed bodies. Comptime
 /// access guards use the same complete syntax walk as purity checks.
-pub(crate) fn walk_expr_nodes_for_validation(e: &Expr, f: &mut impl FnMut(&Expr)) {
+pub fn walk_expr_nodes_for_validation(e: &Expr, f: &mut impl FnMut(&Expr)) {
     walk_expr_nodes(e, WalkOpts::REACHABLE, f);
 }
 
 /// Visit every expression in a statement tree. Comptime access guards need
 /// the same complete walk when the TIR bridge evaluates a whole block.
-pub(crate) fn walk_stmt_expr_nodes_for_validation(stmts: &[Stmt], f: &mut impl FnMut(&Expr)) {
+pub fn walk_stmt_expr_nodes_for_validation(stmts: &[Stmt], f: &mut impl FnMut(&Expr)) {
     for stmt in stmts {
         walk_stmt_expr_nodes(stmt, WalkOpts::REACHABLE, f);
     }

@@ -2,33 +2,45 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
-use crate::AST::CtValue;
-use super::core_calls::{apply_core_call, apply_impure_core_call, as_string, io_error_value};
+use crate::AST::{CtValue, Type};
+use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
+use super::core_calls::{
+    apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
+};
 
 pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {
     let shown = |i: usize, fallback: &str| {
         args.get(i).map(CtValue::jet_show).unwrap_or_else(|| fallback.to_string())
     };
-    let (root, operation, resource) = match (module, method) {
-        ("core.files", "read" | "read_bytes" | "exists" | "is_dir") =>
-            ("FS", "Read", shown(0, "<path>")),
-        ("core.files", "write" | "append_all" | "create_dir" | "remove") =>
-            ("FS", "Write", shown(0, "<path>")),
-        ("core.env", "get") => ("Env", "Read", shown(0, "<key>")),
-        ("core.env", "set") => ("Env", "Write", shown(0, "<key>")),
-        ("core.env", "current_dir") => ("Env", "Read", "PWD".to_string()),
-        ("core.env", "home_dir") => ("Env", "Read", "HOME".to_string()),
-        ("core.io", "eprint") => ("IO", "Write", "stderr".to_string()),
-        ("core.io", "input" | "read_all_input" | "stdin") =>
-            ("IO", "Read", "stdin".to_string()),
-        ("core.io", "args") => ("IO", "Read", "argv".to_string()),
-        ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
-        ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
-        ("core.random", _) => ("Rand", "Draw", method.to_string()),
-        ("core.net" | "core.tls", _) =>
-            ("Net", method, shown(0, "<network resource>")),
-        ("core.exec", _) => ("Exec", method, shown(0, "<command>")),
-        _ => ("IO", method, module.to_string()),
+    let (root, operation, resource) = if is_nondeterministic_core(module, method) {
+        let (root, operation) = match core_effect(module, method) {
+            Some(Effect::Time) => ("Time", "Read"),
+            Some(Effect::Rand) => ("Rand", "Draw"),
+            _ => unreachable!("nondeterministic Core call has no time/rand effect"),
+        };
+        (root, operation, method.to_string())
+    } else {
+        match (module, method) {
+            ("core.files", "read" | "read_bytes" | "exists" | "is_dir") =>
+                ("FS", "Read", shown(0, "<path>")),
+            ("core.files", "write" | "append_all" | "create_dir" | "remove") =>
+                ("FS", "Write", shown(0, "<path>")),
+            ("core.env", "get") => ("Env", "Read", shown(0, "<key>")),
+            ("core.env", "set") => ("Env", "Write", shown(0, "<key>")),
+            ("core.env", "current_dir") => ("Env", "Read", "PWD".to_string()),
+            ("core.env", "home_dir") => ("Env", "Read", "HOME".to_string()),
+            ("core.io", "eprint") => ("IO", "Write", "stderr".to_string()),
+            ("core.io", "input" | "read_all_input" | "stdin") =>
+                ("IO", "Read", "stdin".to_string()),
+            ("core.io", "args") => ("IO", "Read", "argv".to_string()),
+            ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
+            ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
+            ("core.random", _) => ("Rand", "Draw", method.to_string()),
+            ("core.net" | "core.tls", _) =>
+                ("Net", method, shown(0, "<network resource>")),
+            ("core.exec", _) => ("Exec", method, shown(0, "<command>")),
+            _ => ("IO", method, module.to_string()),
+        }
     };
     super::super::ReplEffectRequest {
         root: root.to_string(),
@@ -94,18 +106,42 @@ pub(super) fn apply_repl_fs_call(
 pub fn apply_repl_authorized_core_call(
     module: &str,
     method: &str,
-    mut args: Vec<CtValue>,
+    args: Vec<CtValue>,
     span: Span,
     base_dir: &std::path::Path,
     sink: Option<&mut super::super::Interpreter::DevSink>,
     grants: &[String],
     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
 ) -> Result<CtValue, Diagnostic> {
+    apply_repl_authorized_core_call_with_type(
+        module,
+        method,
+        args,
+        span,
+        base_dir,
+        sink,
+        grants,
+        authorizer,
+        None,
+    )
+}
+
+pub fn apply_repl_authorized_core_call_with_type(
+    module: &str,
+    method: &str,
+    mut args: Vec<CtValue>,
+    span: Span,
+    base_dir: &std::path::Path,
+    sink: Option<&mut super::super::Interpreter::DevSink>,
+    grants: &[String],
+    authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     // REPL eprint is the inline transcript sink. It does not need an effect
     // prompt or a lexical grant; the existing REPL surface keeps it available.
     if module == "core.io" && method == "eprint" {
-        return apply_impure_core_call(
-            module, method, args, span, base_dir, sink, true, None, None,
+        return apply_impure_core_call_with_type(
+            module, method, args, span, base_dir, sink, true, None, None, resolved_ret,
         );
     }
 
@@ -157,7 +193,7 @@ pub fn apply_repl_authorized_core_call(
         return apply_repl_fs_call(method, &args, span, authorizer);
     }
     if module == "core.random" {
-        return apply_core_call(module, method, args, span, true);
+        return apply_core_call_with_type(module, method, args, span, true, resolved_ret);
     }
     let verified_root = if matches!((module, method), ("core.process", "run")) {
         Some(authorizer.verified_root().map_err(|error| {
@@ -169,7 +205,7 @@ pub fn apply_repl_authorized_core_call(
     } else {
         None
     };
-    apply_impure_core_call(
+    apply_impure_core_call_with_type(
         module,
         method,
         args,
@@ -179,6 +215,7 @@ pub fn apply_repl_authorized_core_call(
         true,
         pinned_executable.as_ref(),
         verified_root.as_ref(),
+        resolved_ret,
     )
 }
 

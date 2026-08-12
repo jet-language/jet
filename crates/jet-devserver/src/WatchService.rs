@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::file_mtime;
+use jet_driver::Diagnostics::Diagnostic;
 
 /// What kind of watch root a path is.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -268,19 +269,17 @@ impl WatchGraph {
     }
 
     /// Build a graph from an entry file plus known dependency paths.
-    pub fn from_entry(entry: &Path, deps: &[PathBuf]) -> Self {
+    pub fn from_entry(entry: &Path, deps: &[PathBuf]) -> Result<Self, Diagnostic> {
         let mut graph = Self::new();
         let entry = canonicalize_loose(entry);
         graph.set_entry(entry.clone());
 
         let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
-        let project = jet_driver::Loader::find_manifest_root(entry_dir)
+        let project = jet_driver::Loader::find_manifest_root_checked(entry_dir)?
             .unwrap_or_else(|| entry_dir.to_path_buf());
+        let manifest = jet_driver::Loader::manifest_path_checked(&project)?;
         let extras = [
-            (
-                jet_driver::Loader::manifest_path(&project),
-                RootKind::Manifest,
-            ),
+            (manifest, RootKind::Manifest),
             (Some(project.join(".jet/lock")), RootKind::Lock),
             (
                 Some(project.join(format!(
@@ -317,11 +316,11 @@ impl WatchGraph {
             graph.upsert(path.clone(), kind);
             graph.link(entry.clone(), path);
         }
-        graph
+        Ok(graph)
     }
 
     /// Rebuild from disk using the compiler loader's dependency list.
-    pub fn discover(entry: &Path) -> Self {
+    pub fn discover(entry: &Path) -> Result<Self, Diagnostic> {
         let entry_str = entry.to_string_lossy();
         let deps = match jet_driver::Loader::load_entry_with_overlays_and_dependencies(
             entry_str.as_ref(),
@@ -368,16 +367,16 @@ pub struct WatchSession {
 }
 
 impl WatchSession {
-    pub fn open(entry: &Path) -> Self {
-        let mut graph = WatchGraph::discover(entry);
+    pub fn open(entry: &Path) -> Result<Self, Diagnostic> {
+        let mut graph = WatchGraph::discover(entry)?;
         graph.refresh_stamps();
-        Self {
+        Ok(Self {
             graph,
             generation: 0,
             applied_generation: 0,
             debounce: Duration::from_millis(30),
             edit_started: None,
-        }
+        })
     }
 
     pub fn from_graph(graph: WatchGraph) -> Self {
@@ -535,12 +534,12 @@ impl WatchSession {
     /// Mark a receipt applied. Later polls with older generations are stale.
     /// Stamps refresh in place; newly discovered imports merge in without
     /// dropping previously tracked roots (assets, manual links, etc.).
-    pub fn acknowledge(&mut self, receipt: &InvalidationReceipt) {
+    pub fn acknowledge(&mut self, receipt: &InvalidationReceipt) -> Result<(), Diagnostic> {
         if receipt.generation > self.applied_generation {
             self.applied_generation = receipt.generation;
         }
         if let Some(entry) = self.graph.entry().map(|p| p.to_path_buf()) {
-            let discovered = WatchGraph::discover(&entry);
+            let discovered = WatchGraph::discover(&entry)?;
             for node in discovered.nodes() {
                 if !self.graph.nodes.contains_key(&node.path) {
                     self.graph.upsert(node.path.clone(), node.kind);
@@ -553,6 +552,7 @@ impl WatchSession {
             }
         }
         self.graph.refresh_stamps();
+        Ok(())
     }
 
     /// Crash/reconnect recovery: rebuild stamps from disk without invalidating.
@@ -740,7 +740,7 @@ mod tests {
         ] {
             fs::write(path, body).unwrap();
         }
-        let mut graph = WatchGraph::from_entry(&entry, &[lib.clone()]);
+        let mut graph = WatchGraph::from_entry(&entry, &[lib.clone()]).unwrap();
         graph.upsert(css.clone(), RootKind::Style);
         graph.link(entry.clone(), css.clone());
         graph.upsert(html.clone(), RootKind::HTML);
@@ -779,7 +779,7 @@ mod tests {
         assert!(!receipt.closure.is_empty());
         assert!(receipt.render().contains("\"generation\":"));
         assert!(within_budget(&receipt));
-        session.acknowledge(&receipt);
+        session.acknowledge(&receipt).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -791,7 +791,7 @@ mod tests {
         let b = dir.join("b.jet");
         fs::write(&entry, "fn run() {}\n").unwrap();
         fs::write(&a, "fn a() {}\n").unwrap();
-        let mut graph = WatchGraph::from_entry(&entry, &[a.clone()]);
+        let mut graph = WatchGraph::from_entry(&entry, &[a.clone()]).unwrap();
         graph.upsert(a.clone(), RootKind::Import);
         graph.link(canonicalize_loose(&entry), a.clone());
         let mut session = WatchSession::from_graph(graph);
@@ -806,7 +806,7 @@ mod tests {
             .change_kinds
             .iter()
             .any(|k| *k == "modified" || *k == "created"));
-        session.acknowledge(&receipt);
+        session.acknowledge(&receipt).unwrap();
 
         // Re-attach `a` after rediscover (entry does not import it).
         session.graph_mut().upsert(a.clone(), RootKind::Import);
@@ -820,7 +820,7 @@ mod tests {
         fs::remove_file(&a).unwrap();
         let receipt = session.poll().expect("delete");
         assert!(receipt.change_kinds.contains(&"deleted") || receipt.changed.iter().any(|p| p == &a));
-        session.acknowledge(&receipt);
+        session.acknowledge(&receipt).unwrap();
 
         // Rename a→b (create b, delete a already gone — create b).
         fs::write(&b, "fn b() {}\n").unwrap();
@@ -840,7 +840,7 @@ mod tests {
         let receipt = session.poll();
         assert!(receipt.is_some());
         if let Some(r) = receipt {
-            session.acknowledge(&r);
+            session.acknowledge(&r).unwrap();
         }
 
         // Stale: acknowledge future gen then craft older receipt path.
@@ -911,7 +911,7 @@ mod tests {
         let dir = tmp_dir("recover");
         let entry = dir.join("app.jet");
         fs::write(&entry, "fn run() {}\n").unwrap();
-        let mut session = WatchSession::open(&entry);
+        let mut session = WatchSession::open(&entry).unwrap();
         std::thread::sleep(Duration::from_millis(20));
         fs::write(&entry, "fn run() { /* edited offline */ }\n").unwrap();
         // Simulate crash: recover without applying the pending edit as a

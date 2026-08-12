@@ -27,6 +27,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
+        compute: crate::Compute::ComputeState::default(),
         compile_strings: Vec::new(),
         invocations: 0,
         channels: Vec::new(),
@@ -36,6 +37,8 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         stream_senders: std::collections::HashMap::new(),
         next_stream_channel: -1,
         next_stream_sender: -1,
+        next_option_lift2_thunk: 0,
+        jit_callables: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
         task_groups: Vec::new(),
@@ -77,7 +80,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         pools: Vec::new(),
         shareds: Vec::new(),
         conditions: Vec::new(),
-        shared_guard_permits: HashMap::new(),
+        shared_guard_states: HashMap::new(),
         expirings: Vec::new(),
         secrets: Vec::new(),
         crypto_values: Vec::new(),
@@ -117,6 +120,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
     rt.heap.install_string_slots(&compile_strings);
+    rt.compute.clear();
     crate::Data::clear_lazy_state();
     crate::Math::clear_math_values();
     let stream_consumers = std::mem::take(&mut rt.stream_consumers);
@@ -127,6 +131,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     drop(stream_consumers);
     rt.next_stream_channel = -1;
     rt.next_stream_sender = -1;
+    rt.jit_callables.clear();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();
@@ -167,7 +172,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.byte_buffers.clear();
     rt.allocators.clear();
     rt.pools.clear();
-    rt.shared_guard_permits.clear();
+    rt.shared_guard_states.clear();
     rt.shareds.clear();
     rt.conditions.clear();
     rt.expirings.clear();
@@ -282,6 +287,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         Concurrency::close_active_task_groups();
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
+        jet_codegen::task_group::jet_task_deadline_clear_pending();
         Concurrency::set_active_runtime(None);
         Concurrency::clear_http_shared_runtime();
         if let Some(rendered) = runtime.deadline_exceeded.take() {

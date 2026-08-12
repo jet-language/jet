@@ -569,6 +569,7 @@ impl<'a> Checker<'a> {
         projections: &[crate::AST::ViewSourceProjection],
         span: Span,
     ) -> Vec<ViewPlace> {
+        let actual = actual.without_parens();
         let leading_fields: Vec<String> = projections
             .iter()
             .map_while(|projection| match projection {
@@ -2341,7 +2342,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
-        // A taskgroup loan outlives the borrow binding's last lexical use: the
+        // A task group loan outlives the borrow binding's last lexical use: the
         // child still holds it until the group joins. Check that first — the
         // view scan below would already have let this place go.
         if self.report_scoped_loan_conflict(changed, action, span) {
@@ -2428,7 +2429,8 @@ impl<'a> Checker<'a> {
         &mut self,
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
-        if let Expr::Copy(inner, _) | Expr::Paren(inner, _) | Expr::Try(inner, _, _) = init {
+        let init = init.without_parens();
+        if let Expr::Copy(inner, _) | Expr::Try(inner, _, _) = init {
             return self.view_call_sources(inner);
         }
         if let Expr::Ident(name, _) = init {
@@ -2712,7 +2714,7 @@ impl<'a> Checker<'a> {
             ..
         } = init
         {
-            if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+            if let Expr::Ident(enum_name, _) = receiver.as_ref().without_parens() {
                 if let Some(payload) = self
                     .resolve_enum_variants_cloned(enum_name)
                     .and_then(|variants| variants.get(method).cloned())
@@ -2754,7 +2756,7 @@ impl<'a> Checker<'a> {
         } = init
         {
             if method == Syntax::MEM_PIN
-                && matches!(receiver.as_ref(), Expr::Ident(alias, _)
+                && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
                     if self.core_imports.get(alias).is_some_and(|m| m == Syntax::CORE_MEM_MODULE))
             {
                 return args
@@ -2881,10 +2883,11 @@ impl<'a> Checker<'a> {
         if method != Syntax::METHOD_VIEW {
             return Vec::new();
         }
+        let receiver = receiver.as_ref().without_parens();
         let Some(mut place) = self.place_from_expr(receiver) else {
             return Vec::new();
         };
-        let kind = match receiver.as_ref() {
+        let kind = match receiver {
             Expr::Ident(name, _) => self
                 .view_kind(name)
                 .unwrap_or_else(|| self.view_kind_for_place(&place)),
@@ -4256,8 +4259,8 @@ impl<'a> Checker<'a> {
                 // wrapper, not as a captured Rc local.
                 continue;
             };
-            if matches!(info.ty, Type::Fn { .. }) {
-                if !info.interrupt_sendable {
+            if matches!(&info.ty, Type::Fn { .. }) {
+                if info.param_conv.is_some() || !info.interrupt_sendable {
                     return false;
                 }
                 continue;
@@ -4281,6 +4284,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether an expression already has the one representation that may
+    /// cross `core.os.on_interrupt`. This is intentionally narrower than
+    /// ordinary function typing: arbitrary function-producing expressions
+    /// must not reach codegen as an unexamined `Rc` value.
+    pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
+        if !matches!(ty, Type::Fn { .. }) {
+            return false;
+        }
+        match expr {
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
+                .unwrap_or_else(|| {
+                    self.funcs.contains_key(name)
+                        || self.unqualified.contains_key(name)
+                        || self.unqualified_file.contains_key(name)
+                }),
+            Expr::Paren(inner, _) => self.interrupt_callback_expr_sendable(inner, ty),
+            Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, ty),
+            _ => false,
+        }
+    }
+
     /// Reject a local function value that would otherwise reach the callback
     /// host as an ordinary Rc. Direct named functions and callback-safe aliases
     /// are admitted; function parameters and all other local function values
@@ -4296,12 +4322,72 @@ impl<'a> Checker<'a> {
                 _ => None,
             }
         }
+        fn lambda(expr: &Expr) -> bool {
+            match expr {
+                Expr::Lambda(_) => true,
+                Expr::Paren(inner, _) => lambda(inner),
+                _ => false,
+            }
+        }
+        fn needs_fn_mut(expr: &Expr) -> bool {
+            match expr {
+                Expr::Lambda(lam) => lam.meta.needs_fn_mut,
+                Expr::Paren(inner, _) => needs_fn_mut(inner),
+                _ => false,
+            }
+        }
+        fn lambda_span(expr: &Expr) -> Option<Span> {
+            match expr {
+                Expr::Lambda(lam) => Some(lam.span),
+                Expr::Paren(inner, _) => lambda_span(inner),
+                _ => None,
+            }
+        }
         let Some(name) = ident(expr) else {
+            if lambda(expr) {
+                // Lambda capture checking runs while the interrupt callback
+                // depth is active. It owns the detailed Send/'static proof.
+                // A mutable capture is the one callback-specific fact that
+                // capture sendability alone cannot express: it lowers to
+                // `FnMut`, while the retained ABI is `Fn() + Send + Sync`.
+                // Reject it here, before the Arc coercion reaches rustc.
+                if needs_fn_mut(expr)
+                    && !lambda_span(expr).is_some_and(|span| {
+                        self.diags
+                            .iter()
+                            .any(|diag| diag.code == "E1102" && diag.span == Some(span))
+                    })
+                {
+                    self.report_unsendable(
+                        "this callback",
+                        ty,
+                        SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ClosureCaptures,
+                        },
+                        SendCrossing::InterruptCallback,
+                        expr.span(),
+                    );
+                }
+                return;
+            }
+            self.report_unsendable(
+                "this callback",
+                ty,
+                SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ClosureCaptures,
+                },
+                SendCrossing::InterruptCallback,
+                expr.span(),
+            );
             return;
         };
         if self
             .lookup(name)
-            .map(|info| info.interrupt_sendable)
+            .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
             .unwrap_or_else(|| {
                 self.funcs.contains_key(name)
                     || self.unqualified.contains_key(name)
@@ -4867,7 +4953,11 @@ impl<'a> Checker<'a> {
             crossing,
             SendCrossing::TaskCapture | SendCrossing::TaskResult
         ) {
-            if let Some(name) = &self.current_binding_name {
+            if let Some(name) = self
+                .current_binding_name
+                .as_ref()
+                .or(self.task_spawn_binding_name.as_ref())
+            {
                 if matches!(problem.kind, SendProblemKind::ViewBorrow) {
                     self.view_borrow_escape_tasks.insert(name.clone());
                 } else {
@@ -4906,8 +4996,8 @@ impl<'a> Checker<'a> {
             other => other,
         };
         match place {
-            // Bare name: the fix names that list. Suggest `^` only when it is a
-            // parameter, and only then offer the group helpers on the same name.
+            // Bare name: the fix names the list. Suggest `^` only when it is a
+            // parameter; the canonical task combinators are written at spawn.
             Expr::Ident(name, _) => {
                 let info = self.lookup(name);
                 let is_param = info.as_ref().is_some_and(|info| info.param_conv.is_some());
@@ -4920,12 +5010,12 @@ impl<'a> Checker<'a> {
                 });
                 let fix = if is_param && is_task_list {
                     format!(
-                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`",
+                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or collect the work in a canonical `task.all` or `task.group` block",
                         Syntax::SIGIL_MOVE
                     )
                 } else if is_task_list {
                     format!(
-                        "move the list into a local this scope owns, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`"
+                        "move the list into a local this scope owns before the loop consumes its task handles"
                     )
                 } else {
                     "move the list into a local this scope owns first".to_string()
@@ -4939,7 +5029,8 @@ impl<'a> Checker<'a> {
                 ));
             }
             // Field / index / slice: the root's type is not the list, so do not
-            // rewrite it as `root: ^[Task<…>]` or invent `root.wait_all()`.
+            // rewrite it as `root: ^[Task<…>]`; the field or index itself must
+            // first be copied into a local this scope owns.
             _ => {
                 self.diags.push(Diagnostic::error(
                     "E0120",
@@ -5155,6 +5246,141 @@ impl<'a> Checker<'a> {
             }
             AccessConvention::Write => {}
         }
+    }
+
+    /// Apply the declaration-side capability contract to a function-value
+    /// argument. Function values carry the same convention metadata as named
+    /// functions, so their calls must not silently collapse to read-only.
+    pub(crate) fn check_callable_argument_ownership(
+        &mut self,
+        call_name: &str,
+        index: usize,
+        param_conv: AccessConvention,
+        param_ty: &Type,
+        arg: &mut crate::AST::CallArg,
+    ) {
+        if param_conv != AccessConvention::Move {
+            if let Expr::Ident(name, span) = &arg.expr {
+                if self
+                    .lookup(name)
+                    .is_some_and(|info| info.single_use_span.is_some())
+                {
+                    self.diags.push(e0142_aliased(name, call_name, *span));
+                    return;
+                }
+            }
+        }
+
+        if arg.convention == AccessConvention::Write
+            && !matches!(arg.expr, Expr::Ident(_, _))
+        {
+            self.diags.push(Diagnostic::error(
+                "E0202",
+                "the write-capability marker `&` needs a plain named binding after it".to_string(),
+                "write access from the write-capability marker `&` can only be granted to a named binding, not an expression"
+                    .to_string(),
+                self.non_name_write_argument_fix(&arg.expr),
+                Some(arg.span),
+            ));
+        }
+
+        match (param_conv, arg.convention) {
+            (AccessConvention::Move, AccessConvention::Read) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if type_is_copy(param_ty) {
+                        // Copy values cross an owning parameter by bits.
+                    } else if !self.is_resource_type(param_ty)
+                        && is_cloneable(param_ty, self.registry)
+                    {
+                        arg.flags.implicit_clone = true;
+                        let diagnostic = self.e0209_implicit_clone(
+                            format!("implicit clone of `{name}`"),
+                            format!("`{call_name}` expects to take ownership of this value"),
+                            name,
+                            *span,
+                        );
+                        self.diags.push(diagnostic);
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0201",
+                            format!(
+                                "`{call_name}` needs the move-capability marker `^` here — this value can't be copied"
+                            ),
+                            format!(
+                                "parameter {} takes ownership through the move-capability marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied",
+                                index + 1
+                            ),
+                            format!(
+                                "write the move-capability marker `^` (`{}{name}`) to move ownership to `{call_name}`",
+                                Syntax::SIGIL_MOVE
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                }
+            }
+            (AccessConvention::Move, AccessConvention::Move) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if !type_is_copy(param_ty) {
+                        self.mark_moved(name.clone(), *span);
+                    }
+                }
+            }
+            (AccessConvention::Write, AccessConvention::Read) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    self.diags.push(Diagnostic::error(
+                        "E0202",
+                        format!(
+                            "parameter `{name}` requires the write-capability marker `&` at the call site"
+                        ),
+                        format!(
+                            "`{call_name}` needs to edit this value with the write-capability marker `&`; passing it without that marker grants only read access"
+                        ),
+                        format!(
+                            "write the write-capability marker `&` (`{}{name}`) when calling `{call_name}`",
+                            Syntax::SIGIL_WRITE
+                        ),
+                        Some(*span),
+                    ));
+                }
+            }
+            (AccessConvention::Write, AccessConvention::Write) => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if let Some(info) = self.lookup(name) {
+                        if !info.mutable {
+                            self.diags.push(Diagnostic::error(
+                                "E0111",
+                                format!(
+                                    "`{name}` was made with `{}`, so it can't be changed",
+                                    Syntax::SIGIL_BIND_IMMUT
+                                ),
+                                format!(
+                                    "`{call_name}` will change this value, so it must be mutable (`{}`)",
+                                    Syntax::SIGIL_BIND_MUT
+                                ),
+                                format!(
+                                    "declare it with `{} {name} ...`",
+                                    Syntax::SIGIL_BIND_MUT
+                                ),
+                                Some(*span),
+                            ));
+                        }
+                    }
+                }
+            }
+            (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
+                self.diags.push(Diagnostic::error(
+                    "E0203",
+                    "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
+                    "only parameters declared with the move-capability marker `^` accept a moved value at the call site".to_string(),
+                    "remove the move-capability marker `^`, or declare the parameter with that marker to take ownership".to_string(),
+                    Some(arg.span),
+                ));
+            }
+            _ => {}
+        }
+
+        self.check_write_arg_change(arg);
     }
 
     pub(crate) fn finish_sender_send(
@@ -5382,6 +5608,7 @@ impl<'a> Checker<'a> {
             ret: Some(value.clone()),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let saved_expected = self.expected_type.clone();
@@ -5594,6 +5821,7 @@ impl<'a> Checker<'a> {
             ret: expected_return.map(Box::new),
             effect_bound: None, return_view_provenance: None,
             param_contract: None,
+                call_metadata: None,
         };
         let saved_exp = self.expected_type.clone();
         self.expected_type = Some(expected);

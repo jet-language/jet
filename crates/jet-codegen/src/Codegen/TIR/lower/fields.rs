@@ -1,8 +1,306 @@
-use crate::AST::{Expr, Type, UnOp};
+use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Syntax;
+use std::collections::HashSet;
+
+pub(crate) fn imported_type_name(owner: &str, leaf: &str) -> String {
+    format!("{owner}::{leaf}")
+}
+
+pub(crate) fn imported_type_owners(bundle: &ProgramBundle, module_idx: usize) -> Vec<String> {
+    bundle
+        .name_ledger
+        .module_identity(module_idx)
+        .into_iter()
+        .collect()
+}
+
+fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in items {
+        match item {
+            Item::Struct(definition) => {
+                names.insert(definition.name.clone());
+            }
+            Item::Enum(definition) => {
+                names.insert(definition.name.clone());
+            }
+            Item::UnitFamily(family) => {
+                names.extend(family.distinct_defs().iter().map(|member| member.name.clone()));
+            }
+            Item::Distinct(definition) => {
+                names.insert(definition.name.clone());
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn module_has_nominal_type(items: &[Item], name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Struct(definition) => definition.name == name,
+        Item::Enum(definition) => definition.name == name,
+        Item::Distinct(definition) => definition.name == name,
+        Item::UnitFamily(family) => family
+            .distinct_defs()
+            .iter()
+            .any(|member| member.name == name),
+        _ => false,
+    })
+}
+
+fn canonical_nominal_name(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    name: &str,
+    owned: &HashSet<String>,
+    seen: &mut HashSet<(usize, String)>,
+) -> Option<String> {
+    if name.contains("::") {
+        return Some(name.to_string());
+    }
+    if !seen.insert((module_idx, name.to_string())) {
+        return None;
+    }
+    if owned.contains(name) || module_has_nominal_type(&bundle.modules[module_idx].items, name) {
+        return bundle.name_ledger.nominal_identity(module_idx, name);
+    }
+    if let Some((namespace, leaf)) = name.rsplit_once('.') {
+        let target = bundle
+            .name_ledger
+            .effective_alias(module_idx, namespace)
+            .and_then(|alias| alias.target_module)?;
+        return canonical_nominal_name(bundle, target, leaf, &HashSet::new(), seen);
+    }
+    let alias = bundle.name_ledger.effective_alias(module_idx, name)?;
+    let target = alias.target_module?;
+    let leaf = alias
+        .target
+        .rsplit_once('.')
+        .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+    canonical_nominal_name(bundle, target, leaf, &HashSet::new(), seen)
+}
+
+fn qualify_imported_nominal_name(
+    bundle: &ProgramBundle,
+    target: usize,
+    name: &str,
+    owned: &HashSet<String>,
+) -> String {
+    canonical_nominal_name(bundle, target, name, owned, &mut HashSet::new())
+        .unwrap_or_else(|| name.to_string())
+}
+
+fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
+    match ty {
+        Type::Apply { name, args } => Type::Apply {
+            name: qualify(name),
+            args: args
+                .iter()
+                .map(|arg| rewrite_apply_heads(arg, qualify))
+                .collect(),
+        },
+        Type::List(inner) => Type::List(Box::new(rewrite_apply_heads(inner, qualify))),
+        Type::Map {
+            key,
+            key_span,
+            value,
+        } => Type::Map {
+            key: Box::new(rewrite_apply_heads(key, qualify)),
+            key_span: *key_span,
+            value: Box::new(rewrite_apply_heads(value, qualify)),
+        },
+        Type::Shared(inner) => Type::Shared(Box::new(rewrite_apply_heads(inner, qualify))),
+        Type::Option(inner) => Type::Option(Box::new(rewrite_apply_heads(inner, qualify))),
+        Type::Result { ok, err } => Type::Result {
+            ok: Box::new(rewrite_apply_heads(ok, qualify)),
+            err: Box::new(rewrite_apply_heads(err, qualify)),
+        },
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            param_contract,
+            return_view_provenance,
+            call_metadata,
+        } => Type::Fn {
+            params: params
+                .iter()
+                .map(|param| rewrite_apply_heads(param, qualify))
+                .collect(),
+            ret: ret
+                .as_ref()
+                .map(|ret| Box::new(rewrite_apply_heads(ret, qualify))),
+            effect_bound: effect_bound.clone(),
+            param_contract: param_contract.clone(),
+            return_view_provenance: return_view_provenance.clone(),
+            call_metadata: call_metadata.clone(),
+        },
+        Type::Tuple(fields) => Type::Tuple(
+            fields
+                .iter()
+                .map(|(name, ty)| {
+                    (name.clone(), Box::new(rewrite_apply_heads(ty, qualify)))
+                })
+                .collect(),
+        ),
+        Type::FixedList {
+            elem,
+            len,
+            len_symbol,
+        } => Type::FixedList {
+            elem: Box::new(rewrite_apply_heads(elem, qualify)),
+            len: *len,
+            len_symbol: len_symbol.clone(),
+        },
+        Type::Tagged { marker, inner } => Type::Tagged {
+            marker: marker.clone(),
+            inner: Box::new(rewrite_apply_heads(inner, qualify)),
+        },
+        Type::Union(members) => crate::AST::canonicalize_union(
+            members
+                .iter()
+                .map(|member| rewrite_apply_heads(member, qualify))
+                .collect(),
+        ),
+        Type::Quantity { base, dimension } => Type::Quantity {
+            base: Box::new(rewrite_apply_heads(base, qualify)),
+            dimension: dimension.clone(),
+        },
+        _ => ty.clone(),
+    }
+}
+
+/// Keep every nominal reference owned by an imported module under its canonical
+/// module identity. This is used by both field-shape registration and
+/// cross-module call metadata, so nested/generic references share one key.
+pub(crate) fn qualify_imported_type(
+    bundle: &ProgramBundle,
+    target: usize,
+    _owner: &str,
+    ty: &Type,
+) -> Type {
+    let owned = module_owned_type_names(&bundle.modules[target].items);
+    let mapped = ty.map_named_types(&|name| {
+        let qualified = qualify_imported_nominal_name(bundle, target, name, &owned);
+        (qualified != name).then_some(qualified)
+    });
+    rewrite_apply_heads(&mapped, &|name| {
+        qualify_imported_nominal_name(bundle, target, name, &owned)
+    })
+}
+
+/// Register imported struct shapes under canonical nominal identities. A
+/// leaf-only table cannot distinguish two imported modules that export the same
+/// nominal.
+pub(crate) fn register_imported_struct_shapes(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) {
+    let module = &bundle.modules[module_idx];
+    let mut imported = Vec::<(usize, String)>::new();
+    for import in &module.imports {
+        if import.is_c_import().unwrap_or_else(|error| {
+            unreachable!("invalid foreign import reached codegen: {}", error.path)
+        }) {
+            continue;
+        }
+        let Some(target) = bundle.name_ledger.import_target(module_idx, import.span) else {
+            continue;
+        };
+        for item in &bundle.modules[target].items {
+            if let Item::Struct(definition) = item {
+                if bundle.name_ledger.visible(module_idx, target, &definition.name) {
+                    imported.push((target, definition.name.clone()));
+                }
+            }
+        }
+    }
+    imported.extend(crate::Codegen::Imports::selective_nominal_targets(
+        bundle,
+        module_idx,
+    ));
+    for ((_, _), (rust_mod, _)) in
+        crate::Codegen::Imports::reexport_call_map(bundle, module_idx)
+    {
+        let Some(target) = bundle
+            .modules
+            .iter()
+            .position(|candidate| crate::Codegen::mangle(&candidate.alias) == rust_mod)
+        else {
+            continue;
+        };
+        for item in &bundle.modules[target].items {
+            if let Item::Struct(definition) = item {
+                if bundle.name_ledger.visible(module_idx, target, &definition.name) {
+                    imported.push((target, definition.name.clone()));
+                }
+            }
+        }
+    }
+    imported.sort();
+    imported.dedup();
+    for (target, definition_name) in imported {
+        let Some(definition) = bundle.modules[target].items.iter().find_map(|item| match item {
+            Item::Struct(definition) if definition.name == definition_name => Some(definition),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let owner = bundle
+            .name_ledger
+            .module_identity(target)
+            .expect("name ledger must contain every loaded module");
+        let qualified = imported_type_name(&owner, &definition.name);
+        let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
+        let target_type_names: HashSet<String> = bundle.modules[target]
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                Item::Struct(definition) => vec![definition.name.clone()],
+                Item::Enum(definition) => vec![definition.name.clone()],
+                Item::UnitFamily(family) => family
+                    .distinct_defs()
+                    .iter()
+                    .map(|member| member.name.clone())
+                    .collect(),
+                Item::Distinct(definition) => vec![definition.name.clone()],
+                _ => Vec::new(),
+            })
+            .collect();
+        let fields = definition
+            .fields
+            .iter()
+            .map(|field| {
+                (
+                    field.name.clone(),
+                    qualify_imported_type(bundle, target, &owner, &field.ty),
+                )
+            })
+            .collect::<Vec<(String, Type)>>();
+        cx.type_names.insert(qualified.clone());
+        cx.foreign_types.insert(qualified.clone(), rust_mod.clone());
+        cx.struct_fields.insert(qualified.clone(), fields.clone());
+        if crate::Codegen::type_is_cloneable_struct(definition, &target_type_names) {
+            cx.cloneable.insert(qualified.clone());
+        }
+        if !definition.type_params.is_empty() {
+            let params = definition
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            cx.struct_type_params
+                .insert(qualified.clone(), params.iter().cloned().collect());
+            cx.struct_type_param_order
+                .insert(qualified.clone(), params);
+        }
+    }
+}
 
 /// D-INCR1: the structured place `++`/`--` reads and updates. A bare identifier
 /// resolves to its slot; anything else is the already-structured place expression
@@ -216,7 +514,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             "max_reply_line_bytes" | "max_reply_lines" | "max_capabilities" |
             "max_recipients" | "max_message_bytes" | "max_auth_challenge_bytes"),
         "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
-        "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "issued_at"),
+        "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "not_before" | "issued_at"),
         "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
         "Auth" => matches!(member, "users_table"),
         n if n == Syntax::TYPE_TYPE_INFO => {
@@ -303,6 +601,7 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
                     ret: Some(Box::new(args[0].clone())),
                     effect_bound: None,
                     param_contract: None,
+                call_metadata: None,
                     return_view_provenance: None,
                 }),
                 "grads" => Some(args[0].clone()),
@@ -319,6 +618,7 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
+            "not_before" => Some(Type::Option(Box::new(Type::Int))),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };

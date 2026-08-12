@@ -1,16 +1,15 @@
 mod common;
 
 const SHARED_SOURCE: &str = r#"
-use core.tasks
 struct Counter { value: Int }
 fn run() {
     counter := Shared.new(Counter.{ value: 0 })
-    task :: tasks.spawn(() => {
+    handle :: task {
         counter.edit((value) => {
             value.value += 1
         })
-    })
-    task.join()
+    }
+    handle.join() ?? panic("task failed")
     print(counter.read((value) => value.value))
 }
 "#;
@@ -253,6 +252,7 @@ fn nested_tir_program(
         spawn_lambdas: Vec::new(),
         struct_fields: std::collections::HashMap::new(),
         struct_field_types: std::collections::HashMap::new(),
+        reflect_paths: std::collections::HashMap::new(),
         struct_type_params: std::collections::HashMap::new(),
         enum_variants: std::collections::HashMap::new(),
         enum_variant_payload_types: std::collections::HashMap::new(),

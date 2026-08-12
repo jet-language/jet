@@ -85,6 +85,7 @@
         match j {
             JSON::Null => DataTree::Null,
             JSON::Boolean(b) => DataTree::Bool(*b),
+            JSON::Integer(n) => DataTree::Int(*n),
             JSON::Number(n) => {
                 if n.fract() == 0.0
                     && n.is_finite()

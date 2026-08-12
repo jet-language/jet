@@ -105,12 +105,10 @@ fn spawn_owned(group: TaskGroup, values: ^[Int]) {
     print(handle.join() ?? 0)
 }
 
-fn spawn_pair_left(group: TaskGroup) => Task<Int> {
-    return task 20
-}
-
-fn spawn_pair_right(group: TaskGroup) => Task<Int> {
-    return task 22
+fn spawn_both(group: TaskGroup) {
+    left :: task 20
+    right :: task 22
+    print((left.join() ?? 0) + (right.join() ?? 0))
 }
 
 fn run() {
@@ -119,9 +117,7 @@ fn run() {
         values :: [7, 8, 9]
         spawn_owned(group, ^values)
         task.group inner {
-            left :: spawn_pair_left(group)
-            right :: spawn_pair_right(inner)
-            print((left.join() ?? 0) + (right.join() ?? 0))
+            spawn_both(inner)
         }
     }
 }
@@ -143,6 +139,18 @@ fn lexical_group_joins_anonymous_helper_spawn() {
 
 #[test]
 fn default_run_joins_helper_spawn_before_outer_exit() {
+    match interpreter_outcome("parameter_join", OUTER_GROUP_HELPER) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "{stderr}");
+            assert_eq!(stderr, "", "{stderr}");
+            assert_eq!(stdout, "inside\ntask\nafter\n");
+        }
+        RunOutcome::Problems(diags) => panic!("interpreter rejected helper spawn: {diags:?}"),
+    }
     assert_jit_compiles("parameter_join", OUTER_GROUP_HELPER);
     let (code, stdout, stderr) = run_default_multi(
         "taskgroup_parameter_join",
@@ -245,14 +253,14 @@ fn slow_eleven() => Int {
 
 fn run() {
     task.group all_group {
-        values :: task.all { 1, 2 }
+        values :: (task.all { 1, 2 }) ?? panic("all failed")
         print(values[0] + values[1])
     }
     task.group race_group {
-        print(task.race { slow_seven(), 8 })
+        print((task.race { slow_seven(), 8 }) ?? panic("race failed"))
     }
     task.group any_group {
-        print(task.any { slow_eleven(), 12 })
+        print((task.any { slow_eleven(), 12 }) ?? panic("any failed"))
     }
 }
 "#;
@@ -265,7 +273,7 @@ fn run() {
             assert_eq!(exit_code, 0, "{stderr}");
             stdout
         }
-        RunOutcome::Problems(diags) => panic!("interpreter rejected taskgroups: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("interpreter rejected task groups: {diags:?}"),
     };
     assert_eq!(interpreted, "3\n8\n12\n");
 
@@ -289,8 +297,8 @@ fn assert_native_wait_exit(
 ) {
     assert_jit_compiles(name, source);
     let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
-    assert_ne!(code, 0, "stdout={stdout:?}\n{stderr}");
-    assert_eq!(stdout, expected_stdout, "stdout={stdout:?}\n{stderr}");
+    assert_ne!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected_stdout, "{stderr}");
     assert!(!stdout.contains("caller"), "{stdout:?}\n{stderr}");
     assert!(stderr.contains(stderr_text), "{stderr}");
     assert!(
@@ -303,19 +311,78 @@ fn assert_native_wait_exit(
     );
 }
 
-fn assert_native_wait_success(name: &str, source: &str, expected_stdout: &str) {
-    assert_jit_compiles(name, source);
+fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
+    let interpreted = match interpreter_outcome(name, source) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "interpreter: {stderr}");
+            assert!(
+                stderr
+                    .lines()
+                    .all(|line| line.contains("tier0 interp")),
+                "interpreter diagnostics: {stderr}"
+            );
+            stdout
+        }
+        RunOutcome::Problems(diags) => panic!("interpreter rejected {name}: {diags:?}"),
+    };
+    assert_eq!(interpreted, expected_stdout, "interpreter output drifted");
+
+    // Nested task/group lowering needs more than the default test-thread
+    // stack. Keep the resident probe on the same 8 MiB stack as the focused
+    // JIT compile helper above; this changes only probe capacity, not runtime
+    // semantics.
+    let probe_name = name.to_string();
+    let probe_source = source.to_string();
+    let probe = std::thread::Builder::new()
+        .name(format!("jet-taskgroup-resident-{probe_name}"))
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let jit_path = std::env::temp_dir().join(format!(
+                "jet_taskgroup_resident_{probe_name}_{}.jet",
+                std::process::id()
+            ));
+            fs::write(&jit_path, probe_source).unwrap();
+            let mut bundle = jet::Loader::load_entry(jit_path.to_str().unwrap()).unwrap();
+            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+                .into_iter()
+                .filter(|diagnostic| {
+                    matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                errors.is_empty(),
+                "resident probe rejected {probe_name}: {errors:?}"
+            );
+            let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+            assert!(
+                jet_jit::resident_jit_safe_bundle(&bundle),
+                "{probe_name} must stay resident-JIT safe: {detail}"
+            );
+            let _ = fs::remove_file(&jit_path);
+        })
+        .expect("spawn resident JIT probe");
+    probe.join().expect("resident JIT probe panicked");
+
     let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
-    assert_eq!(code, 0, "stdout={stdout:?}\n{stderr}");
-    assert_eq!(stdout, expected_stdout, "{stderr}");
+    assert_eq!(code, 0, "resident JIT: {stderr}");
     assert!(
-        stderr.lines().any(|line| {
-            line.split_whitespace()
-                .take(3)
-                .eq(["run", "tier1", "native"])
-        }),
-        "{stderr}"
+        stderr
+            .lines()
+            .all(|line| line.contains("tier0 interp") || line.contains("tier1 native")),
+        "runtime diagnostics: {stderr}"
     );
+    assert_eq!(stdout, expected_stdout, "resident JIT output drifted");
+
+    if have_rustc() {
+        let (code, stdout, stderr) = build_and_run_full("jet_taskgroup", name, source);
+        assert_eq!(code, 0, "AOT: {stderr}");
+        assert_eq!(stderr, "");
+        assert_eq!(stdout, expected_stdout, "AOT output drifted");
+    }
 }
 
 #[test]
@@ -323,34 +390,32 @@ fn native_cancellation_closes_group_before_caller_continues() {
     let source = r#"
 use core.time as time
 
-fn wait_in_group(gate: Shared<[Int]>) {
+fn wait_in_group(sender: Sender<Int>) {
     task.group group {
         child :: task {
-            gate.edit((state: [Int]) => state[0] = 1)
-            total := 0
-            loop n, 0..<2000000 { total += n }
+            sender.send(1)
+            time.sleep(10)
             print("settled")
         }
         time.sleep(10000)
-        child.join().drop("the sleep above never returns before cancellation lands")
+        child.join() ?? panic("child failed")
     }
 }
 
 fn run() {
-    gate :: Shared.new([0])
-    outer :: task wait_in_group(gate)
-    loop gate.read((state: [Int]) => state[0]) == 0 {}
+    (sender, ready) :: tasks.channel<Int>()
+    outer :: task wait_in_group(sender)
+    ready.receive() ?? panic("child did not start")
     outer.cancel()
-    outer.join().drop("the process exits from the cancelled wait before this would matter")
+    result :: outer.join()
+    if result == {
+        .Err(_) -> { print("cancelled") }
+        .Ok(_) -> { print("ok") }
+    }
     print("caller")
 }
 "#;
-    // D-CANCELMODEL1=C cancels at the outer task's sleep wait point. The
-    // explicit outer `.drop(...)` follows D-CONC-FAIL1=A and D-IGNORERET2,
-    // so it discards the resulting `Cancelled` value and the caller returns
-    // normally. Group cleanup still drains the uncancellable tight-loop child
-    // before the caller can print, so the settled line precedes caller.
-    assert_native_wait_success("taskgroup_cancel_exit", source, "settled\ncaller\n");
+    assert_group_close_success("taskgroup_cancel", source, "settled\ncancelled\ncaller\n");
 }
 
 #[test]
@@ -368,7 +433,7 @@ fn leave_on_deadline() {
         #Context(deadline: time.now() - 1) {
             time.sleep(10000)
         }
-        child.join().drop("the deadline blows before this would matter")
+        child.join() ?? panic("child failed")
     }
 }
 
@@ -377,7 +442,7 @@ fn run() {
     print("caller")
 }
 "#;
-    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003", "");
+    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003", "settled\n");
 }
 
 #[test]
@@ -402,7 +467,7 @@ fn leave_on_wait_panic() {
     task.group group {
         slow :: task slow_value(gate)
         ignored :: task.any { fail_after_start(gate) }
-        slow.join().drop("the any-combinator panic exits before this would matter")
+        slow.join() ?? panic("slow child failed")
     }
 }
 
@@ -411,7 +476,7 @@ fn run() {
     print("caller")
 }
 "#;
-    assert_native_wait_exit("taskgroup_wait_panic_exit", source, "wait failed", "settled\n");
+    assert_group_close_success("taskgroup_wait_panic", source, "settled\ncaller\n");
 }
 
 #[test]
@@ -459,25 +524,30 @@ fn run() {
             stderr,
             exit_code,
         } => {
-            assert_eq!(exit_code, 70, "{stderr}");
+            assert_eq!(exit_code, 0, "{stderr}");
             (stdout, stderr)
         }
         RunOutcome::Problems(diags) => panic!("interpreter rejected child panic: {diags:?}"),
     };
-    assert!(!interpreted_stdout.contains("after"), "{interpreted_stdout:?}");
-    assert!(interpreted_stderr.starts_with("panic: child\n"), "{interpreted_stderr}");
+    assert_eq!(interpreted_stdout, "after\n");
+    assert_eq!(interpreted_stderr, "");
 
     let (code, stdout, stderr) =
         run_default_multi("taskgroup_early_return", "main.jet", &[("main.jet", source)]);
-    assert_eq!(code, 70, "{stderr}");
-    assert!(!stdout.contains("after"), "{stdout:?}\n{stderr}");
-    assert!(stderr.contains("panic: child\n"), "{stderr}");
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "after\n", "{stderr}");
+    assert!(
+        stderr
+            .lines()
+            .all(|line| line.contains("tier0 interp") || line.contains("tier1 native")),
+        "runtime diagnostics: {stderr}"
+    );
 
     if have_rustc() {
         let (code, stdout, stderr) =
             build_and_run_full("jet_taskgroup", "taskgroup_early_return", source);
-        assert_eq!(code, 70, "{stderr}");
-        assert!(!stdout.contains("after"), "{stdout:?}\n{stderr}");
-        assert!(stderr.starts_with("panic: child\n"), "{stderr}");
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "after\n", "{stderr}");
+        assert_eq!(stderr, "", "{stderr}");
     }
 }

@@ -11,7 +11,7 @@ use super::runtime_host::catch_jit_panic;
 use super::tiers::{plan_tiers, record_trace};
 use super::trace::note_jit_execution;
 use super::safety::{
-    collect_select_arms_jit, count_spawn_sites, jit_list_task_int_type, jit_value_type,
+    collect_select_arms_jit, count_spawn_sites, jit_list_task_type, jit_value_type,
     resident_safe_capture_policy, resident_safe_expr, resident_safe_func,
     resident_safe_func_detail, resident_safe_program, resident_safe_spawn_lambda,
     resident_safe_stmt,
@@ -473,6 +473,7 @@ fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
     match &expr.kind {
         TExprKind::Print(inner)
         | TExprKind::Clone(inner)
+        | TExprKind::ExplicitCopy(inner)
         | TExprKind::MaterializeView(inner)
         | TExprKind::DistinctRaw(inner)
         | TExprKind::Present(inner)
@@ -619,7 +620,7 @@ pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
                             format!(
                                 ", init=TaskGroupAll tasks={} list_ok={} tasks_ok={}",
                                 jit_expr_tag(tasks),
-                                jit_list_task_int_type(&tasks.ty),
+                                jit_list_task_type(&tasks.ty),
                                 resident_safe_expr(tasks, &names)
                             )
                         } else {
@@ -816,6 +817,20 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
                     if let Some(t) = tail {
                         if !resident_safe_expr(t, &names) {
                             why.push("tail unsafe".into());
+                        }
+                    }
+                }
+                jet_codegen::Codegen::TIR::TJitSpawnBody::SharedBlock { body, tail } => {
+                    for (si, s) in body.iter().enumerate() {
+                        if !resident_safe_stmt(s, &names) {
+                            why.push(format!("stmt{si} unsafe"));
+                        }
+                    }
+                    if *tail {
+                        if let Some(TStmt::ExprStmt(expr) | TStmt::Return(Some(expr))) = body.last() {
+                            if !resident_safe_expr(expr, &names) {
+                                why.push("tail unsafe".into());
+                            }
                         }
                     }
                 }

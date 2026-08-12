@@ -9,6 +9,7 @@
 //! no back-compat alias.
 
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Authority::AuthorityResolver;
 use crate::Package::{self, PackageParseError};
 use crate::Syntax;
 use std::collections::BTreeMap;
@@ -25,7 +26,7 @@ pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// into a specific era of Jet syntax (docs/spec/release-policy.md). The list is
 /// ordered oldest→newest; the last entry is the newest stable edition, used by
 /// single-file `jet run file.jet` which carries no edition marker (E2-V4).
-const LATEST_EDITION: &str = "2027";
+const LATEST_EDITION: &str = "2028";
 pub const SUPPORTED_EDITIONS: &[&str] = &["2026", "2027", "2028"];
 
 /// Parse an edition label like `"2027"` into its year. Unknown labels sort before
@@ -285,7 +286,7 @@ pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     // an uncomposed read would reject any package whose default output is
     // declared in a `configs:`-referenced file.
     let facts = Package::PackageFacts::parse_uncomposed(raw, path.display().to_string())
-        .map_err(|e| to_diagnostic(path, &e))?;
+        .map_err(|e| manifest_parse_diagnostic(path, &e))?;
     Package::to_manifest(&facts, raw)
 }
 
@@ -298,35 +299,40 @@ pub fn manifest_path_in(dir: &Path) -> std::path::PathBuf {
 /// is never parsed, but a mixed root is rejected so migration cannot silently
 /// hide a second Package identity.
 pub fn has_both_manifests(dir: &Path) -> bool {
-    dir.join(Syntax::PACKAGE_FILE).is_file() && dir.join(Syntax::PAYLOAD_FILE).is_file()
+    match AuthorityResolver::open(dir) {
+        Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
+            Ok(_) | Err(crate::Authority::AuthorityError::Missing(_)) => false,
+            Err(crate::Authority::AuthorityError::AmbiguousManifest(_)) => true,
+            Err(_) => true,
+        },
+        Err(_) => true,
+    }
 }
 
 /// Load and parse the nearest package manifest in a directory.
 pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
-    if has_both_manifests(dir) {
-        return Some(Err(to_diagnostic(
-            &dir.join(Syntax::PACKAGE_FILE),
-            &PackageParseError::Composition(format!(
-                "both `{}` and migration-era `{}` exist; keep one Package root",
-                Syntax::PACKAGE_FILE,
-                Syntax::PAYLOAD_FILE,
-            )),
-        )));
-    }
-    let pack_path = manifest_path_in(dir);
-    if !pack_path.is_file() {
-        return None;
-    }
-    let raw = match std::fs::read_to_string(&pack_path) {
-        Ok(s) => s,
-        Err(e) => {
-            return Some(Err(e1206(
-                &pack_path.display().to_string(),
-                &format!("couldn't read {}: {}", Syntax::PACKAGE_FILE, e),
-            )));
-        }
+    let resolver = match AuthorityResolver::open(dir) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return None,
+        Err(error) => return Some(Err(error.diagnostic())),
     };
-    Some(parse(&pack_path, &raw))
+    let checked = match resolver.checked_manifest(Path::new(".")) {
+        Ok(checked) => checked,
+        Err(error) if error.is_missing() => return None,
+        Err(error) => return Some(Err(error.diagnostic())),
+    };
+    let raw = match checked.file.text() {
+        Ok(raw) => raw,
+        Err(error) => return Some(Err(error.diagnostic())),
+    };
+    if let Err(error) = resolver.revalidate_file(&checked.file) {
+        return Some(Err(error.diagnostic()));
+    }
+    let result = parse(&checked.file.path, &raw);
+    if let Err(error) = resolver.revalidate_file(&checked.file) {
+        return Some(Err(error.diagnostic()));
+    }
+    Some(result)
 }
 
 /// Validate the toolchain constraint from `package.jet`. Returns E1208 on mismatch.
@@ -423,7 +429,7 @@ pub fn new_template(name: &str, annotated: bool) -> String {
 // Diagnostics
 // ──────────────────────────────────────────────
 
-fn to_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
+pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
     let file = path.display().to_string();
     match err {
         PackageParseError::UnknownField(field) => e1206_unknown_field(field),

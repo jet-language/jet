@@ -23,9 +23,9 @@ fn run() {
     mux.get("/", (req: HTTPRequest) => handle_root(req))
     mux.get("/users/:id", (req: HTTPRequest) => handle_user(req))
     mux.post("/users", (req: HTTPRequest) => handle_create(req))
-    t :: tasks.spawn(() => {
+    t :: task {
         loop i, [0, 1, 2, 3] { server.serve_once_listener(listener, mux) ?? panic("serve failed") }
-    })
+    }
     r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body().text(8388608) ?? panic("body failed"))
     r2 :: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
@@ -34,5 +34,5 @@ fn run() {
     print(r3.body().text(8388608) ?? panic("body failed"))
     r4 :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
     print(r4.status())
-    t.join()
+    t.join() ?? panic("server failed")
 }

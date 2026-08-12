@@ -382,21 +382,34 @@ impl<'a> Checker<'a> {
                 while let Type::Tagged { inner, .. } = owner {
                     owner = *inner;
                 }
-                let (name, subst) = match owner {
-                    Type::Named(name) => (name, HashMap::new()),
-                    Type::Apply { name, args } => {
-                        let params = self.trait_reg.struct_params.get(&name)?;
-                        let subst = params
-                            .iter()
-                            .zip(args)
-                            .map(|(param, arg)| (param.name.clone(), arg))
-                            .collect();
-                        (name, subst)
-                    }
+                let (type_name, type_args) = match owner {
+                    Type::Named(name) => (name, None),
+                    Type::Apply { name, args } => (name, Some(args)),
                     _ => return None,
                 };
-                self.registry
-                    .struct_fields(&name)?
+                let (import_ns, leaf) = Self::split_type_name(&type_name);
+                let owner_mod = self.struct_owner_module(leaf, import_ns)?;
+                let (registry, trait_reg) = if owner_mod == self.module_idx {
+                    (self.registry, self.trait_reg)
+                } else {
+                    let module = self.modules.and_then(|modules| modules.get(owner_mod))?;
+                    (&module.registry, &module.trait_reg)
+                };
+                let subst: HashMap<String, Type> = type_args
+                    .and_then(|args| {
+                        Some(
+                            trait_reg
+                                .struct_params
+                                .get(leaf)?
+                                .iter()
+                                .zip(args)
+                                .map(|(param, arg)| (param.name.clone(), arg))
+                                .collect::<HashMap<String, Type>>(),
+                        )
+                    })
+                    .unwrap_or_default();
+                registry
+                    .struct_fields(leaf)?
                     .iter()
                     .find(|(candidate, _, _)| candidate == field)
                     .map(|(_, _, ty)| substitute_type(ty, &subst))
@@ -421,9 +434,7 @@ impl<'a> Checker<'a> {
         self.operator_expr_type(expr)
             .is_some_and(|ty| match &ty {
                 Type::Named(name) => {
-                    self.trait_reg
-                        .trait_impls
-                        .contains(&(name.clone(), trait_name.to_string()))
+                    self.type_implements_trait_for_name(name, trait_name)
                         || self.type_param_has_bound(&ty, trait_name)
                 }
                 _ => false,
@@ -612,12 +623,13 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some((trait_name, method, ret)) = hook {
-                    if self
-                        .trait_reg
-                        .trait_impls
-                        .contains(&(type_name.clone(), trait_name.to_string()))
+                    if self.type_implements_trait_for_name(type_name, trait_name)
                         || self.type_param_has_bound(&lt, trait_name)
                     {
+                        // `lt` and `rt` are the typed operands that selected this
+                        // exact hook. Do not inspect source shape here: a field,
+                        // call, literal, or other expression of the same type
+                        // dispatches back to this hook just like an identifier.
                         if self.fn_name == method
                             && self
                                 .lookup(crate::Syntax::KW_SELF)
@@ -656,7 +668,7 @@ impl<'a> Checker<'a> {
                                 label: None,
                                 spread: false,
                             }],
-                            recv_type: Some(type_name.clone()),
+                            recv_type: Some(Self::split_type_name(type_name).1.to_string()),
                             resolved_ret: Some(ret),
                             checked_widen: false,
                         };
@@ -1207,7 +1219,8 @@ impl<'a> Checker<'a> {
                 if lt == rt && lt.is_numeric() {
                     Some(lt)
                 } else if let Type::Named(type_name) = &lt {
-                    if self.registry.contains(type_name) {
+                    let (import_ns, leaf) = Self::split_type_name(type_name);
+                    if self.struct_owner_module(leaf, import_ns).is_some() {
                         let trait_name = match op {
                             BinOp::Add => crate::Syntax::TRAIT_ADD,
                             BinOp::Sub => crate::Syntax::TRAIT_SUB,
@@ -1303,11 +1316,7 @@ impl<'a> Checker<'a> {
             }
             BinOp::Eq | BinOp::Ne => {
                 if lt == rt {
-                    if !crate::Sema::Diagnostics::is_equatable(
-                        &lt,
-                        self.registry,
-                        self.trait_reg,
-                    ) {
+                    if !self.is_equatable_type(&lt) {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
@@ -1316,7 +1325,7 @@ impl<'a> Checker<'a> {
                                 "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values".to_string(),
                                 Some(span),
                             ));
-                        } else if let Some(field) = incomparable_field(&lt, self.registry) {
+                        } else if let Some(field) = self.incomparable_field_type(&lt) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
                                 format!("`{}` can't be compared with `{}` because field `{}` doesn't support {}", lt.name(), rt.name(), field, operator_label(op)),
@@ -1370,31 +1379,34 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         if lt == rt && matches!(lt, Type::Int | Type::Float) {
             Some(Type::Bool)
-        } else if lt == rt
-            && matches!(lt, Type::Named(name) if self.registry.is_distinct(name))
-        {
-            let Type::Named(name) = lt else {
-                unreachable!("distinct relational branch only matches named types")
-            };
-            if self.trait_reg.implements_trait(name, COMPARABLE) {
+        } else if lt == rt {
+            let (normalized, registry, trait_reg) = self.capability_type_context(lt);
+            if let Type::Named(name) = &normalized {
+                if registry.is_distinct(name) {
+                    if trait_reg.implements_trait(name, COMPARABLE) {
+                        return Some(Type::Bool);
+                    }
+                    self.diags.push(e0905(name, COMPARABLE, span, false));
+                    return None;
+                }
+            }
+            if self.types_comparable_type(lt)
+                || self.type_param_has_bound(lt, COMPARABLE)
+            {
                 Some(Type::Bool)
+            } else if *lt == Type::String {
+                self.diags.push(Diagnostic::error(
+                    "E0109",
+                    format!("text isn't ordered with {}", operator_label(op)),
+                    "comparing text for order isn't supported yet".to_string(),
+                    "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
+                    Some(span),
+                ));
+                None
             } else {
-                self.diags.push(e0905(name, COMPARABLE, span, false));
+                self.op_mismatch(op, lt, rt, span);
                 None
             }
-        } else if lt == rt
-            && (types_comparable(lt, self.registry) || self.type_param_has_bound(lt, COMPARABLE))
-        {
-            Some(Type::Bool)
-        } else if lt == rt && *lt == Type::String {
-            self.diags.push(Diagnostic::error(
-                "E0109",
-                format!("text isn't ordered with {}", operator_label(op)),
-                "comparing text for order isn't supported yet".to_string(),
-                "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
-                Some(span),
-            ));
-            None
         } else {
             self.op_mismatch(op, lt, rt, span);
             None
@@ -1427,10 +1439,10 @@ impl<'a> Checker<'a> {
                     let uses_hook = lt == rt
                         && match lt {
                             Type::Named(type_name) => {
-                                self.trait_reg.trait_impls.contains(&(
-                                    type_name.clone(),
-                                    crate::Syntax::TRAIT_COMPARABLE.to_string(),
-                                )) || self
+                                self.type_implements_trait_for_name(
+                                    type_name,
+                                    crate::Syntax::TRAIT_COMPARABLE,
+                                ) || self
                                     .type_param_has_bound(lt, crate::Syntax::TRAIT_COMPARABLE)
                             }
                             _ => false,

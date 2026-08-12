@@ -150,6 +150,19 @@ impl<'a> Checker<'a> {
                 (None, None) => None,
             }
         }
+
+        /// Update the callback representation fact after a function-valued
+        /// local is assigned. The fact is deliberately attached to the
+        /// binding, not inferred again at the eventual host call: an unsafe
+        /// reassignment must not leave a stale `Send` proof behind.
+        pub(crate) fn set_interrupt_sendable(&mut self, name: &str, sendable: bool) {
+            if let Some(info) = self.flow.bindings.get_mut(name) {
+                info.interrupt_sendable = sendable && info.param_conv.is_none();
+            }
+            if let Some(info) = self.flow.narrow.get_mut(name) {
+                info.interrupt_sendable = sendable && info.param_conv.is_none();
+            }
+        }
     
         /// A binding is borrowed (a `view`) when it is a `Read` parameter of a
         /// non-scalar type — in v1 those lower to `&T`, so the value can't be moved

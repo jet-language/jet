@@ -3,6 +3,37 @@ use crate::Generics::substitute_type;
 use crate::Sema::Checker;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
+        fn imported_nominal_type(&self, name: &str) -> Option<Type> {
+            let (import_ns, leaf) = Self::split_type_name(name);
+            let owner = self.struct_owner_module(leaf, import_ns)?;
+            if owner == self.module_idx {
+                return None;
+            }
+            let module = self.modules?.get(owner)?;
+            if module.trait_reg.is_trait_name(leaf) && !module.registry.contains(leaf) {
+                Some(Type::TraitObject(vec![leaf.to_string()]))
+            } else if module.registry.contains(leaf) {
+                Some(Type::Named(self.canonical_nominal_name(owner, leaf)))
+            } else {
+                None
+            }
+        }
+
+        fn imported_nominal_head(&self, name: &str) -> String {
+            if name.contains("::") {
+                return name.to_string();
+            }
+            let (import_ns, leaf) = Self::split_type_name(name);
+            let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+                return name.to_string();
+            };
+            if owner == self.module_idx {
+                name.to_string()
+            } else {
+                self.canonical_nominal_name(owner, leaf)
+            }
+        }
+
         pub(crate) fn resolve_type(&self, ty: Type) -> Type {
             match ty {
                 // D-ENC-DYN1=A+: `JSON`/`TOML`/`YAML`/`CSV` are type aliases over the one
@@ -10,11 +41,18 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
                     Type::Named(crate::Syntax::TYPE_DATA.to_string())
                 }
-                // D-BOUND-HEAD1=A: `URL` is the canonical source spelling;
-                // keep the existing `Url` nominal in semantic and generated
-                // value types.
-                Type::Named(n) if n == crate::Syntax::TYPE_URL => {
-                    Type::Named("Url".to_string())
+                // D-BOUND-HEAD1=A: the shared typed-head descriptor owns the
+                // source-to-nominal spelling for URL (`Url` remains internal).
+                Type::Named(n)
+                    if crate::Syntax::typed_head_kind(&n)
+                        .is_some_and(|kind| kind.internal_type_name() != n.as_str()) =>
+                {
+                    Type::Named(
+                        crate::Syntax::typed_head_kind(&n)
+                            .expect("descriptor guard checked above")
+                            .internal_type_name()
+                            .to_string(),
+                    )
                 }
                 // D-LANGNS-NAME1=A: `core.lang` publishes compiler vocabulary as
                 // ordinary generated enum declarations. Membership is decided by
@@ -69,14 +107,16 @@ impl<'a> Checker<'a> {
                         }) {
                             Type::TraitObject(vec![leaf.to_string()])
                         } else {
-                            // File-module qualification is nominal identity.
-                            // A local type may deliberately use the same leaf.
-                            Type::Named(n)
+                            self.imported_nominal_type(&n)
+                                .unwrap_or_else(|| Type::Named(n))
                         }
                     }
                 Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
                     Type::TraitObject(vec![n])
                 }
+                Type::Named(n) => self
+                    .imported_nominal_type(&n)
+                    .unwrap_or(Type::Named(n)),
                 Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
                 Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
                 Type::Apply { name, args } => {
@@ -92,7 +132,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     Type::Apply {
-                        name,
+                        name: self.imported_nominal_head(&name),
                         args: args.into_iter().map(|a| self.resolve_type(a)).collect(),
                     }
                 }
@@ -121,13 +161,21 @@ impl<'a> Checker<'a> {
                     len,
                     len_symbol,
                 },
-Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
-                    param_contract: param_contract.clone(),
-                    params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
-                    ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
-                    effect_bound,
-                    return_view_provenance,
-                },
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            param_contract,
+            call_metadata,
+            return_view_provenance,
+        } => Type::Fn {
+            params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
+            ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
+            effect_bound,
+            param_contract,
+            call_metadata,
+            return_view_provenance,
+        },
                 Type::Tagged { marker, inner } => Type::Tagged {
                     marker,
                     inner: Box::new(self.resolve_type(*inner)),
@@ -140,7 +188,6 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
                 Type::Bool => Type::Bool,
                 Type::String => Type::String,
                 Type::Char => Type::Char,
-                Type::Named(name) => Type::Named(name),
                 Type::TraitObject(names) => Type::TraitObject(names),
                 Type::IntN { signed, bits } => Type::IntN { signed, bits },
                 Type::Float32 => Type::Float32,
@@ -168,12 +215,39 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
             type_name: &str,
             type_args: &[Type],
         ) -> HashMap<String, Type> {
-            let params = self
-                .trait_reg
-                .struct_params
-                .get(type_name)
-                .cloned()
-                .unwrap_or_default();
+            let (import_ns, leaf) = Self::split_type_name(type_name);
+            if let Some(owner) = self.struct_owner_module(leaf, import_ns) {
+                return self.struct_subst_for_owner(owner, leaf, type_args);
+            }
+            self.struct_subst_for_owner(self.module_idx, leaf, type_args)
+        }
+
+        pub(crate) fn struct_subst_for_owner(
+            &self,
+            owner_mod: usize,
+            type_name: &str,
+            type_args: &[Type],
+        ) -> HashMap<String, Type> {
+            let leaf = Self::split_type_name(type_name).1;
+            let params = if owner_mod == self.module_idx {
+                self.trait_reg
+                    .struct_params
+                    .get(leaf)
+                    .or_else(|| self.trait_reg.enum_params.get(leaf))
+                    .cloned()
+            } else {
+                self.modules.and_then(|modules| {
+                    modules.get(owner_mod).and_then(|module| {
+                        module
+                            .trait_reg
+                            .struct_params
+                            .get(leaf)
+                            .or_else(|| module.trait_reg.enum_params.get(leaf))
+                            .cloned()
+                    })
+                })
+            }
+            .unwrap_or_default();
             if params.is_empty() {
                 return HashMap::new();
             }
@@ -190,5 +264,20 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
                     .collect()
             }
         }
-    
-}
+
+        pub(crate) fn instantiate_type_for_owner(
+            &self,
+            owner_mod: usize,
+            ty: &Type,
+            subst: &HashMap<String, Type>,
+        ) -> Type {
+            if owner_mod == self.module_idx {
+                self.trait_reg.instantiate_type(ty, subst)
+            } else {
+                self.modules
+                    .and_then(|modules| modules.get(owner_mod))
+                    .map(|module| module.trait_reg.instantiate_type(ty, subst))
+                    .unwrap_or_else(|| substitute_type(ty, subst))
+            }
+        }
+    }

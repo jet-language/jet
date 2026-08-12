@@ -161,6 +161,7 @@ fn jet_process_spec_spawn(
         jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
     })?;
     Ok(jet_std::ProcessChild {
+        wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(
             child.stdin.take().map(jet_std::ProcessStdin::Pipe),
         )),
@@ -237,6 +238,7 @@ fn jet_process_terminal_spawn(
         jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
     })?;
     Ok(jet_std::ProcessChild {
+        wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
             jet_std::ProcessStdin::Terminal(stdin),
         ))),
@@ -375,6 +377,82 @@ fn jet_process_spec_run_checked(
         cause,
     ))
 }
+
+fn jet_process_spec_pipeline(
+    specs: &Vec<jet_std::ProcessSpec>,
+) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+    if specs.is_empty() {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve,
+            None,
+            None,
+            Some("process.pipeline needs at least one command".to_string()),
+        )));
+    }
+    let mut children: Vec<std::process::Child> = Vec::new();
+    let mut prev_stdout: Option<std::process::ChildStdout> = None;
+    for spec in specs {
+        let mut command = jet_process_command(spec)?;
+        if let Some(stdout) = prev_stdout.take() {
+            command.stdin(std::process::Stdio::from(stdout));
+        }
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().map_err(|error| {
+            jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
+        })?;
+        prev_stdout = child.stdout.take();
+        children.push(child);
+    }
+    let output_drain = prev_stdout
+        .take()
+        .and_then(|stdout| jet_process_drain_reader(Some(std::io::BufReader::new(stdout))));
+    let stderr_drains = children
+        .iter_mut()
+        .map(|child| {
+            jet_process_drain_reader(
+                child
+                    .stderr
+                    .take()
+                    .map(std::io::BufReader::new),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut code = 0;
+    let mut success = true;
+    for child in &mut children {
+        let status = loop {
+            if let Some(status) = child.try_wait().map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Close,
+                    Some("pipeline process".to_string()),
+                    error,
+                )
+            })? {
+                break status;
+            }
+            jet_scheduler_park_ms("process wait", 10);
+        };
+        if !status.success() {
+            success = false;
+            code = status.code().unwrap_or(-1) as i64;
+        }
+    }
+    let output = jet_process_finish_output_drain(output_drain, "pipeline stdout")?;
+    let mut errors = String::new();
+    for drain in stderr_drains {
+        errors.push_str(&jet_process_finish_output_drain(drain, "pipeline stderr")?);
+    }
+    Ok(jet_std::ProcessResult {
+        code,
+        success,
+        signal: None,
+        timed_out: false,
+        output,
+        errors,
+    })
+}
+
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
     child
         .inner
@@ -386,6 +464,9 @@ fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
 fn jet_process_child_wait(
     child: &jet_std::ProcessChild,
 ) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+    if let Some(result) = child.wait_result.borrow().clone() {
+        return Ok(result);
+    }
     // Capture pipes must be drained while the child runs. Waiting first can
     // deadlock when either pipe fills; stdout and stderr need independent
     // readers because a child may fill both concurrently. Stream consumers
@@ -395,15 +476,12 @@ fn jet_process_child_wait(
     let status = loop {
         let mut slot = child.inner.borrow_mut();
         let Some(inner) = slot.as_mut() else {
-            let (output, errors) = jet_process_collect_output(drains)?;
-            return Ok(jet_std::ProcessResult {
-                code: 0,
-                success: true,
-                signal: None,
-                timed_out: false,
-                output,
-                errors,
-            });
+            return Err(jet_std::IOError::Closed(jet_std::IOContext::new(
+                jet_std::IOOperation::Close,
+                Some("process".to_string()),
+                None,
+                Some("process child wait result is unavailable".to_string()),
+            )));
         };
         if let Some(status) = inner.try_wait().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))? {
             break status;
@@ -439,14 +517,16 @@ fn jet_process_child_wait(
     let signal = std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from);
     #[cfg(not(unix))]
     let signal = None;
-    Ok(jet_std::ProcessResult {
+    let result = jet_std::ProcessResult {
         code,
         success: status.success(),
         signal,
         timed_out,
         output,
         errors,
-    })
+    };
+    *child.wait_result.borrow_mut() = Some(result.clone());
+    Ok(result)
 }
 // #1481 core.process: a non-blocking companion to `wait()` — reports whether
 // the child has already exited without draining its output pipes or
@@ -579,12 +659,106 @@ fn jet_process_child_signal(
 // `child.stderr` are streaming reader handles consumed only via
 // `loop line; child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
 // — sema restricts the field access + `.lines()` result to that position, E2502).
+#[cfg(unix)]
+fn jet_process_stdin_write(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
+    text: &String,
+) -> Result<(), jet_std::IOError> {
+    use std::io::ErrorKind;
+    use std::os::fd::AsRawFd;
+
+    let bytes = text.as_bytes();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let wait_fd = {
+            let mut stdin = handle.borrow_mut();
+            let Some(stdin) = stdin.as_mut() else {
+                return Ok(());
+            };
+            let fd = match stdin {
+                jet_std::ProcessStdin::Pipe(writer) => writer.as_raw_fd(),
+                jet_std::ProcessStdin::Terminal(writer) => writer.as_raw_fd(),
+            };
+            jet_scheduler_raw_io_set_nonblocking(fd).map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Write,
+                    Some("process stdin".to_string()),
+                    error,
+                )
+            })?;
+            match std::io::Write::write(stdin, &bytes[offset..]) {
+                Ok(0) => {
+                    return Err(jet_std::IOError::Closed(jet_std::IOContext::new(
+                        jet_std::IOOperation::Write,
+                        Some("process stdin".to_string()),
+                        None,
+                        Some("process stdin closed".to_string()),
+                    )));
+                }
+                Ok(written) => {
+                    offset += written;
+                    None
+                }
+                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => Some(fd),
+                Err(error) => {
+                    return Err(jet_std::IOError::other(
+                        jet_std::IOOperation::Write,
+                        Some("process stdin".to_string()),
+                        error,
+                    ));
+                }
+            }
+        };
+        let Some(fd) = wait_fd else {
+            continue;
+        };
+        let scheduler = jet_scheduler_raw_io_handle(fd);
+        match jet_scheduler_wait_without_unwind(|| {
+            jet_scheduler_raw_io_write_wait(&scheduler, "process stdin")
+        }) {
+            JetSchedulerWait::Ready(()) => {}
+            JetSchedulerWait::Cancelled => {
+                return Err(jet_std::IOError::Cancelled(jet_std::IOContext::new(
+                    jet_std::IOOperation::Write,
+                    Some("process stdin".to_string()),
+                    None,
+                    Some("process stdin cancelled".to_string()),
+                )));
+            }
+            JetSchedulerWait::Deadline(_) => {
+                return Err(jet_std::IOError::TimedOut(jet_std::IOContext::new(
+                    jet_std::IOOperation::Write,
+                    Some("process stdin".to_string()),
+                    None,
+                    Some("deadline exceeded while waiting in process stdin".to_string()),
+                )));
+            }
+            JetSchedulerWait::Panicked(message) => {
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Write,
+                    Some("process stdin".to_string()),
+                    format!("process stdin scheduler wait failed: {message}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
     text: &String,
 ) -> Result<(), jet_std::IOError> {
     if let Some(stdin) = handle.borrow_mut().as_mut() {
-        std::io::Write::write_all(stdin, text.as_bytes()).map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Write, Some("process stdin".to_string()), error))?;
+        std::io::Write::write_all(stdin, text.as_bytes()).map_err(|error| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("process stdin".to_string()),
+                error,
+            )
+        })?;
     }
     Ok(())
 }

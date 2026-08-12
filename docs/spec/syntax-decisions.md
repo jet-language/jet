@@ -1994,7 +1994,19 @@ There is no general deferred statement or block: `defer action()` and
 ordinary close-call resolution proves that `close(^resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
 
-### Concurrency — ratified law
+**S53 — Concurrency** *(historical record, superseded by D-CONC-SPAWN1=D)*:
+tasks/channels were once planned around `tasks.spawn` and handle-list
+combinators. The current surface is one `task` word with nested
+`task.all`/`task.race`/`task.any`/`task.group`; old spellings have no alias.
+**D-CONC-FAIL1=A** makes `join()` fallible with `TaskFailure`.
+**D-DETACH1** `task.detach()` consumes the handle, detached capture of a
+borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
+`async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
+*(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
+`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
+`.sender()` method. Destructure with the existing S74 tuple form:
+`(tx, rx) := tasks.channel<T>()`; a second sender is `~tx`. A
+`Receiver<T>` is what `g.select().recv(rx)` takes.
 
 **D-CONC-UNIT1=A — one substrate for state, duty, and reach** *(ratified
 2026-08-06, card #1505)*: task lifecycles are typestate rows; the join duty
@@ -2109,7 +2121,7 @@ everywhere. It amends D-IFGUARD1, D-CONCSELECT1, and D-CONC-CHAN1's spelling;
 preemptive at wait points. A cancelled task (race loser, fail-fast sibling,
 explicit `handle.cancel()`) unwinds at its next wait point — channel
 recv/send, sleep, join, select, I/O — running Drop-backed cleanup, exactly as
-a blown deadline (E3003) already does; a cancelled `g.all` member reports
+a blown deadline (E3003) already does; a cancelled `task.all` member reports
 `Cancelled`, not a completed `Value`. A scoped shielded region defers (never
 discards) the unwind until a critical section finishes. **D-SHIELDNAME1 = A**
 *(ratified 2026-07-11)*: the shielded region is spelled `#Shield { … }`,
@@ -2361,8 +2373,10 @@ code+what/why/fix). No mutation, no AST injection, no macros
 grammar).
 
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
-`.name`, `.fields`; each field carries `.name`/`.ty`/`.markers`/
-`.has_marker("…")`.
+`.name` is the leaf, `.path` is the canonical typeable path, and `.fields` is
+the field list; each field carries `.name`/`.ty`/`.markers`/
+`.has_marker("…")`. Runtime `reflect.of(x)` uses the same rule: `.type_name()`
+is the leaf and `.path()` is the canonical path.
 
 **D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
 2026-08-03)*: `T.$layout` is exactly the focused projection of
@@ -2623,7 +2637,11 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 | Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
 | Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
-| Project | `use c.raylib as rl` — one form per lib per file |
+| Project | `use c.raylib as rl` or `use c.[raylib as rl, sqlite3]` — one form per lib per file |
+
+All foreign-language namespaces use the same `.[…]` member-list form as ordinary
+namespaces. Single-library `use <lang>.<lib> as alias` remains valid; there is no
+FFI-only import grammar (D-VERDICT-1867-1).
 
 **D-SHAPE-CASE2=A — FFI casing escape: binding modules are exempt zones**
 *(ratified 2026-07-16, card #665)*: casing diagnostics (S54/D-SHAPE-CASE1)
@@ -2789,8 +2807,9 @@ Per-language binder depth, all ratified 2026-07-03:
 **D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
 worker (typed message boundary, crash-isolated, `=[Py]=>` effect added to the
 D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
-zero-copy buffer-protocol arrays. One `use py.X` surface; the tier never
-moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
+zero-copy buffer-protocol arrays. One `use py.X` or `use py.[X, Y]` surface; the
+tier never moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` or
+`use js.[X, Y]` surface, host chosen by
 compile target — browser JS engine on the web target, QuickJS/componentize-js
 WASM component on wasmtime for native targets. `jet inspect bind js` generates
 committable typed stubs from a package's `.d.ts` — this AMENDS D-NPMTYPE1's
@@ -3395,10 +3414,13 @@ index, not a substitute for that law.
   clock_skew:])` accepts HS256 only and requires valid `exp` and `aud` claims.
   `verify_paseto(token, key:, audience:, [issuer:, clock_skew:, footer:,
   implicit:])` accepts PASETO v4.public only, verifies Ed25519 over PAE, and
-  applies the same claims policy. Unknown algorithms, versions, and purposes
-  fail closed. Both return `Result<Claims, AuthError>`; `Claims.audience`
-  preserves the validated audience for downstream authorization. Future
-  `app.auth` reuses these functions rather than creating another mechanism.
+  applies the same claims policy. Optional `nbf` is checked with the same
+  signed NumericDate policy; `iat`, `nbf`, and `exp` remain exact integer
+  claims, while `clock_skew` keeps exact nanoseconds. Unknown algorithms,
+  versions, and purposes fail closed. Both return `Result<Claims, AuthError>`;
+  `Claims.audience` preserves the validated audience for downstream
+  authorization. Future `app.auth` reuses these functions rather than
+  creating another mechanism.
 - **D-SYNC1=A**: `core.sync` CRDT value types — `SyncText`,
   `SyncMap<K,V>`, `SyncList<T>`, `SyncCounter`; `#Codable`,
   deterministic merge, ride the live-query channel via
@@ -5831,9 +5853,9 @@ The fence is statement expansion, not a list,
 destructure. `<:` and `:>` are longest-match digraphs; `:>`
 suppresses line termination and neither digraph ends a statement. The formatter
 retains one authored fence and wraps wide explicit fences one name per line.
-`tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
-returns their results in list order; the nested `task` combinators retain the
-structured ownership surface under D-CONC-SPAWN1=D. Card #1239.
+The former `tasks.join_all([Task<T>]) => [T]` list operation was folded into
+`task.all { … }`; task combinators now own the structured surface. Card #1239,
+superseded by D-CONC-SPAWN1=D.
 
 **2026-07-30 — D-VERDICT-1320-1 (amends D-EACH1)**: the fence respells as
 symmetric `$[ a, b ]$`. `$[` and `]$` are longest-match digraphs (`$[` before
@@ -6611,6 +6633,7 @@ refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
 law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
+**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `TaskGroup` parameters reuse the caller's lexical group. `join()` is the fallible `T ? TaskFailure` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
 **2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
 D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
 `loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,

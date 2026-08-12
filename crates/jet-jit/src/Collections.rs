@@ -554,14 +554,57 @@ extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
 }
 
 extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
-    Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_float(list, idx) {
-        Some(value) => value,
-        None => {
-            if rt.heap.list_len(list).is_none() {
-                jet_foundation::ice!(None, "jit list get f64: bad handle");
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(value) = crate::Compute::try_get_list_f64(rt, list, idx) {
+            return value;
+        }
+        match rt.heap.list_get_float(list, idx) {
+            Some(value) => value,
+            None => {
+                if rt.heap.list_len(list).is_none() {
+                    jet_foundation::ice!(None, "jit list get f64: bad handle");
+                }
+                rt.set_trap("index out of bounds: the index is outside the list");
+                0.0
             }
-            rt.set_trap("index out of bounds: the index is outside the list");
-            0.0
+        }
+    })
+}
+
+extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit fixed-list index: bad handle");
+        match jet_codegen::fixed_list::jet_fixed_list_index(len as usize, idx, |position| {
+            rt.heap.list_get_int(list, position as i64).unwrap_or_default()
+        }) {
+            Ok(value) => value,
+            Err(error) => {
+                rt.set_trap(&error.message());
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit fixed-list index f64: bad handle");
+        match jet_codegen::fixed_list::jet_fixed_list_index(len as usize, idx, |position| {
+            rt.heap
+                .list_get_float(list, position as i64)
+                .unwrap_or_default()
+        }) {
+            Ok(value) => value,
+            Err(error) => {
+                rt.set_trap(&error.message());
+                0.0
+            }
         }
     })
 }
@@ -614,6 +657,9 @@ extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
 
 extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, _line: u32) {
     Concurrency::with_runtime_mut(|rt| {
+        if crate::Compute::try_set_list_f64(rt, list, idx, v) {
+            return;
+        }
         if rt.heap.list_len(list).is_none() {
             jet_foundation::ice!(None, "jit list set f64: bad handle");
         }
@@ -681,17 +727,10 @@ extern "C" fn jet_jit_list_range_end(
         let Some(len) = rt.heap.list_len(list) else {
             jet_foundation::ice!(None, "jit Range window: bad list handle");
         };
-        match range_semantics::jet_range_bounds(start, end, exclusive != 0, len) {
-            Some((_, end_exclusive)) => end_exclusive,
-            None => {
-                rt.set_trap(&format!(
-                    "can't view {len} items from {start} to {end} ({})",
-                    if exclusive != 0 {
-                        "exclusive"
-                    } else {
-                        "inclusive"
-                    }
-                ));
+        match range_semantics::jet_checked_view_bounds(start, end, exclusive != 0, len) {
+            Ok((_, end_exclusive)) => end_exclusive,
+            Err(message) => {
+                rt.set_trap(&message);
                 0
             }
         }
@@ -1542,7 +1581,9 @@ extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
 
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
 /// `kind`: 0 = Int, 1 = String, 2 = signed IntN, 3 = unsigned IntN,
-/// 4 = Float, 5 = Bool, 6 = Char, 7 = F32.
+/// 4 = Float, 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
+/// 9 = civil-time handle. Debug list marshalling uses 5 = Bool, 6 = Char,
+/// 7 = F32.
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_show_text(rt, list, kind);
@@ -1552,6 +1593,55 @@ extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
 }
 
 fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
+    if !debug {
+        let values = || rt.heap.clone_int_list(list).unwrap_or_default();
+        match kind {
+            5 => {
+                return format!(
+                    "[{}]",
+                    values()
+                        .into_iter()
+                        .map(|handle| crate::Net::show_value(rt, handle))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            6 => {
+                return collection_semantics::show_bool_list(
+                    values().into_iter().map(|value| value != 0).collect(),
+                );
+            }
+            7 => {
+                return collection_semantics::show_char_list(
+                    values()
+                        .into_iter()
+                        .map(|value| char::from_u32(value as u32).unwrap_or('?'))
+                        .collect(),
+                );
+            }
+            8 => {
+                return format!(
+                    "[{}]",
+                    values()
+                        .into_iter()
+                        .map(|handle| crate::CoreHost::show_path(rt, handle))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            9 => {
+                return format!(
+                    "[{}]",
+                    values()
+                        .into_iter()
+                        .map(|handle| crate::Time::show_value(rt, handle))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            _ => {}
+        }
+    }
     match kind {
         1 => {
             let values = rt
@@ -1778,7 +1868,9 @@ extern "C" fn jet_jit_str_push_debug_variant(
 
 /// Print `T?` using its JIT Option carrier.
 /// `kind`: 0 = packed i64, 1 = packed string, 2 = packed f64 bits,
-/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN.
+/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN,
+/// 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
+/// 9 = civil-time handle.
 extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let result_abi = kind >= 10;
@@ -1790,7 +1882,7 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
             return;
         }
         let kind = if result_abi { kind - 10 } else { kind };
-        let payload = if result_abi || kind >= 3 {
+        let payload = if result_abi || matches!(kind, 3 | 4) {
             crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
         } else {
             packed.wrapping_sub(1)
@@ -1809,6 +1901,16 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
                     &jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
                 );
             }
+            5 => rt.stdout.push_str(&crate::Net::show_value(rt, payload)),
+            6 => rt.stdout.push_str(&(payload != 0).to_string()),
+            7 => {
+                let text = char::from_u32(payload as u32)
+                    .map(|character| character.to_string())
+                    .unwrap_or_default();
+                rt.stdout.push_str(&text);
+            }
+            8 => rt.stdout.push_str(&crate::CoreHost::show_path(rt, payload)),
+            9 => rt.stdout.push_str(&crate::Time::show_value(rt, payload)),
             _ => {
                 rt.stdout.push_str(&payload.to_string());
             }
@@ -3681,6 +3783,8 @@ host_fns! {
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
+    fixed_list_get: "jet_jit_fixed_list_get" => jet_jit_fixed_list_get: sig_get;
+    fixed_list_get_f64: "jet_jit_fixed_list_get_f64" => jet_jit_fixed_list_get_f64: sig_get_f64;
     list_get_range_start: "jet_jit_list_get_range_start" => jet_jit_list_get_range_start: sig_get_range_scalar;
     list_get_range_end: "jet_jit_list_get_range_end" => jet_jit_list_get_range_end: sig_get_range_scalar;
     list_get_range_exclusive: "jet_jit_list_get_range_exclusive" => jet_jit_list_get_range_exclusive: sig_get_range_exclusive;

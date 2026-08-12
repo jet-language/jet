@@ -114,8 +114,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
-        let Some(owner) = self.struct_owner_module(type_name, None) else { return };
-        let name = format!("{type_name}.{method}");
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else { return };
+        let name = format!("{leaf}.{method}");
         let target = self
             .name_ledger
             .declaration(owner, &name)
@@ -148,7 +149,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_field_reference(&mut self, owner: usize, type_name: &str, member: &str, span: Span) {
-        let name = format!("{type_name}.{member}");
+        let (_, leaf) = Self::split_type_name(type_name);
+        let name = format!("{leaf}.{member}");
         let target = self.name_ledger.declaration(owner, &name).map(|declaration| {
             (
                 self.name_ledger
@@ -170,3 +172,4 @@ impl<'a> Checker<'a> {
         }
     }
 }
+

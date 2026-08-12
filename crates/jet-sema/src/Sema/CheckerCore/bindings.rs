@@ -14,6 +14,22 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
     )
 }
 
+fn interrupt_callback_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name, _) => Some(name),
+        Expr::Paren(inner, _) => interrupt_callback_name(inner),
+        _ => None,
+    }
+}
+
+fn interrupt_callback_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
+    match expr {
+        Expr::Lambda(lambda) => Some(lambda),
+        Expr::Paren(inner, _) => interrupt_callback_lambda(inner),
+        _ => None,
+    }
+}
+
 
 fn contains_taskgroup(ty: &Type) -> bool {
     match ty {
@@ -650,7 +666,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E1110",
                     "`TaskGroup` cannot be stored inside another value".to_string(),
-                    "a taskgroup is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
+                    "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
                         .to_string(),
                     "pass `group: TaskGroup` directly to a named helper and use it there"
                         .to_string(),
@@ -776,17 +792,18 @@ impl<'a> Checker<'a> {
             let interrupt_sendable = if !matches!(&final_ty, Type::Fn { .. }) {
                 false
             } else {
-                match &b.init {
-                    Expr::Ident(name, _) => self
-                        .lookup(name)
-                        .map(|info| info.interrupt_sendable)
+                if let Some(name) = interrupt_callback_name(&b.init) {
+                    self.lookup(name)
+                        .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
                         .unwrap_or_else(|| {
                             self.funcs.contains_key(name)
                                 || self.unqualified.contains_key(name)
                                 || self.unqualified_file.contains_key(name)
-                        }),
-                    Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, &final_ty),
-                    _ => false,
+                        })
+                } else if let Some(lambda) = interrupt_callback_lambda(&b.init) {
+                    self.lambda_interrupt_sendable(lambda, &final_ty)
+                } else {
+                    false
                 }
             };
             let task_lint_span = if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
@@ -943,14 +960,16 @@ impl<'a> Checker<'a> {
                     rest,
                     span: pat_span,
                 } => {
+                    let display_type_name = self.display_type_name(type_name, None);
                     let actual = match &it {
                         Type::Named(n) => Some(n.clone()),
                         Type::Apply { name, .. } => Some(name.clone()),
                         _ => None,
                     };
                     let is_struct = actual.as_deref().is_some_and(|n| {
-                        self.struct_owner_module(n, None)
-                            .and_then(|m| self.struct_fields_of(m, n))
+                        let (import_ns, lookup_name) = self.struct_type_name_parts(n);
+                        self.struct_owner_module(lookup_name, import_ns)
+                            .and_then(|m| self.struct_fields_of(m, lookup_name))
                             .is_some()
                     });
                     if !is_struct {
@@ -958,14 +977,14 @@ impl<'a> Checker<'a> {
                             "E0313",
                             format!(
                                 "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
-                                type_name,
-                                type_name,
+                                display_type_name,
+                                display_type_name,
                                 it.show()
                             ),
                             "destructuring with `{ }` pulls fields out of a struct value".to_string(),
                             format!(
                                 "destructure a `{}`, or bind the whole value with a name",
-                                type_name
+                                display_type_name
                             ),
                             Some(*type_span),
                         ));
@@ -975,10 +994,31 @@ impl<'a> Checker<'a> {
                         return;
                     }
                     let actual = actual.unwrap();
-                    if actual != *type_name {
+                    let pattern_matches = match &it {
+                        Type::Apply { name: actual_name, .. } => {
+                            let (pattern_ns, pattern_name) =
+                                self.struct_type_name_parts(type_name);
+                            let (actual_ns, actual_name) =
+                                self.struct_type_name_parts(actual_name);
+                            pattern_name == actual_name
+                                && matches!(
+                                    (
+                                        self.struct_owner_module(pattern_name, pattern_ns),
+                                        self.struct_owner_module(actual_name, actual_ns),
+                                    ),
+                                    (Some(pattern_owner), Some(actual_owner))
+                                        if pattern_owner == actual_owner
+                                )
+                        }
+                        _ => self.nominal_type_identity(
+                            &Type::Named(type_name.clone()),
+                            &it,
+                        ),
+                    };
+                    if !pattern_matches {
                         self.diags.push(Diagnostic::error(
                             "E0313",
-                            format!("this value is a `{}`, not a `{}`", actual, type_name),
+                            format!("this value is a `{}`, not a `{}`", actual, display_type_name),
                             "the type named before `{ }` must match the value you destructure"
                                 .to_string(),
                             format!("write `{} {{ … }}` to match the value", actual),
@@ -997,16 +1037,17 @@ impl<'a> Checker<'a> {
                     }
                     // D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't
                     // name every field, and redundant when it already does.
+                    let (import_ns, lookup_name) = self.struct_type_name_parts(&actual);
                     let total_fields = self
-                        .struct_owner_module(&actual, None)
-                        .and_then(|m| self.struct_fields_of(m, &actual))
+                        .struct_owner_module(lookup_name, import_ns)
+                        .and_then(|m| self.struct_fields_of(m, lookup_name))
                         .map(|fs| fs.len());
                     if let Some(total) = total_fields {
                         let partial = fields.len() < total;
                         if partial && rest.is_none() {
                             self.diags.push(Diagnostic::error(
                                 "E0326",
-                                format!("this pattern leaves out fields of `{}`", type_name),
+                                format!("this pattern leaves out fields of `{}`", display_type_name),
                                 "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
                                 "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
                                 Some(*pat_span),
@@ -1015,7 +1056,7 @@ impl<'a> Checker<'a> {
                             if let Some(rest_span) = rest {
                                 self.diags.push(Diagnostic::error(
                                     "E0327",
-                                    format!("`..` is redundant — this pattern already names every field of `{}`", type_name),
+                                    format!("`..` is redundant — this pattern already names every field of `{}`", display_type_name),
                                     "a trailing `..` only makes sense when some fields are left unnamed".to_string(),
                                     "remove the `..`".to_string(),
                                     Some(*rest_span),
@@ -1104,6 +1145,7 @@ impl<'a> Checker<'a> {
                                 ret: Some(Box::new(args[0].clone())),
                                 effect_bound: None,
                                 param_contract: None,
+                call_metadata: None,
                                 return_view_provenance: None,
                             };
                             let types = [Type::Named("Tensor".to_string()), pull_ty];

@@ -2,6 +2,25 @@
 // Prelude values and evaluator adapters. Payload storage is deliberately
 // outside this module; engines may marshal values, but not redefine policy.
 
+#[allow(dead_code)]
+pub const JET_SHARED_GUARD_EDIT_REQUIRED: &str = "a condition wait needs an edit guard";
+#[allow(dead_code)]
+pub const JET_SHARED_GUARD_WAIT_CANCELLED: &str = "condition wait cancelled";
+#[allow(dead_code)]
+pub const JET_SHARED_GUARD_INVALID: &str = "SharedGuard is invalid or released";
+#[allow(dead_code)]
+pub const JET_SHARED_GUARD_VALUE_STORAGE_FAILED: &str = "SharedGuard value storage failed";
+#[allow(dead_code)]
+pub const JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED: &str =
+    "SharedGuard character storage failed";
+#[allow(dead_code)]
+pub const JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED: &str =
+    "Shared transaction record payload became invalid";
+
+pub fn jet_shared_guard_validate_char(value: i32) -> Result<char, &'static str> {
+    char::from_u32(value as u32).ok_or(JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED)
+}
+
 #[derive(Default)]
 struct JetSharedLockState {
     readers: usize,
@@ -32,6 +51,13 @@ impl JetSharedProtocol {
             state.writers_waiting += 1;
         }
         loop {
+            if cancelled() {
+                if editable {
+                    state.writers_waiting -= 1;
+                    self.wake.notify_all();
+                }
+                return None;
+            }
             let available = if editable {
                 !state.writer && state.readers == 0
             } else {
@@ -50,13 +76,6 @@ impl JetSharedProtocol {
                     held: std::sync::atomic::AtomicBool::new(true),
                 }));
             }
-            if cancelled() {
-                if editable {
-                    state.writers_waiting -= 1;
-                    self.wake.notify_all();
-                }
-                return None;
-            }
             let (next, _) = self
                 .wake
                 .wait_timeout(state, std::time::Duration::from_millis(10))
@@ -64,6 +83,14 @@ impl JetSharedProtocol {
             state = next;
         }
     }
+}
+
+pub fn jet_shared_acquire(
+    protocol: &std::sync::Arc<JetSharedProtocol>,
+    editable: bool,
+    cancelled: impl FnMut() -> bool,
+) -> Option<std::sync::Arc<JetSharedPermit>> {
+    protocol.acquire(editable, cancelled)
 }
 
 pub fn jet_shared_acquire_ordered(
@@ -74,11 +101,100 @@ pub fn jet_shared_acquire_ordered(
     protocols
         .into_iter()
         .map(|protocol| {
-            protocol
-                .acquire(true, || false)
+            jet_shared_acquire(&protocol, true, || false)
                 .expect("uncancelled transaction lock acquires")
         })
         .collect()
+}
+
+/// The Shared side of a `#Transact` block.
+///
+/// Engines and generated adapters only supply type-erased payload closures.
+/// Participant identity, canonical lock ordering, commit, and rollback live
+/// here so every execution tier uses one transaction protocol.
+pub struct JetSharedTransaction {
+    parts: Option<Vec<JetSharedTransactionPart>>,
+}
+
+struct JetSharedTransactionPart {
+    protocol: std::sync::Arc<JetSharedProtocol>,
+    deltas: Vec<Box<dyn FnOnce()>>,
+}
+
+pub fn jet_shared_transaction_begin() -> JetSharedTransaction {
+    JetSharedTransaction {
+        parts: Some(Vec::new()),
+    }
+}
+
+impl JetSharedTransaction {
+    pub fn touch(&mut self, protocol: std::sync::Arc<JetSharedProtocol>) {
+        let parts = self
+            .parts
+            .as_mut()
+            .expect("Shared transaction touch after commit");
+        if !parts
+            .iter()
+            .any(|part| std::sync::Arc::ptr_eq(&part.protocol, &protocol))
+        {
+            parts.push(JetSharedTransactionPart {
+                protocol,
+                deltas: Vec::new(),
+            });
+        }
+    }
+
+    pub fn record_edit(
+        &mut self,
+        protocol: std::sync::Arc<JetSharedProtocol>,
+        delta: Box<dyn FnOnce()>,
+    ) {
+        let parts = self
+            .parts
+            .as_mut()
+            .expect("Shared transaction edit after commit");
+        if let Some(part) = parts
+            .iter_mut()
+            .find(|part| std::sync::Arc::ptr_eq(&part.protocol, &protocol))
+        {
+            part.deltas.push(delta);
+        } else {
+            parts.push(JetSharedTransactionPart {
+                protocol,
+                deltas: vec![delta],
+            });
+        }
+    }
+
+    pub fn commit(self) {
+        let _ = self.commit_with(|| ());
+    }
+
+    pub fn commit_with<R>(mut self, apply: impl FnOnce() -> R) -> R {
+        let Some(mut parts) = self.parts.take() else {
+            return apply();
+        };
+        let _permits = jet_shared_acquire_ordered(
+            parts
+                .iter()
+                .map(|part| part.protocol.clone())
+                .collect(),
+        );
+        for part in &mut parts {
+            for delta in part.deltas.drain(..) {
+                delta();
+            }
+        }
+        apply()
+    }
+}
+
+impl Drop for JetSharedTransaction {
+    fn drop(&mut self) {
+        // An uncommitted transaction drops its deferred payloads. No engine
+        // gets a second rollback path to implement or accidentally invoke.
+        self.parts.take();
+    }
 }
 
 pub struct JetSharedPermit {
@@ -129,6 +245,13 @@ impl JetSharedPermit {
             state.writers_waiting += 1;
         }
         loop {
+            if cancelled() {
+                if self.editable {
+                    state.writers_waiting -= 1;
+                    self.protocol.wake.notify_all();
+                }
+                return false;
+            }
             let available = if self.editable {
                 !state.writer && state.readers == 0
             } else {
@@ -144,13 +267,6 @@ impl JetSharedPermit {
                 self.held
                     .store(true, std::sync::atomic::Ordering::Release);
                 return true;
-            }
-            if cancelled() {
-                if self.editable {
-                    state.writers_waiting -= 1;
-                    self.protocol.wake.notify_all();
-                }
-                return false;
             }
             let (next, _) = self
                 .protocol
@@ -168,9 +284,123 @@ impl Drop for JetSharedPermit {
     }
 }
 
+pub struct JetSharedGuardState {
+    permit: std::sync::Arc<JetSharedPermit>,
+    path: Vec<i64>,
+    editable: bool,
+    active: std::sync::atomic::AtomicBool,
+}
+
+impl JetSharedGuardState {
+    pub fn permit_arc(&self) -> std::sync::Arc<JetSharedPermit> {
+        self.permit.clone()
+    }
+
+    pub fn permit(&self) -> &JetSharedPermit {
+        self.permit.as_ref()
+    }
+
+    pub fn editable(&self) -> bool {
+        self.editable
+    }
+
+    pub fn held(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Acquire) && self.permit.held()
+    }
+
+    pub fn path(&self) -> &[i64] {
+        &self.path
+    }
+}
+
+pub fn jet_shared_guard_acquire(
+    protocol: &std::sync::Arc<JetSharedProtocol>,
+    editable: bool,
+    cancelled: impl FnMut() -> bool,
+) -> Option<std::sync::Arc<JetSharedGuardState>> {
+    jet_shared_acquire(protocol, editable, cancelled).map(|permit| {
+        std::sync::Arc::new(JetSharedGuardState {
+            permit,
+            path: Vec::new(),
+            editable,
+            active: std::sync::atomic::AtomicBool::new(true),
+        })
+    })
+}
+
+pub fn jet_shared_guard_map(
+    guard: &JetSharedGuardState,
+    field: i64,
+    editable: bool,
+) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
+    if !guard.held() {
+        return Err(JET_SHARED_GUARD_INVALID);
+    }
+    if editable {
+        jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
+    }
+
+    let mut path = guard.path.clone();
+    path.push(field);
+    let mapped = std::sync::Arc::new(JetSharedGuardState {
+        permit: std::sync::Arc::clone(&guard.permit),
+        path,
+        editable,
+        active: std::sync::atomic::AtomicBool::new(true),
+    });
+    guard
+        .active
+        .store(false, std::sync::atomic::Ordering::Release);
+    Ok(mapped)
+}
+
+pub fn jet_shared_guard_clone(
+    guard: &JetSharedGuardState,
+    editable: bool,
+) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
+    if !guard.held() {
+        return Err(JET_SHARED_GUARD_INVALID);
+    }
+    if editable {
+        jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
+    }
+
+    Ok(std::sync::Arc::new(JetSharedGuardState {
+        permit: std::sync::Arc::clone(&guard.permit),
+        path: guard.path.clone(),
+        editable,
+        active: std::sync::atomic::AtomicBool::new(true),
+    }))
+}
+
+pub fn jet_shared_guard_require_edit(
+    guard: &JetSharedGuardState,
+) -> Result<(), &'static str> {
+    if !guard.held() {
+        return Err(JET_SHARED_GUARD_INVALID);
+    }
+    jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())
+}
+
+pub fn jet_shared_guard_require_edit_capability(
+    editable: bool,
+    permit: &JetSharedPermit,
+) -> Result<(), &'static str> {
+    if !permit.held() {
+        return Err(JET_SHARED_GUARD_INVALID);
+    }
+    if !editable || !permit.editable() {
+        return Err(JET_SHARED_GUARD_EDIT_REQUIRED);
+    }
+    Ok(())
+}
+
 pub trait JetConditionWaiter: Send + Sync {
     fn park(&self) -> Result<(), ()>;
     fn wake(&self);
+    fn interrupted(&self) -> bool {
+        false
+    }
 }
 
 pub struct JetConditionProtocol {
@@ -278,6 +508,18 @@ impl JetConditionProtocol {
     }
 }
 
+pub fn jet_shared_condition_notify_one(
+    condition: &std::sync::Arc<JetConditionProtocol>,
+) {
+    condition.notify_one();
+}
+
+pub fn jet_shared_condition_notify_all(
+    condition: &std::sync::Arc<JetConditionProtocol>,
+) {
+    condition.notify_all();
+}
+
 pub struct JetConditionRegistration {
     condition: std::sync::Arc<JetConditionProtocol>,
     id: u64,
@@ -310,6 +552,7 @@ pub enum JetConditionWaitError<E> {
 struct JetConditionWaitCleanup<'a> {
     registration: Option<JetConditionRegistration>,
     permit: &'a JetSharedPermit,
+    waiter: &'a dyn JetConditionWaiter,
     released: bool,
 }
 
@@ -318,13 +561,24 @@ impl JetConditionWaitCleanup<'_> {
         self.permit.release();
         self.released = true;
     }
+
+    fn finish(&mut self) -> Result<(), ()> {
+        self.registration.take();
+        if self.released {
+            self.released = false;
+            if !self.permit.reacquire(|| self.waiter.interrupted()) {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for JetConditionWaitCleanup<'_> {
     fn drop(&mut self) {
         self.registration.take();
         if self.released {
-            let _ = self.permit.reacquire(|| false);
+            let _ = self.permit.reacquire(|| self.waiter.interrupted());
         }
     }
 }
@@ -338,6 +592,7 @@ fn jet_shared_condition_wait_registered(
     let mut cleanup = JetConditionWaitCleanup {
         registration: Some(registration),
         permit,
+        waiter: waiter.as_ref(),
         released: false,
     };
     cleanup.release();
@@ -346,8 +601,9 @@ fn jet_shared_condition_wait_registered(
     } else {
         waiter.park()
     };
+    let reacquired = cleanup.finish();
     drop(cleanup);
-    parked
+    parked.and(reacquired)
 }
 
 /// Park one condition-wait iteration after the caller checked its predicate.
@@ -360,6 +616,45 @@ pub fn jet_shared_condition_wait_once(
 ) -> Result<(), ()> {
     let registration = condition.register(waiter.clone());
     jet_shared_condition_wait_registered(permit, registration, waiter)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JetSharedGuardWaitError {
+    Invalid,
+    EditRequired,
+    Cancelled,
+}
+
+impl JetSharedGuardWaitError {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Invalid => JET_SHARED_GUARD_INVALID,
+            Self::EditRequired => JET_SHARED_GUARD_EDIT_REQUIRED,
+            Self::Cancelled => JET_SHARED_GUARD_WAIT_CANCELLED,
+        }
+    }
+
+    pub fn traps(self) -> bool {
+        matches!(self, Self::Invalid)
+    }
+}
+
+pub fn jet_shared_guard_wait_once(
+    guard: Option<&JetSharedGuardState>,
+    condition: Option<&std::sync::Arc<JetConditionProtocol>>,
+    waiter: std::sync::Arc<dyn JetConditionWaiter>,
+) -> Result<(), JetSharedGuardWaitError> {
+    let guard = guard.ok_or(JetSharedGuardWaitError::Invalid)?;
+    let condition = condition.ok_or(JetSharedGuardWaitError::Invalid)?;
+    jet_shared_guard_require_edit(guard).map_err(|message| {
+        if message == JET_SHARED_GUARD_INVALID {
+            JetSharedGuardWaitError::Invalid
+        } else {
+            JetSharedGuardWaitError::EditRequired
+        }
+    })?;
+    jet_shared_condition_wait_once(guard.permit(), condition, waiter)
+        .map_err(|_| JetSharedGuardWaitError::Cancelled)
 }
 
 pub fn jet_shared_condition_wait<E>(

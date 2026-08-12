@@ -4,18 +4,18 @@ fn run() {
     (s1, ch) :: tasks.channel<Int>()
     s2 :: ~s1
     s3 :: ~s1
-    t1 :: tasks.spawn(() => {
+    t1 :: task {
         s1.send(30)
-    })
-    t2 :: tasks.spawn(() => {
+    }
+    t2 :: task {
         s2.send(10)
-    })
-    t3 :: tasks.spawn(() => {
+    }
+    t3 :: task {
         s3.send(20)
-    })
-    t1.join()
-    t2.join()
-    t3.join()
+    }
+    t1.join() ?? panic("task 1 failed")
+    t2.join() ?? panic("task 2 failed")
+    t3.join() ?? panic("task 3 failed")
     results := [Int].{}
     results.push(ch.receive() ?? panic("channel closed"))
     results.push(ch.receive() ?? panic("channel closed"))

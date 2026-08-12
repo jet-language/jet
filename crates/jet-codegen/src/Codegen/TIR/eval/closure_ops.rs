@@ -240,7 +240,7 @@ impl<'a> EvalCtx<'a> {
             else {
                 return Err(unsupported("edit_disjoint list base", self.span()));
             };
-            let CtValue::List(targets) = self.eval_expr(&args[0], scope)? else {
+            let CtValue::List(targets) = self.eval_expr_child(&args[0], scope)? else {
                 return Err(unsupported("edit_disjoint indexes", self.span()));
             };
             let mut indexes = Vec::with_capacity(targets.len());
@@ -274,10 +274,11 @@ impl<'a> EvalCtx<'a> {
                 .collect::<Vec<_>>();
             views.sort_by_key(|(position, _)| *position);
             let argv = views.into_iter().map(|(_, view)| view).collect();
-            let _ = self.apply_callable(&args[1], argv, scope)?;
+            let callable = self.eval_expr(&args[1], scope)?;
+            let _ = self.call_callable_in_scope(&callable, argv, scope)?;
             return Ok(CtValue::Present(Box::new(CtValue::Unit)));
         }
-        let mut recv_v = self.eval_expr(recv, scope)?;
+        let mut recv_v = self.eval_expr_child(recv, scope)?;
         let progress = progress_parts(&recv_v);
         let iter = progress_iter_parts(&recv_v);
         if let Some((items, _, _, _, _, _, _, _)) = &progress {
@@ -355,11 +356,28 @@ impl<'a> EvalCtx<'a> {
                 recv_v = materialize_view_mut_window(fields, scope, self.span())?;
             }
         }
-        let mut call1 = |this: &mut Self, item: CtValue| -> Result<CtValue, Diagnostic> {
-            let f = args
-                .first()
-                .ok_or_else(|| unsupported("closure method arg", this.span()))?;
-            this.apply_callable(f, vec![item], scope)
+        // Evaluate callback expression once per collection operation. A direct
+        // lambda expression creates one runtime callable and its canonical
+        // `call_callable` path writes FnMut captures back into that storage.
+        // Re-evaluating the lambda for every item would throw that storage away.
+        let callback_index = match op {
+            TClosureOp::Reduce
+            | TClosureOp::Fold
+            | TClosureOp::ViewFold
+            | TClosureOp::Scan
+            | TClosureOp::ParaFold
+            | TClosureOp::MapFold => 1,
+            _ => 0,
+        };
+        let callback = args
+            .get(callback_index)
+            .ok_or_else(|| unsupported("closure method arg", self.span()))?;
+        let callback_value = self.eval_expr(callback, scope)?;
+        let scope_ptr = scope as *mut HashMap<String, CtValue>;
+        let calln = |this: &mut Self, argv: Vec<CtValue>| {
+            // SAFETY: the collection operation invokes this closure
+            // synchronously; no other scope access overlaps the call.
+            unsafe { this.call_callable_in_scope(&callback_value, argv, &mut *scope_ptr) }
         };
         let mut progress_cursor = 0usize;
         let mut progress_count = 0usize;
@@ -371,7 +389,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
-                    out.push(call1(self, item)?);
+                    out.push(calln(self, vec![item])?);
                 }
                 let (pulls, tail) = progress_passthrough(&progress, out.len());
                 Ok(wrap_list(out, pulls, tail))
@@ -389,7 +407,7 @@ impl<'a> EvalCtx<'a> {
                 let mut pending = 0usize;
                 for (index, item) in items.into_iter().enumerate() {
                     pending += source_pulls.get(index).copied().unwrap_or(1);
-                    let keep = call1(self, item.clone())?;
+                    let keep = calln(self, vec![item.clone()])?;
                     if as_bool(&keep, self.span())? {
                         out.push(item);
                         out_pulls.push(pending);
@@ -403,7 +421,7 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("each receiver", self.span()));
                 };
                 for item in items {
-                    let _ = call1(self, item)?;
+                    let _ = calln(self, vec![item])?;
                 }
                 Ok(CtValue::Unit)
             }
@@ -418,7 +436,7 @@ impl<'a> EvalCtx<'a> {
                         &mut progress_cursor,
                         &mut progress_count,
                     );
-                    let keep = call1(self, item.clone())?;
+                    let keep = calln(self, vec![item.clone()])?;
                     if as_bool(&keep, self.span())? {
                         return Ok(CtValue::Present(Box::new(item)));
                     }
@@ -456,7 +474,7 @@ impl<'a> EvalCtx<'a> {
                         &mut progress_cursor,
                         &mut progress_count,
                     );
-                    if as_bool(&call1(self, item)?, self.span())? {
+                    if as_bool(&calln(self, vec![item])?, self.span())? {
                         return Ok(CtValue::Bool(true));
                     }
                 }
@@ -479,7 +497,7 @@ impl<'a> EvalCtx<'a> {
                         &mut progress_cursor,
                         &mut progress_count,
                     );
-                    if !as_bool(&call1(self, item)?, self.span())? {
+                    if !as_bool(&calln(self, vec![item])?, self.span())? {
                         return Ok(CtValue::Bool(false));
                     }
                 }
@@ -498,10 +516,9 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("reduce receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
-                let f = &args[1];
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 for item in items {
-                    acc = self.apply_callable(f, vec![acc, item], scope)?;
+                    acc = calln(self, vec![acc, item])?;
                 }
                 Ok(acc)
             }
@@ -511,7 +528,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut keyed = Vec::with_capacity(items.len());
                 for item in items {
-                    let k = call1(self, item.clone())?;
+                    let k = calln(self, vec![item.clone()])?;
                     keyed.push((k, item));
                 }
                 let span = self.span();
@@ -544,7 +561,7 @@ impl<'a> EvalCtx<'a> {
                 let mut stopped = false;
                 for (index, item) in items.into_iter().enumerate() {
                     pending += source_pulls.get(index).copied().unwrap_or(1);
-                    if !as_bool(&call1(self, item.clone())?, self.span())? {
+                    if !as_bool(&calln(self, vec![item.clone()])?, self.span())? {
                         stopped = true;
                         break;
                     }
@@ -570,7 +587,7 @@ impl<'a> EvalCtx<'a> {
                 for (index, item) in items.into_iter().enumerate() {
                     pending += source_pulls.get(index).copied().unwrap_or(1);
                     if skipping {
-                        if as_bool(&call1(self, item.clone())?, self.span())? {
+                        if as_bool(&calln(self, vec![item.clone()])?, self.span())? {
                             continue;
                         }
                         skipping = false;
@@ -594,7 +611,7 @@ impl<'a> EvalCtx<'a> {
                 let mut pending = 0usize;
                 for (index, item) in items.into_iter().enumerate() {
                     let source_pull = source_pulls.get(index).copied().unwrap_or(1);
-                    match call1(self, item)? {
+                    match calln(self, vec![item])? {
                         CtValue::List(inner) => {
                             if inner.is_empty() {
                                 pending += source_pull;
@@ -628,7 +645,7 @@ impl<'a> EvalCtx<'a> {
                 let mut pending = 0usize;
                 for (index, item) in items.into_iter().enumerate() {
                     pending += source_pulls.get(index).copied().unwrap_or(1);
-                    match call1(self, item)? {
+                    match calln(self, vec![item])? {
                         CtValue::Present(v) => {
                             out.push(*v);
                             out_pulls.push(pending);
@@ -655,7 +672,7 @@ impl<'a> EvalCtx<'a> {
                         &mut progress_cursor,
                         &mut progress_count,
                     );
-                    if as_bool(&call1(self, item)?, self.span())? {
+                    if as_bool(&calln(self, vec![item])?, self.span())? {
                         return Ok(CtValue::Present(Box::new(CtValue::Int(i as i64))));
                     }
                 }
@@ -668,7 +685,7 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::absent(crate::AST::Type::Int))
             }
             TClosureOp::OptionMap => match recv_v {
-                CtValue::Present(inner) => Ok(CtValue::Present(Box::new(call1(self, *inner)?))),
+                CtValue::Present(inner) => Ok(CtValue::Present(Box::new(calln(self, vec![*inner])?))),
                 CtValue::Failed(CtReport::Clean(t)) => Ok(CtValue::Failed(CtReport::Clean(t))),
                 _ => Err(unsupported("option map receiver", self.span())),
             },
@@ -678,7 +695,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
-                    out.push(call1(self, item)?);
+                    out.push(calln(self, vec![item])?);
                 }
                 let (pulls, tail) = progress_passthrough(&progress, out.len());
                 Ok(wrap_list(out, pulls, tail))
@@ -696,7 +713,7 @@ impl<'a> EvalCtx<'a> {
                 let mut pending = 0usize;
                 for (index, item) in items.into_iter().enumerate() {
                     pending += source_pulls.get(index).copied().unwrap_or(1);
-                    let keep = call1(self, item.clone())?;
+                    let keep = calln(self, vec![item.clone()])?;
                     if as_bool(&keep, self.span())? {
                         out.push(item);
                         out_pulls.push(pending);
@@ -712,10 +729,9 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("para_fold receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
-                let f = &args[1];
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 for item in items {
-                    acc = self.apply_callable(f, vec![acc, item], scope)?;
+                    acc = calln(self, vec![acc, item])?;
                 }
                 Ok(acc)
             }
@@ -728,9 +744,9 @@ impl<'a> EvalCtx<'a> {
                     return Ok(CtValue::absent(crate::AST::Type::Named("Any".into())));
                 };
                 let maximum = matches!(op, TClosureOp::MaxBy);
-                let mut best_key = call1(self, best.clone())?;
+                let mut best_key = calln(self, vec![best.clone()])?;
                 for candidate in items.into_iter().skip(1) {
-                    let candidate_key = call1(self, candidate.clone())?;
+                    let candidate_key = calln(self, vec![candidate.clone()])?;
                     let order = cmp(best_key.clone(), candidate_key.clone(), self.span())?;
                     if (maximum && order != std::cmp::Ordering::Greater)
                         || (!maximum && order == std::cmp::Ordering::Greater)
@@ -747,7 +763,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut out = std::collections::BTreeMap::new();
                 for item in items {
-                    let key_v = call1(self, item)?;
+                    let key_v = calln(self, vec![item])?;
                     let key = crate::AST::CtKey::from_value(key_v)
                         .ok_or_else(|| unsupported("this map key type", self.span()))?;
                     match out.entry(key).or_insert(CtValue::Int(0)) {
@@ -761,15 +777,8 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map each receiver", self.span()));
                 };
-                let f = args
-                    .first()
-                    .ok_or_else(|| unsupported("map each arg", self.span()))?;
                 for (key, value) in entries {
-                    let _ = self.apply_callable(
-                        f,
-                        vec![key.to_value(), value],
-                        scope,
-                    )?;
+                    let _ = calln(self, vec![key.to_value(), value])?;
                 }
                 Ok(CtValue::Unit)
             }
@@ -777,9 +786,8 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map any receiver", self.span()));
                 };
-                let f = args.first().ok_or_else(|| unsupported("map any arg", self.span()))?;
                 for (key, value) in entries {
-                    if as_bool(&self.apply_callable(f, vec![key.to_value(), value], scope)?, self.span())? {
+                    if as_bool(&calln(self, vec![key.to_value(), value])?, self.span())? {
                         return Ok(CtValue::Bool(true));
                     }
                 }
@@ -789,9 +797,8 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map all receiver", self.span()));
                 };
-                let f = args.first().ok_or_else(|| unsupported("map all arg", self.span()))?;
                 for (key, value) in entries {
-                    if !as_bool(&self.apply_callable(f, vec![key.to_value(), value], scope)?, self.span())? {
+                    if !as_bool(&calln(self, vec![key.to_value(), value])?, self.span())? {
                         return Ok(CtValue::Bool(false));
                     }
                 }
@@ -801,10 +808,9 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map filter receiver", self.span()));
                 };
-                let f = args.first().ok_or_else(|| unsupported("map filter arg", self.span()))?;
                 let mut out = std::collections::BTreeMap::new();
                 for (key, value) in entries {
-                    if as_bool(&self.apply_callable(f, vec![key.to_value(), value.clone()], scope)?, self.span())? {
+                    if as_bool(&calln(self, vec![key.to_value(), value.clone()])?, self.span())? {
                         out.insert(key, value);
                     }
                 }
@@ -814,10 +820,9 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map map receiver", self.span()));
                 };
-                let f = args.first().ok_or_else(|| unsupported("map map arg", self.span()))?;
                 let mut out = std::collections::BTreeMap::new();
                 for (key, value) in entries {
-                    let mapped = self.apply_callable(f, vec![key.to_value(), value], scope)?;
+                    let mapped = calln(self, vec![key.to_value(), value])?;
                     out.insert(key, mapped);
                 }
                 Ok(CtValue::Map(out))
@@ -829,10 +834,9 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map fold receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
-                let f = &args[1];
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 for (key, value) in entries {
-                    acc = self.apply_callable(f, vec![acc, key.to_value(), value], scope)?;
+                    acc = calln(self, vec![acc, key.to_value(), value])?;
                 }
                 Ok(acc)
             }
@@ -840,10 +844,9 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map flat_map receiver", self.span()));
                 };
-                let f = args.first().ok_or_else(|| unsupported("map flat_map arg", self.span()))?;
                 let mut out = std::collections::BTreeMap::new();
                 for (key, value) in entries {
-                    let part = self.apply_callable(f, vec![key.to_value(), value], scope)?;
+                    let part = calln(self, vec![key.to_value(), value])?;
                     let CtValue::Map(part) = part else {
                         return Err(unsupported("map flat_map must return map", self.span()));
                     };
@@ -855,9 +858,8 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("binary_search_by receiver", self.span()));
                 };
-                let f = args.first().ok_or_else(|| unsupported("binary_search_by arg", self.span()))?;
                 for (i, item) in items.into_iter().enumerate() {
-                    let ord = self.apply_callable(f, vec![item], scope)?;
+                    let ord = calln(self, vec![item])?;
                     if matches!(ord, CtValue::Int(0)) {
                         return Ok(CtValue::Present(Box::new(CtValue::Int(i as i64))));
                     }
@@ -871,13 +873,12 @@ impl<'a> EvalCtx<'a> {
                 if items.is_empty() {
                     return Ok(CtValue::absent(crate::AST::Type::Int));
                 }
-                let f = args.first().ok_or_else(|| unsupported("min_max_by arg", self.span()))?;
                 let mut min_item = items[0].clone();
                 let mut max_item = items[0].clone();
-                let mut min_key = self.apply_callable(f, vec![min_item.clone()], scope)?.jet_show();
+                let mut min_key = calln(self, vec![min_item.clone()])?.jet_show();
                 let mut max_key = min_key.clone();
                 for item in items.into_iter().skip(1) {
-                    let key = self.apply_callable(f, vec![item.clone()], scope)?.jet_show();
+                    let key = calln(self, vec![item.clone()])?.jet_show();
                     if key < min_key { min_key = key.clone(); min_item = item.clone(); }
                     if key > max_key { max_key = key; max_item = item; }
                 }
@@ -893,7 +894,7 @@ impl<'a> EvalCtx<'a> {
                 let mut trues = Vec::new();
                 let mut falses = Vec::new();
                 for item in items {
-                    if as_bool(&call1(self, item.clone())?, self.span())? {
+                    if as_bool(&calln(self, vec![item.clone()])?, self.span())? {
                         trues.push(item);
                     } else {
                         falses.push(item);
@@ -916,11 +917,10 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("scan receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
-                let f = &args[1];
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
-                    acc = self.apply_callable(f, vec![acc, item], scope)?;
+                    acc = calln(self, vec![acc, item])?;
                     out.push(acc.clone());
                 }
                 let (pulls, tail) = progress_passthrough(&progress, out.len());
@@ -933,7 +933,7 @@ impl<'a> EvalCtx<'a> {
                 let mut out: std::collections::BTreeMap<crate::AST::CtKey, Vec<CtValue>> =
                     std::collections::BTreeMap::new();
                 for item in items {
-                    let key_v = call1(self, item.clone())?;
+                    let key_v = calln(self, vec![item.clone()])?;
                     let key = crate::AST::CtKey::from_value(key_v)
                         .ok_or_else(|| unsupported("this group_by key type", self.span()))?;
                     out.entry(key).or_default().push(item);
@@ -953,7 +953,7 @@ impl<'a> EvalCtx<'a> {
                 let mut out = Vec::new();
                 let mut prev_key: Option<CtValue> = None;
                 for item in items {
-                    let key = call1(self, item.clone())?;
+                    let key = calln(self, vec![item.clone()])?;
                     if prev_key.as_ref() == Some(&key) {
                         continue;
                     }
@@ -971,7 +971,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut prev_key: Option<CtValue> = None;
                 for item in items {
-                    let key = call1(self, item.clone())?;
+                    let key = calln(self, vec![item.clone()])?;
                     if let Some(prev) = prev_key {
                         if cmp(prev, key.clone(), self.span())? == std::cmp::Ordering::Greater {
                             return Ok(CtValue::Bool(false));
@@ -988,16 +988,13 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("chunk_while receiver", self.span()));
                 };
-                let f = args
-                    .first()
-                    .ok_or_else(|| unsupported("chunk_while arg", self.span()))?;
                 let mut chunks: Vec<Vec<CtValue>> = Vec::new();
                 for item in items {
                     let start_new = match chunks.last() {
                         Some(chunk) => {
                             let last = chunk.last().cloned().unwrap();
                             !as_bool(
-                                &self.apply_callable(f, vec![last, item.clone()], scope)?,
+                                &calln(self, vec![last, item.clone()])?,
                                 self.span(),
                             )?
                         }
@@ -1018,38 +1015,43 @@ impl<'a> EvalCtx<'a> {
 
     pub(super) fn apply_callable(
         &mut self,
+        callable: &CtValue,
+        argv: Vec<CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        // `callable` is the stable `__JetTirCallable` slot returned by
+        // `eval_expr`. Do not recover a lambda from the source expression here:
+        // `call_callable` snapshots and writes back the same slot's captures,
+        // which is the FnMut persistence contract.
+        self.call_callable(callable, argv)
+    }
+
+    /// Evaluate a callable expression once, then keep calling its canonical
+    /// runtime storage. `call_callable` owns slot capture write-back and this
+    /// method publishes the same update to the active lexical scope; the cache
+    /// keeps a direct lambda from minting a fresh storage slot per item.
+    pub(super) fn apply_callable_once(
+        &mut self,
         f: &'a TExpr,
+        callable: &mut Option<CtValue>,
         argv: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        match &f.kind {
-            TExprKind::Lambda(lam) => self.eval_tlambda(lam, argv, scope),
-            TExprKind::Local(local) => {
-                if let Some(value) = scope.get(&local.name).cloned() {
-                    if Self::callable_index(&value).is_some() {
-                        return self.call_callable(&value, argv);
-                    }
-                }
-                if let Some(func) = self.funcs.get(&local.name).copied() {
-                    let mut child = HashMap::new();
-                    return self.run_func(func, argv, &mut child);
-                }
-                let v = self.eval_expr(f, scope)?;
-                Err(unsupported(
-                    &format!("callable value `{v:?}`"),
-                    self.span(),
-                ))
-            }
-            _ => {
-                if let TExprKind::Call { name, .. } = &f.kind {
-                    if let Some(func) = self.funcs.get(name).copied() {
-                        let mut child = HashMap::new();
-                        return self.run_func(func, argv, &mut child);
-                    }
-                }
-                Err(unsupported("callable form", self.span()))
-            }
+        if callable.is_none() {
+            *callable = Some(self.eval_expr_child(f, scope)?);
         }
+        let result = self.apply_callable(
+            callable
+                .as_ref()
+                .expect("cached callable initialized before call"),
+            argv,
+        );
+        self.sync_callable_captures(
+            callable
+                .as_ref()
+                .expect("cached callable initialized before capture sync"),
+            scope,
+        );
+        result
     }
 
     pub(super) fn eval_tlambda(
@@ -1059,6 +1061,13 @@ impl<'a> EvalCtx<'a> {
         outer: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut child = outer.clone();
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = outer.get(source).cloned() {
+                    child.insert(runtime.clone(), value);
+                }
+            }
+        }
         let param_names: std::collections::HashSet<String> =
             lam.source_params.iter().cloned().collect();
         for (i, name) in lam.source_params.iter().enumerate() {
@@ -1079,7 +1088,24 @@ impl<'a> EvalCtx<'a> {
                     ));
                 }
             },
+            TLambdaBody::SharedBlock(stmts) => match self.exec_stmts(&stmts[..], &mut child)? {
+                Flow::Return(v) => v,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping lambda"),
+                        self.span(),
+                    ));
+                }
+            },
         };
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = child.get(runtime).cloned() {
+                    child.insert(source.clone(), value);
+                }
+            }
+        }
         // FnMut capture write-back: mutations to outer locals (Set.add, Map.add, …)
         // must be visible after the lambda returns (#777 pure-parity HOF).
         for (k, v) in child {
@@ -1104,6 +1130,13 @@ impl<'a> EvalCtx<'a> {
         };
         let mut child = outer.clone();
         child.insert(param.clone(), arg);
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = outer.get(source).cloned() {
+                    child.insert(runtime.clone(), value);
+                }
+            }
+        }
         let result = match &lam.executable {
             TLambdaBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
             TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
@@ -1116,7 +1149,24 @@ impl<'a> EvalCtx<'a> {
                     ));
                 }
             },
+            TLambdaBody::SharedBlock(stmts) => match self.exec_stmts(&stmts[..], &mut child)? {
+                Flow::Return(value) => value,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping shared lambda"),
+                        self.span(),
+                    ));
+                }
+            },
         };
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = child.get(runtime).cloned() {
+                    child.insert(source.clone(), value);
+                }
+            }
+        }
         let updated = child.remove(param).unwrap_or(CtValue::Unit);
         for (name, value) in child {
             if outer.contains_key(&name) {

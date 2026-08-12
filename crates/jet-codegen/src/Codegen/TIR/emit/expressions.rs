@@ -1,9 +1,8 @@
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
-use crate::Generics;
-use crate::Codegen::TIR::emit::statements::PRELUDE_CARRIED;
+use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
-use crate::Codegen::user_type_rust;
+use crate::Codegen::mangle_path;
 use crate::Codegen::TIR::emit::collect_select_arms;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
@@ -71,6 +70,28 @@ fn emit_tir_lambda(lam: &TLambda) -> String {
 
 fn emit_tir_lambda_sync(lam: &TLambda) -> String {
     emit_tir_lambda_with_arc(lam, true)
+}
+
+pub(super) fn is_view(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.len() == 1
+    )
+}
+
+pub(super) fn is_float_view(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.first().is_some_and(|arg| matches!(arg, Type::Float))
+    )
+}
+
+pub(super) fn is_compute_view_mut(ty: &Type) -> bool {
+    ty.is_compute_view_mut()
 }
 
 fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> String {
@@ -200,9 +221,11 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .collect::<Vec<_>>()
                 .join(", ");
             if method == "edit_txn" {
+                let stm = crate::Codegen::TIR::TLocal::stm().rust_place();
                 return format!(
-                    "({}).edit_txn(&mut __jet_stm, {})",
+                    "({}).edit_txn(&mut {}, {})",
                     emit_tir_expr(recv, cx),
+                    stm,
                     arg_str
                 );
             }
@@ -262,11 +285,14 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 _ => unreachable!("Cell guard projection has one or two sema paths"),
             }
         }
-        THostCall::FixedListIndex { base, index } => format!(
-            "(({b})[({i}).0 as usize].clone())",
-            b = emit_tir_expr(base, cx),
-            i = emit_tir_expr(index, cx),
-        ),
+        THostCall::FixedListIndex { base, index, line } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            format!(
+                "{{ let __jet_fixed = ({b}); jet_fixed_list_index(__jet_fixed.len(), ({i}).0, |__jet_i| __jet_fixed[__jet_i].clone()).unwrap_or_else(|__jet_error| jet_panic({:?}, {line}, &__jet_error.message())) }}",
+                cx.file
+            )
+        }
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
             match kind {
@@ -630,7 +656,7 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
         TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
         TNumericOp::Origin { origin } => format!(
-            "{{ let _ = ({recv}); {:?}.to_string() }}",
+            "{{ let _ = ({recv}); jet_float_origin(Some({:?})) }}",
             origin
         ),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
@@ -994,11 +1020,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             };
             call
         }
-        // c109 Phase 6: the synthetic `.clone()`. Mirrors `emit_method_call`'s
-        // `clone` early return: `(recv).clone()`, no deref/borrow decision (the
-        // receiver was already lowered to the place the AST path would clone).
+        // c109 Phase 6: compiler-inserted Clone is ordinary Rust clone. It must
+        // not acquire explicit Jet-copy semantics for Tensor values.
         TExprKind::Clone(recv) => {
             format!("({}).clone()", emit_tir_expr(recv, cx))
+        }
+        // D-MEM1/D-CAP2: only the explicit Jet `~` copy calls the canonical
+        // Tensor copy helper. Other explicit-copyable values use their normal
+        // clone/materialization path.
+        TExprKind::ExplicitCopy(recv) => {
+            let value = emit_tir_expr(recv, cx);
+            if recv.ty.is_compute_tensor_family() {
+                format!("{}jet_compute_copy(&({}))", cx.root_prefix, value)
+            } else {
+                format!("({}).clone()", value)
+            }
         }
         TExprKind::Borrow { place, mutable } => {
             if let TExprKind::Local(local) = &place.kind {
@@ -1052,7 +1088,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 };
                 return format!(
                     "{}::__jet_{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
-                    Generics::user_trait_rust(trait_name),
+                    crate::Codegen::mangle(trait_name),
                     emit_tir_expr(recv, cx),
                     cx.file,
                 );
@@ -1166,19 +1202,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv_is_list = matches!(&recv.ty, Type::List(_) | Type::FixedList { .. });
-            let recv = emit_tir_expr(recv, cx);
+            let recv_is_compute_view_mut = is_compute_view_mut(&recv.ty);
+            let recv_expr = recv;
+            let recv = emit_tir_expr(recv_expr, cx);
             let a = |i: usize| {
                 args.get(i)
                     .map(|e| emit_tir_expr(e, cx))
                     .unwrap_or_default()
             };
             // D-ITERTOOLS1=A: Iter is IntoIterator; List clones. Adapters start from JetIter.
-            let vec_src = if recv_is_iter {
+            let vec_src = if recv_is_compute_view_mut {
+                format!("({recv}).to_vec()")
+            } else if recv_is_iter {
                 format!("({recv})")
             } else {
                 format!("({recv}).clone()")
             };
-            let as_iter = if recv_is_iter {
+            let as_iter = if recv_is_compute_view_mut {
+                format!("jet_iter_from_vec(({recv}).to_vec())")
+            } else if recv_is_iter {
                 format!("({recv})")
             } else {
                 format!("jet_iter_from_vec(({recv}).clone())")
@@ -1690,6 +1732,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::ViewMutNew { line } => {
+                    let recv = emit_mut_list_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "jet_view_mut_range_new(&mut ({}), &({}), {:?}, {})",
@@ -1732,6 +1775,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::ComputeViewMutNew { line } => {
+                    let recv = emit_mut_list_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "{}jet_compute_view_mut_range(&mut ({}), &({}), {:?}, {})",
@@ -2216,25 +2260,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Type::Apply { name, args } if !args.is_empty() => {
                     let head = match cx.foreign_types.get(name) {
                         Some(rust_mod) => {
-                            format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(name))
+                            format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(name))
                         }
                         None => {
                             if let Some((alias, leaf)) = name.split_once('.') {
                                 cx.import_mods.get(alias).map_or_else(
-                                    || user_type_rust(name),
+                                    || mangle_path(name),
                                     |rust_mod| {
                                         format!(
                                             "{}{}::{}",
                                             cx.root_prefix,
                                             rust_mod,
-                                            user_type_rust(leaf)
+                                            mangle_path(leaf)
                                         )
                                     },
                                 )
                             } else if matches!(name.as_str(), "DkimConfig" | "SMTPConfig") {
                                 format!("{}jet_email::{}", cx.root_prefix, name)
                             } else {
-                                user_type_rust(name)
+                                mangle_path(name)
                             }
                         }
                     };
@@ -2307,7 +2351,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
                 Some((trait_name, _)) => {
-                    let trait_rust = crate::Generics::user_trait_rust(trait_name);
+                    let trait_rust = crate::Codegen::mangle(trait_name);
                     format!("Box::new({lit}) as Box<dyn {trait_rust}>")
                 }
                 None => lit,
@@ -2586,7 +2630,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let trait_rust = match &e.ty {
                 Type::List(inner) => match inner.as_ref() {
                     Type::TraitObject(names) if names.len() == 1 => {
-                        Some(crate::Generics::user_trait_rust(&names[0]))
+                        Some(crate::Codegen::mangle(&names[0]))
                     }
                     _ => None,
                 },
@@ -2731,14 +2775,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
             } else if *uninit_fixed {
                 format!("(({b})[({i}) as usize].clone())")
-            } else if matches!(
-                &e.ty,
-                Type::Apply { name, .. } if name == "ViewMut"
-            ) {
+            } else if is_compute_view_mut(&base.ty) {
                 format!(
-                    "(&mut **jet_index_vec_mut(&mut ({}), {}, {:?}, {}))",
-                    b, i, cx.file, line
+                    "{}jet_compute_window_get_view(&({}), {}, {:?}, {})",
+                    cx.root_prefix, b, i, cx.file, line
                 )
+            } else if is_view(&base.ty) {
+                format!("jet_view_get(&*({}), {}, {:?}, {})", b, i, cx.file, line)
             } else {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }
@@ -2781,7 +2824,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             index,
             line,
         } => {
-            let ty = user_type_rust(type_name);
+            let ty = mangle_path(type_name);
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(
@@ -2820,8 +2863,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
         } => {
             let b = emit_tir_expr(base, cx);
-            let is_tensor = matches!(&base.ty, Type::Named(name) if name == "Tensor")
-                || matches!(&base.ty, Type::Apply { name, .. } if name == "Tensor");
+            let is_tensor = base.ty.is_compute_tensor_family();
             if let Some(range) = range {
                 return format!(
                     "{}(&({}), &({}), {:?}, {})",
@@ -2905,7 +2947,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-UNIONTYPE1=A: member error → anonymous union wrap.
                 TTryConvert::WidenUnion { enum_name, tag } => format!(
                     "jet_trace_err({}.map_err(|e| {}::{tag}(e)), {}, {}, {})?",
-                    v, user_type_rust(enum_name), file, line, fn_name
+                    v, mangle_path(enum_name), file, line, fn_name
                 ),
                 // Error types match — bare propagate.
                 TTryConvert::None => {
@@ -2969,15 +3011,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("move |{declarations}| ({callable})({arguments})")
         }
-        // D-HOLE1: `Option.lift2(f, a, b)` — `a.zip(b).map(|(x, y)| f(x, y))`. `f` is
-        // any lowered function value (lambda or fn ident), called via Rust's
-        // call-operator syntax on the (possibly boxed) closure.
+        // D-HOLE1: the shared Prelude owns presence, lazy callable creation,
+        // and the one canonical call. The factory keeps `f` unevaluated when
+        // either option is absent.
         TExprKind::OptionLift2 { f, a, b } => {
             let f = emit_tir_expr(f, cx);
             let a = emit_tir_expr(a, cx);
             let b = emit_tir_expr(b, cx);
             format!(
-                "({}).clone().zip(({}).clone()).map(|(x, y)| ({})(x, y))",
+                "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || ({}))",
                 a, b, f
             )
         }
@@ -3824,15 +3866,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-ANY-JAI1 (c7jaiany §6): Value/Field are plain inherent-method
                 // passthroughs, same shape as `ArgsSpecHelp`.
                 THandleOp::ReflectValueTypeName => format!("({}).type_name()", recv),
+                THandleOp::ReflectValuePath => format!("({}).path()", recv),
                 THandleOp::ReflectValueDisplay => format!("({}).display()", recv),
                 THandleOp::ReflectValueFields => format!("({}).fields()", recv),
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
-                THandleOp::TaskScopeJoin => format!(
-                    "{}jet_std::jet_task_outcome_unwrap(({recv}).join())",
-                    cx.root_prefix
-                ),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => {
                     if args.is_empty() {
@@ -3843,32 +3882,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
-                THandleOp::TaskTrace => format!("({}).trace()", recv),
-                THandleOp::TaskException => format!("({}).exception()", recv),
-                THandleOp::TaskDetachAll => {
-                    format!("{}jet_std::jet_task_detach_all({})", cx.root_prefix, recv)
-                }
-                THandleOp::TaskCancelAll => {
-                    format!("{}jet_std::jet_task_cancel_all(&({}))", cx.root_prefix, recv)
-                }
-                THandleOp::TaskPauseAll => {
-                    if args.is_empty() {
-                        format!("{}jet_std::jet_task_pause_all(&({}))", cx.root_prefix, recv)
-                    } else {
-                        format!(
-                            "{}jet_std::jet_task_pause_all_mode(&({}), {})",
-                            cx.root_prefix,
-                            recv,
-                            a(0)
-                        )
-                    }
-                }
-                THandleOp::TaskResumeAll => {
-                    format!("{}jet_std::jet_task_resume_all(&({}))", cx.root_prefix, recv)
-                }
-                THandleOp::TaskTraceAll => {
-                    format!("{}jet_std::jet_task_trace_all(&({}))", cx.root_prefix, recv)
-                }
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::ChannelClose => format!("({}).close()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
@@ -5003,7 +5016,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let mut bind_vars: Vec<String> = holes
                         .iter()
                         .map(|(n, _)| {
-                            crate::Syntax::generated_name(&format!(
+                            jet_foundation::Names::mangle(&format!(
                                 "sm_{}",
                                 crate::Syntax::generated_suffix(&mangle(n))
                             ))
@@ -5051,7 +5064,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let mut bind_vars: Vec<String> = holes
                         .iter()
                         .map(|(n, _)| {
-                            crate::Syntax::generated_name(&format!(
+                            jet_foundation::Names::mangle(&format!(
                                 "bm_{}",
                                 crate::Syntax::generated_suffix(&mangle(n))
                             ))
@@ -5183,13 +5196,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             TCoreClosureKind::Spawn {
                 group,
                 spawn_closure,
-                scoped,
                 ..
             } => match group {
                 Some(group) => format!(
                     "({}).{}({})",
                     emit_tir_expr(group, cx),
-                    if *scoped { "spawn_scoped" } else { "spawn" },
+                    "spawn",
                     spawn_closure
                 ),
                 None => format!(
@@ -5249,31 +5261,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             }
         },
-        // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
-        // D-CONC-FAIL1=A: sema types these combinators as plain `[T]`/`T`, not
-        // `Result` — unwrap the Prelude call's fail-fast outcome so the
-        // generated Rust value matches the Jet-level type (see
-        // `jet_task_outcome_unwrap` in `Prelude/CoreLib/JetStd/MathTaskMem.rs`).
+        // D-CONC-SPAWN1=D: `task.all { … }` — join each child in source order.
         TExprKind::TaskGroupAll { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_all({list}))",
-                root = cx.root_prefix
-            )
+            format!("{}jet_std::jet_task_all({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupRace { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_race({list}))",
-                root = cx.root_prefix
-            )
+            format!("{}jet_std::jet_task_race({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupAny { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_any({list}))",
-                root = cx.root_prefix
-            )
+            format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
         }
         TExprKind::SelectStart => {
             format!("{}jet_std::JetSelectBuilder::start()", cx.root_prefix)
@@ -5331,6 +5330,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     emit_tir_expr(callee, cx),
                     emit_tir_call_args(args, cx)
                 )
+            }
+            TFnValueKind::Interrupt { value } => {
+                let rendered = emit_tir_expr(value, cx);
+                // `core.os.on_interrupt` is a read-only registration. Local
+                // callback values already carry the canonical Arc-backed
+                // Send + Sync representation, so registration clones the
+                // box instead of moving the caller's reusable alias. Lambda
+                // and named-function values are fresh Arc values and stay
+                // untouched here.
+                if matches!(&value.kind, TExprKind::Local(_)) {
+                    format!("std::sync::Arc::clone(&({rendered}))")
+                } else {
+                    rendered
+                }
             }
         },
         // c109 Phase 14: a cross-module call. The path form was resolved at lowering;

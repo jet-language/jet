@@ -1,13 +1,16 @@
-use super::{CFfi, ComptimeInput, Expr, Item, Marker, Stmt, Type};
-use crate::{Diagnostics::Span, Syntax};
+use super::{CFfi, ComptimeInput, Expr, Func, Item, Marker, Stmt, Type};
+use crate::{
+    Diagnostics::{Diagnostic, Span},
+    Syntax,
+};
 
 #[derive(Debug)]
 pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
-    /// D-ENTRY-SCRIPT1=B: top-level statements remain separate until sema
-    /// materializes the entry file's implicit `fn run`.
+    /// D-ENTRY-SCRIPT1=B: top-level statements remain separate until the
+    /// package seam materializes the entry file's implicit `fn run`.
     pub script_body: Vec<Stmt>,
     /// Parser-owned inner boundaries for statement blocks. Each span starts
     /// immediately after `{` and ends immediately before `}`.
@@ -146,10 +149,74 @@ pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> 
     None
 }
 
-/// Return the local name for one member in a grouped `use` list. An explicit
-/// alias wins; otherwise a dotted member path binds its final segment.
-pub fn import_item_alias<'a>(original: &'a str, alias: Option<&'a str>) -> &'a str {
-    alias.unwrap_or_else(|| original.rsplit('.').next().unwrap_or(original))
+/// The binding introduced by one member-list item. A dotted Core member uses
+/// its leaf by default (`use core.[encoding.json]` binds `json`); an explicit
+/// alias always wins.
+pub fn member_import_local(original: &str, alias: Option<&str>) -> String {
+    alias
+        .map(str::to_owned)
+        .unwrap_or_else(|| original.rsplit('.').next().unwrap_or(original).to_string())
+}
+
+/// One canonical import binding produced by `ImportDecl::walk_bindings`.
+///
+/// A single module import and every member of a `.[…]` list use this same
+/// shape. The source `ImportKind` remains the parser's lossless representation;
+/// this view carries the authority, scope metadata, alias, and full member path
+/// needed by every consumer after parsing.
+#[derive(Debug, Clone)]
+pub struct ImportBinding<'a> {
+    /// The path prefix. For a single module import this is the full module path;
+    /// for a member list it is the list prefix before `.[…]`.
+    pub module_alias: &'a str,
+    /// The dotted member path, or `None` for a single module import.
+    pub original: Option<&'a str>,
+    /// The local binding introduced by this import.
+    pub local: String,
+    /// An explicit member alias, when the source supplied one.
+    pub alias: Option<&'a str>,
+    pub module_alias_span: Span,
+    pub items_span: Option<Span>,
+    pub import_span: Span,
+    pub is_pub: bool,
+    pub is_package_pub: bool,
+}
+
+impl ImportBinding<'_> {
+    /// Reconstruct the canonical dotted path consumed by namespace resolvers.
+    pub fn path(&self) -> String {
+        match self.original {
+            Some(original) => format!("{}.{}", self.module_alias, original),
+            None => self.module_alias.to_string(),
+        }
+    }
+}
+
+/// A foreign-language-rooted import whose path cannot name exactly one library.
+/// The error is returned before any member is resolved, so a group can never be
+/// partially imported.
+#[derive(Debug, Clone)]
+pub struct ForeignImportError {
+    pub path: String,
+    pub language: ForeignLanguage,
+    pub span: Span,
+}
+
+impl ForeignImportError {
+    pub fn diagnostic(&self) -> Diagnostic {
+        let root = self.language.root();
+        Diagnostic::error(
+            "E0611",
+            format!("`{}` is not a foreign library namespace", self.path),
+            format!(
+                "foreign imports have exactly one library segment after the `{root}` language root"
+            ),
+            format!(
+                "write `use {root}.[library]` or `use {root}.library as alias`"
+            ),
+            Some(self.span),
+        )
+    }
 }
 
 impl ImportDecl {
@@ -183,24 +250,93 @@ impl ImportDecl {
             .then(|| name.clone())
     }
 
-    /// D-FFI-UNIFY1: parse a project-tier foreign namespace import,
-    /// `use <lang>.<lib> as alias`.
-    pub fn foreign_namespace(&self) -> Option<ForeignNamespace> {
-        let ImportKind::Module(name, _) = &self.kind else {
-            return None;
-        };
-        ForeignNamespace::from_module_path(name)
+    /// Walk one canonical binding for a single import or each member of a
+    /// `.[…]` import list. All consumers use this view instead of destructuring
+    /// `ImportKind::Unqualified` independently.
+    pub fn walk_bindings(&self) -> Vec<ImportBinding<'_>> {
+        match &self.kind {
+            ImportKind::Module(name, path_span) => vec![ImportBinding {
+                module_alias: name,
+                original: None,
+                local: self.import_alias(),
+                alias: (!self.alias.is_empty()).then_some(self.alias.as_str()),
+                module_alias_span: *path_span,
+                items_span: None,
+                import_span: self.span,
+                is_pub: self.is_pub,
+                is_package_pub: self.is_package_pub,
+            }],
+            ImportKind::Unqualified {
+                module_alias,
+                module_alias_span,
+                items,
+                items_span,
+                ..
+            } => items
+                .iter()
+                .map(|(original, alias)| ImportBinding {
+                    module_alias,
+                    original: Some(original),
+                    local: member_import_local(original, alias.as_deref()),
+                    alias: alias.as_deref(),
+                    module_alias_span: *module_alias_span,
+                    items_span: Some(*items_span),
+                    import_span: self.span,
+                    is_pub: self.is_pub,
+                    is_package_pub: self.is_package_pub,
+                })
+                .collect(),
+            ImportKind::File(_, _) => Vec::new(),
+        }
     }
 
-    /// True when this import is any C `use` form (`use c.<lib>` or `use "<…>.h"`).
-    pub fn is_c_import(&self) -> bool {
+    /// Resolve every foreign library carried by this import.
+    ///
+    /// The member-list form deliberately stays in `ImportKind::Unqualified`:
+    /// `use c.[raylib as rl, sqlite3]` is the same parser path as an ordinary
+    /// `use alias.[item as local]`.  This helper is the shared semantic seam
+    /// for loaders, sema, and codegen; no foreign namespace gets a grammar of
+    /// its own.
+    pub fn foreign_imports(
+        &self,
+    ) -> Result<Vec<(ForeignNamespace, String)>, ForeignImportError> {
+        if matches!(&self.kind, ImportKind::File(_, _)) {
+            return Ok(Vec::new());
+        }
+        let mut imports = Vec::new();
+        for binding in self.walk_bindings() {
+            let path = binding.path();
+            let Some(language) = path
+                .split('.')
+                .next()
+                .and_then(ForeignLanguage::from_root)
+            else {
+                continue;
+            };
+            let Some(namespace) = ForeignNamespace::from_module_path(&path) else {
+                return Err(ForeignImportError {
+                    path,
+                    language,
+                    span: binding.import_span,
+                });
+            };
+            imports.push((namespace, binding.local));
+        }
+        Ok(imports)
+    }
+
+    /// True when this import is any C `use` form (`use c.<lib>`, a C member
+    /// list, or `use "<…>.h"`).
+    pub fn is_c_import(&self) -> Result<bool, ForeignImportError> {
         match &self.kind {
-            ImportKind::Module(_, _) => self
-                .foreign_namespace()
-                .map(|ns| ns.language == ForeignLanguage::C)
-                .unwrap_or(false),
-            ImportKind::File(path, _) => path.ends_with(".h"),
-            ImportKind::Unqualified { .. } => false,
+            ImportKind::Module(_, _) | ImportKind::Unqualified { .. } => self
+                .foreign_imports()
+                .map(|imports| {
+                    imports
+                        .into_iter()
+                        .any(|(ns, _)| ns.language == ForeignLanguage::C)
+                }),
+            ImportKind::File(path, _) => Ok(path.ends_with(".h")),
         }
     }
 }
@@ -421,6 +557,36 @@ pub struct ProgramBundle {
     pub edition: String,
 }
 
+impl ProgramBundle {
+    /// Materialize loose statements in the direct entry module as its implicit `fn run`.
+    ///
+    /// Invalid script shapes remain in `script_body` for sema to diagnose. In particular, an
+    /// explicit `fn run` is never wrapped or replaced.
+    pub fn materialize_script_entries(&mut self) {
+        let entry = self.entry;
+        for (module_idx, module) in self.modules.iter_mut().enumerate() {
+            if module_idx != entry || module.script_body.is_empty() {
+                continue;
+            }
+
+            let has_explicit_run = module
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Func(func) if func.name == "run"));
+            if has_explicit_run {
+                continue;
+            }
+
+            let body = std::mem::take(&mut module.script_body);
+            let span = Span::new(
+                body.first().map_or(0, |stmt| stmt.span().start),
+                body.last().map_or(0, |stmt| stmt.span().end),
+            );
+            module.items.push(Item::Func(Func::implicit_run(body, span)));
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct LoadedModule {
     pub path: std::path::PathBuf,
@@ -431,8 +597,9 @@ pub struct LoadedModule {
     pub alias: String,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
-    /// D-ENTRY-SCRIPT1=B: raw top-level statements from a script file. Sema
-    /// consumes these only for the entry module; imported scripts are errors.
+    /// D-ENTRY-SCRIPT1=B: raw top-level statements from a script file. The
+    /// package seam materializes a valid direct-entry body; sema consumes any
+    /// remaining body to diagnose imported scripts or an explicit `fn run` conflict.
     pub script_body: Vec<Stmt>,
     /// Checked parser-owned inner boundaries for statement blocks.
     pub block_spans: Vec<Span>,
@@ -453,6 +620,72 @@ pub struct LoadedModule {
     pub rule_facts: Vec<AppliedRuleApplication>,
 }
 
+/// Walk every import-bearing scope in a loaded module. Top-level imports use
+/// `None`; inline, generic, and instantiated module bodies carry their owning
+/// namespace. The recursive shape is shared by CFFI, foreign binders, and
+/// codegen so no tier invents a second namespace traversal.
+pub fn walk_imports(module: &LoadedModule) -> Vec<(Option<&str>, &ImportDecl)> {
+    fn collect_code_module_imports<'a>(
+        code_module: &'a crate::AST::CodeModule,
+        imports: &mut Vec<(Option<&'a str>, &'a ImportDecl)>,
+    ) {
+        imports.extend(
+            code_module
+                .imports
+                .iter()
+                .map(|import| (Some(code_module.name.as_str()), import)),
+        );
+        if let Some(body) = &code_module.body {
+            for item in body {
+                if let Item::CodeModule(child) = item {
+                    collect_code_module_imports(child, imports);
+                }
+            }
+        }
+    }
+
+    let mut imports = module
+        .imports
+        .iter()
+        .map(|import| (None, import))
+        .collect::<Vec<_>>();
+    for item in &module.items {
+        match item {
+            Item::CodeModule(code_module) => {
+                collect_code_module_imports(code_module, &mut imports);
+            }
+            Item::GenericModule(generic_module) => {
+                imports.extend(
+                    generic_module
+                        .imports
+                        .iter()
+                        .map(|import| (Some(generic_module.name.as_str()), import)),
+                );
+                for alias in &module.items {
+                    let Item::ModuleAlias(alias) = alias else {
+                        continue;
+                    };
+                    if alias.target == generic_module.name {
+                        imports.extend(
+                            generic_module
+                                .imports
+                                .iter()
+                                .map(|import| (Some(alias.name.as_str()), import)),
+                        );
+                    }
+                }
+                for item in &generic_module.body {
+                    if let Item::CodeModule(code_module) = item {
+                        collect_code_module_imports(code_module, &mut imports);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    imports
+}
+
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TryConvert {
@@ -467,7 +700,7 @@ pub enum TryConvert {
     /// Holds the mangled Rust function name emitted by codegen.
     Typed(String),
     /// D-UNIONTYPE1=A: source error is one member of the return's anonymous union.
-    /// Codegen wraps with `user_<enum>::<tag>(e)`.
+    /// Codegen wraps with the canonical `__jet_<enum>::__jet_<tag>(e)` path.
     WidenUnion { enum_name: String, tag: String },
 }
 

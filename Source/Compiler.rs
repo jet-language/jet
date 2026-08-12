@@ -29,6 +29,19 @@ pub fn eval_core_call(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    eval_core_call_with_type(module, method, args, span, None)
+}
+
+/// Ambient callback variant carrying the resolved return type for typed
+/// absence payloads. The compiler API wrapper above stays four-argument for
+/// callers that use the public read-only toolkit directly.
+pub fn eval_core_call_with_type(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+) -> Option<Result<CtValue, Diagnostic>> {
     if module != "core.compiler" {
         return None;
     }
@@ -317,7 +330,7 @@ fn compiler_symbol_kind_value(kind: &jet_semindex::SymbolKind) -> CtValue {
         jet_semindex::SymbolKind::Module => {
             ("module", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
         }
-        jet_semindex::SymbolKind::Function { params, ret } => (
+        jet_semindex::SymbolKind::Function { params, ret, .. } => (
             "function",
             params
                 .iter()

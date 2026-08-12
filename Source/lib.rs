@@ -74,6 +74,7 @@ pub use jet_driver::{
     TargetMachine,
     Traits,
     AST,
+    Authority,
     CFFI,
     FFI,
     SHA256,
@@ -124,7 +125,7 @@ fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     // every compiler entry point. Build uses the same ambient seam, so a
     // `comptime` binding and `fn build` cannot observe different APIs.
     jet_driver::run_compiler_work(|| {
-        Comptime::with_ambient(Some(Compiler::eval_core_call), None, work)
+        Comptime::with_ambient(Some(Compiler::eval_core_call_with_type), None, work)
     })
 }
 
@@ -171,11 +172,24 @@ pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
 /// the shared renderer and JSON path.
 fn check_workspace_file(file: &str) -> Option<Vec<Diagnostic>> {
     let path = absolute_source_path(file);
-    if path.file_name().and_then(|name| name.to_str()) != Some(Syntax::WORKSPACE_FILE) {
+    let root = path.parent().unwrap_or(std::path::Path::new("."));
+    let resolver = match jet_driver::Authority::AuthorityResolver::open(root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return None,
+        Err(error) => return Some(vec![error.diagnostic()]),
+    };
+    let source = match resolver.resolve_workspace_source() {
+        Ok(Some(source)) => source,
+        Ok(None) => return None,
+        Err(error) => return Some(vec![error.workspace_diagnostic()]),
+    };
+    let Some(entry_name) = path.file_name() else {
+        return None;
+    };
+    if source.path != resolver.root().join(entry_name) {
         return None;
     }
-    let root = path.parent().unwrap_or(std::path::Path::new("."));
-    match jetpack::WorkspaceFile::load(root)? {
+    match jetpack::WorkspaceFile::evaluate_checked_source(&source, &resolver) {
         Ok(_) => Some(Vec::new()),
         Err(diagnostic) => Some(vec![diagnostic]),
     }
@@ -348,7 +362,7 @@ fn compile_programmable_build_opts_inner(
                     None,
                 )]
             })?;
-        if is_workspace_build_entry(file) {
+        if let Some(checked_workspace) = workspace_build_authority(file)? {
             return compile_workspace_build_opts(
                 file,
                 grants,
@@ -360,6 +374,7 @@ fn compile_programmable_build_opts_inner(
                 cross_target,
                 emit_generated,
                 remote,
+                checked_workspace,
             );
         }
         let grants = resolve_build_grants(file, grants)?;
@@ -396,7 +411,7 @@ fn compile_programmable_build_opts_inner(
 /// the workspace entry runs last with a fresh context. No member plan crosses
 /// that boundary as a mutable value.
 fn compile_workspace_build_opts(
-    file: &str,
+    _file: &str,
     grants: &[String],
     freestanding: bool,
     allow_impure: bool,
@@ -406,31 +421,37 @@ fn compile_workspace_build_opts(
     cross_target: Option<&str>,
     emit_generated: bool,
     remote: Option<Comptime::Build::RemoteBuildBinding>,
+    checked_workspace: (
+        jet_driver::Authority::AuthorityResolver,
+        jetpack::WorkspaceFile::WorkspaceSource,
+    ),
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let workspace_path = absolute_source_path(file);
-    let workspace_root = workspace_path
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-    let members = match jetpack::WorkspaceFile::load(workspace_root) {
-        Some(Ok(plan)) => jetpack::MemberSelect::dependency_order(workspace_root, &plan.members),
-        Some(Err(diagnostic)) => return Err(vec![diagnostic]),
-        None => Vec::new(),
-    };
+    let (workspace_resolver, workspace_source) = checked_workspace;
+    workspace_resolver
+        .revalidate_source(&workspace_source)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let workspace_path = workspace_source.path.clone();
+    let plan = jetpack::WorkspaceFile::evaluate_checked_source(
+        &workspace_source,
+        &workspace_resolver,
+    )
+    .map_err(|diagnostic| vec![workspace_build_root_diagnostic(&workspace_path, &diagnostic)])?;
+    let members = jetpack::MemberSelect::dependency_order_packages_checked(
+        &workspace_resolver,
+        &plan.members,
+    )
+    .map_err(|error| vec![error.diagnostic()])?;
 
-    for member in members {
-        let entry = match workspace_member_entry(workspace_root, &member.path) {
+    for (member, checked_package) in members {
+        let entry = match workspace_member_entry(
+            &workspace_resolver,
+            &member.path,
+            checked_package,
+        ) {
             Ok(entry) => entry,
-            Err(error) => {
-                return Err(vec![Diagnostic::error(
-                    "E3501",
-                    format!("workspace member `{}` has an invalid typed output", member.name),
-                    error,
-                    "repair the member's typed Package output before building the workspace".to_string(),
-                    None,
-                )]);
-            }
+            Err(diagnostic) => return Err(vec![diagnostic]),
         };
-        if !entry.is_file() {
+        let Some(entry) = entry else {
             return Err(vec![Diagnostic::error(
                 "E3501",
                 format!("workspace member `{}` has no build entry", member.name),
@@ -438,18 +459,31 @@ fn compile_workspace_build_opts(
                 "add `run.jet` or `src/run.jet`, or name the member source explicitly".to_string(),
                 None,
             )]);
-        }
+        };
+        entry
+            .revalidate(&workspace_resolver)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let source_file = entry.source_file();
+        let entry_path = source_file.path.to_string_lossy().into_owned();
+        let entry_source = source_file
+            .text()
+            .map_err(|error| vec![error.diagnostic()])?;
         // A dependency/member is its own authority boundary. The workspace
         // CLI grant names the workspace root; it is not inherited by every
         // member. Package-local and explicitly subject-matched workspace
         // grants still flow through `resolve_build_grants`.
-        let member_grants = resolve_build_grants(&entry.to_string_lossy(), &[])?;
+        let member_grants = resolve_build_grants(&entry_path, &[])?;
         let member_grants = member_grants
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
             .collect();
-        let output = Driver::compile_bundle_path_build_as_dependency(
-            &entry.to_string_lossy(),
+        entry
+            .revalidate(&workspace_resolver)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let output = Driver::compile_bundle_path_build_as_dependency_with_overlay(
+            &entry_path,
+            &source_file.path,
+            &entry_source,
             Driver::BuildRunOptions {
                 grants: member_grants,
                 policy: production_build_policy(),
@@ -465,8 +499,11 @@ fn compile_workspace_build_opts(
                 remote: remote.clone(),
             },
         )?;
+        entry
+            .revalidate(&workspace_resolver)
+            .map_err(|error| vec![error.diagnostic()])?;
         if emit_generated {
-            export_generated_sources(&entry.to_string_lossy(), &output)?;
+            export_generated_sources(&entry_path, &output)?;
         }
     }
 
@@ -475,8 +512,13 @@ fn compile_workspace_build_opts(
         .iter()
         .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
         .collect();
-    let output = Driver::compile_bundle_path_build(
+    workspace_resolver
+        .revalidate_source(&workspace_source)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let output = Driver::compile_bundle_path_build_with_overlay(
         &workspace_path.to_string_lossy(),
+        &workspace_source.path,
+        &workspace_source.source,
         Driver::BuildRunOptions {
             grants: workspace_grants,
             policy: production_build_policy(),
@@ -492,6 +534,9 @@ fn compile_workspace_build_opts(
             remote,
         },
     )?;
+    workspace_resolver
+        .revalidate_source(&workspace_source)
+        .map_err(|error| vec![error.diagnostic()])?;
     if emit_generated {
         export_generated_sources(&workspace_path.to_string_lossy(), &output)?;
     }
@@ -505,7 +550,7 @@ fn export_generated_sources(
     let Some(build) = &output.build else {
         return Ok(());
     };
-    let project_root = build_project_root(file);
+    let project_root = build_project_root(file)?;
     let export_root = project_root.join("build/generated");
     let mut exports = Vec::new();
     for generated in build.generated.iter().filter(|generated| {
@@ -564,6 +609,19 @@ fn export_generated_sources(
     }
     transaction.commit();
     Ok(())
+}
+
+fn workspace_build_root_diagnostic(
+    workspace_path: &std::path::Path,
+    diagnostic: &Diagnostic,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E3503",
+        format!("build policy in `{}` is malformed", workspace_path.display()),
+        diagnostic.why.clone(),
+        diagnostic.fix.clone(),
+        None,
+    )
 }
 
 struct GeneratedExportTransaction {
@@ -642,14 +700,50 @@ impl Drop for GeneratedExportTransaction {
     }
 }
 
-fn is_workspace_build_entry(file: &str) -> bool {
+fn workspace_build_authority(
+    file: &str,
+) -> Result<
+    Option<(
+        jet_driver::Authority::AuthorityResolver,
+        jetpack::WorkspaceFile::WorkspaceSource,
+    )>,
+    Vec<Diagnostic>,
+> {
     let path = absolute_source_path(file);
-    if path.file_name().and_then(|name| name.to_str()) != Some(Syntax::WORKSPACE_FILE) {
-        return false;
+    let root = path.parent().unwrap_or(std::path::Path::new("."));
+    let resolver = match jet_driver::Authority::AuthorityResolver::open(root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
+    let Some(source) = resolver
+        .resolve_workspace_source()
+        .map_err(|error| vec![workspace_build_root_diagnostic(&path, &error.workspace_diagnostic())])?
+    else {
+        return Ok(None);
+    };
+    let Some(entry_name) = path.file_name() else {
+        return Ok(None);
+    };
+    let checked_entry = resolver
+        .checked_file(std::path::Path::new(entry_name))
+        .map_err(|error| vec![error.diagnostic()])?;
+    if checked_entry.path != source.path || !jetpack::WorkspaceFile::has_build_entry(&source.source) {
+        return Ok(None);
     }
-    std::fs::read_to_string(path)
-        .map(|source| jetpack::WorkspaceFile::has_build_entry(&source))
-        .unwrap_or(false)
+    resolver
+        .revalidate_source(&source)
+        .map_err(|error| vec![error.diagnostic()])?;
+    if source.role != jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+        return Err(vec![Diagnostic::error(
+            "E1334",
+            "workspace build entry is selected by an authority source".to_string(),
+            "workspace build execution requires the matching source to have the Index role; an authority source cannot select a workspace entry".to_string(),
+            "declare the workspace index in `workspace.jet`, or build the member entry directly".to_string(),
+            None,
+        )]);
+    }
+    Ok(Some((resolver, source)))
 }
 
 fn absolute_source_path(file: &str) -> std::path::PathBuf {
@@ -663,62 +757,105 @@ fn absolute_source_path(file: &str) -> std::path::PathBuf {
     }
 }
 
-fn workspace_member_entry(
-    root: &std::path::Path,
-    member: &str,
-) -> Result<std::path::PathBuf, String> {
-    let member_root = root.join(member);
-    if let Some(entry) = package_output_entry(&member_root)? {
-        return Ok(entry);
-    }
-    for candidate in [
-        member_root.join(Syntax::DEFAULT_ENTRY_FILE),
-        member_root.join("src").join(Syntax::DEFAULT_ENTRY_FILE),
-    ] {
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    if let Some(Ok(manifest)) = Package::PackageFacts::load(&member_root) {
-        let candidate = member_root.join(format!("{}.{}", manifest.name, Syntax::FILE_EXT));
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    let package_manifest = Loader::manifest_path(&member_root)
-        .unwrap_or_else(|| member_root.join(Syntax::PACKAGE_FILE));
-    if let Ok(source) = std::fs::read_to_string(&package_manifest) {
-        if Package::build_entry_source(&source).is_some() {
-            // A package may own build authority without a runtime entry file.
-            // Pass the manifest through the normal Driver path so its selected
-            // build function is checked and run with the package root context.
-            return Ok(package_manifest);
-        }
-    }
-    for candidate in [
-        member_root.join("src").join(Syntax::LEGACY_ENTRY_FILE),
-        member_root.join(Syntax::LEGACY_ENTRY_FILE),
-    ] {
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    Ok(member_root.join(Syntax::DEFAULT_ENTRY_FILE))
+struct CheckedBuildEntry {
+    package: jet_driver::Authority::CheckedPackage,
+    file: Option<jet_driver::Authority::CheckedFile>,
 }
 
-fn package_output_entry(root: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
-    let Some(package) = Package::PackageFacts::load(root) else {
-        return Ok(None);
-    };
-    let package = match package {
-        Ok(package) => package,
-        Err(error) => {
-            let source = Loader::manifest_path(root)
-                .unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
-            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+impl CheckedBuildEntry {
+    fn source_file(&self) -> &jet_driver::Authority::CheckedFile {
+        self.file
+            .as_ref()
+            .unwrap_or(&self.package.member.manifest.file)
+    }
+
+    fn revalidate(
+        &self,
+        workspace_resolver: &jet_driver::Authority::AuthorityResolver,
+    ) -> Result<(), jet_driver::Authority::AuthorityError> {
+        workspace_resolver.revalidate_member(&self.package.member)?;
+        let member_resolver =
+            jet_driver::Authority::AuthorityResolver::from_checked_directory(
+                &self.package.member.directory,
+            );
+        match &self.file {
+            Some(file) => member_resolver.revalidate_file(file),
+            None => workspace_resolver.revalidate_file(&self.package.member.manifest.file),
         }
-    };
-    package.resolve_run_entry(root)
+    }
+}
+
+fn workspace_member_entry(
+    resolver: &jet_driver::Authority::AuthorityResolver,
+    member: &str,
+    checked_package: jet_driver::Authority::CheckedPackage,
+) -> Result<Option<CheckedBuildEntry>, Diagnostic> {
+    resolver
+        .revalidate_member(&checked_package.member)
+        .map_err(|error| error.diagnostic())?;
+    let member_resolver = jet_driver::Authority::AuthorityResolver::from_checked_directory(
+        &checked_package.member.directory,
+    );
+    if let Some(entry) = checked_package
+        .facts
+        .resolve_run_entry_checked(&member_resolver)
+        .map_err(|error| {
+        Diagnostic::error(
+            "E3501",
+            format!("workspace member `{member}` has an invalid typed output"),
+            error,
+            "repair the member's typed Package output before building the workspace".to_string(),
+            None,
+        )
+    })? {
+        return Ok(Some(CheckedBuildEntry {
+            package: checked_package,
+            file: Some(entry),
+        }));
+    }
+    for candidate in [
+        std::path::PathBuf::from(Syntax::DEFAULT_ENTRY_FILE),
+        std::path::PathBuf::from("src").join(Syntax::DEFAULT_ENTRY_FILE),
+    ] {
+        match member_resolver.checked_file(&candidate) {
+            Ok(file) => {
+                return Ok(Some(CheckedBuildEntry {
+                    package: checked_package,
+                    file: Some(file),
+                }))
+            }
+            Err(error) if error.is_missing() => {}
+            Err(error) => return Err(error.diagnostic()),
+        }
+    }
+    let named = std::path::PathBuf::from(format!(
+        "{}.{}",
+        checked_package.facts.name,
+        Syntax::FILE_EXT
+    ));
+    match member_resolver.checked_file(&named) {
+        Ok(file) => {
+            return Ok(Some(CheckedBuildEntry {
+                package: checked_package,
+                file: Some(file),
+            }))
+        }
+        Err(error) if error.is_missing() => {}
+        Err(error) => return Err(error.diagnostic()),
+    }
+    let package_source = checked_package
+        .member
+        .manifest
+        .file
+        .text()
+        .map_err(|error| error.diagnostic())?;
+    if Package::build_entry_source(&package_source).is_some() {
+        return Ok(Some(CheckedBuildEntry {
+            package: checked_package,
+            file: None,
+        }));
+    }
+    Ok(None)
 }
 
 fn read_real_generated_file(
@@ -834,7 +971,7 @@ fn ensure_real_directory(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn build_project_root(file: &str) -> std::path::PathBuf {
+fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>> {
     let entry = std::path::Path::new(file);
     let absolute = if entry.is_absolute() {
         entry.to_path_buf()
@@ -847,7 +984,20 @@ fn build_project_root(file: &str) -> std::path::PathBuf {
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
-    Loader::find_manifest_root(&directory).unwrap_or(directory)
+    let workspace_root = Loader::find_workspace_root_checked(&directory).map_err(|diagnostic| {
+        vec![workspace_build_root_diagnostic(&directory, &diagnostic)]
+    })?;
+    let package_root = Loader::find_manifest_root_checked(&directory).map_err(|diagnostic| {
+        vec![workspace_build_root_diagnostic(&directory, &diagnostic)]
+    })?;
+    Ok(match (workspace_root, package_root) {
+        (Some(workspace), Some(package)) if Loader::is_physically_within(&workspace, &package) => {
+            package
+        }
+        (Some(workspace), _) => workspace,
+        (None, Some(package)) => package,
+        (None, None) => directory,
+    })
 }
 
 fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
@@ -873,81 +1023,146 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     let entry_dir = absolute
         .parent()
         .unwrap_or(std::path::Path::new("."));
-    let package_root = Loader::find_manifest_root(entry_dir);
+    let workspace_root = Loader::find_workspace_root_checked(entry_dir).map_err(|diagnostic| {
+        vec![workspace_build_root_diagnostic(entry_dir, &diagnostic)]
+    })?;
+    let workspace_checked = workspace_root
+        .as_deref()
+        .map(|root| {
+            let resolver = jet_driver::Authority::AuthorityResolver::open(root)
+                .map_err(|error| vec![workspace_build_root_diagnostic(root, &error.diagnostic())])?;
+            let source = resolver
+                .resolve_workspace_source()
+                .map_err(|error| vec![workspace_build_root_diagnostic(root, &error.workspace_diagnostic())])?
+                .ok_or_else(|| {
+                    vec![Diagnostic::error(
+                        "E3503",
+                        format!("build policy in `{}` is malformed", root.display()),
+                        "the workspace root disappeared before build policy was selected".to_string(),
+                        "restore the workspace declaration before running build code".to_string(),
+                        None,
+                    )]
+                })?;
+            resolver
+                .revalidate_source(&source)
+                .map_err(|error| vec![error.diagnostic()])?;
+            Ok::<_, Vec<Diagnostic>>((resolver, source))
+        })
+        .transpose()?;
+    let workspace_policy = workspace_checked
+        .as_ref()
+        .map(|(resolver, source)| load_workspace_build_policy(resolver, source))
+        .transpose()?;
+    let workspace_path = workspace_checked
+        .as_ref()
+        .map(|(_, source)| source.path.clone());
+    let package_root = Loader::find_manifest_root_checked(entry_dir)
+        .map_err(|diagnostic| vec![workspace_build_root_diagnostic(entry_dir, &diagnostic)])?
+        .filter(|root| {
+            workspace_root
+                .as_ref()
+                .is_none_or(|workspace| Loader::is_physically_within(workspace, root))
+        });
     if package_root.is_none() {
         if let Some((_, diagnostic)) = Loader::stale_manifest_name_diagnostic(entry_dir) {
             return Err(vec![diagnostic]);
         }
     }
     if let Some(dir) = package_root.as_deref() {
-        let package_path = Loader::manifest_path(dir).expect("manifest root has a Package file");
-        if let Ok(source) = std::fs::read_to_string(&package_path) {
-            match Package::PackageFacts::parse(&source, package_path.display().to_string()) {
-                Ok(package) => {
-                    package_name = Some(package.name.clone());
-                    for effect in package.build_allow {
-                        if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                            allowed.insert(capability.flag().to_string());
-                        }
-                    }
-                }
-                Err(error) => {
-                    let diagnostic = Manifest::parse(&package_path, &source).err()
-                        .unwrap_or_else(|| Diagnostic::error(
-                            "E3503",
-                            format!("build policy in `{}` is malformed", package_path.display()),
-                            format!("typed package policy parser rejected it: {error:?}"),
-                            "fix the `build: { allow: #(…) }` block before running build code".to_string(),
-                            None,
-                        ));
-                    return Err(vec![diagnostic]);
-                }
+        let resolver = jet_driver::Authority::AuthorityResolver::open(dir)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let member = resolver
+            .checked_member(std::path::Path::new("."))
+            .map_err(package_policy_diagnostic)?;
+        let package = resolver
+            .complete_checked_package(member)
+            .map_err(package_policy_diagnostic)?;
+        package_name = Some(package.facts.name.clone());
+        for effect in package.facts.build_allow {
+            if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                allowed.insert(capability.flag().to_string());
             }
         }
     }
-    let mut directory = Some(entry_dir);
-    while let Some(dir) = directory {
-        let workspace = dir.join(Syntax::WORKSPACE_FILE);
-        if let Ok(source) = std::fs::read_to_string(&workspace) {
-            let policy = match jetpack::Overlay::parse_workspace_policy(&source) {
-                Ok(policy) => policy,
-                Err(error) => return Err(vec![Diagnostic::error(
+    // A nested workspace owns one policy layer. Do not merge an enclosing
+    // workspace's ceiling into this root; that would make an outer policy
+    // silently decide the inner workspace's authority.
+    if let (Some(policy), Some(workspace)) = (workspace_policy, workspace_path.as_deref()) {
+        for effect in policy.build_deny {
+            if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                workspace_denies.insert(capability.flag().to_string());
+            } else {
+                return Err(vec![Diagnostic::error(
                     "E3503",
                     format!("build policy in `{}` is malformed", workspace.display()),
-                    error.message().to_string(),
-                    "fix the typed `policy: .{ deny: #(…) }` block before running build code".to_string(),
+                    format!("unknown build effect `{effect}`"),
+                    "use one of the declared build effects in `policy.deny`".to_string(),
                     None,
-                )]),
-            };
-            for effect in policy.build_deny {
-                if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                    workspace_denies.insert(capability.flag().to_string());
-                }
+                )]);
             }
-            for (subject, effects) in policy.build_grants {
-                let grants = workspace_grants.entry(subject).or_default();
-                for effect in effects {
-                    if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                        grants.insert(capability.flag().to_string());
-                    }
+        }
+        for (subject, effects) in policy.build_grants {
+            let grants = workspace_grants.entry(subject).or_default();
+            for effect in effects {
+                if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                    grants.insert(capability.flag().to_string());
+                } else {
+                    return Err(vec![Diagnostic::error(
+                        "E3503",
+                        format!("build policy in `{}` is malformed", workspace.display()),
+                        format!("unknown build effect `{effect}`"),
+                        "use one of the declared build effects in `policy.grants`".to_string(),
+                        None,
+                    )]);
                 }
             }
         }
-        directory = dir.parent();
     }
-    let package_name = package_name.unwrap_or_else(|| {
-        absolute
+    let package_name = match package_name {
+        Some(name) => name,
+        None if workspace_root.is_some() => Loader::authority_name_for_entry(&absolute)
+            .map_err(|diagnostic| vec![diagnostic])?,
+        None => absolute
             .file_stem()
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
             .unwrap_or("app")
-            .to_string()
-    });
+            .to_string(),
+    };
     if let Some(grants) = workspace_grants.get(&package_name) {
         allowed.extend(grants.iter().cloned());
     }
     for denied in workspace_denies { allowed.remove(&denied); }
     Ok(allowed.into_iter().collect())
+}
+
+fn load_workspace_build_policy(
+    resolver: &jet_driver::Authority::AuthorityResolver,
+    source: &jetpack::WorkspaceFile::WorkspaceSource,
+) -> Result<jetpack::Overlay::OverlayPolicy, Vec<Diagnostic>> {
+    match jetpack::WorkspaceFile::evaluate_checked_source(source, resolver) {
+        Ok(plan) => Ok(plan.overlay_policy),
+        Err(diagnostic) => Err(vec![workspace_build_root_diagnostic(
+            &source.path,
+            &diagnostic,
+        )]),
+    }
+}
+
+fn package_policy_diagnostic(error: jet_driver::Authority::AuthorityError) -> Vec<Diagnostic> {
+    match error {
+        jet_driver::Authority::AuthorityError::Invalid { path, detail }
+            if detail.contains("build") || detail.contains("effect") => {
+                vec![Diagnostic::error(
+                    "E1221",
+                    format!("invalid build policy in `{}`", path.display()),
+                    detail,
+                    "use `build: { allow: #(FS, Exec) }` with a valid effect tuple".to_string(),
+                    None,
+                )]
+            }
+        other => vec![other.diagnostic()],
+    }
 }
 
 fn production_build_policy() -> Comptime::Build::BuildPolicy {

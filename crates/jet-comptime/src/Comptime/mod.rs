@@ -36,7 +36,7 @@ pub mod SyncLite;
 mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
-mod EmailAdapter;
+pub mod EmailAdapter;
 mod Interpreter;
 mod JSONInterp;
 pub mod MathLayout;
@@ -49,8 +49,14 @@ mod TypedDecode;
 mod UrlLite;
 pub mod TirBridge;
 
+#[allow(dead_code)]
+mod typed_text_kernel {
+    include!("../../../jet-codegen/src/Prelude/TypedText.rs");
+}
+
 pub use AmbientRuntime::{
-    ambient_hooks, try_core_call as try_ambient_core_call, try_handle as try_ambient_handle,
+    ambient_hooks, try_core_call as try_ambient_core_call,
+    try_core_call_typed as try_ambient_core_call_typed, try_handle as try_ambient_handle,
     with_ambient,
 };
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
@@ -66,14 +72,16 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
-use crate::{Syntax, TypedHeads};
+use crate::Syntax;
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call,
-    apply_repl_authorized_core_call, display_core_pure_value, eval_regex_replace_all_with,
+    apply_core_call, apply_core_call_with_type, apply_data_line_call, apply_impure_core_call,
+    apply_impure_core_call_with_type,
+    apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
+    display_core_pure_value, eval_regex_replace_all_with,
 };
-pub use Methods::apply_seeded_rng_method;
+pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, vault_comptime_denied,
@@ -91,74 +99,142 @@ pub fn validate_url_literal(value: &str) -> Result<(), String> {
     UrlLite::parse(value).map(|_| ())
 }
 
+/// D-BOUND-HEAD1: validate URL literal components without flattening holes
+/// into a string that can change the URL grammar.
+pub fn validate_typed_url_literal(literals: &[String]) -> Result<(), String> {
+    UrlLite::validate_typed_url_literal(literals)
+}
+
+pub fn validate_typed_path_literal(literals: &[String]) -> Result<(), String> {
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    typed_text_kernel::jet_validate_typed_path_literal(&literal_refs)
+}
+
+pub fn validate_typed_boundary_literal(
+    kind: Syntax::TypedHeadKind,
+    literals: &[String],
+) -> Result<(), String> {
+    match kind {
+        Syntax::TypedHeadKind::URL => validate_typed_url_literal(literals),
+        Syntax::TypedHeadKind::Path => validate_typed_path_literal(literals),
+        Syntax::TypedHeadKind::DateTime => {
+            validate_datetime_literal(&literals.iter().map(String::as_str).collect::<String>())
+        }
+        _ => Err("typed head is not a checked boundary head".to_string()),
+    }
+}
+
+/// D-BOUND-HEAD1: typed holes use the same pure display projection as nested
+/// runtime values. There is no CtValue debug fallback: sema must admit only
+/// values for which this canonical renderer succeeds.
+pub fn render_typed_hole(value: &crate::AST::CtValue) -> Option<String> {
+    display_core_pure_value(value)
+}
+
+pub fn render_typed_holes(
+    values: &[crate::AST::CtValue],
+    span: crate::Diagnostics::Span,
+) -> Result<Vec<String>, Diagnostic> {
+    values
+        .iter()
+        .map(render_typed_hole)
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "E0112",
+                "a typed literal hole has no canonical JetShow renderer".to_string(),
+                "typed literal holes use one display contract in every execution tier".to_string(),
+                "use a sema-admitted printable value or convert it to String before the hole".to_string(),
+                Some(span),
+            )
+        })
+}
+
 /// D-BOUND-HEAD1: typed DateTime heads validate through the shared Prelude
 /// parser; runtime string constructors remain unchanged.
 pub fn validate_datetime_literal(value: &str) -> Result<(), String> {
     Methods::validate_datetime_literal(value)
 }
 
-/// D-BOUND-HEAD1: evaluate a sema-rewritten typed head through the one shared
-/// interpolation law, then reuse the existing pure Core parsers for the
-/// nominal values. Runtime string constructors stay on their existing paths.
+/// D-BOUND-HEAD1: validate raw heads at the typed boundary, then evaluate a
+/// sema-rewritten head through the one shared interpolation law and existing
+/// pure Core parsers. Runtime string constructors stay on their existing paths.
 pub fn evaluate_typed_head(
-    name: &str,
+    kind: Syntax::TypedHeadKind,
     literals: &[String],
     holes: &[CtValue],
     span: crate::Diagnostics::Span,
 ) -> Result<CtValue, Diagnostic> {
-    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-    let shown_holes = holes.iter().map(CtValue::jet_show).collect::<Vec<_>>();
-    let text = match name {
-        Syntax::TYPE_URL => TypedHeads::jet_typed_url_interpolate(&literal_refs, &shown_holes),
-        Syntax::TYPE_PATH => TypedHeads::jet_typed_path_interpolate(&literal_refs, &shown_holes),
-        Syntax::TYPE_DATETIME => {
-            TypedHeads::jet_typed_datetime_interpolate(&literal_refs, &shown_holes)
-        }
-        _ => {
-            return Err(Diagnostic::error(
-                "E0956",
-                format!("typed head `{name}` can't run at compile time yet"),
-                "the canonical TIR evaluator only accepts the ratified URL, Path, and DateTime heads".to_string(),
-                "use one of `URL.{\"…\"}`, `Path.{\"…\"}`, or `DateTime.{\"…\"}`".to_string(),
-                Some(span),
-            ))
-        }
-    };
-    let parsed = match name {
-        Syntax::TYPE_URL => apply_core_call(
-            "core.url",
-            "parse",
-            vec![CtValue::Str(text)],
-            span,
-            false,
-        )?,
-        Syntax::TYPE_DATETIME => apply_core_call(
-            "core.time",
-            "parse_rfc3339",
-            vec![CtValue::Str(text)],
-            span,
-            false,
-        )?,
-        Syntax::TYPE_PATH => {
-            return Ok(CtValue::Struct {
-                type_name: Syntax::TYPE_PATH.to_string(),
-                fields: vec![("inner".to_string(), CtValue::Str(text))],
-            })
-        }
-        _ => unreachable!("typed-head name was checked above"),
-    };
-    match parsed {
-        CtValue::Present(value) => Ok(*value),
-        failure => Err(Diagnostic::error(
+    let name = kind.source_name();
+    if !kind.is_boundary() {
+        return Err(Diagnostic::error(
             "E0956",
-            format!("{name} typed head produced an invalid value"),
-            format!(
-                "the typed head parser returned `{}` after sema validation",
-                failure.jet_show()
-            ),
-            "keep the literal skeleton valid and let holes supply only head-safe values".to_string(),
+            format!("typed head `{name}` can't run at compile time yet"),
+            "the canonical TIR evaluator only accepts the ratified URL, Path, and DateTime heads".to_string(),
+            "use one of `URL.{\"…\"}`, `Path.{\"…\"}`, or `DateTime.{\"…\"}`".to_string(),
             Some(span),
-        )),
+        ));
+    }
+    if kind.forbids_holes() && !holes.is_empty() {
+        return Err(Diagnostic::error(
+            "E0155",
+            "a `DateTime` literal cannot contain interpolation".to_string(),
+            "DateTime values are checked as complete RFC3339 literals before the program runs".to_string(),
+            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly".to_string(),
+            Some(span),
+        ));
+    }
+    if let Err(reason) = validate_typed_boundary_literal(kind, literals) {
+        return Err(Diagnostic::error(
+            "E0155",
+            format!("this `{name}` literal is invalid"),
+            reason,
+            format!(
+                "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"
+            ),
+            Some(span),
+        ));
+    }
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    let shown_holes = render_typed_holes(holes, span)?;
+    match kind {
+        Syntax::TypedHeadKind::URL => {
+            let url = UrlLite::typed_url_literal(literals, &shown_holes);
+            Ok(Methods::url_parts_to_ct(&url))
+        }
+        Syntax::TypedHeadKind::Path => Ok(CtValue::Struct {
+            type_name: Syntax::TYPE_PATH.to_string(),
+            fields: vec![(
+                "inner".to_string(),
+                CtValue::Str(typed_text_kernel::jet_typed_path_interpolate(
+                    &literal_refs,
+                    &shown_holes,
+                )),
+            )],
+        }),
+        Syntax::TypedHeadKind::DateTime => {
+            let text = typed_text_kernel::jet_typed_datetime_interpolate(
+                &literal_refs,
+                &shown_holes,
+            );
+            let parsed = Methods::evaluate_typed_datetime_literal(&text, span)?;
+            match parsed {
+                CtValue::Present(value) => Ok(*value),
+                failure => Err(Diagnostic::error(
+                    "E0956",
+                    format!("{name} typed head produced an invalid value"),
+                    match render_typed_hole(&failure) {
+                        Some(text) => format!(
+                            "the typed head parser returned `{text}` after sema validation"
+                        ),
+                        None => "the typed head parser returned an unrenderable value after sema validation".to_string(),
+                    },
+                    "keep the literal skeleton valid and let holes supply only head-safe values".to_string(),
+                    Some(span),
+                )),
+            }
+        }
+        _ => unreachable!("boundary evaluation validated its descriptor"),
     }
 }
 
@@ -170,11 +246,13 @@ pub fn data_status_rows() -> Vec<(String, String, String, String, String, String
 pub use Methods::apply_dollar_splices;
 pub use Purity::{
     check_build_time_io, walk_calls, walk_identifiers, walk_purity_expr, walk_purity_stmts,
-    walk_purity_stmts_from, PurityStage,
+    walk_purity_stmts_from, walk_expr_nodes_for_validation,
+    walk_stmt_expr_nodes_for_validation, PurityStage,
 };
 pub use Reflect::{
-    build_distinct_type_info, build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
-    build_struct_type_info_with_states, ProgramSemanticFacts,
+    build_distinct_type_info, build_distinct_type_info_with_path, build_enum_layout_info,
+    build_program_info, build_struct_layout_info, build_struct_type_info,
+    build_struct_type_info_with_path, build_struct_type_info_with_states, ProgramSemanticFacts,
 };
 pub use crate::AST::{CtReport, CtValue};
 
@@ -424,6 +502,20 @@ pub fn cbor_encode_typed_for_tir(
     EncodingLite::cbor_encode_typed(value, Some(root_ty), struct_fields, canonical)
 }
 
+/// TIR/JIT bridge for whole-value CBOR encoding. Keep the wire encoder in the
+/// same comptime-reachable Prelude implementation used by interpreter calls.
+pub fn cbor_encode_for_tir(
+    value: &CtValue,
+    canonical: bool,
+) -> Result<Vec<u8>, CtValue> {
+    if canonical {
+        EncodingLite::cbor_encode_canonical(value)
+    } else {
+        EncodingLite::cbor_encode(value)
+    }
+    .map_err(EncodingLite::cbor_error_value)
+}
+
 pub fn render_datatree_for_tir(value: &CtValue) -> String {
     JSONInterp::render_json_pretty(value, false, 0)
 }
@@ -541,6 +633,12 @@ pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
         "jet_std::XMLRenderOptions" => Some(EncodingLite::xml_safe_render_options_value()),
         _ => None,
     }
+}
+
+/// TIR static-call bridge for the shared Email limits constructor.
+pub fn email_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
+    (method == "safe" && path == "jet_email::Limits")
+        .then(EmailAdapter::limits_safe_value)
 }
 static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
     std::sync::OnceLock::new();

@@ -1617,8 +1617,8 @@ fn run() { print(left.value() + right.value()) }
 "#;
     let dir = build_web_fixture("module_identity", src, "tests/fixtures/web_module_identity.jet");
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("function left__value()"), "left module identity was dropped:\n{js}");
-    assert!(js.contains("function right__value()"), "right module identity was dropped:\n{js}");
+    assert!(js.contains("function __jet_left__value()"), "left module identity was dropped:\n{js}");
+    assert!(js.contains("function __jet_right__value()"), "right module identity was dropped:\n{js}");
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1639,10 +1639,10 @@ fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_left__value()"), "left qualified call was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_right__value()"), "right qualified call was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm___jet_left__value()"), "left qualified call was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm___jet_right__value()"), "right qualified call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1671,8 +1671,8 @@ fn web_file_modules_keep_qualified_js_function_identity() {
         ],
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("function left__value()"), "left identity was dropped:\n{js}");
-    assert!(js.contains("function right__value()"), "right identity was dropped:\n{js}");
+    assert!(js.contains("function __jet_left__value()"), "left identity was dropped:\n{js}");
+    assert!(js.contains("function __jet_right__value()"), "right identity was dropped:\n{js}");
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1695,10 +1695,10 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right identity was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_left__value()"), "left call was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_right__value()"), "right call was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> i64"), "left identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> i64"), "right identity was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm___jet_left__value()"), "left call was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm___jet_right__value()"), "right call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1724,12 +1724,12 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
-        js.contains("await bridge_math__value()"),
+        js.contains("await bridge___jet_math__value()"),
         "qualified call did not use Wasm bridge:\n{js}"
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_export_math__value() -> i64"),
+        wasm.contains("pub extern \"C\" fn jet_export___jet_math__value() -> i64"),
         "qualified export symbol was dropped:\n{wasm}"
     );
     assert_eq!(run_web_app(&dir), "7\n");
@@ -1771,20 +1771,20 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
         );
         let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
         assert!(
-            js.contains("function left__value()"),
+            js.contains("function __jet_left__value()"),
             "JS sibling inherited Wasm bucket under {stem}:\n{js}"
         );
         assert!(
-            js.contains("function left__helper()"),
+            js.contains("function __jet_left__helper()"),
             "JS local helper lost caller identity under {stem}:\n{js}"
         );
         assert!(
-            js.contains("await bridge_right__value()"),
+            js.contains("await bridge___jet_right__value()"),
             "Wasm sibling inherited JS bucket under {stem}:\n{js}"
         );
         let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
         assert!(
-            wasm.contains("jet_wasm_right__helper()"),
+            wasm.contains("jet_wasm___jet_right__helper()"),
             "Wasm local helper lost caller identity under {stem}:\n{wasm}"
         );
         assert_eq!(run_web_app(&dir), "3\n", "load order changed behavior");
@@ -1893,7 +1893,7 @@ fn run() { print("hello, web") }
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
     assert!(
-        wasm.contains("fn jet_wasm_tools__dev() -> i64"),
+        wasm.contains("fn jet_wasm___jet_tools__dev() -> i64"),
         "module tools.dev was not emitted:\n{wasm}"
     );
     assert!(

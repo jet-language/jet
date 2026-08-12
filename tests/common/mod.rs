@@ -692,41 +692,418 @@ fn build_and_run_with_cwd(
 /// Remove every audited generated-prelude module (jet_mem, jet_txn, the
 /// per-platform jet_term/jet_os/jet_atomic shims, jet_gtk, and any
 /// __jet___c_* CFFI overlay module) before checking generated Rust for I1
-/// violations. Mirrors `golden.rs::strip_vetted_prelude_modules` — kept as a
-/// second, independent implementation so a sema-soundness corpus check does
-/// not depend on golden.rs internals.
+/// violations. This shared structural helper is used by golden and sema/TIR
+/// checks so every I1 scan removes the same vetted source.
 pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
-    fn strip_mod(src: &str, name: &str) -> String {
-        let Some(start) = src.find(&format!("mod {name}")) else {
-            return src.to_string();
-        };
-        let bytes = src.as_bytes();
-        let mut depth = 0usize;
-        let mut i = start;
-        let mut end = src.len();
-        let mut seen_brace = false;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'{' => {
-                    depth += 1;
-                    seen_brace = true;
+    fn strip_named_mod(src: &str, matches_name: impl Fn(&str) -> bool) -> String {
+        fn ident_continue(byte: u8) -> bool {
+            byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80
+        }
+
+        fn raw_string_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
+            let mut i = at;
+            if bytes.get(i) == Some(&b'b') {
+                if bytes.get(i + 1) != Some(&b'r') {
+                    return None;
                 }
-                b'}' => {
-                    depth -= 1;
-                    if seen_brace && depth == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
+                i += 1;
+            } else if bytes.get(i) != Some(&b'r') {
+                return None;
             }
             i += 1;
+            let mut hashes = 0;
+            while bytes.get(i) == Some(&b'#') {
+                hashes += 1;
+                i += 1;
+            }
+            (bytes.get(i) == Some(&b'"')).then_some((i + 1, hashes))
         }
+
+        fn starts_char_literal(bytes: &[u8], at: usize) -> bool {
+            let Some(next) = bytes.get(at + 1).copied() else {
+                return false;
+            };
+            next == b'\\'
+                || !ident_continue(next)
+                || bytes.get(at + 2) == Some(&b'\'')
+        }
+
+        fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
+            #[derive(Clone, Copy)]
+            enum State {
+                Normal,
+                LineComment,
+                BlockComment(usize),
+                String,
+                Char,
+                Raw(usize),
+            }
+
+            let mut state = State::Normal;
+            let mut depth = 0usize;
+            let mut i = opening;
+            while i < bytes.len() {
+                match state {
+                    State::Normal => match bytes[i] {
+                        b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                            state = State::LineComment;
+                            i += 2;
+                        }
+                        b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                            state = State::BlockComment(1);
+                            i += 2;
+                        }
+                        _ if raw_string_start(bytes, i).is_some() => {
+                            let (after_open, hashes) = raw_string_start(bytes, i).unwrap();
+                            state = State::Raw(hashes);
+                            i = after_open;
+                        }
+                        b'"' => {
+                            state = State::String;
+                            i += 1;
+                        }
+                        b'\'' if starts_char_literal(bytes, i) => {
+                            state = State::Char;
+                            i += 1;
+                        }
+                        b'{' => {
+                            depth += 1;
+                            i += 1;
+                        }
+                        b'}' => {
+                            depth = depth.checked_sub(1)?;
+                            i += 1;
+                            if depth == 0 {
+                                return Some(i);
+                            }
+                        }
+                        _ => i += 1,
+                    },
+                    State::LineComment => {
+                        if bytes[i] == b'\n' {
+                            state = State::Normal;
+                        }
+                        i += 1;
+                    }
+                    State::BlockComment(mut nested) => {
+                        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                            nested += 1;
+                            i += 2;
+                        } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                            nested -= 1;
+                            i += 2;
+                            if nested == 0 {
+                                state = State::Normal;
+                            } else {
+                                state = State::BlockComment(nested);
+                            }
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    State::String | State::Char => {
+                        if bytes[i] == b'\\' {
+                            i = (i + 2).min(bytes.len());
+                        } else {
+                            let closing = matches!(state, State::String) && bytes[i] == b'"'
+                                || matches!(state, State::Char) && bytes[i] == b'\'';
+                            i += 1;
+                            if closing {
+                                state = State::Normal;
+                            }
+                        }
+                    }
+                    State::Raw(hashes) => {
+                        if bytes[i] == b'"'
+                            && bytes
+                                .get(i + 1..i + 1 + hashes)
+                                .is_some_and(|tail| tail.iter().all(|&byte| byte == b'#'))
+                        {
+                            i += hashes + 1;
+                            state = State::Normal;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        fn item_start(src: &str, module_start: usize) -> usize {
+            let line_start = |at: usize| src[..at].rfind('\n').map_or(0, |pos| pos + 1);
+            let current_line = line_start(module_start);
+            let prefix = src[current_line..module_start].trim_start();
+            let mut start = if prefix.is_empty()
+                || prefix.starts_with("pub")
+                || prefix.starts_with("#[")
+            {
+                current_line
+            } else {
+                module_start
+            };
+            while start > 0 {
+                let previous_line = line_start(start.saturating_sub(1));
+                let previous = src[previous_line..start].trim();
+                if previous.starts_with("#[")
+                    || previous.starts_with("///")
+                    || previous.starts_with("//!")
+                {
+                    start = previous_line;
+                } else if previous.ends_with(']') {
+                    // An outer attribute may span several lines. Walk back to
+                    // its `#[` line before deciding where the item starts.
+                    let mut candidate_end = start;
+                    let mut attribute_start = None;
+                    while candidate_end > 0 {
+                        let candidate_line = line_start(candidate_end.saturating_sub(1));
+                        let text = src[candidate_line..candidate_end].trim();
+                        if text.starts_with("#[") {
+                            attribute_start = Some(candidate_line);
+                            break;
+                        }
+                        if text.is_empty() {
+                            break;
+                        }
+                        candidate_end = candidate_line;
+                    }
+                    if let Some(attribute_start) = attribute_start {
+                        start = attribute_start;
+                    } else {
+                        break;
+                    }
+                } else if previous.ends_with("*/") {
+                    // Preserve a preceding block documentation comment with
+                    // the item it documents.
+                    let mut candidate_end = start;
+                    let mut doc_start = None;
+                    while candidate_end > 0 {
+                        let candidate_line = line_start(candidate_end.saturating_sub(1));
+                        let text = src[candidate_line..candidate_end].trim();
+                        if text.starts_with("/**") || text.starts_with("/*!") {
+                            doc_start = Some(candidate_line);
+                            break;
+                        }
+                        if text.is_empty() {
+                            break;
+                        }
+                        candidate_end = candidate_line;
+                    }
+                    if let Some(doc_start) = doc_start {
+                        start = doc_start;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            start
+        }
+
+        fn skip_trivia(bytes: &[u8], mut at: usize) -> usize {
+            loop {
+                while bytes
+                    .get(at)
+                    .is_some_and(|byte| byte.is_ascii_whitespace())
+                {
+                    at += 1;
+                }
+                if bytes.get(at) == Some(&b'/') && bytes.get(at + 1) == Some(&b'/') {
+                    at += 2;
+                    while bytes.get(at).is_some_and(|byte| *byte != b'\n') {
+                        at += 1;
+                    }
+                    continue;
+                }
+                if bytes.get(at) == Some(&b'/') && bytes.get(at + 1) == Some(&b'*') {
+                    let mut nested = 1usize;
+                    at += 2;
+                    while at < bytes.len() && nested > 0 {
+                        if bytes[at] == b'/' && bytes.get(at + 1) == Some(&b'*') {
+                            nested += 1;
+                            at += 2;
+                        } else if bytes[at] == b'*' && bytes.get(at + 1) == Some(&b'/') {
+                            nested -= 1;
+                            at += 2;
+                        } else {
+                            at += 1;
+                        }
+                    }
+                    continue;
+                }
+                return at;
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum State {
+            Normal,
+            LineComment,
+            BlockComment(usize),
+            String,
+            Char,
+            Raw(usize),
+        }
+
+        let bytes = src.as_bytes();
+        let mut state = State::Normal;
+        let mut i = 0usize;
+        let mut brace_depth = 0usize;
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        let mut module = None;
+        while i < bytes.len() {
+            match state {
+                State::Normal => match bytes[i] {
+                    b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                        state = State::LineComment;
+                        i += 2;
+                    }
+                    b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                        state = State::BlockComment(1);
+                        i += 2;
+                    }
+                    _ if raw_string_start(bytes, i).is_some() => {
+                        let (after_open, hashes) = raw_string_start(bytes, i).unwrap();
+                        state = State::Raw(hashes);
+                        i = after_open;
+                    }
+                    b'"' => {
+                        state = State::String;
+                        i += 1;
+                    }
+                    b'\'' if starts_char_literal(bytes, i) => {
+                        state = State::Char;
+                        i += 1;
+                    }
+                    b'{' => {
+                        brace_depth += 1;
+                        i += 1;
+                    }
+                    b'}' => {
+                        brace_depth = brace_depth.saturating_sub(1);
+                        i += 1;
+                    }
+                    b'(' => {
+                        paren_depth += 1;
+                        i += 1;
+                    }
+                    b')' => {
+                        paren_depth = paren_depth.saturating_sub(1);
+                        i += 1;
+                    }
+                    b'[' => {
+                        bracket_depth += 1;
+                        i += 1;
+                    }
+                    b']' => {
+                        bracket_depth = bracket_depth.saturating_sub(1);
+                        i += 1;
+                    }
+                    b'm'
+                        if brace_depth == 0
+                            && paren_depth == 0
+                            && bracket_depth == 0
+                            && bytes.get(i + 1..i + 3) == Some(b"od")
+                            && (i == 0 || !ident_continue(bytes[i - 1]))
+                            && bytes.get(i + 3).is_none_or(|byte| !ident_continue(*byte)) =>
+                    {
+                        let mut j = i + 3;
+                        while bytes.get(j).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                            j += 1;
+                        }
+                        let name_start = j;
+                        while bytes.get(j).is_some_and(|byte| ident_continue(*byte)) {
+                            j += 1;
+                        }
+                        if matches_name(&src[name_start..j]) {
+                            j = skip_trivia(bytes, j);
+                            if bytes.get(j) == Some(&b'{') {
+                                module = Some((item_start(src, i), j, true));
+                                break;
+                            }
+                            if bytes.get(j) == Some(&b';') {
+                                module = Some((item_start(src, i), j + 1, false));
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+                    _ => i += 1,
+                },
+                State::LineComment => {
+                    if bytes[i] == b'\n' {
+                        state = State::Normal;
+                    }
+                    i += 1;
+                }
+                State::BlockComment(mut nested) => {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        nested += 1;
+                        i += 2;
+                    } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        nested -= 1;
+                        i += 2;
+                        if nested == 0 {
+                            state = State::Normal;
+                        } else {
+                            state = State::BlockComment(nested);
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                State::String | State::Char => {
+                    if bytes[i] == b'\\' {
+                        i = (i + 2).min(bytes.len());
+                    } else {
+                        let closing = matches!(state, State::String) && bytes[i] == b'"'
+                            || matches!(state, State::Char) && bytes[i] == b'\'';
+                        i += 1;
+                        if closing {
+                            state = State::Normal;
+                        }
+                    }
+                }
+                State::Raw(hashes) => {
+                    if bytes[i] == b'"'
+                        && bytes
+                            .get(i + 1..i + 1 + hashes)
+                            .is_some_and(|tail| tail.iter().all(|&byte| byte == b'#'))
+                    {
+                        i += hashes + 1;
+                        state = State::Normal;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        let Some((start, end_or_opening, has_body)) = module else {
+            return src.to_string();
+        };
+        let end = if has_body {
+            let Some(end) = matching_brace_end(bytes, end_or_opening) else {
+                return src.to_string();
+            };
+            end
+        } else {
+            end_or_opening
+        };
         format!("{}{}", &src[..start], &src[end..])
+    }
+
+    fn strip_mod(src: &str, name: &str) -> String {
+        strip_named_mod(src, |candidate| candidate == name)
+    }
+
+    fn strip_mod_prefix(src: &str, prefix: &str) -> String {
+        strip_named_mod(src, |candidate| candidate.starts_with(prefix))
     }
     let s = strip_mod(rust_code, "jet_uninit_semantics");
     let s = strip_mod(&s, "jet_mem");
-    let s = strip_mod(&s, "jet_cell");
+    let s = strip_vetted_module(&s, "jet_cell");
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");
@@ -737,16 +1114,17 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
     s = strip_shared_guard_internals(&s);
+    s = strip_vetted_module(&s, "jet_os_extra");
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "jet_atomic_windows");
     s = strip_vetted_module(&s, "jet_ws_upgrade");
-    // D-TASKBORROW1=A: scoped taskgroup lifetime erasure (mirrors golden.rs).
-    s = strip_vetted_module(&s, "jet_taskgroup_scoped");
+    // D-TASKBORROW1=A: canonical task-group lifetime erasure (mirrors golden.rs).
+    s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "ffi_reporter");
     while s.contains("mod __jet___c_") {
         let before = s.clone();
-        s = strip_mod(&s, "__jet___c_");
+        s = strip_mod_prefix(&s, "__jet___c_");
         if s == before {
             break;
         }

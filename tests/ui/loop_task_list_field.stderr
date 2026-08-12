@@ -1,7 +1,7 @@
 Error [E0120]: this loop can't take handles out of a field or index
-  --> tests/ui/loop_task_list_field.jet:7:15
+  --> tests/ui/loop_task_list_field.jet:5:15
     |
-  7 |     loop h, p.handles { total += h.wait() }
+  5 |     loop h, p.handles { total += h.join() ?? 0 }
     |               ^^^^^^^
- Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list
+ Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move-capability marker `^`
  Fix: bind the list into a local this scope owns first (`hs := …`), then write `loop h, hs { … }`

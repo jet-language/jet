@@ -647,54 +647,30 @@ pub(crate) fn foreign_thread_safe_lambda(lam: &crate::AST::Lambda) -> bool {
         }
 }
 
-/// D-NARG-D2: Walk a default expression and substitute any `Ident` that names
-/// an earlier parameter with the corresponding supplied argument expression.
-/// `param_names` is the slice of earlier param names (index-aligned with `args`).
-/// Returns the rewritten expression.
+/// D-NARG-D2: Walk one default expression exhaustively and replace each
+/// declaration-local reference with its compiler-private slot name. The
+/// replacement is a slot read, never a supplied argument AST, so side effects
+/// in a written argument cannot be duplicated by a default.
 pub(crate) fn substitute_param_refs(
-    expr: crate::AST::Expr,
-    param_names: &[String],
-    args: &[crate::AST::CallArg],
+    mut expr: crate::AST::Expr,
+    refs: &[(&str, String)],
 ) -> crate::AST::Expr {
-    use crate::AST::Expr;
-    match expr {
-        Expr::Ident(ref name, _) => {
-            if let Some(idx) = param_names.iter().position(|n| n == name) {
-                if let Some(arg) = args.get(idx) {
-                    return arg.expr.clone();
-                }
-            }
-            expr
+    expr.for_each_expr_mut(|node| {
+        let crate::AST::Expr::Ident(name, _) = node else {
+            return;
+        };
+        if let Some((_, replacement)) = refs.iter().find(|(param, _)| *param == name) {
+            *name = replacement.clone();
         }
-        Expr::Unary(op, inner, span) => Expr::Unary(
-            op,
-            Box::new(substitute_param_refs(*inner, param_names, args)),
-            span,
-        ),
-        Expr::Binary(op, lhs, rhs, span) => Expr::Binary(
-            op,
-            Box::new(substitute_param_refs(*lhs, param_names, args)),
-            Box::new(substitute_param_refs(*rhs, param_names, args)),
-            span,
-        ),
-        Expr::Field(base, field, span) => Expr::Field(
-            Box::new(substitute_param_refs(*base, param_names, args)),
-            field,
-            span,
-        ),
-        // All other expression forms don't mention parameter names directly
-        // (calls, literals, etc.) — leave them as-is. A complex default
-        // expression containing a nested call with a param ident would need
-        // recursive handling, but the parser only allows simple expressions in
-        // defaults (literals, idents, field access, arithmetic).
-        other => other,
-    }
+    });
+    expr
 }
 
-/// D-NARG-D2: Check whether a default expression references any parameter
-/// that appears *after* the current parameter index. Collects the names of
-/// any forward-referenced parameters found. `all_param_names` is the full
-/// list of non-self parameter names for this function (in order).
+/// D-NARG-D2: Use the same exhaustive expression walker to check whether a
+/// default expression references any parameter that appears *after* the
+/// current parameter index. Collects the names of any forward-referenced
+/// parameters found. `all_param_names` is the full list of non-self parameter
+/// names for this function (in order).
 /// `default_param_idx` is the index of the parameter whose default we're checking.
 pub(crate) fn find_forward_refs(
     expr: &crate::AST::Expr,
@@ -712,28 +688,17 @@ fn find_forward_refs_inner(
     default_param_idx: usize,
     found: &mut Vec<(String, crate::Diagnostics::Span)>,
 ) {
-    use crate::AST::Expr;
-    match expr {
-        Expr::Ident(name, span) => {
-            // A forward ref: name is in param list at an index >= default_param_idx
-            if let Some(idx) = all_param_names.iter().position(|n| n == name) {
-                if idx >= default_param_idx {
-                    found.push((name.clone(), *span));
-                }
+    let mut copy = expr.clone();
+    copy.for_each_expr_mut(|node| {
+        let crate::AST::Expr::Ident(name, span) = node else {
+            return;
+        };
+        if let Some(idx) = all_param_names.iter().position(|candidate| candidate == name) {
+            if idx >= default_param_idx {
+                found.push((name.clone(), *span));
             }
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
-            find_forward_refs_inner(inner, all_param_names, default_param_idx, found);
-        }
-        Expr::Binary(_, lhs, rhs, _) => {
-            find_forward_refs_inner(lhs, all_param_names, default_param_idx, found);
-            find_forward_refs_inner(rhs, all_param_names, default_param_idx, found);
-        }
-        Expr::Field(base, _, _) => {
-            find_forward_refs_inner(base, all_param_names, default_param_idx, found);
-        }
-        _ => {}
-    }
+    });
 }
 
 #[derive(Debug, Clone)]
@@ -1205,6 +1170,12 @@ pub(crate) struct ModuleState {
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
+    /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign namespace aliases scoped
+    /// to one inline module body.
+    inline_foreign_imports: HashMap<(String, String), usize>,
+    /// D-VERDICT-1867-1: foreign namespace aliases publicly re-exported by
+    /// an inline module.
+    inline_reexport_foreign: HashMap<(String, String), usize>,
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
@@ -1219,7 +1190,7 @@ pub(crate) struct ModuleState {
     /// use their module identity; generic instances use `instance:<digest>`.
     code_module_identities: HashMap<String, String>,
     /// D-MOD3: unqualified items imported via `use alias.Item` (inline modules).
-    /// Maps unqualified name → mangled name (e.g. "clamp" → "math__clamp").
+    /// Maps unqualified name → mangled name (e.g. "clamp" → "__jet_math__clamp").
     unqualified: HashMap<String, String>,
     /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
     /// Maps name → (function_name, module_idx).
@@ -1280,6 +1251,7 @@ pub(crate) struct Checker<'a> {
     inline_reexport_inline: &'a HashMap<(String, String), (String, String)>,
     inline_reexport_file: &'a HashMap<(String, String), (String, usize)>,
     inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
+    inline_reexport_foreign: &'a HashMap<(String, String), usize>,
     module_path: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
@@ -1390,6 +1362,9 @@ pub(crate) struct Checker<'a> {
     fn_name: String,
     /// Canonical caller-visible parameter order; excludes `self`.
     current_param_names: Vec<String>,
+    /// Compiler-private names in inserted defaults resolve to their declaration
+    /// slot type here. This map is populated by the shared call binder.
+    pub(crate) binder_ref_types: HashMap<String, Type>,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
@@ -1442,7 +1417,7 @@ pub(crate) struct Checker<'a> {
     /// `edit_disjoint` lends each callback parameter for that invocation only.
     /// Any store, return, or retaining call from the callback is E0212.
     lambda_params_are_lending_views: bool,
-    /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
+    /// M11: when true, lambda is being passed to canonical `task` — stricter capture rules (E1101).
     is_task_spawn: bool,
     /// True while checking the callback stored by `core.os.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
@@ -1464,12 +1439,17 @@ pub(crate) struct Checker<'a> {
     reactive_upgrades: Vec<String>,
     /// D-DATARACE1=C: binding names that crossed a concurrency boundary this function.
     reactive_upgrade_names: HashSet<String>,
-    /// D-DETACH1: task names whose spawn lambda captured a `view` borrow specifically (E1102/ViewBorrow).
-    /// At `.detach()`, if the task is in this set, E1106 fires instead of E1103.
+    /// D-DETACH1: task names whose spawn lambda captured a `view` or
+    /// task-group-scoped borrow. At `.detach()`, if the task is in this set,
+    /// E1106 fires instead of E1103.
     view_borrow_escape_tasks: HashSet<String>,
     /// D-DETACH1: the binding name currently being elaborated (set at check_binding
     /// entry, cleared after). Used to record view-capturing task names.
     current_binding_name: Option<String>,
+    /// Binding owned by the task spawn whose lambda is being checked. Nested
+    /// task bodies must not reuse that outer name for group auto-join tracking,
+    /// but sendability diagnostics still need the outer detach target.
+    task_spawn_binding_name: Option<String>,
     /// M8: binding name when checking `f :: (…) => …` (E0804 self-call).
     lambda_binding: Option<String>,
     /// Names mutably captured by an escaping lambda still in scope (E0204).
@@ -1513,10 +1493,10 @@ pub(crate) struct Checker<'a> {
     /// Each entry is the (ptr, len) of the tail saved before entering a nested
     /// block, so `is_name_live_after` can walk up through all enclosing scopes.
     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
-    /// D-TASKSCOPE1=A: stack of active `taskgroup` scopes (innermost last).
+    /// D-CONC-SPAWN1=D: stack of active `task.group` scopes (innermost last).
     taskgroup_stack: Vec<TaskGroupCtx>,
-    /// True while inferring the body passed to `g.task => …` — suppresses L1101
-    /// (the taskgroup owns the handle until scope exit or an explicit join).
+    /// True while inferring a child body passed to `task.group` — suppresses L1101
+    /// (the group owns the handle until scope exit or an explicit join).
     in_taskgroup_spawn: bool,
     /// D-METHODMACRO1=A: top-level function names whose bare identifier was
     /// read as a VALUE (not called directly) while checking this one function
@@ -1529,6 +1509,23 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn register_binder_refs(&mut self, args: &[crate::AST::CallArg]) {
+        for arg in args {
+            for (name, _, ty) in &arg.flags.binder_refs {
+                self.binder_ref_types.insert(name.clone(), ty.clone());
+            }
+        }
+    }
+
+    /// Project a resolved source name through the sema-owned name ledger.
+    /// Diagnostics keep a leaf while it is unique and use the canonical path
+    /// when another visible declaration makes the leaf ambiguous.
+    pub(crate) fn display_type_name(&self, name: &str, resolved_module: Option<usize>) -> String {
+        self.name_ledger
+            .display_path(self.module_idx, name, resolved_module)
+            .unwrap_or_else(|| name.to_string())
+    }
+
     pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
         self.source_nesting += 1;
         if self.source_nesting <= crate::Diagnostics::MAX_SOURCE_NESTING {
@@ -1575,40 +1572,44 @@ impl<'a> Checker<'a> {
         if let Some(fact) = self.registry.unit_fact(name) {
             return Some((name.clone(), fact.clone()));
         }
-        if let Some((module, leaf)) = name.split_once('.') {
-            return self.modules.and_then(|modules| {
-                self.imports
-                    .get(module)
-                    .and_then(|index| modules.get(*index))
-                    .and_then(|candidate| candidate.registry.unit_fact(leaf))
-                    .map(|fact| (name.clone(), fact.clone()))
-            });
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let modules = self.modules?;
+        if let Some(namespace) = import_ns {
+            let index = if namespace.contains("::") {
+                let identity = format!("{namespace}::{leaf}");
+                self.name_ledger.nominal_module(&identity)?
+            } else {
+                *self.imports.get(namespace)?
+            };
+            let fact = modules.get(index)?.registry.unit_fact(leaf)?.clone();
+            let canonical = if index == self.module_idx {
+                leaf.to_string()
+            } else {
+                self.canonical_nominal_name(index, leaf)
+            };
+            return Some((canonical, fact));
         }
-        None
+        let mut owner = None;
+        for (index, module) in modules.iter().enumerate() {
+            if module.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
+                if owner.is_some_and(|previous| previous != index) {
+                    return None;
+                }
+                owner = Some(index);
+            }
+        }
+        let index = owner?;
+        let fact = modules.get(index)?.registry.unit_fact(leaf)?.clone();
+        let canonical = if index == self.module_idx {
+            leaf.to_string()
+        } else {
+            self.canonical_nominal_name(index, leaf)
+        };
+        Some((canonical, fact))
     }
 
     pub(crate) fn is_unit_type_name(&self, name: &str) -> bool {
-        if self.registry.is_unit_type(name) {
-            return true;
-        }
-        let Some((module, leaf)) = name.split_once('.') else {
-            return false;
-        };
-        let Some(modules) = self.modules else {
-            return false;
-        };
-        let index = self.imports.get(module).copied().or_else(|| {
-            self.imports
-                .values()
-                .copied()
-                .find(|&index| modules[index].module_alias == module)
-        });
-        let Some(index) = index else {
-            return false;
-        };
-        modules.get(index).is_some_and(|candidate| {
-            candidate.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf)
-        })
+        self.unit_fact_for_type(&Type::Named(name.to_string())).is_some()
     }
 
     pub(crate) fn is_unit_type(&self, ty: &Type) -> bool {
@@ -1628,9 +1629,15 @@ impl<'a> Checker<'a> {
             QuantityKind::Point => format!("{stem}Point"),
             QuantityKind::Delta => format!("{stem}Delta"),
         };
-        let candidate = source_name
-            .split_once('.')
-            .map_or_else(|| leaf.clone(), |(module, _)| format!("{module}.{leaf}"));
+        let candidate = Self::split_type_name(source_name)
+            .0
+            .map_or_else(|| leaf.clone(), |namespace| {
+                if namespace.contains("::") {
+                    format!("{namespace}::{leaf}")
+                } else {
+                    format!("{namespace}.{leaf}")
+                }
+            });
         self.unit_fact_for_type(&Type::Named(candidate.clone()))
             .filter(|(_, other)| {
                 other.package == fact.package && other.family == fact.family && other.kind == kind
@@ -1969,7 +1976,7 @@ pub fn stmt_references_name_exact(stmt: &Stmt, name: &str) -> bool {
 }
 
 /// Same question as `stmt_references_name_exact`, but a use inside a lambda
-/// body counts. D-TASKBORROW1=A: a `taskgroup` child borrows through a lambda.
+/// body counts. D-TASKBORROW1=A: a `task.group` child borrows through a lambda.
 pub fn stmt_references_name_deep(stmt: &Stmt, name: &str) -> bool {
     Captures::stmt_uses_name_through_lambdas(stmt, name)
 }
@@ -2002,7 +2009,7 @@ pub use Bundle::{
     bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    prepare_script_entries, specialize_function_types,
+    specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{EffectSummary, SemIndexEffectFacts};

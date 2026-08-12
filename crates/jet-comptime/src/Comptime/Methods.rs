@@ -6,26 +6,31 @@ mod dispatch;
 mod repl_process;
 #[path = "Methods/core_calls.rs"]
 mod core_calls;
+#[path = "Methods/time_deadline.rs"]
+mod time_deadline_kernel;
 #[path = "Methods/pool.rs"]
 mod pool;
 
 pub(super) use core_calls::{
     apply_core_pure_method, apply_regex_method, as_float, as_string, solver_require,
 };
-pub(crate) use core_calls::validate_datetime_literal;
+pub(crate) use core_calls::{evaluate_typed_datetime_literal, url_parts_to_ct, validate_datetime_literal};
 /// Public host entry for the TIR evaluator (#777).
 pub use core_calls::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, data_status_rows,
-    display_core_pure_value, eval_regex_replace_all_with,
+    apply_core_call, apply_core_call_with_type, apply_data_line_call, apply_impure_core_call,
+    apply_impure_core_call_with_type, data_status_rows, display_core_pure_value,
+    eval_regex_replace_all_with,
 };
 pub use dispatch::apply_dollar_splices;
 /// Public for TirBridge `Rng.shuffle(&list)` write-back (#777).
 pub use dispatch::apply_seeded_rng_method;
+pub use dispatch::apply_seeded_rng_method_with_type;
 pub use dispatch::{
     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch,
     is_tier2_core_call, vault_comptime_denied,
 };
 pub use repl_process::apply_repl_authorized_core_call;
+pub use repl_process::apply_repl_authorized_core_call_with_type;
 pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
 
 pub(super) fn apply_pool(
@@ -54,14 +59,18 @@ mod structure_tests {
                 "core_calls/regex",
                 include_str!("Methods/core_calls/regex.rs"),
             ),
+            ("core_calls/data", include_str!("Methods/core_calls/data.rs")),
+            (
+                "core_calls/impure",
+                include_str!("Methods/core_calls/impure.rs"),
+            ),
             ("pool", include_str!("Methods/pool.rs")),
         ] {
             let lines = source.lines().count();
             assert!(
-                lines < 3_300,
+                lines < 2_500,
                 "{name}.rs regrew to {lines} lines; split it along semantic ownership \
-                 (cap raised from 2_500 when dispatch absorbed empty-schema/REPL \
-                 binding-type plumbing for core.data; still under one module)"
+                 without changing the 2,500-line module cap"
             );
         }
     }

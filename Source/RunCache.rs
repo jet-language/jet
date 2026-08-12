@@ -144,7 +144,14 @@ fn path_digest(path: &Path) -> String {
 
 /// Content + dependency + compiler + config key for a script run.
 pub fn run_cache_key(entry: &Path, program_args: &[&str]) -> String {
-    let mut graph = WatchGraph::discover(entry);
+    let mut graph = match WatchGraph::discover(entry) {
+        Ok(graph) => graph,
+        Err(diagnostic) => {
+            // Fail closed: an authority error yields a key no healthy run can
+            // produce, so the cache misses and the real run reports it.
+            return format!("jet-run-cache-v1:discover-error:{}:{}", entry.display(), diagnostic.code);
+        }
+    };
     graph.refresh_stamps();
     let mut chunks = Vec::new();
     chunks.push(b"jet-run-cache-v1".to_vec());

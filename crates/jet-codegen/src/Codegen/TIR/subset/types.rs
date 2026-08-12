@@ -22,11 +22,12 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 }
 
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
-/// Char, String, a covered *plain user struct* (c109 Phase 3), a covered
+/// Char, String, a covered *plain user struct* (c109 Phase 3) or generic
+/// struct application (c109 Phase 19), a covered
 /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
 /// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Generic type variables
-/// are admitted when active in the enclosing function; generic struct
-/// applications and recursive (boxed) types are still out.
+/// are admitted when active in the enclosing function; recursive (boxed) types
+/// remain out of the value subset.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     let ty = cx.expand_type_aliases(ty);
     // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
@@ -98,14 +99,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
 /// representation. Sema owns the shape checks; this gate only admits the
 /// resolved forms that `cx.rust_type` renders to that representation.
 pub(crate) fn is_covered_compute_ty(ty: &Type) -> bool {
-    match ty {
-        Type::Named(name) => name == "Tensor",
-        Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
-        Type::Apply { name, .. } if matches!(name.as_str(), "Vec" | "Matrix") => {
-            ty.compute_shape_dimensions().is_some()
-        }
-        _ => false,
-    }
+    ty.is_compute_tensor_family()
 }
 
 fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
@@ -123,7 +117,7 @@ fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(
         ty,
         Type::Apply { name, args }
-            if matches!(name.as_str(), "View" | "ViewMut" | crate::Syntax::TYPE_PIN)
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_PIN)
                 && args.len() == 1
                 && (matches!(&args[0], Type::Named(inner) if inner == "str")
                     || is_subset_param_ty(&args[0], cx))
@@ -305,7 +299,7 @@ pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 21: a `Task<T>`/`Channel<T>`/`Sender<T>` element type. Any covered value
 /// type, PLUS `Unit` (`Type::Named("Unit")`) — the result type of a `() => { … }` spawn
-/// closure that returns nothing (`tasks.spawn(() => { s.send(…) })` →
+/// closure that returns nothing (`task { s.send(…) }` →
 /// `Task<Unit>`, the `[Task<Unit>]` worker list in 34_parallel_scan). `Unit` renders via
 /// `cx.rust_type` to `()` (Source/Codegen/Context.rs), so `JetTask<()>` is byte-identical
 /// to the AST path. (`Unit` is not a covered value type generally — it has no binding/
@@ -317,17 +311,20 @@ pub(crate) fn concurrency_elem_covered(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 19: a GENERIC struct application `Pair<T>` / `Stack<Int>` (a `Type::Apply`)
 /// usable as a param/return/local value type. The base name must be a covered user struct
-/// (`struct_is_covered` — which now admits type-var fields, Phase 19), and every type
-/// argument must itself be a covered value type OR a bare type variable. The Rust head is
-/// `user_<Name>::<args>` (the turbofish from `user_type_apply_rust`), resolved at lowering.
-/// `cx.rust_type` already renders `Type::Apply` to that head, so param/return/local typing
-/// is byte-identical to the AST path. (A non-generic `Type::Apply` would be malformed;
-/// sema only produces `Apply` for a generic struct/enum instantiation.)
+/// (`struct_is_covered` — which admits type-var fields, Phase 19), and every type argument
+/// must itself be a covered value type OR a bare type variable. Imported struct shapes use
+/// their canonical qualified names in the same tables, so `owner::Stack<Int>` follows the
+/// identical TIR path. The Rust head is `user_<Name>::<args>` (the turbofish from
+/// `user_type_apply_rust`), resolved at lowering. `cx.rust_type` already renders
+/// `Type::Apply` to that head, so param/return/local typing is byte-identical to the AST
+/// path. (A non-generic `Type::Apply` would be malformed; sema only produces `Apply` for a
+/// generic struct/enum instantiation.)
 pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    // The base must be a known user struct (not an enum/trait/foreign/prelude type).
+    // The base must be a known struct (not an enum/trait/core/prelude type). Local
+    // and imported user structs are both registered in `cx.struct_fields`.
     if !cx.struct_fields.contains_key(name) {
         return false;
     }
@@ -386,15 +383,9 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
             || cx.current_type_params.borrow().contains(n.as_str()))
 }
 
-/// Resolve a user nominal through the one codegen import map. A sema type may
-/// be bare (`Note`) in a declaration or qualified (`note.Note`) at a literal;
-/// both spellings must consult the same foreign module entry.
+/// Resolve a user nominal through the one canonical codegen import map.
 pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
-    let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
-    cx.foreign_types
-        .get(name)
-        .or_else(|| cx.foreign_types.get(leaf))
-        .map(String::as_str)
+    cx.foreign_types.get(name).map(String::as_str)
 }
 
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
@@ -492,7 +483,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
 /// subset? The `import_ns` struct-literal branch emits
 /// `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED field names.
 /// Cover it when: the import alias resolves in `cx.import_mods` (so the module head is
-/// total), the type is a registered cross-module type (`cx.foreign_types`), and every
+/// total), the owner-qualified shape is registered, and every
 /// turbofish type arg is a covered/type-var value. The field VALUES are checked in-subset
 /// by the caller; the foreign struct's field *types* live in another module and don't
 /// affect the emit (the head + mangled field names are the whole shape). A trait-coerced
@@ -503,13 +494,19 @@ pub(crate) fn foreign_struct_lit_in_subset(
     import_ns: Option<&str>,
     cx: &Cx,
 ) -> bool {
-    let Some(alias) = import_ns else {
+    let alias = import_ns.unwrap_or("");
+    let Some(qualified) = cx.foreign_type_identity(alias, type_name) else {
         return false;
     };
-    if !cx.import_mods.contains_key(alias) {
-        return false;
+    if let Some(alias) = import_ns {
+        let Some(import_mod) = cx.import_mods.get(alias) else {
+            return false;
+        };
+        if cx.foreign_types.get(&qualified) != Some(import_mod) {
+            return false;
+        }
     }
-    if foreign_type_module(type_name, cx).is_none() {
+    if !cx.struct_fields.contains_key(&qualified) {
         return false;
     }
     type_args

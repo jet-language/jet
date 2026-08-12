@@ -856,18 +856,22 @@ oauth_finish(state, subject, now_ms, ttl_ms) => Session ? String
 key, and verifies the PAE input including the supplied footer and implicit
 assertion. Unknown algorithms, versions, and purposes fail closed.
 
-Both formats require integer `exp` and matching `aud` claims. An optional
-expected issuer must match `iss`. Expiry is compared in milliseconds, equality
-is expired, subsecond skew is preserved, and arithmetic overflow is rejected.
-Token JSON rejects duplicate object keys after escape decoding, including
-duplicates in headers and claims. Base64url input must be unpadded and
-canonical.
+Both formats require exact signed-integer `exp` and matching `aud` claims. An
+optional `nbf` claim uses the same exact NumericDate representation. An
+optional expected issuer must match `iss`. `iat` and `nbf` are preserved in
+`Claims`; expiry and not-before comparisons use nanoseconds, equality at the
+expiry boundary is expired, skew is applied with exact signed arithmetic, and
+arithmetic overflow is rejected. Token JSON rejects duplicate object keys
+after escape decoding, including duplicates in headers and claims. Base64url
+input must be unpadded and canonical.
 
 `Claims` exposes `subject: String?`, the validated `audience: String`,
-`issuer: String?`, `expires_at: Int`, and `issued_at: Int?`. `AuthError` is an
-inspectable enum with `MalformedToken`, `UnsupportedToken`, `InvalidSignature`,
-`WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`, `TokenExpired`, and
-`DecodeError` variants. Sessions use httponly/secure/samesite cookie defaults.
+`issuer: String?`, `expires_at: Int`, `not_before: Int?`, and `issued_at:
+Int?`. `AuthError` is an inspectable enum with `MalformedToken`,
+`UnsupportedToken`, `InvalidSignature`, `WeakKey`, `MissingClaim`,
+`WrongAudience`, `WrongIssuer`, `TokenExpired`, `DecodeError`, and
+`TokenNotYetValid` variants. Sessions use httponly/secure/samesite cookie
+defaults.
 The implementation is compiler-embedded, reuses Jet's JSON and crypto
 mechanisms, and adds no external dependency.
 
@@ -1116,6 +1120,7 @@ fn run() {
     p :: Point.{ x: 3, y: 4 }
     v :: reflect.of(p)
     print(v.type_name())    // "Point"
+    print(v.path())         // the canonical typeable path, e.g. "reflect_value.Point"
     print(v.display())      // "(3, 4)" — exactly what "{p}" would print
     loop f; v.fields() {
         print("{f.name()} = {f.value()}")
@@ -1128,6 +1133,7 @@ fn run() {
 | Method | Signature | Returns |
 |--------|-----------|---------|
 | `.type_name()` | `() → String` | the value's declared type name |
+| `.path()` | `() → String` | the canonical typeable path; `.type_name()` remains its leaf |
 | `.display()` | `() → String` | the same string `"{x}"` interpolation shows |
 | `.fields()` | `() → [Field]` | one entry per struct field; `[]` for anything else (primitives, enums, tuples, lists) |
 
@@ -2460,8 +2466,6 @@ Blocking tasks and typed channels are Jet's concurrency model. There is no
 `async`/`await` and no mutex API; tasks communicate by sending owned values.
 
 ```jet
-use core.tasks as tasks
-
 fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n; first..last {
@@ -2471,11 +2475,11 @@ fn sum_range(first: Int, last: Int) => Int {
 }
 
 fn run() {
-    a :: tasks.spawn(() => sum_range(1, 25))
-    b :: tasks.spawn(() => sum_range(26, 50))
-    c :: tasks.spawn(() => sum_range(51, 75))
-    d :: tasks.spawn(() => sum_range(76, 100))
-    print(a.join() + b.join() + c.join() + d.join())
+    a :: task sum_range(1, 25)
+    b :: task sum_range(26, 50)
+    c :: task sum_range(51, 75)
+    d :: task sum_range(76, 100)
+    print((a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0) + (d.join() ?? 0))
 }
 ```
 
@@ -2486,10 +2490,10 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    task :: tasks.spawn(() => {
+    handle :: task {
         sender.send(42)
-    })
-    task.join()
+    }
+    handle.join() ?? panic("task failed")
     print(ch.receive() ?? panic("channel closed"))
 }
 ```
@@ -2502,18 +2506,17 @@ there's no combined channel value).
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
-| `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
-| `tasks.join_all(handles)` | `[T]` | Consume `[Task<T>]`, wait in list order, and return results in that order |
-| `tasks.wait_any(handles)` | `T` | Consume `[Task<T>]` and return the first finished result |
+| `task body` / `task { body }` | `Task<T>` | Run one zero-parameter child |
+| `task.all { … }` | `[T] ? TaskFailure` | Run every branch, fail-fast, and return results in source order |
+| `task.race { … }` | `T ? TaskFailure` | Return the first successful branch and cancel losers |
+| `task.any { … }` | `T ? TaskFailure` | Return the first completed branch and cancel the rest |
+| `task.group name(limit: n) { … }` | nothing | Own children and join them at scope close |
 | `tasks.yield_now()` | nothing | Cooperative yield at a scheduler wait point (`yield` is the stream keyword) |
 | `tasks.current_task()` | `String` | Control-plane trace of the running task (`paused=...,cancel=...`) |
-| `task.join()` | `T` | Wait for the task and consume the task handle |
-| `task.wait()` | `T` | Alias of `.join()` |
-| `task.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
-| `task.resume()` | nothing | Clear paused state on the task control plane |
-| `task.cancel()` | nothing | Request cancellation on the task control plane |
-| `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
-| `task.exception()` | `String` | `"cancelled"` after cancel; otherwise `""` |
+| `handle.join()` | `T ? TaskFailure` | Wait for the task and consume the task handle |
+| `handle.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
+| `handle.resume()` | nothing | Clear paused state on the task control plane |
+| `handle.cancel()` | nothing | Request cancellation on the task control plane |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
 | `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
 | `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
@@ -2525,21 +2528,20 @@ there's no combined channel value).
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 | `receiver.close()` | nothing | Close the receive half explicitly |
 
-Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
+Values crossing a task body or `send` must be sendable: no `View<T>` or string-view
 windows, no trait values, and no closure values with non-sendable captures.
 Copyable captures copy automatically; owned non-copyable captures move. A
 `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
-With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
-`task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
+With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`handle.join()` /
+`ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
 and `ProcessChild.wait()`) observe the inherited budget and report runtime
 **E3003** on exceed. Task cancellation wakes the same scheduler wait points.
 
-Use `tasks.join_all([first, second])` when code already owns free task handles
-and needs every result in handle-list order. The list and each handle are
-consumed. `taskgroup` remains the structured default: it owns child tasks until
-scope exit. Inside one, use `g.all`, `g.race`, and `g.any`; `race`/`any` cancel
-losers. `g.select()` races receivers and timers: `.recv(rx)` waits for a channel
+`task.group` remains the structured default: it owns child tasks until scope
+exit. A numeric limit below one is clamped to one before a child starts. Inside
+one, use `task.all`, `task.race`, and `task.any`; `race`/`any` cancel losers.
+The group handle's `select()` races receivers and timers: `.recv(rx)` waits for a channel
 value, `.after(ms: N)` is a unit timer arm, and `.after(ms: N, value: fallback)`
 is a typed timeout arm that can be mixed with same-`T` receive arms.
 
@@ -3669,7 +3671,7 @@ share that source-owned TIR path.
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#RenameAll(camel)` |
 | `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
-| `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
+| `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.path()`/`.display()`/`.fields()` |
 | `examples/features/syntax/maturity_tags.jet` | `#Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

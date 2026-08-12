@@ -77,12 +77,7 @@ fn run() {
 
 #[test]
 fn named_args_example_runs_on_resident_jit_and_forced_interpreter() {
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(named_args_example_runs_on_resident_jit_and_forced_interpreter_inner)
-        .expect("named_args tier proof thread")
-        .join()
-        .expect("named_args tier proof thread panicked");
+    named_args_example_runs_on_resident_jit_and_forced_interpreter_inner();
 }
 
 fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
@@ -111,6 +106,19 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|error| panic!("named_args example must compile in resident JIT: {error}"));
+
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT named_args failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        aot.stdout,
+        expected.as_bytes(),
+        "AOT named_args observable order drifted"
+    );
 
     jet_jit::reset_jit_trace_for_test();
     let interpreted = match dev_iteration(&shown, false, true) {
@@ -156,23 +164,6 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
 
 #[test]
 fn bounded_workers_example_has_total_tir() {
-    // Sema and TIR lowering recurse per source-nesting level with large debug
-    // frames (#1319). Direct calls to jet_jit's lowering helpers bypass the
-    // 32 MiB compiler worker thread that public entry points like
-    // `jet::compile` route through, so they still run on libtest's default
-    // 2 MiB thread. bounded_workers's four sequential `tasks.spawn` closures
-    // plus channel/generic inference push that over the edge. Same fix as
-    // #1614/#1615: give this test the same 16 MiB thread jit_coverage_audit
-    // uses, instead of overflowing.
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(bounded_workers_example_has_total_tir_inner)
-        .expect("bounded_workers TIR check thread")
-        .join()
-        .expect("bounded_workers TIR check thread panicked");
-}
-
-fn bounded_workers_example_has_total_tir_inner() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/concurrency/bounded_workers.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
@@ -449,6 +440,20 @@ fn run() {
         .Err(e) -> { print("signal-error") }
         else -> {}
     }
+
+    child :: process.cmd(["sh", "-c", "kill -TERM $$"]).spawn() ?? panic("signal spawn failed")
+    first :: child.wait() ?? panic("first signal wait failed")
+    second :: child.wait() ?? panic("second signal wait failed")
+    print("{first.code}:{first.success}:{second.code}:{second.success}")
+    if first.signal == second.signal {
+        print("repeat-signal-same")
+    } else {
+        print("repeat-signal-different")
+    }
+    if first.signal == {
+        .Val(signal) -> print("repeat-signal:{signal}")
+        .None -> print("repeat-signal:none")
+    }
 }
 "#,
     )
@@ -475,7 +480,7 @@ fn run() {
     assert_eq!(default.stdout, release.stdout);
     assert_eq!(
         String::from_utf8(default.stdout).unwrap(),
-        "true\n0\nfalse\n7\nchecked-error\nsignal-error\n"
+        "true\n0\nfalse\n7\nchecked-error\nsignal-error\n-1:false:-1:false\nrepeat-signal-same\nrepeat-signal:15\n"
     );
 
     let trace = String::from_utf8(default.stderr).unwrap();

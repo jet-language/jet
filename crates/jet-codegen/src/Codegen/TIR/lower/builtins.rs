@@ -870,7 +870,7 @@ pub(crate) fn resolve_closure_op(
                 TClosureOp::OptionMap
             } else if matches!(recv_ty, Type::Map { .. }) {
                 TClosureOp::MapMap
-            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
+            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")) {
                 // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
                 // the other list ops use (`recv` is already a borrow, not owned).
                 TClosureOp::ViewMap
@@ -936,7 +936,7 @@ pub(crate) fn resolve_closure_op(
         "fold" => {
             if matches!(recv_ty, Type::Map { .. }) {
                 TClosureOp::MapFold
-            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
+            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")) {
                 TClosureOp::ViewFold
             } else {
                 TClosureOp::Fold

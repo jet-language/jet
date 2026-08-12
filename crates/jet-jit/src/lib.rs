@@ -149,6 +149,7 @@ mod Cell;
 mod CLI;
 mod Collections;
 mod Compress;
+mod Compute;
 mod Concurrency;
 mod CoreHost;
 mod Crypto;
@@ -190,6 +191,15 @@ mod Web;
 /// Shared by prelude `include!` fragments that impl `crate::JetShow`.
 pub(crate) trait JetShow {
     fn jet_show(&self) -> String;
+}
+
+/// Display/debug seams for included Prelude fragments (`impl crate::JetDisplay`).
+pub(crate) trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
+pub(crate) trait JetDebug {
+    fn jet_debug(&self) -> String;
 }
 
 /// Canonical XML pull engine — EncodingStream refers to `crate::jet_xml_pull`.

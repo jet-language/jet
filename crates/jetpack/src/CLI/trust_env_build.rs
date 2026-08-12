@@ -5,7 +5,10 @@ use super::realize::{
     report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
-use super::workspace_sources::{cwd_table, load_workspace};
+use super::workspace_sources::{
+    cwd_table, load_workspace_for_source, project_root, workspace_index_required_diagnostic,
+    workspace_root_snapshot_or_exit,
+};
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
@@ -17,6 +20,8 @@ use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
 use crate::WorkspaceFile::WorkspaceMember;
+use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
 /// store; top-level `jet trust` dispatches here.
@@ -673,26 +678,41 @@ fn run_workspace_members(
     theme: &Theme,
     parsed: &Parsed,
     dir: &std::path::Path,
+    checked_source: &(AuthorityResolver, WorkspaceSource),
     plan_members: &[WorkspaceMember],
     action: WorkspaceAction,
 ) -> i32 {
     let roots = Store::resolve();
     let mut ok = true;
     let mut built: Vec<WorkspaceMember> = Vec::new();
-    let ordered_members = MemberSelect::dependency_order(dir, plan_members);
-    for (idx, member) in ordered_members.iter().enumerate() {
-        let abs = if std::path::Path::new(&member.path).is_absolute() {
-            std::path::PathBuf::from(&member.path)
-        } else {
-            dir.join(&member.path)
-        };
+    let (resolver, source) = checked_source;
+    if source.role != WorkspaceSourceRole::Index {
+        return report_select_error(theme, &workspace_index_required_diagnostic());
+    }
+    if let Err(error) = resolver.revalidate_source(source) {
+        return report_select_error(theme, &error.diagnostic());
+    }
+    let ordered_members = match MemberSelect::dependency_order_packages_checked(resolver, plan_members) {
+        Ok(ordered_members) => ordered_members,
+        Err(error) => {
+            let diagnostic = error.diagnostic();
+            return report_select_error(theme, &diagnostic);
+        }
+    };
+    for (idx, (member, checked_package)) in ordered_members.iter().enumerate() {
+        if let Err(error) = resolver.revalidate_member(&checked_package.member) {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+            continue;
+        }
+        if let Err(error) = resolver.revalidate_source(source) {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+            continue;
+        }
         theme.status(&format!("{} workspace member: {}", action.present(), member.name));
-        let table = RefSpec::SourceTable::from_decls([(
-            member.name.clone(),
-            format!("path:{}", abs.display()),
-            ProviderKind::Core,
-        )]);
-        let raw = format!("{}@{}", member.name, member.name);
         if ordered_members.len() > 1 {
             theme.progress_chain(
                 action.present(),
@@ -702,6 +722,13 @@ fn run_workspace_members(
                 "workspace",
             );
         }
+        let abs = checked_package.member.directory.path.clone();
+        let table = RefSpec::SourceTable::from_decls([(
+            member.name.clone(),
+            format!("path:{}", abs.display()),
+            ProviderKind::Core,
+        )]);
+        let raw = format!("{}@{}", member.name, member.name);
         let spec = match RefSpec::classify_in(&raw, &table) {
             Ok(s) => s,
             Err(e) => {
@@ -710,23 +737,45 @@ fn run_workspace_members(
                 continue;
             }
         };
-        if realize_ref(
+        if let Err(error) = resolver
+            .revalidate_source(source)
+            .and_then(|_| resolver.revalidate_member(&checked_package.member))
+        {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+            continue;
+        }
+        let realized = realize_ref(
             theme,
             &roots,
             &parsed.flags,
             &table,
             &spec,
             member.name.len().max(8),
-        )
-        .is_none() {
+        );
+        let authority_valid = resolver
+            .revalidate_source(source)
+            .and_then(|_| resolver.revalidate_member(&checked_package.member));
+        if let Err(error) = authority_valid {
             ok = false;
-        } else if action == WorkspaceAction::Test && !run_jet_tests(&abs) {
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+        } else if realized.is_none() {
             ok = false;
+        } else if action == WorkspaceAction::Test {
+            if run_jet_tests(&checked_package.member.directory.path) {
+            } else {
+                ok = false;
+            }
         } else {
             built.push(member.clone());
         }
     }
     if ok {
+        if let Err(error) = resolver.revalidate_source(source) {
+            return report_select_error(theme, &error.diagnostic());
+        }
         MemberSelect::record_member_input_hashes(dir, &built);
         theme.status(&format!(
             "{} {} workspace member(s).",
@@ -743,28 +792,36 @@ fn run_workspace_members(
 pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
+    let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
 
-    // D-WORKSPACE1=B: if workspace.jet is present, build selected workspace
+    // D-WORKSPACE1=B: if a workspace declaration is present, build selected
     // members via the first-party core provider (no Nix required).
-    if dir.join(Syntax::WORKSPACE_FILE).exists() {
-        if let Some(result) = load_workspace(&dir) {
+    if let Some(checked) = workspace_source.as_ref() {
+        if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
             return match result {
-                Err(code) => code,
-                Ok(plan) => {
-                    let req = select_request_from_flags(&parsed.flags);
-                    let selected = match MemberSelect::select_members(&dir, &plan, &req) {
-                        Ok(m) => m,
-                        Err(d) => return report_select_error(theme, &d),
-                    };
-                    if selected.is_empty() {
-                        theme.status("no workspace members matched the selection.");
-                        return 0;
-                    }
-                    run_workspace_members(theme, parsed, &dir, &selected, WorkspaceAction::Build)
+            Err(code) => code,
+            Ok(plan) => {
+                let req = select_request_from_flags(&parsed.flags);
+                let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
+                    Ok(m) => m,
+                    Err(d) => return report_select_error(theme, &d),
+                };
+                if selected.is_empty() {
+                    theme.status("no workspace members matched the selection.");
+                    return 0;
                 }
+                run_workspace_members(
+                    theme,
+                    parsed,
+                    &workspace_dir,
+                    checked,
+                    &selected,
+                    WorkspaceAction::Build,
+                )
+            }
             };
         }
     }
@@ -772,7 +829,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
             Ok(s) => RunPlan {
-                project_root: dir.clone(),
+                project_root: project_root(&dir),
                 refs: vec![s],
                 adapters: Vec::new(),
                 table: cwd_table(),
@@ -947,27 +1004,35 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
 
 pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
+    let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
-    if dir.join(Syntax::WORKSPACE_FILE).exists() {
-        if let Some(result) = load_workspace(&dir) {
+    if let Some(checked) = workspace_source.as_ref() {
+        if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
             return match result {
-                Err(code) => code,
-                Ok(plan) => {
-                    let req = select_request_from_flags(&parsed.flags);
-                    let selected = match MemberSelect::select_members(&dir, &plan, &req) {
-                        Ok(m) => m,
-                        Err(d) => return report_select_error(theme, &d),
-                    };
-                    if selected.is_empty() {
-                        theme.status("no workspace members matched the selection.");
-                        return 0;
-                    }
-                    let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
-                    theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
-                    run_workspace_members(theme, parsed, &dir, &selected, WorkspaceAction::Test)
+            Err(code) => code,
+            Ok(plan) => {
+                let req = select_request_from_flags(&parsed.flags);
+                let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
+                    Ok(m) => m,
+                    Err(d) => return report_select_error(theme, &d),
+                };
+                if selected.is_empty() {
+                    theme.status("no workspace members matched the selection.");
+                    return 0;
                 }
+                let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
+                theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
+                run_workspace_members(
+                    theme,
+                    parsed,
+                    &workspace_dir,
+                    checked,
+                    &selected,
+                    WorkspaceAction::Test,
+                )
+            }
             };
         }
     }

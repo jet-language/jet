@@ -1,5 +1,6 @@
 //! D-COMPUTE1=D / I9: `core.compute` ambient mirrors AOT Prelude `jet_compute_*`
-//! by including the same source (`Prelude/CoreLib/Top/Compute.rs`). Marshalling
+//! by including the same compute and view-access sources
+//! (`Prelude/CoreLib/Top/Compute.rs`, `Prelude/Core/ViewAccess.rs`). Marshalling
 //! to `CtValue` lives here; engines must not re-encode tensor law.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs
 
@@ -41,6 +42,7 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
 fn device_to_ct(device: JetComputeDevice) -> CtValue {
@@ -236,6 +238,20 @@ struct JetComputeTapeHandle {
     tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
 }
 
+const TENSOR_HANDLE_FIELD: &str = "__jet_tensor_handle";
+
+#[derive(Clone)]
+struct JetComputeTensorHandle {
+    tensor: std::sync::Arc<std::sync::Mutex<JetTensor>>,
+    valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Clone)]
+struct JetComputeWindowHandle {
+    valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    tensor_valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
 fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> CtValue {
     CtValue::Closure(std::sync::Arc::new(ClosureData {
         lambda: Lambda {
@@ -249,6 +265,155 @@ fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> 
         return_type: None,
         opaque: Some(CtOpaque::new(JetComputeTapeHandle { tape })),
     }))
+}
+
+fn tensor_handle_to_ct(
+    tensor: std::sync::Arc<std::sync::Mutex<JetTensor>>,
+    valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> CtValue {
+    CtValue::Closure(std::sync::Arc::new(ClosureData {
+        lambda: Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            body: LambdaBody::Block(Vec::new()),
+            span: Span::new(0, 0),
+            meta: LambdaMeta::default(),
+        },
+        captured: std::collections::HashMap::new(),
+        return_type: None,
+        opaque: Some(CtOpaque::new(JetComputeTensorHandle { tensor, valid })),
+    }))
+}
+
+fn opaque_closure<T: std::any::Any + Send + Sync>(opaque: T) -> CtValue {
+    CtValue::Closure(std::sync::Arc::new(ClosureData {
+        lambda: Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            body: LambdaBody::Block(Vec::new()),
+            span: Span::new(0, 0),
+            meta: LambdaMeta::default(),
+        },
+        captured: std::collections::HashMap::new(),
+        return_type: None,
+        opaque: Some(CtOpaque::new(opaque)),
+    }))
+}
+
+const TENSOR_WINDOW_HANDLE_FIELD: &str = "__jet_tensor_window_handle";
+
+pub fn tensor_window_handle(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = tensor_handle_state(value, span)?;
+    Ok(opaque_closure(JetComputeWindowHandle {
+        valid: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        tensor_valid: tensor.valid,
+    }))
+}
+
+pub fn tensor_window_is_live(fields: &[(String, CtValue)]) -> bool {
+    let Some(value) = fields
+        .iter()
+        .find(|(name, _)| name == TENSOR_WINDOW_HANDLE_FIELD)
+        .map(|(_, value)| value)
+    else {
+        return true;
+    };
+    let CtValue::Closure(data) = value else {
+        return false;
+    };
+    data.opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
+        .is_some_and(|handle| {
+            handle.valid.load(std::sync::atomic::Ordering::Acquire)
+                && handle
+                    .tensor_valid
+                    .load(std::sync::atomic::Ordering::Acquire)
+        })
+}
+
+pub fn tensor_window_drop_value(value: &CtValue, span: Span) -> Result<(), Diagnostic> {
+    let CtValue::Struct { fields, .. } = value else {
+        return Err(unsupported("Tensor window", span));
+    };
+    let Some(value) = fields
+        .iter()
+        .find(|(name, _)| name == TENSOR_WINDOW_HANDLE_FIELD)
+        .map(|(_, value)| value)
+    else {
+        return Ok(());
+    };
+    let CtValue::Closure(data) = value else {
+        return Err(unsupported("Tensor window handle", span));
+    };
+    let handle = data
+        .opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
+        .ok_or_else(|| unsupported("Tensor window handle", span))?;
+    handle
+        .valid
+        .store(false, std::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+pub fn tensor_window_values_share_handle(left: &CtValue, right: &CtValue) -> bool {
+    let handle = |value: &CtValue| {
+        let CtValue::Struct { fields, .. } = value else {
+            return None;
+        };
+        let CtValue::Closure(data) = fields
+            .iter()
+            .find(|(name, _)| name == TENSOR_WINDOW_HANDLE_FIELD)
+            .map(|(_, value)| value)?
+        else {
+            return None;
+        };
+        data.opaque
+            .as_ref()
+            .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
+            .map(|handle| std::sync::Arc::clone(&handle.valid))
+    };
+    handle(left).zip(handle(right)).is_some_and(|(left, right)| {
+        std::sync::Arc::ptr_eq(&left, &right)
+    })
+}
+
+fn tensor_handle_from_fields(
+    fields: &[(String, CtValue)],
+    span: Span,
+) -> Result<Option<JetComputeTensorHandle>, Diagnostic> {
+    let Some(value) = fields
+        .iter()
+        .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
+        .map(|(_, value)| value)
+    else {
+        return Ok(None);
+    };
+    let CtValue::Closure(data) = value else {
+        return Err(unsupported("Tensor handle", span));
+    };
+    data.opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
+        .filter(|handle| {
+            handle
+                .valid
+                .load(std::sync::atomic::Ordering::Acquire)
+        })
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| unsupported("Tensor handle", span))
+}
+
+fn tensor_handle_state(
+    value: &CtValue,
+    span: Span,
+) -> Result<JetComputeTensorHandle, Diagnostic> {
+    let CtValue::Struct { fields, .. } = value else {
+        return Err(unsupported("Tensor", span));
+    };
+    tensor_handle_from_fields(fields, span)?.ok_or_else(|| unsupported("Tensor handle", span))
 }
 
 fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
@@ -317,10 +482,23 @@ fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
 }
 
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
-    tensor_to_ct_inner(tensor, true)
+    let handle = std::sync::Arc::new(std::sync::Mutex::new(tensor.clone()));
+    let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    tensor_to_ct_with_handle(tensor, handle, valid, true)
 }
 
 fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: bool) -> CtValue {
+    let handle = std::sync::Arc::new(std::sync::Mutex::new(tensor.clone()));
+    let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    tensor_to_ct_with_handle(tensor, handle, valid, include_trace)
+}
+
+fn tensor_to_ct_with_handle(
+    tensor: &JetTensor,
+    handle: std::sync::Arc<std::sync::Mutex<JetTensor>>,
+    valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    include_trace: bool,
+) -> CtValue {
     // CtValue owns lists; Prelude remains authority for validation and logical
     // element selection at this engine boundary.
     if let Err(error) = jet_compute_validate_tensor(tensor) {
@@ -379,6 +557,10 @@ fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: bool) -> CtValue {
             ));
         }
     }
+    fields.push((
+        TENSOR_HANDLE_FIELD.to_string(),
+        tensor_handle_to_ct(handle, valid),
+    ));
     CtValue::Struct {
         type_name: "Tensor".to_string(),
         fields,
@@ -591,36 +773,16 @@ fn ct_to_tensor_inner(
     if type_name != "Tensor" && type_name != "JetTensor" {
         return Err(unsupported("Tensor", span));
     }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v)
-            .ok_or_else(|| unsupported("Tensor field", span))
-    };
-    let last_transfer = match field("last_transfer")? {
-        CtValue::Present(value) => Some(ct_to_transfer(value, span)?),
-        CtValue::Failed(CtReport::Clean(_)) => None,
-        _ => return Err(unsupported("Tensor last_transfer", span)),
-    };
-    let trace = if include_trace {
-        match fields.iter().find(|(name, _)| name == "autodiff").map(|(_, value)| value) {
-            Some(CtValue::Present(value)) => Some(trace_from_ct(value, span)?),
-            Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
-            Some(_) => return Err(unsupported("Tensor autodiff trace", span)),
-        }
-    } else {
-        None
-    };
-    let tensor = JetTensor {
-        shape: as_i64_list(field("shape")?, span)?,
-        strides: as_i64_list(field("strides")?, span)?,
-        data: std::sync::Arc::new(as_f64_list(field("data")?, span)?),
-        device: ct_to_device(field("device")?, span)?,
-        last_placement: ct_to_receipt(field("last_placement")?, span)?,
-        last_transfer,
-        trace,
-    };
+    let handle = tensor_handle_from_fields(fields, span)?
+        .ok_or_else(|| unsupported("Tensor handle", span))?;
+    let mut tensor = handle
+        .tensor
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?
+        .clone();
+    if !include_trace {
+        tensor.trace = None;
+    }
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
     if let Some(receipt) = &tensor.last_transfer {
@@ -667,9 +829,79 @@ pub fn tensor_view_window(
 ) -> Result<(usize, usize), Diagnostic> {
     let tensor = ct_to_tensor(value, span)?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    jet_compute_window_bounds(&tensor, start, end, exclusive)
-        .map(|bounds| (bounds.start, bounds.end))
+    jet_compute_view_checked(&tensor, start, end, exclusive)
+        .map(|view| (0, view.len()))
         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))
+}
+
+/// Ambient marshalling for a mutable Tensor view. Construction uses the same
+/// trace, bounds, and exclusivity checker as AOT and resident JIT; the returned
+/// range is only a CtValue carrier fact.
+pub fn tensor_view_mut_window(
+    value: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Result<(usize, usize), Diagnostic> {
+    let handle = tensor_handle_state(value, span)?;
+    let mut tensor = handle
+        .tensor
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    let view = jet_compute_view_mut_checked(&mut tensor, start, end, exclusive)
+        .map_err(|error| unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span))?;
+    let len = usize::try_from(view.len())
+        .map_err(|_| unsupported("Tensor mutable view length", span))?;
+    Ok((0, len))
+}
+
+/// Mutable/read-only Tensor-window indexing is an adapter concern at the
+/// CtValue boundary. Window addressing and element access come from the
+/// shared Prelude helpers used by AOT and the resident JIT.
+pub fn tensor_view_get_value(
+    value: &CtValue,
+    args: &[CtValue],
+    index: i64,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    jet_compute_window_get(&tensor, start, end, exclusive, index)
+        .map(|value| CtValue::Float(CtFloat::f64(value)))
+        .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))
+}
+
+pub fn tensor_view_set_value(
+    value: &CtValue,
+    args: &[CtValue],
+    index: i64,
+    replacement: &CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let handle = tensor_handle_state(value, span)?;
+    let mut tensor = handle
+        .tensor
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    let replacement = as_float(replacement, span)?;
+    jet_compute_window_set(
+        &mut tensor,
+        start,
+        end,
+        exclusive,
+        index,
+        replacement,
+    )
+    .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))?;
+    let snapshot = (*tensor).clone();
+    drop(tensor);
+    Ok(tensor_to_ct_with_handle(
+        &snapshot,
+        std::sync::Arc::clone(&handle.tensor),
+        handle.valid,
+        true,
+    ))
 }
 
 pub fn tensor_view_list(
@@ -679,12 +911,22 @@ pub fn tensor_view_list(
 ) -> Result<CtValue, Diagnostic> {
     let tensor = ct_to_tensor(value, span)?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    let view = jet_compute_slice_checked(&tensor, start, end, exclusive)
+    let view = jet_compute_view_checked(&tensor, start, end, exclusive)
         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))?;
     Ok(CtValue::List(
-        jet_compute_tensor_to_list(&view)
+        view
             .iter()
             .map(|value| CtValue::Float(CtFloat::f64(*value)))
+            .collect(),
+    ))
+}
+
+pub fn tensor_to_list_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    Ok(CtValue::List(
+        jet_compute_tensor_to_list(&tensor)
+            .into_iter()
+            .map(|value| CtValue::Float(CtFloat::f64(value)))
             .collect(),
     ))
 }
@@ -702,22 +944,91 @@ pub fn tensor_slice_value(
         .map_err(|error| unsupported(&format!("Tensor slice: {}", error.jet_show()), span))
 }
 
+pub fn tensor_copy_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    jet_compute_copy_checked(&tensor)
+        .map(|copy| tensor_to_ct(&copy))
+        .map_err(|error| unsupported(&format!("Tensor copy: {}", error.jet_show()), span))
+}
+
+/// The TIR clone node is the implicit Tensor sharing operation. Keep its
+/// storage Arc shared while giving the clone its own canonical handle, exactly
+/// as a Prelude `JetTensor::clone` does at the AOT/JIT boundary.
+pub fn tensor_clone_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    let cloned = tensor.clone();
+    Ok(tensor_to_ct(&cloned))
+}
+
+pub fn tensor_drop_value(value: &CtValue, span: Span) -> Result<(), Diagnostic> {
+    let CtValue::Struct { fields, .. } = value else {
+        return Err(unsupported("Tensor", span));
+    };
+    let value = fields
+        .iter()
+        .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
+        .map(|(_, value)| value)
+        .ok_or_else(|| unsupported("Tensor handle", span))?;
+    let CtValue::Closure(data) = value else {
+        return Err(unsupported("Tensor handle", span));
+    };
+    let handle = data
+        .opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
+        .ok_or_else(|| unsupported("Tensor handle", span))?;
+    handle
+        .valid
+        .store(false, std::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+pub fn tensor_values_share_handle(left: &CtValue, right: &CtValue) -> bool {
+    let handle = |value: &CtValue| {
+        let CtValue::Struct { fields, .. } = value else {
+            return None;
+        };
+        let CtValue::Closure(data) = fields
+            .iter()
+            .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
+            .map(|(_, value)| value)?
+        else {
+            return None;
+        };
+        data.opaque
+            .as_ref()
+            .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
+            .map(|handle| std::sync::Arc::clone(&handle.valid))
+    };
+    handle(left).zip(handle(right)).is_some_and(|(left, right)| {
+        std::sync::Arc::ptr_eq(&left, &right)
+    })
+}
+
 pub fn tensor_replace_data(
     value: &CtValue,
     items: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let mut tensor = ct_to_tensor(value, span)?;
+    let handle = tensor_handle_state(value, span)?;
+    let mut tensor = handle
+        .tensor
+        .lock()
+        .map_err(|_| unsupported("Tensor handle", span))?;
     let values = as_f64_list(&CtValue::List(items), span)?;
     if values.len() != jet_compute_tensor_values(&tensor).len() {
         return Err(unsupported("Tensor write-back length", span));
     }
-    tensor.strides = jet_compute_row_major_strides(&tensor.shape)
+    jet_compute_replace_data_checked(&mut tensor, values)
         .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
-    tensor.data = std::sync::Arc::new(values);
-    jet_compute_validate_tensor(&tensor)
-        .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
-    Ok(tensor_to_ct(&tensor))
+    let snapshot = (*tensor).clone();
+    drop(tensor);
+    Ok(tensor_to_ct_with_handle(
+        &snapshot,
+        std::sync::Arc::clone(&handle.tensor),
+        handle.valid,
+        true,
+    ))
 }
 
 fn map_err(err: JetComputeError) -> CtValue {
@@ -1085,19 +1396,35 @@ pub fn apply(
             Err(e) => err_compute(e),
         }),
         "set" => {
-            let mut tensor = ct_to_tensor(one(0)?, span)?;
+            let handle = tensor_handle_state(one(0)?, span)?;
+            let mut tensor = handle
+                .tensor
+                .lock()
+                .map_err(|_| unsupported("Tensor handle", span))?;
             match jet_compute_set(
-                &mut tensor,
+                &mut *tensor,
                 &as_i64_list(one(1)?, span)?,
                 as_float(one(2)?, span)?,
             ) {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Struct {
-                    type_name: "__JetComputeSet".to_string(),
-                    fields: vec![
-                        ("tensor".to_string(), tensor_to_ct(&tensor)),
-                        ("unit".to_string(), CtValue::Unit),
-                    ],
-                }))),
+                Ok(()) => {
+                    let snapshot = (*tensor).clone();
+                    drop(tensor);
+                    Ok(CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "__JetComputeSet".to_string(),
+                        fields: vec![
+                            (
+                                "tensor".to_string(),
+                                tensor_to_ct_with_handle(
+                                    &snapshot,
+                                    std::sync::Arc::clone(&handle.tensor),
+                                    handle.valid,
+                                    true,
+                                ),
+                            ),
+                            ("unit".to_string(), CtValue::Unit),
+                        ],
+                    })))
+                }
                 Err(e) => Ok(err_compute(e)),
             }
         }
@@ -1288,21 +1615,20 @@ pub fn apply(
     }
 }
 
-/// Unpack `set`'s success payload into (updated tensor, unit Result).
-pub fn take_set_ok(value: CtValue) -> Option<(CtValue, CtValue)> {
-    match value {
-        CtValue::Present(inner) => match *inner {
-            CtValue::Struct { type_name, fields } if type_name == "__JetComputeSet" => {
-                let tensor = fields.iter().find(|(n, _)| n == "tensor")?.1.clone();
-                Some((tensor, CtValue::Present(Box::new(CtValue::Unit))))
-            }
-            other => Some((
-                CtValue::Unit,
-                CtValue::Present(Box::new(other)),
-            )),
-        },
-        other => Some((CtValue::Unit, other)),
+/// Unpack only `set`'s success payload. Failed results stay untouched so the
+/// caller can return the canonical Prelude error without mutating its place.
+pub fn take_set_ok(value: &CtValue) -> Option<(CtValue, CtValue)> {
+    let CtValue::Present(inner) = value else {
+        return None;
+    };
+    let CtValue::Struct { type_name, fields } = inner.as_ref() else {
+        return None;
+    };
+    if type_name != "__JetComputeSet" {
+        return None;
     }
+    let tensor = fields.iter().find(|(n, _)| n == "tensor")?.1.clone();
+    Some((tensor, CtValue::Present(Box::new(CtValue::Unit))))
 }
 
 #[allow(dead_code)]

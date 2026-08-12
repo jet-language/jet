@@ -185,7 +185,7 @@ pub fn emit_plugin(
             .map(|(i, _)| format!("p{i}: {}", scalar.rust_ty()))
             .collect();
         let call_args: Vec<String> = (0..f.params.len()).map(|i| format!("p{i}")).collect();
-        let wrapper_name = crate::Syntax::generated_name(&format!("plugin_export_{}", f.name));
+        let wrapper_name = mangle(&format!("plugin_export_{}", f.name));
         wrapper_fns.push_str(&format!(
             "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {callee}({call_args}) }}\n",
             wrapper_name = wrapper_name,

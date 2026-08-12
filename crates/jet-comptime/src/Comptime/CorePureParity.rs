@@ -49,7 +49,13 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Time, "zone") => zone_named(args, span),
         (CoreCallPureRoute::Time, "zoned") => zoned_from_datetime(args, span),
         (CoreCallPureRoute::Time, "zoned_local") => zoned_from_local(args, span),
-        (CoreCallPureRoute::Time, "instant") => Ok(structure("Instant", vec![("start_ns", CtValue::Int(0))])),
+        (CoreCallPureRoute::Time, "instant") => Ok(structure(
+            "Instant",
+            vec![(
+                "start_ns",
+                CtValue::Int(super::time_kernel::jet_time_monotonic_now_ns()),
+            )],
+        )),
         (CoreCallPureRoute::Time, "datetime") => datetime_parts(args, span),
         (CoreCallPureRoute::Time, "time" | "local_time") => local_time_parts(args, span),
         (CoreCallPureRoute::Time, "days_in_month") => time_days_in_month(args, span),
@@ -163,11 +169,20 @@ pub(super) fn evaluate_method(
     let CtValue::Struct { type_name, .. } = recv else {
         return None;
     };
-    let row = jet_foundation::Syntax::core_receiver_method(type_name, method)?;
-    if !row.accepts_arity(args.len()) {
-        return None;
+    // Url handles are selected by the TIR typed-handle table rather than the
+    // plain Core receiver registry. Keep Url on the shared marshalled value
+    // path; otherwise `to_string` would expose the Rust-shaped record value
+    // instead of the shared URL renderer.
+    let normalized_type_name = type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name.as_str());
+    if normalized_type_name != "Url" {
+        let row = jet_foundation::Syntax::core_receiver_method(type_name, method)?;
+        if !row.accepts_arity(args.len()) {
+            return None;
+        }
     }
-    let result = match (type_name.as_str(), method, args.len()) {
+    let result = match (normalized_type_name, method, args.len()) {
         (
             "Signature"
                 | "Secret"
@@ -185,6 +200,86 @@ pub(super) fn evaluate_method(
         ("Mime", "to_string", 0) => mime_string(recv, span).map(CtValue::Str),
         ("Mime", "param", 1) => mime_param(recv, args, span),
         ("Mime", "params", 0) => value_field(recv, "Mime", "params", span),
+        ("Url", "scheme", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.scheme()))
+        }
+        ("Url", "username", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.username()))
+        }
+        ("Url", "password", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.password()))
+        }
+        ("Url", "userinfo", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.userinfo()))
+        }
+        ("Url", "authority", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.authority()))
+        }
+        ("Url", "path", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.path()))
+        }
+        ("Url", "query", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.query()))
+        }
+        ("Url", "host", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+            match url.host() {
+                Ok(host) => CtValue::Present(Box::new(CtValue::Str(host))),
+                Err(_) => CtValue::absent(Type::String),
+            }
+        }),
+        ("Url", "port", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+            match url.port() {
+                Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
+                Err(_) => CtValue::absent(Type::Int),
+            }
+        }),
+        ("Url", "default_port", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+            match url.default_port() {
+                Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
+                Err(_) => CtValue::absent(Type::Int),
+            }
+        }),
+        ("Url", "fragment", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+            match url.fragment() {
+                Ok(fragment) => CtValue::Present(Box::new(CtValue::Str(fragment))),
+                Err(_) => CtValue::absent(Type::String),
+            }
+        }),
+        ("Url", "path_segments", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+            CtValue::List(url.path_segments().into_iter().map(CtValue::Str).collect())
+        }),
+        ("Url", "query_pairs", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+            CtValue::List(
+                url.query_pairs()
+                    .into_iter()
+                    .map(|pair| CtValue::List(pair.into_iter().map(CtValue::Str).collect()))
+                    .collect(),
+            )
+        }),
+        ("Url", "normalize", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| super::url_parts_to_ct(&url.normalize()))
+        }
+        ("Url", "join", 1) => super::url_parts_from_ct(recv, span).and_then(|url| {
+            let relative = string_arg(args, 0, span)?.to_string();
+            Ok(match url.join(&relative) {
+                Ok(url) => CtValue::Present(Box::new(super::url_parts_to_ct(&url))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            })
+        }),
+        ("Url", "set_query" | "add_query", 2) => {
+            super::url_parts_from_ct(recv, span).and_then(|url| {
+                let key = string_arg(args, 0, span)?.to_string();
+                let value = string_arg(args, 1, span)?.to_string();
+                let updated = if method == "set_query" {
+                    url.set_query(&key, &value)
+                } else {
+                    url.add_query(&key, &value)
+                };
+                Ok(super::url_parts_to_ct(&updated))
+            })
+        }
+        ("Url", "to_string", 0) => super::url_parts_from_ct(recv, span)
+            .map(|url| CtValue::Str(url.to_string_value())),
         ("Date" | "LocalDate", "year" | "month" | "day", 0) => {
             value_field(recv, type_name, method, span)
         }
@@ -300,8 +395,8 @@ pub(super) fn evaluate_method(
         ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(ZonedDateTime::from_datetime(date_time, zone_from_value(&args[0], span)?).value())
         }),
-        ("Instant", "elapsed_millis", 0) => Ok(CtValue::Int(0)),
-        ("Instant", "elapsed", 0) => Ok(duration_value(0)),
+        ("Instant", "elapsed_millis", 0) => instant_elapsed_millis(recv, span),
+        ("Instant", "elapsed", 0) => instant_elapsed(recv, span),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
         ("Fraction", "to_string", 0) => fraction_from_value(recv, span)
             .map(|f| CtValue::Str(f.to_string_rep())),
@@ -438,11 +533,50 @@ pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 pub(super) fn display(value: &CtValue) -> Option<String> {
-    if let CtValue::Struct { type_name, .. } = value {
-        let type_name = type_name
+    match value {
+        CtValue::List(values) => {
+            let values = values
+                .iter()
+                .map(nested_display)
+                .collect::<Option<Vec<_>>>()?;
+            return Some(format!(
+                "[{}]",
+                values.join(", ")
+            ));
+        }
+        CtValue::Map(entries) => {
+            let values = entries
+                .iter()
+                .map(|(key, value)| {
+                    let key = key.to_value();
+                    Some(format!(
+                        "{}: {}",
+                        nested_display(&key)?,
+                        nested_display(value)?
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            return Some(format!(
+                "[:{}]",
+                values.join(", ")
+            ));
+        }
+        _ => {}
+    }
+    let core_type = match value {
+        CtValue::Struct { type_name, .. } => type_name
             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-            .unwrap_or(type_name.as_str());
-        jet_foundation::Syntax::core_receiver_method(type_name, "__display")?;
+            .unwrap_or(type_name.as_str()),
+        _ => "",
+    };
+    if core_type == "Mime" {
+        return mime_string(value, Span::new(0, 0)).ok();
+    }
+    if core_type == "Path" {
+        return path_string(value, Span::new(0, 0)).ok();
+    }
+    if core_type == "DateTime" {
+        return datetime_string(value, Span::new(0, 0)).ok();
     }
     match value {
         CtValue::Struct { type_name, .. } if type_name == "HyperLogLog" => {
@@ -532,6 +666,13 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         }
         // Core pure structs: REPL/transcript show uses Type(field: jet_show) —
         // not Rust `__jet_*` Debug — matching AOT JetShow for these foreign types.
+        CtValue::Struct { type_name, .. }
+            if type_name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(type_name.as_str())
+                == "Url" => super::url_parts_from_ct(value, Span::new(0, 0))
+            .ok()
+            .map(|url| url.to_string_value()),
         CtValue::Struct { type_name, fields }
             if matches!(
                 type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name.as_str()),
@@ -544,7 +685,6 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                     | "Zone"
                     | "ZonedDateTime"
                     | "Instant"
-                    | "Url"
                     | "Envelope"
                     | "Address"
                     | "Message"
@@ -552,23 +692,14 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             ) =>
         {
             let ty = type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
-            let parts: Vec<String> = fields
+                let parts: Vec<String> = fields
                 .iter()
+                .filter(|(name, _)| !name.starts_with(super::URL_INTERNAL_PREFIX))
                 .map(|(name, v)| {
                     let field = name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name);
-                    let shown = display(v).unwrap_or_else(|| match v {
-                        CtValue::List(xs) => {
-                            let inner: Vec<String> = xs
-                                .iter()
-                                .map(|x| display(x).unwrap_or_else(|| x.jet_show()))
-                                .collect();
-                            format!("[{}]", inner.join(", "))
-                        }
-                        _ => v.jet_show(),
-                    });
-                    format!("{field}: {shown}")
+                    Some(format!("{field}: {}", nested_display(v)?))
                 })
-                .collect();
+                .collect::<Option<Vec<_>>>()?;
             Some(format!("{ty}({})", parts.join(", ")))
         }
         CtValue::Present(inner) => {
@@ -579,18 +710,111 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         }
         CtValue::Failed(CtReport::Clean(_)) => Some("null".to_string()),
         _ => {
-            let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
-                return None;
-            };
-            let CtValue::Float(uncertainty) = field(value, "Measurement", "uncertainty")? else {
-                return None;
-            };
-            Some(super::measurement_kernel::jet_measurement_kernel_show((
-                measured.as_f64(),
-                uncertainty.as_f64(),
-            )))
+            if let (Some(CtValue::Float(measured)), Some(CtValue::Float(uncertainty))) = (
+                field(value, "Measurement", "value"),
+                field(value, "Measurement", "uncertainty"),
+            ) {
+                Some(super::measurement_kernel::jet_measurement_kernel_show((
+                    measured.as_f64(),
+                    uncertainty.as_f64(),
+                )))
+            } else {
+                canonical_structural_display(value)
+            }
         }
     }
+}
+
+fn nested_display(value: &CtValue) -> Option<String> {
+    display(value)
+}
+
+fn canonical_structural_display(value: &CtValue) -> Option<String> {
+    match value {
+        CtValue::Struct { type_name, fields } => {
+            let type_name = type_name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(type_name.as_str());
+            let fields = fields
+                .iter()
+                .filter(|(name, _)| !name.starts_with(super::URL_INTERNAL_PREFIX))
+                .map(|(name, value)| {
+                    let name = name
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(name.as_str());
+                    Some(format!("{name}: {}", nested_display(value)?))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(format!("{type_name}({})", fields.join(", ")))
+        }
+        CtValue::Enum { variant, args, .. } => {
+            let variant = variant
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(variant.as_str());
+            if args.is_empty() {
+                Some(variant.to_string())
+            } else {
+                let args = args
+                    .iter()
+                    .map(|(label, value)| {
+                        let shown = nested_display(value)?;
+                        Some(label.as_ref().map_or_else(
+                            || shown.clone(),
+                            |label| format!("{label}: {shown}"),
+                        ))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!("{variant}({})", args.join(", ")))
+            }
+        }
+        CtValue::Int(_)
+        | CtValue::Float(_)
+        | CtValue::Bool(_)
+        | CtValue::Char(_)
+        | CtValue::Str(_)
+        | CtValue::BigInt(_)
+        | CtValue::Bytes(_)
+        | CtValue::Present(_)
+        | CtValue::Failed(_) => Some(value.jet_show()),
+        CtValue::List(values) => Some(format!(
+            "[{}]",
+            values
+                .iter()
+                .map(nested_display)
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        )),
+        CtValue::Map(entries) => Some(format!(
+            "[:{}]",
+            entries
+                .iter()
+                .map(|(key, value)| {
+                    let key = key.to_value();
+                    Some(format!(
+                        "{}: {}",
+                        nested_display(&key)?,
+                        nested_display(value)?
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        )),
+        CtValue::Unit => Some(String::new()),
+        CtValue::Closure(_) => None,
+    }
+}
+
+fn path_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    let CtValue::Struct { fields, .. } = value else {
+        return Err(unsupported("malformed Path value", span));
+    };
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("inner", CtValue::Str(path)) => Some(path.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| unsupported("malformed Path value", span))
 }
 
 fn one<'a>(
@@ -1819,6 +2043,25 @@ fn datetime_value(seconds: i64, nanos: u32) -> CtValue {
             ("nanos", CtValue::Int(nanos as i64)),
         ],
     )
+}
+
+fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+    int_field(value, "Instant", "start_ns", span)
+}
+
+fn instant_elapsed_millis(value: &CtValue, span: Span) -> EvalResult {
+    Ok(CtValue::Int(
+        super::time_kernel::jet_time_monotonic_now_ns()
+            .saturating_sub(instant_start_ns(value, span)?)
+            .saturating_div(1_000_000),
+    ))
+}
+
+fn instant_elapsed(value: &CtValue, span: Span) -> EvalResult {
+    Ok(duration_value(
+        super::time_kernel::jet_time_monotonic_now_ns()
+            .saturating_sub(instant_start_ns(value, span)?),
+    ))
 }
 
 fn duration_value(ns: i64) -> CtValue {

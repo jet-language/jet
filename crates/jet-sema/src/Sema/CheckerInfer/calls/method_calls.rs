@@ -51,8 +51,9 @@ impl<'a> Checker<'a> {
             Type::Apply { name, .. } => name.as_str(),
             _ => return None,
         };
-        let owner = self.struct_owner_module(name, None)?;
-        let fields = self.struct_fields_of(owner, name)?;
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        let fields = self.struct_fields_of(owner, leaf)?;
         if let Some((_, _, ty)) = fields.iter().find(|(known, ..)| known == field) {
             return Some(ty.clone());
         }
@@ -966,6 +967,27 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // D-VERDICT-1867-1: an inline module may publicly re-export a
+            // foreign namespace. Keep the namespace hop structural here;
+            // the actual library function still resolves through the same
+            // imported-module checker as a direct `use`.
+            if let Expr::Field(base, leaf, _) = &**receiver {
+                if let Expr::Ident(inline_alias, _) = &**base {
+                    if let Some(&mod_idx) = self
+                        .inline_reexport_foreign
+                        .get(&(inline_alias.clone(), leaf.clone()))
+                    {
+                        return self.infer_import_call(
+                            mod_idx,
+                            method,
+                            span,
+                            span,
+                            type_args,
+                            args,
+                        );
+                    }
+                }
+            }
             if let Some((module, alias_span)) = self.core_module_path_from_receiver(receiver) {
                 let ret = self.infer_core_call(&module, method, alias_span, span, type_args, args);
                 if is_polymorphic_core_special(&module, method) {
@@ -1005,6 +1027,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Expr::Ident(type_name, type_span) = &**receiver {
+                let display_type_name = self.display_type_name(type_name, None);
                 // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
                 // tree. Point at `DataTree` (no alias, I8) before generic resolution.
                 if type_name == "Data" {
@@ -1194,9 +1217,9 @@ impl<'a> Checker<'a> {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
                                     "E0104",
-                                    format!("`{type_name}.{method}` takes one value, got {}", args.len()),
+                                    format!("`{display_type_name}.{method}` takes one value, got {}", args.len()),
                                     "a distinct conversion wraps exactly one value of its base type".to_string(),
-                                    format!("write `{type_name}.{method}(value)`"),
+                                    format!("write `{display_type_name}.{method}(value)`"),
                                     Some(span),
                                 ));
                                 for arg in args.iter_mut() {
@@ -1210,7 +1233,7 @@ impl<'a> Checker<'a> {
                             if got.as_ref().is_some_and(|got| got != &base) {
                                 self.diags.push(Diagnostic::error(
                                     "E0108",
-                                    format!("argument to `{type_name}.{method}` should be {}, not {}", base.name(), got.as_ref().unwrap().name()),
+                                    format!("argument to `{display_type_name}.{method}` should be {}, not {}", base.name(), got.as_ref().unwrap().name()),
                                     "the source name fixes the conversion input type".to_string(),
                                     format!("pass a {} value", base.name()),
                                     Some(args[0].expr.span()),
@@ -1229,9 +1252,9 @@ impl<'a> Checker<'a> {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
                                     "E0104",
-                                    format!("`{type_name}.{method}` takes one value, got {}", args.len()),
+                                    format!("`{display_type_name}.{method}` takes one value, got {}", args.len()),
                                     "a distinct conversion wraps exactly one value of its base type".to_string(),
-                                    format!("write `{type_name}.{method}(value)`"),
+                                    format!("write `{display_type_name}.{method}(value)`"),
                                     Some(span),
                                 ));
                                 for arg in args.iter_mut() {
@@ -1245,7 +1268,7 @@ impl<'a> Checker<'a> {
                             if got.as_ref().is_some_and(|got| got != &source) {
                                 self.diags.push(Diagnostic::error(
                                     "E0108",
-                                    format!("argument to `{type_name}.{method}` should be {}, not {}", source.name(), got.as_ref().unwrap().name()),
+                                    format!("argument to `{display_type_name}.{method}` should be {}, not {}", source.name(), got.as_ref().unwrap().name()),
                                     "the source name fixes the conversion input type".to_string(),
                                     format!("pass a {} value", source.name()),
                                     Some(args[0].expr.span()),
@@ -1293,8 +1316,8 @@ impl<'a> Checker<'a> {
                                     if n < lo || n > hi {
                                         self.diags.push(Diagnostic::error(
                                             "E0135",
-                                            format!("`{n}` is outside `{type_name}`'s range {lo}..{hi}"),
-                                            format!("a range type only holds values inside its bounds; `{n}` can never be a `{type_name}`"),
+                                            format!("`{n}` is outside `{display_type_name}`'s range {lo}..{hi}"),
+                                            format!("a range type only holds values inside its bounds; `{n}` can never be a `{display_type_name}`"),
                                             format!("use a value in `{lo}..{hi}`, or widen the type's range"),
                                             Some(literal_span),
                                         ));
@@ -2381,6 +2404,7 @@ impl<'a> Checker<'a> {
                                 ret: None,
                                 effect_bound: None, return_view_provenance: None,
                                 param_contract: None,
+                call_metadata: None,
                             };
                             let saved_esc = self.lambda_escapes;
                             let saved_exp = self.expected_type.clone();
@@ -2902,6 +2926,7 @@ impl<'a> Checker<'a> {
                             })),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         },
                         &mut args[1],
                     );
@@ -3009,6 +3034,7 @@ impl<'a> Checker<'a> {
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
+                call_metadata: None,
                         };
                         self.expect_core_arg(method, 1, &cb, &mut args[1]);
                     }
@@ -4270,12 +4296,14 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             };
-            if let Some(fields) = self.registry.struct_fields(&type_name) {
+            let (_, dispatch_type_name) = Self::split_type_name(&type_name);
+            let display_type_name = self.display_type_name(&type_name, None);
+            if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
                 if let Some((_, _, field_ty)) =
                     fields.iter().find(|(fname, _, _)| fname == method)
                 {
                     if matches!(field_ty, Type::Fn { .. }) {
-                        *recv_type_out = Some(type_name.clone());
+                        *recv_type_out = Some(dispatch_type_name.to_string());
                         let mut callee =
                             Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
                         let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
@@ -4292,12 +4320,12 @@ impl<'a> Checker<'a> {
                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
                 .flatten();
                 let fix = materializer.map_or_else(
-                    || format!("define it inside `struct {type_name}` or `impl {type_name}`"),
+                    || format!("define it inside `struct {display_type_name}` or `impl {display_type_name}`"),
                     |method| format!("call `{method}` first"),
                 );
                 self.diags.push(Diagnostic::error(
                     "E0102",
-                    format!("`{}` has no method `{}`", type_name, method),
+                    format!("`{}` has no method `{}`", display_type_name, method),
                     "check the method name on this type".to_string(),
                     fix,
                     Some(span),
@@ -4307,7 +4335,9 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
-            let method_name = format!("{type_name}.{method}");
+            let (_, method_type_name) = self.struct_type_name_parts(&type_name);
+            let method_name = format!("{method_type_name}.{method}");
+            let display_type_name = self.display_type_name(&type_name, Some(owner_mod));
             if owner_mod != self.module_idx
                 && !self
                     .name_ledger
@@ -4327,7 +4357,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(args) = applied_args {
-                self.instantiate_method_sig(&type_name, &mut msig, args);
+                self.instantiate_method_sig(owner_mod, &type_name, &mut msig, args);
             }
             // D-APILABEL1=A: bind before inference — see `bind_method_args`.
             if !self.bind_method_args(method, &msig, args, span) {
@@ -4335,9 +4365,10 @@ impl<'a> Checker<'a> {
                 *resolved_ret_out = ret.clone();
                 return ret;
             }
+            self.normalize_method_variadic_call(method, &msig, args, span);
             let mut call_access = self.call_access_frame();
             let pre_inferred_method = self.instantiate_method_type_args(
-                &type_name,
+                dispatch_type_name,
                 method,
                 &mut msig,
                 type_args,
@@ -4346,17 +4377,20 @@ impl<'a> Checker<'a> {
                 &mut call_access,
             );
             self.record_method_reference(&type_name, method, span);
-            self.record_edge(crate::Sema::effect_key(Some(&type_name), method), span);
+            self.record_edge(
+                crate::Sema::effect_key(Some(dispatch_type_name), method),
+                span,
+            );
             if msig.is_static {
                 self.diags.push(Diagnostic::error(
                     "E0311",
-                    format!("`{}` is a static method on `{}`", method, type_name),
+                    format!("`{}` is a static method on `{}`", method, display_type_name),
                     "static methods belong to the type name, not a value".to_string(),
-                    format!("write `{}.{method}(...)` instead", type_name),
+                    format!("write `{}.{method}(...)` instead", display_type_name),
                     Some(span),
                 ));
             }
-            *recv_type_out = Some(type_name.clone());
+            *recv_type_out = Some(dispatch_type_name.to_string());
             // `mut self` methods change the receiver: it must be changeable,
             // free of an active `for` borrow, and not aliased by an argument.
             if msig.self_conv == Some(AccessConvention::Write) {
@@ -4397,7 +4431,7 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_method_args(
-                &type_name,
+                dispatch_type_name,
                 method,
                 &msig,
                 Some(receiver),

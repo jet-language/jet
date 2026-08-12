@@ -325,9 +325,9 @@ fn panic_context_uses_only_lexically_live_locals() {
             &["context_only"],
         ),
         (
-            "taskgroup",
-            "task.group g { taskgroup_only :: 7; print(taskgroup_only) }",
-            &["taskgroup_only"],
+            "task.group",
+            "task.group g { task_group_only :: 7; print(task_group_only) }",
+            &["task_group_only"],
         ),
     ];
 

@@ -67,6 +67,17 @@ const EMAIL_LEAVES: &[(&str, CoreLeafKind)] = &[
 
 const ENV_LEAVES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 
+/// Canonical root Core types that are not qualified module leaves. Keep these
+/// in the same Core-name authority used by generated declarations.
+const CORE_ROOT_TYPES: &[&str] = &[
+    crate::Syntax::TYPE_DECIMAL,
+    crate::Syntax::DURATION_TYPE,
+    "Date",
+    "LocalDate",
+    "LocalTime",
+    crate::Syntax::TYPE_JSON_ERROR,
+];
+
 /// One table row per Core module: its canonical name plus its exported leaf
 /// types. Add a module here to give it resolve_type support — no new match
 /// arm required.
@@ -106,6 +117,18 @@ const CORE_MODULE_EXPORTS: &[(&str, &[(&str, CoreLeafKind)])] = &[
 /// dynamic rule check).
 pub fn core_leaf_kind(module: &str, leaf: &str) -> Option<CoreLeafKind> {
     lookup(CORE_MODULE_EXPORTS, module, leaf)
+}
+
+/// Whether `name` is a canonical root or module-exported Core type.
+///
+/// Generated declarations use this same Core-name table when choosing a
+/// user-visible type name. Keeping the query here prevents binders from
+/// carrying a second, inevitably stale list of Core names.
+pub fn is_core_type_name(name: &str) -> bool {
+    CORE_ROOT_TYPES.contains(&name)
+        || CORE_MODULE_EXPORTS
+            .iter()
+            .any(|(_, leaves)| leaves.iter().any(|(leaf, _)| *leaf == name))
 }
 
 /// The one generic lookup every module table (production or test) resolves

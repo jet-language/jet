@@ -138,7 +138,8 @@ pub const CAP_HANDLE_TYPE: &str = "Capability";
 
 /// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
 pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";
-/// Compiler-only dispatch type for a `task` combinator not attached to a group.
+/// Compiler-only dispatch type for a `task` combinator that is not attached to
+/// a lexical `TaskGroup` handle.
 pub const INTERNAL_TASK_SURFACE_TYPE: &str = "\0jet.task.surface";
 /// Compiler-only dispatch type for a canonical combinator inside `task.group`.
 pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
@@ -150,19 +151,16 @@ pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
 /// Compiler-private dispatch method for canonical `task` spawn syntax.
-pub const TASKGROUP_SPAWN_METHOD: &str = "spawn";
+pub const INTERNAL_TASK_SPAWN_METHOD: &str = "\0jet.task.spawn";
 
-/// D-NURSERY1=A, respelled `task.all { … }` by D-CONC-SPAWN1=D: join every
-/// branch, results in order.
-pub const TASKGROUP_ALL_METHOD: &str = "all";
+/// Compiler-private dispatch method for `task.all { … }`.
+pub const INTERNAL_TASK_ALL_METHOD: &str = "\0jet.task.all";
 
-/// D-CONCCOMB1=A, respelled `task.race { … }` by D-CONC-SPAWN1=D: first
-/// successful branch wins.
-pub const TASKGROUP_RACE_METHOD: &str = "race";
+/// Compiler-private dispatch method for `task.race { … }`.
+pub const INTERNAL_TASK_RACE_METHOD: &str = "\0jet.task.race";
 
-/// D-CONCCOMB1=A, respelled `task.any { … }` by D-CONC-SPAWN1=D: first
-/// completed branch wins (v1: same join race).
-pub const TASKGROUP_ANY_METHOD: &str = "any";
+/// Compiler-private dispatch method for `task.any { … }`.
+pub const INTERNAL_TASK_ANY_METHOD: &str = "\0jet.task.any";
 
 /// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.
 pub const TASKGROUP_SELECT_METHOD: &str = "select";
@@ -182,39 +180,12 @@ pub const SELECT_READ_METHOD: &str = "read";
 /// D-CONCSELECT1=A: block until one arm wins — `.wait()`.
 pub const SELECT_WAIT_METHOD: &str = "wait";
 
-/// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
-pub const METHOD_TASK_WAIT: &str = "wait";
-/// Compiler-private consuming join used by task-group scope cleanup. Unlike
-/// user `.join()`, it unwraps `TaskFailure` so a child panic cannot vanish when
-/// the generated cleanup expression's value is discarded.
-pub const METHOD_TASK_SCOPE_JOIN: &str = "\0jet.task.scope_join";
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 pub const METHOD_TASK_PAUSE: &str = "pause";
 /// D-COROUTINE1=A: clear the paused marker in the control plane.
 pub const METHOD_TASK_RESUME: &str = "resume";
 /// D-COROUTINE1=A: request cancellation for a task in the control plane.
 pub const METHOD_TASK_CANCEL: &str = "cancel";
-/// D-COROUTINE1=A: inspect task control-plane state.
-pub const METHOD_TASK_TRACE: &str = "trace";
-
-// D-VERDICT-1323-1 (ratified 2026-07-30): the list twin of each single-task
-// method, so a group of handles is driven without writing a loop. Each name
-// means exactly what its single-handle counterpart means, applied in order.
-/// Wait for every task and return the results in list order (consumes).
-pub const METHOD_TASK_WAIT_ALL: &str = "wait_all";
-/// `join_all`'s method spelling — the same mechanism as `wait_all` (consumes).
-pub const METHOD_TASK_JOIN_ALL: &str = "join_all";
-/// Detach every task (consumes).
-pub const METHOD_TASK_DETACH_ALL: &str = "detach_all";
-/// Request cancellation for every task (borrows).
-pub const METHOD_TASK_CANCEL_ALL: &str = "cancel_all";
-/// Mark every task paused (borrows).
-pub const METHOD_TASK_PAUSE_ALL: &str = "pause_all";
-/// Clear the paused marker on every task (borrows).
-pub const METHOD_TASK_RESUME_ALL: &str = "resume_all";
-/// One control-plane trace line per task, in list order (borrows).
-pub const METHOD_TASK_TRACE_ALL: &str = "trace_all";
-
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
 /// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an

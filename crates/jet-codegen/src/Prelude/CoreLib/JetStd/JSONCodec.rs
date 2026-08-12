@@ -7,6 +7,10 @@
         parse_json_with(text, true)
     }
 
+    pub fn is_json_structural_whitespace(c: char) -> bool {
+        matches!(c, ' ' | '\t' | '\r' | '\n')
+    }
+
     fn parse_json_with(text: &str, reject_duplicate_keys: bool) -> Result<JSON, JSONError> {
         let mut p = JSONParser {
             chars: text.chars().collect(),
@@ -25,6 +29,7 @@
         match j {
             JSON::Null => "null".to_string(),
             JSON::Boolean(b) => b.to_string(),
+            JSON::Integer(n) => n.to_string(),
             JSON::Number(n) => format!("{:?}", n),
             JSON::Text(s) => quote_json(s),
             JSON::Array(items) => {
@@ -112,7 +117,12 @@
         }
 
         fn ws(&mut self) {
-            while self.pos < self.chars.len() && self.chars[self.pos].is_whitespace() {
+            // RFC 8259 permits only space, horizontal tab, carriage return,
+            // and line feed between JSON tokens. Rust's Unicode whitespace
+            // predicate would accept non-JSON characters such as NBSP.
+            while self.pos < self.chars.len()
+                && is_json_structural_whitespace(self.chars[self.pos])
+            {
                 self.pos += 1;
             }
         }
@@ -268,6 +278,11 @@
                 }
             }
             let s: String = self.chars[start..self.pos].iter().collect();
+            if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+                if let Ok(n) = s.parse::<i64>() {
+                    return Ok(JSON::Integer(n));
+                }
+            }
             match s.parse::<f64>() {
                 Ok(n) => Ok(JSON::Number(n)),
                 Err(_) => Err(self.err("bad number")),

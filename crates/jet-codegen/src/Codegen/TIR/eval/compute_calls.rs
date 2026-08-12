@@ -314,17 +314,13 @@ impl<'a> EvalCtx<'a> {
         }
         let result = apply_core_call("core.compute", method, argv, source_span, self.repl_mode)?;
         if method == "set" {
-            if let Some((tensor, unit)) = crate::Comptime::ComputeLite::take_set_ok(result) {
+            if let Some((tensor, unit)) = crate::Comptime::ComputeLite::take_set_ok(&result) {
                 if let Some(place) = args.first() {
                     self.write_back_place(place, tensor, scope)?;
                 }
                 return Ok(unit);
             }
-            // take_set_ok always answers a payload for carrier shapes; fall through
-            // only if the payload was unexpected.
-            return Ok(CtValue::failed(Box::new(CtValue::Str(
-                "core.compute.set: unexpected ambient payload".to_string(),
-            ))));
+            return Ok(result);
         }
         Ok(result)
     }

@@ -207,9 +207,16 @@ impl<'a> EvalCtx<'a> {
                 } else {
                     Some(&args[2])
                 };
+                let mut key_callable = None;
+                let mut value_callable = None;
                 let mut groups: BTreeMap<String, (i64, f64)> = BTreeMap::new();
                 for row in &rows {
-                    let key = match self.apply_callable(key_f, vec![row.clone()], scope)? {
+                    let key = match self.apply_callable_once(
+                        key_f,
+                        &mut key_callable,
+                        vec![row.clone()],
+                        scope,
+                    )? {
                         CtValue::Str(s) => s,
                         other => {
                             return Err(unsupported(
@@ -219,7 +226,12 @@ impl<'a> EvalCtx<'a> {
                         }
                     };
                     let value = if let Some(vf) = value_f {
-                        match self.apply_callable(vf, vec![row.clone()], scope)? {
+                        match self.apply_callable_once(
+                            vf,
+                            &mut value_callable,
+                            vec![row.clone()],
+                            scope,
+                        )? {
                             CtValue::Float(f) => f.as_f64(),
                             CtValue::Int(n) => n as f64,
                             _ => return Err(unsupported("group value must be Float", span)),
@@ -260,9 +272,18 @@ impl<'a> EvalCtx<'a> {
                     _ => return Err(unsupported("`data.filter` needs a list", span)),
                 };
                 let pred = &args[1];
+                let mut pred_callable = None;
                 let mut out = Vec::new();
                 for row in rows {
-                    if as_bool(&self.apply_callable(pred, vec![row.clone()], scope)?, span)? {
+                    if as_bool(
+                        &self.apply_callable_once(
+                            pred,
+                            &mut pred_callable,
+                            vec![row.clone()],
+                            scope,
+                        )?,
+                        span,
+                    )? {
                         out.push(row);
                     }
                 }
@@ -276,10 +297,23 @@ impl<'a> EvalCtx<'a> {
                 let row_key = &args[1];
                 let col_key = &args[2];
                 let value_f = &args[3];
+                let mut row_key_callable = None;
+                let mut col_key_callable = None;
+                let mut value_callable = None;
                 let mut groups: BTreeMap<String, (i64, f64, String, String)> = BTreeMap::new();
                 for row in &rows {
-                    let left = self.apply_callable(row_key, vec![row.clone()], scope)?;
-                    let right = self.apply_callable(col_key, vec![row.clone()], scope)?;
+                    let left = self.apply_callable_once(
+                        row_key,
+                        &mut row_key_callable,
+                        vec![row.clone()],
+                        scope,
+                    )?;
+                    let right = self.apply_callable_once(
+                        col_key,
+                        &mut col_key_callable,
+                        vec![row.clone()],
+                        scope,
+                    )?;
                     let left_s = match &left {
                         CtValue::Str(s) => s.clone(),
                         other => other.jet_show(),
@@ -289,7 +323,12 @@ impl<'a> EvalCtx<'a> {
                         other => other.jet_show(),
                     };
                     let key = format!("{left_s}|{right_s}");
-                    let amount = match self.apply_callable(value_f, vec![row.clone()], scope)? {
+                    let amount = match self.apply_callable_once(
+                        value_f,
+                        &mut value_callable,
+                        vec![row.clone()],
+                        scope,
+                    )? {
                         CtValue::Float(f) => f.as_f64(),
                         CtValue::Int(n) => n as f64,
                         _ => {

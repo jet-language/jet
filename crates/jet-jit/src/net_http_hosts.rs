@@ -3,7 +3,7 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_codegen::AST::{CtKey, CtValue};
+use jet_codegen::AST::{CtKey, CtValue, Type};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
@@ -16,6 +16,7 @@ enum NetHttpHandle {
     TcpStream(Arc<Mutex<JetTCPStream>>),
     SocketAddr(JetSocketAddr),
     UdpSocket(Arc<JetUDPSocket>),
+    NetReady(Arc<JetNetReady>),
     UDPPacket(JetUDPPacket),
     #[cfg(unix)]
     UnixListener(Arc<JetUnixListener>),
@@ -90,6 +91,22 @@ fn udp_socket(handle: i64) -> Option<Arc<JetUDPSocket>> {
         NetHttpHandle::UdpSocket(s) => Some(Arc::clone(s)),
         _ => None,
     })
+}
+
+fn net_ready(handle: i64) -> Option<Arc<JetNetReady>> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::NetReady(ready) => Some(Arc::clone(ready)),
+        _ => None,
+    })
+}
+
+fn net_ready_interest(value: i64) -> Option<JetNetReadyInterest> {
+    match value {
+        0 => Some(JetNetReadyInterest::Read),
+        1 => Some(JetNetReadyInterest::Write),
+        2 => Some(JetNetReadyInterest::ReadWrite),
+        _ => None,
+    }
 }
 
 #[cfg(unix)]
@@ -200,8 +217,16 @@ fn result_ok_handle(h: i64) -> i64 {
     result_ok(h as u64)
 }
 
+fn net_invalid_error(operation: &str, resource: &str) -> JetNetError {
+    jet_net_invalid_input(operation, resource)
+}
+
+fn net_invalid(operation: &str, resource: &str) -> i64 {
+    net_err(net_invalid_error(operation, resource))
+}
+
 fn net_err(e: JetNetError) -> i64 {
-    result_err(format!("{e:?}"))
+    result_err_bits(marshal_net_error(e).0)
 }
 
 fn http_err(e: JetHTTPError) -> i64 {
@@ -234,6 +259,95 @@ fn map_http_ok<T>(r: Result<T, JetHTTPError>, f: impl FnOnce(T) -> i64) -> i64 {
         Ok(v) => result_ok_handle(f(v)),
         Err(e) => http_err(e),
     }
+}
+
+fn net_error_detail_handle(detail: JetNetErrorDetail) -> i64 {
+    let operation = alloc_string(detail.operation);
+    let address = option_string(detail.address);
+    let name = option_string(detail.name);
+    let message = alloc_string(detail.message);
+    let os_code = detail
+        .os_code
+        .map(|value| value.wrapping_add(1))
+        .unwrap_or(0);
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(5);
+        let _ = rt.heap.record_set_string(record, 0, operation);
+        let _ = rt.heap.record_set_int(record, 1, address);
+        let _ = rt.heap.record_set_int(record, 2, name);
+        let _ = rt.heap.record_set_string(record, 3, message);
+        let _ = rt.heap.record_set_int(record, 4, os_code);
+        record
+    })
+}
+
+fn net_ct_optional_string(value: Option<String>) -> CtValue {
+    match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        None => CtValue::absent(Type::String),
+    }
+}
+
+fn net_ct_optional_int(value: Option<i64>) -> CtValue {
+    match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        None => CtValue::absent(Type::Int),
+    }
+}
+
+fn net_error_detail_value(detail: JetNetErrorDetail) -> CtValue {
+    CtValue::Struct {
+        type_name: "NetErrorDetail".to_string(),
+        fields: vec![
+            ("operation".to_string(), CtValue::Str(detail.operation)),
+            ("address".to_string(), net_ct_optional_string(detail.address)),
+            ("name".to_string(), net_ct_optional_string(detail.name)),
+            ("message".to_string(), CtValue::Str(detail.message)),
+            ("os_code".to_string(), net_ct_optional_int(detail.os_code)),
+        ],
+    }
+}
+
+fn marshal_net_error(error: JetNetError) -> (i64, CtValue) {
+    let parts = jet_net_error_surface_parts(error);
+    let (payload_bits, args) = match parts.payload {
+        JetNetErrorSurfacePayload::Detail(detail) => (
+            net_error_detail_handle(detail.clone()),
+            vec![(None, net_error_detail_value(detail))],
+        ),
+        JetNetErrorSurfacePayload::DNS {
+            variant,
+            ordinal,
+            value,
+        } => {
+            let value_handle = alloc_string(value.clone());
+            let packed = value_handle.wrapping_shl(8) | ordinal;
+            (
+                packed,
+                vec![
+                    (
+                        None,
+                        CtValue::Enum {
+                            type_name: "NetDnsError".to_string(),
+                            variant: variant.to_string(),
+                            args: vec![(None, CtValue::Str(value))],
+                        },
+                    ),
+                ],
+            )
+        }
+    };
+    let packed = payload_bits.wrapping_shl(8) | parts.ordinal;
+    let value = CtValue::Enum {
+        type_name: "NetError".to_string(),
+        variant: parts.variant.to_string(),
+        args,
+    };
+    (packed, value)
+}
+
+fn net_error_value(error: JetNetError) -> CtValue {
+    marshal_net_error(error).1
 }
 
 fn decode_result(handle: i64) -> Option<(bool, u64)> {
@@ -334,7 +448,7 @@ extern "C" fn jet_jit_net_tcp_listen_addr(addr: i64) -> i64 {
         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
         _ => None,
     }) else {
-        return result_err("invalid SocketAddr".into());
+        return net_invalid("tcp listen", "SocketAddr");
     };
     map_net_ok(jet_net_tcp_listen_addr(&addr), |l| {
         push_handle(NetHttpHandle::TcpListener(Arc::new(l)))
@@ -350,7 +464,7 @@ extern "C" fn jet_jit_net_tcp_connect(addr: i64) -> i64 {
 
 extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
-        return result_err("invalid TcpListener".into());
+        return net_invalid("listener local address", "TcpListener");
     };
     match jet_net_listener_local_socket_addr(&listener) {
         Ok(a) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(a))),
@@ -360,13 +474,7 @@ extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
 
 extern "C" fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "set_timeout",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("set_timeout", "TcpStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_set_timeout(&mut guard, ms))
@@ -374,13 +482,7 @@ extern "C" fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
 
 extern "C" fn jet_jit_net_nodelay(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "nodelay",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("nodelay", "TcpStream");
     };
     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     match jet_net_nodelay(&guard) {
@@ -391,13 +493,7 @@ extern "C" fn jet_jit_net_nodelay(stream: i64) -> i64 {
 
 extern "C" fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "set_nodelay",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("set_nodelay", "TcpStream");
     };
     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_set_nodelay(&guard, enabled != 0))
@@ -405,13 +501,7 @@ extern "C" fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
 
 extern "C" fn jet_jit_net_ttl(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "ttl",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("ttl", "TcpStream");
     };
     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     match jet_net_ttl(&guard) {
@@ -422,13 +512,7 @@ extern "C" fn jet_jit_net_ttl(stream: i64) -> i64 {
 
 extern "C" fn jet_jit_net_set_ttl(stream: i64, ttl: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "set_ttl",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("set_ttl", "TcpStream");
     };
     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_set_ttl(&guard, ttl))
@@ -445,13 +529,7 @@ extern "C" fn jet_jit_net_socket_type(stream: i64) -> i64 {
 extern "C" fn jet_jit_net_sendfile(stream: i64, path: i64) -> i64 {
     let path = clone_string(path);
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "sendfile",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("sendfile", "TcpStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     match jet_net_sendfile(&mut guard, &path) {
@@ -487,7 +565,7 @@ extern "C" fn jet_jit_net_tcp_reply(stream: i64, status: i64, body: i64) -> i64 
     let status = clone_string(status);
     let body = clone_string(body);
     let Some(NetHttpHandle::TcpStream(s)) = take_handle(stream) else {
-        return result_err("invalid TcpStream".into());
+        return net_invalid("tcp reply", "TcpStream");
     };
     let Ok(stream) = Arc::try_unwrap(s).map(|m| m.into_inner().unwrap_or_else(|p| p.into_inner()))
     else {
@@ -505,7 +583,7 @@ extern "C" fn jet_jit_net_udp_bind(addr: i64) -> i64 {
 
 extern "C" fn jet_jit_net_udp_local_addr(socket: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
-        return result_err("invalid UdpSocket".into());
+        return net_invalid("udp_local_addr", "UdpSocket");
     };
     match jet_net_udp_local_addr(&socket) {
         Ok(a) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(a))),
@@ -515,13 +593,7 @@ extern "C" fn jet_jit_net_udp_local_addr(socket: i64) -> i64 {
 
 extern "C" fn jet_jit_net_udp_set_timeout(socket: i64, ms: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "udp_set_timeout",
-            None,
-            None,
-            "invalid UdpSocket".into(),
-            None,
-        )));
+        return net_invalid("udp_set_timeout", "UdpSocket");
     };
     map_net_unit(jet_net_udp_set_timeout(&socket, ms))
 }
@@ -532,10 +604,10 @@ extern "C" fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -
         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
         _ => None,
     }) else {
-        return result_err("invalid SocketAddr".into());
+        return net_invalid("udp_send", "SocketAddr");
     };
     let Some(socket) = udp_socket(socket) else {
-        return result_err("invalid UdpSocket".into());
+        return net_invalid("udp_send", "UdpSocket");
     };
     match jet_net_udp_send_bytes_to(&socket, &bytes, &addr) {
         Ok(n) => result_ok(n as u64),
@@ -545,10 +617,48 @@ extern "C" fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -
 
 extern "C" fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
-        return result_err("invalid UdpSocket".into());
+        return net_invalid("udp_receive", "UdpSocket");
     };
     match jet_net_udp_receive(&socket, limit) {
         Ok(p) => result_ok_handle(push_handle(NetHttpHandle::UDPPacket(p))),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_udp_send_bytes_to_deadline(
+    socket: i64,
+    data: i64,
+    addr: i64,
+    deadline: i64,
+) -> i64 {
+    let bytes = clone_bytes(data);
+    let Some(addr) = with_handle(addr, |h| match h {
+        NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+        _ => None,
+    }) else {
+        return net_invalid("udp send", "SocketAddr");
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return net_invalid("udp send", "UdpSocket");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_udp_send_bytes_to_deadline(&socket, &bytes, &addr, &deadline) {
+        Ok(n) => result_ok(n as u64),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_udp_receive_deadline(
+    socket: i64,
+    limit: i64,
+    deadline: i64,
+) -> i64 {
+    let Some(socket) = udp_socket(socket) else {
+        return net_invalid("udp receive", "UdpSocket");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_udp_receive_deadline(&socket, limit, &deadline) {
+        Ok(packet) => result_ok_handle(push_handle(NetHttpHandle::UDPPacket(packet))),
         Err(e) => net_err(e),
     }
 }
@@ -592,7 +702,7 @@ extern "C" fn jet_jit_net_unix_listen(path: i64) -> i64 {
 #[cfg(unix)]
 extern "C" fn jet_jit_net_unix_accept(listener: i64) -> i64 {
     let Some(listener) = unix_listener(listener) else {
-        return result_err("invalid UnixListener".into());
+        return net_invalid("unix accept", "UnixListener");
     };
     match jet_net_unix_accept(&listener) {
         Ok(s) => result_ok_handle(push_handle(NetHttpHandle::UnixStream(Arc::new(
@@ -613,7 +723,7 @@ extern "C" fn jet_jit_net_unix_connect(path: i64) -> i64 {
 #[cfg(unix)]
 extern "C" fn jet_jit_net_unix_read(stream: i64) -> i64 {
     let Some(stream) = unix_stream(stream) else {
-        return result_err("invalid UnixStream".into());
+        return net_invalid("unix read", "UnixStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     match jet_net_unix_read(&mut guard) {
@@ -626,13 +736,7 @@ extern "C" fn jet_jit_net_unix_read(stream: i64) -> i64 {
 extern "C" fn jet_jit_net_unix_write(stream: i64, data: i64) -> i64 {
     let data = clone_string(data);
     let Some(stream) = unix_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "unix_write",
-            None,
-            None,
-            "invalid UnixStream".into(),
-            None,
-        )));
+        return net_invalid("unix_write", "UnixStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_unix_write(&mut guard, &data))
@@ -642,13 +746,7 @@ extern "C" fn jet_jit_net_unix_write(stream: i64, data: i64) -> i64 {
 extern "C" fn jet_jit_net_unix_write_all_bytes(stream: i64, data: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(stream) = unix_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "unix_write_all_bytes",
-            None,
-            None,
-            "invalid UnixStream".into(),
-            None,
-        )));
+        return net_invalid("unix_write_all_bytes", "UnixStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_unix_write_all_bytes(&mut guard, &bytes))
@@ -657,52 +755,58 @@ extern "C" fn jet_jit_net_unix_write_all_bytes(stream: i64, data: i64) -> i64 {
 #[cfg(unix)]
 extern "C" fn jet_jit_net_unix_close(stream: i64) -> i64 {
     let Some(stream) = unix_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "unix_close",
-            None,
-            None,
-            "invalid UnixStream".into(),
-            None,
-        )));
+        return net_invalid("unix_close", "UnixStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_unix_close(&mut guard))
 }
 
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_listen(_path: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+extern "C" fn jet_jit_net_unix_listen(path: i64) -> i64 {
+    let path = clone_string(path);
+    map_net_ok(jet_net_unix_listen(&path), |_| 0)
 }
 #[cfg(not(unix))]
 extern "C" fn jet_jit_net_unix_accept(_listener: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+    let listener = JetUnixListener;
+    map_net_ok(jet_net_unix_accept(&listener), |_| 0)
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_connect(_path: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+extern "C" fn jet_jit_net_unix_connect(path: i64) -> i64 {
+    let path = clone_string(path);
+    map_net_ok(jet_net_unix_connect(&path), |_| 0)
 }
 #[cfg(not(unix))]
 extern "C" fn jet_jit_net_unix_read(_stream: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+    let mut stream = JetUnixStream;
+    match jet_net_unix_read(&mut stream) {
+        Ok(value) => result_ok_handle(alloc_string(value)),
+        Err(error) => net_err(error),
+    }
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_write(_stream: i64, _data: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+extern "C" fn jet_jit_net_unix_write(_stream: i64, data: i64) -> i64 {
+    let mut stream = JetUnixStream;
+    let data = clone_string(data);
+    map_net_unit(jet_net_unix_write(&mut stream, &data))
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_write_all_bytes(_stream: i64, _data: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+extern "C" fn jet_jit_net_unix_write_all_bytes(_stream: i64, data: i64) -> i64 {
+    let mut stream = JetUnixStream;
+    let data = clone_bytes(data);
+    map_net_unit(jet_net_unix_write_all_bytes(&mut stream, &data))
 }
 #[cfg(not(unix))]
 extern "C" fn jet_jit_net_unix_close(_stream: i64) -> i64 {
-    result_err("unix sockets unsupported".into())
+    let mut stream = JetUnixStream;
+    map_net_unit(jet_net_unix_close(&mut stream))
 }
 
 // ── TcpListener / TcpStream handle methods ─────────────────────────────────
 
 extern "C" fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
-        return result_err("invalid TcpListener".into());
+        return net_invalid("tcp accept", "TcpListener");
     };
     match jet_net_tcp_accept(&listener) {
         Ok(s) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(
@@ -714,7 +818,7 @@ extern "C" fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
 
 extern "C" fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
-        return result_err("invalid TcpListener".into());
+        return net_invalid("tcp local address", "TcpListener");
     };
     match jet_net_listener_local_socket_addr(&listener) {
         Ok(a) => result_ok_handle(alloc_string(jet_net_socket_to_string(&a))),
@@ -724,7 +828,7 @@ extern "C" fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
 
 extern "C" fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return result_err("invalid TcpStream".into());
+        return net_invalid("tcp read", "TcpStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     match jet_net_tcp_read_text(&mut guard, limit) {
@@ -736,13 +840,7 @@ extern "C" fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
 extern "C" fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(stream) = tcp_stream(stream) else {
-        return net_err(JetNetError::InvalidInput(jet_net_detail(
-            "write_all",
-            None,
-            None,
-            "invalid TcpStream".into(),
-            None,
-        )));
+        return net_invalid("write_all", "TcpStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_tcp_write_all_bytes(&mut guard, &bytes))
@@ -750,10 +848,61 @@ extern "C" fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 
 
 extern "C" fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
-        return result_ok_unit();
+        return net_invalid("tcp close", "TcpStream");
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_tcp_close(&mut guard))
+}
+
+extern "C" fn jet_jit_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+    let Some(interest) = net_ready_interest(interest) else {
+        return net_invalid("tcp ready", "NetReadyInterest");
+    };
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp ready", "TcpStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_ok(
+        jet_net_tcp_ready_deadline(&mut guard, interest, &deadline),
+        |ready| push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
+    )
+}
+
+extern "C" fn jet_jit_udp_socket_ready(socket: i64, interest: i64, deadline: i64) -> i64 {
+    let Some(interest) = net_ready_interest(interest) else {
+        return net_invalid("udp ready", "NetReadyInterest");
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return net_invalid("udp ready", "UdpSocket");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    map_net_ok(jet_net_udp_ready(&socket, interest, &deadline), |ready| {
+        push_handle(NetHttpHandle::NetReady(Arc::new(ready)))
+    })
+}
+
+extern "C" fn jet_jit_udp_socket_close(socket: i64) -> i64 {
+    let Some(socket) = udp_socket(socket) else {
+        return net_invalid("udp close", "UdpSocket");
+    };
+    map_net_unit(jet_net_udp_close(&socket))
+}
+
+extern "C" fn jet_jit_net_ready_readable(ready: i64) -> i64 {
+    i64::from(
+        net_ready(ready)
+            .map(|ready| jet_net_ready_readable(&ready))
+            .unwrap_or(false),
+    )
+}
+
+extern "C" fn jet_jit_net_ready_writable(ready: i64) -> i64 {
+    i64::from(
+        net_ready(ready)
+            .map(|ready| jet_net_ready_writable(&ready))
+            .unwrap_or(false),
+    )
 }
 
 // ── core.http.server ───────────────────────────────────────────────────────
@@ -1951,7 +2100,9 @@ host_fns! {
     udp_local_addr: "jet_jit_net_udp_local_addr" => jet_jit_net_udp_local_addr: sig1;
     udp_set_timeout: "jet_jit_net_udp_set_timeout" => jet_jit_net_udp_set_timeout: sig2;
     udp_send_bytes_to: "jet_jit_net_udp_send_bytes_to" => jet_jit_net_udp_send_bytes_to: sig3;
+    udp_send_bytes_to_deadline: "jet_jit_net_udp_send_bytes_to_deadline" => jet_jit_net_udp_send_bytes_to_deadline: sig4;
     udp_receive: "jet_jit_net_udp_receive" => jet_jit_net_udp_receive: sig2;
+    udp_receive_deadline: "jet_jit_net_udp_receive_deadline" => jet_jit_net_udp_receive_deadline: sig3;
     udp_packet_bytes: "jet_jit_net_udp_packet_bytes" => jet_jit_net_udp_packet_bytes: sig1;
     udp_packet_original_len: "jet_jit_net_udp_packet_original_len" => jet_jit_net_udp_packet_original_len: sig1;
     udp_packet_truncated: "jet_jit_net_udp_packet_truncated" => jet_jit_net_udp_packet_truncated: sig1;
@@ -1967,6 +2118,11 @@ host_fns! {
     tcp_read_text: "jet_jit_tcp_stream_read_text" => jet_jit_tcp_stream_read_text: sig2;
     tcp_write_all_bytes: "jet_jit_tcp_stream_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
     tcp_close: "jet_jit_tcp_stream_close" => jet_jit_tcp_stream_close: sig1;
+    tcp_ready: "jet_jit_tcp_stream_ready" => jet_jit_tcp_stream_ready: sig3;
+    udp_ready: "jet_jit_udp_socket_ready" => jet_jit_udp_socket_ready: sig3;
+    udp_close: "jet_jit_udp_socket_close" => jet_jit_udp_socket_close: sig1;
+    ready_readable: "jet_jit_net_ready_readable" => jet_jit_net_ready_readable: sig1;
+    ready_writable: "jet_jit_net_ready_writable" => jet_jit_net_ready_writable: sig1;
     http_mux_new: "jet_jit_http_mux_new" => jet_jit_http_mux_new: sig0;
     http_mux_add: "jet_jit_http_mux_add" => jet_jit_http_mux_add: sig4;
     http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
@@ -2113,6 +2269,310 @@ pub(crate) fn runtime_json_response(status: i64, body: String) -> i64 {
 
 pub(crate) fn runtime_http_mux() -> i64 {
     push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
+}
+
+// ── I9 UDP ambient adapters ───────────────────────────────────────────────
+
+fn net_ct_handle(type_name: &str, handle: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+    }
+}
+
+pub(crate) fn runtime_net_socket_addr(host: String, port: i64) -> CtValue {
+    match jet_net_socket_addr(&host, port) {
+        Ok(addr) => CtValue::Present(Box::new(net_ct_handle(
+            "SocketAddr",
+            push_handle(NetHttpHandle::SocketAddr(addr)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_bind(address: String) -> CtValue {
+    match jet_net_udp_bind(&address) {
+        Ok(socket) => CtValue::Present(Box::new(net_ct_handle(
+            "UdpSocket",
+            push_handle(NetHttpHandle::UdpSocket(Arc::new(socket))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_bind_addr(address: i64) -> CtValue {
+    let Some(address) = with_handle(address, |handle| match handle {
+        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp bind",
+            "SocketAddr",
+        ))));
+    };
+    match jet_net_udp_bind_addr(&address) {
+        Ok(socket) => CtValue::Present(Box::new(net_ct_handle(
+            "UdpSocket",
+            push_handle(NetHttpHandle::UdpSocket(Arc::new(socket))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_local_addr(socket: i64) -> CtValue {
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp local address",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_local_addr(&socket) {
+        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
+            "SocketAddr",
+            push_handle(NetHttpHandle::SocketAddr(address)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_set_timeout(socket: i64, timeout_ms: i64) -> CtValue {
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "set udp timeout",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_set_timeout(&socket, timeout_ms) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_send_to(socket: i64, data: String, address: i64) -> CtValue {
+    let Some(address) = with_handle(address, |handle| match handle {
+        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp send",
+            "SocketAddr",
+        ))));
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp send",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_send_to(&socket, &data, &address) {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_recv_from(socket: i64, limit: i64) -> CtValue {
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp receive",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_recv_from(&socket, limit) {
+        Ok(packet) => CtValue::Present(Box::new(net_ct_handle(
+            "UDPPacket",
+            push_handle(NetHttpHandle::UDPPacket(packet)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_send_bytes_to(socket: i64, data: Vec<u8>, address: i64) -> CtValue {
+    let Some(address) = with_handle(address, |handle| match handle {
+        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp send",
+            "SocketAddr",
+        ))));
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp send",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_send_bytes_to(&socket, &data, &address) {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_receive(socket: i64, limit: i64) -> CtValue {
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp receive",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_receive(&socket, limit) {
+        Ok(packet) => CtValue::Present(Box::new(net_ct_handle(
+            "UDPPacket",
+            push_handle(NetHttpHandle::UDPPacket(packet)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_ready(socket: i64, interest: i64, deadline: i64) -> CtValue {
+    let Some(interest) = net_ready_interest(interest) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp ready",
+            "NetReadyInterest",
+        ))));
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp ready",
+            "UdpSocket",
+        ))));
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_udp_ready(&socket, interest, &deadline) {
+        Ok(ready) => CtValue::Present(Box::new(net_ct_handle(
+            "NetReady",
+            push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_close(socket: i64) -> CtValue {
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp close",
+            "UdpSocket",
+        ))));
+    };
+    match jet_net_udp_close(&socket) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_receive_deadline(socket: i64, limit: i64, deadline: i64) -> CtValue {
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp receive",
+            "UdpSocket",
+        ))));
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_udp_receive_deadline(&socket, limit, &deadline) {
+        Ok(packet) => CtValue::Present(Box::new(net_ct_handle(
+            "UDPPacket",
+            push_handle(NetHttpHandle::UDPPacket(packet)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_send_to_deadline(
+    socket: i64,
+    data: Vec<u8>,
+    addr: i64,
+    deadline: i64,
+) -> CtValue {
+    let Some(addr) = with_handle(addr, |handle| match handle {
+        NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp send",
+            "SocketAddr",
+        ))));
+    };
+    let Some(socket) = udp_socket(socket) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "udp send",
+            "UdpSocket",
+        ))));
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_udp_send_bytes_to_deadline(&socket, &data, &addr, &deadline) {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_udp_packet_data(packet: i64) -> CtValue {
+    CtValue::Str(
+        with_handle(packet, |handle| match handle {
+            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_data(packet)),
+            _ => None,
+        })
+        .unwrap_or_default(),
+    )
+}
+
+pub(crate) fn runtime_udp_packet_addr(packet: i64) -> CtValue {
+    let address = with_handle(packet, |handle| match handle {
+        NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_addr(packet)),
+        _ => None,
+    });
+    match address {
+        Some(address) => net_ct_handle(
+            "SocketAddr",
+            push_handle(NetHttpHandle::SocketAddr(address)),
+        ),
+        None => net_ct_handle("SocketAddr", 0),
+    }
+}
+
+pub(crate) fn runtime_udp_packet_bytes(packet: i64) -> CtValue {
+    CtValue::Bytes(
+        with_handle(packet, |handle| match handle {
+            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_bytes(packet)),
+            _ => None,
+        })
+        .unwrap_or_default(),
+    )
+}
+
+pub(crate) fn runtime_udp_packet_original_len(packet: i64) -> CtValue {
+    CtValue::Int(
+        with_handle(packet, |handle| match handle {
+            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_original_len(packet)),
+            _ => None,
+        })
+        .unwrap_or(0),
+    )
+}
+
+pub(crate) fn runtime_udp_packet_truncated(packet: i64) -> CtValue {
+    CtValue::Bool(
+        with_handle(packet, |handle| match handle {
+            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_truncated(packet)),
+            _ => None,
+        })
+        .unwrap_or(false),
+    )
+}
+
+pub(crate) fn runtime_net_ready_readable(ready: i64) -> CtValue {
+    CtValue::Bool(
+        net_ready(ready)
+            .map(|ready| jet_net_ready_readable(&ready))
+            .unwrap_or(false),
+    )
+}
+
+pub(crate) fn runtime_net_ready_writable(ready: i64) -> CtValue {
+    CtValue::Bool(
+        net_ready(ready)
+            .map(|ready| jet_net_ready_writable(&ready))
+            .unwrap_or(false),
+    )
 }
 
 fn marshal_http_error(error: JetHTTPError) -> (i64, CtValue) {
@@ -2525,6 +2985,46 @@ mod http_i9_adapter_tests {
                         args.as_slice(),
                         [(Some(field), CtValue::Str(value))]
                             if field == "reason" && value == "named origins required"
+                    )
+        ));
+    }
+
+    #[test]
+    fn net_error_marshalling_uses_canonical_surface_shape() {
+        let detail = jet_net_detail(
+            "udp receive",
+            Some("127.0.0.1:9".to_string()),
+            None,
+            "timed out".to_string(),
+            Some(110),
+        );
+        let (timeout, timeout_value) = marshal_net_error(JetNetError::Timeout(detail));
+        assert_eq!(timeout & 0xff, 8);
+        assert!(matches!(
+            timeout_value,
+            CtValue::Enum { type_name, variant, args }
+                if type_name == "NetError"
+                    && variant == "Timeout"
+                    && matches!(
+                        args.as_slice(),
+                        [(None, CtValue::Struct { type_name: detail_type, .. })]
+                            if detail_type == "NetErrorDetail"
+                    )
+        ));
+
+        let (dns, dns_value) = marshal_net_error(JetNetError::DNS(
+            JetNetDnsError::NotFound("missing.example".to_string()),
+        ));
+        assert_eq!(dns & 0xff, 14);
+        assert!(matches!(
+            dns_value,
+            CtValue::Enum { type_name, variant, args }
+                if type_name == "NetError"
+                    && variant == "DNS"
+                    && matches!(
+                        args.as_slice(),
+                        [(None, CtValue::Enum { type_name: dns_type, variant: dns_variant, .. })]
+                            if dns_type == "NetDnsError" && dns_variant == "NotFound"
                     )
         ));
     }

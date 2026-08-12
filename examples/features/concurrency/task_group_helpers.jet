@@ -1,26 +1,18 @@
-// D-VERDICT-1323-1: a group of task handles is driven without writing a loop.
-// `tasks.spawn_group(n, body)` starts n tasks from one callable, and every
-// single-handle method has a list twin that means the same thing applied in
-// order: wait_all/join_all and detach_all consume the group, cancel_all,
-// pause_all, resume_all and trace_all borrow it.
-use core.tasks as tasks
+// D-CONC-SPAWN1=D: dynamic fan-out uses the one `task.group` surface.
+// The limit bounds active children; the group joins every child at close.
+
+fn work(value: Int) => Int {
+    value + 1
+}
 
 fn run() {
-    workers :: tasks.spawn_group(3, () => 7)
-    // pause_all, resume_all and trace_all borrow the group: the handles are
-    // still yours afterwards. `trace_all` reports each child's flags in order.
-    workers.pause_all()
-    print(workers.trace_all())
-    workers.resume_all()
-    print(workers.trace_all())
-    // cancel_all borrows too; wait_all consumes.
-    workers.cancel_all()
-    print(workers.wait_all())
-
-    pair :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
-    print(pair.join_all())
-
-    // detach_all consumes without waiting: nobody observes these results.
-    background :: tasks.spawn_group(2, () => 0)
-    background.detach_all()
+    task.group workers(limit: 3) {
+        results :: task.all {
+            work(1),
+            work(2),
+            work(3),
+            work(4)
+        } ?? panic("task.all failed")
+        print(results)
+    }
 }

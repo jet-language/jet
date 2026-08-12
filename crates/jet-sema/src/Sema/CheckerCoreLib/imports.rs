@@ -7,7 +7,7 @@ use crate::Syntax;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
         /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
-        /// The function was registered as `{alias}__{method}` in `self.funcs`.
+        /// The function was registered as `__jet_{alias}__{method}` in `self.funcs`.
         pub(crate) fn infer_code_module_call(
             &mut self,
             alias: &str,
@@ -108,6 +108,44 @@ impl<'a> Checker<'a> {
             let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
             if Syntax::classify_identifier(item) == Syntax::IdentifierClass::SoftPublic {
                 self.diags.push(soft_public_use(item, span));
+            }
+            // D-APILABEL1=A: inline-module calls use the same binder as local
+            // and file-module calls. The mangled registration is only an
+            // implementation name; its public labels remain the source
+            // function's contract.
+            let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+            if crate::Sema::CallBinder::bind_call_args(
+                item,
+                &params,
+                args,
+                span,
+                &mut self.diags,
+            )
+            .is_none()
+            {
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return sig.return_type.clone();
+            }
+            self.register_binder_refs(args);
+            // Homogeneous rest parameters are lowered as one list slot after
+            // binding. Trait-bounded heterogeneous rests retain their source
+            // tail for the dedicated per-arity path.
+            if sig.param_variadic.last().copied().unwrap_or(false)
+                && sig.variadic_bounds.is_none()
+            {
+                let mut normalized = crate::AST::Call {
+                    name: item.to_string(),
+                    name_span: span,
+                    type_args: type_args.to_vec(),
+                    args: std::mem::take(args),
+                    resolved_ret: None,
+                    range_checked: false,
+                    widen_approx: false,
+                };
+                self.normalize_variadic_call(&mut normalized, &sig);
+                *args = normalized.args;
             }
             if args.len() != sig.params.len() {
                 self.diags.push(Diagnostic::error(
@@ -349,6 +387,27 @@ impl<'a> Checker<'a> {
                         }
                         return sig.return_type.clone();
                     }
+                    self.register_binder_refs(args);
+                }
+                // Homogeneous rest parameters are one declaration slot in the
+                // binder and one list slot at the module boundary. Keep the
+                // same normalization as direct calls before generic inference
+                // and per-parameter checking. Heterogeneous trait-bounded
+                // rests retain their individual tail for their special path.
+                if sig.param_variadic.last().copied().unwrap_or(false)
+                    && sig.variadic_bounds.is_none()
+                {
+                    let mut normalized = crate::AST::Call {
+                        name: name.to_string(),
+                        name_span: span,
+                        type_args: type_args.to_vec(),
+                        args: std::mem::take(args),
+                        resolved_ret: None,
+                        range_checked: false,
+                        widen_approx: false,
+                    };
+                    self.normalize_variadic_call(&mut normalized, &sig);
+                    *args = normalized.args;
                 }
                 let mut call_access = self.call_access_frame();
                 let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();

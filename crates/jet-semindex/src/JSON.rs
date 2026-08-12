@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use jet_foundation::AST::ParamZone;
+use jet_foundation::AST::ProgramBundle;
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::Package::{
@@ -10,6 +12,7 @@ use jet_pkg_model::Package::{
 };
 
 use crate::Build::{SymDef, SymKind, SymRef};
+use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, ExpandProjection, ExpandValue,
     InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
@@ -388,18 +391,34 @@ fn json_view_provenance(provenance: &ViewProvenanceFact) -> String {
 fn json_kind(kind: &SymbolKind) -> String {
     match kind {
         SymbolKind::Module => "{\"kind\":\"module\"}".to_string(),
-        SymbolKind::Function { params, ret } => {
+        SymbolKind::Function {
+            params,
+            call_contract,
+            ret,
+        } => {
             let ps: Vec<String> = params
                 .iter()
-                .map(|(n, t)| format!("{{\"name\":{},\"type\":{}}}", json_str(n), json_str(t)))
+                .map(|(_, t)| format!("{{\"type\":{}}}", json_str(t)))
                 .collect();
+            let contract = call_contract
+                .iter()
+                .map(|(label, zone, variadic)| {
+                    format!(
+                        "{{\"label\":{},\"zone\":{},\"variadic\":{}}}",
+                        json_str(label),
+                        json_str(zone),
+                        variadic,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
             let ret_json = match ret {
                 Some(t) => json_str(t),
                 None => "null".to_string(),
             };
             format!(
-                "{{\"kind\":\"function\",\"params\":[{}],\"ret\":{}}}",
-                ps.join(","), ret_json
+                "{{\"kind\":\"function\",\"params\":[{}],\"call_contract\":[{}],\"ret\":{}}}",
+                ps.join(","), contract, ret_json
             )
         }
         SymbolKind::Struct { fields } => {
@@ -451,8 +470,9 @@ fn json_def(d: &SymbolDef) -> String {
             .join(",")
     );
     format!(
-        "{{\"identity\":{},\"name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{}}}",
+        "{{\"identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{}}}",
         json_str(&d.identity),
+        json_str(&d.qualified_name),
         json_str(&d.name),
         json_str(&d.module_path),
         json_span(d.def_span),
@@ -789,22 +809,38 @@ fn origin_text(origin: &MemberOrigin) -> String {
 pub(crate) fn convert_defs(
     defs: &[SymDef],
     view_provenance: &std::collections::HashMap<String, jet_foundation::AST::ViewProvenanceMap>,
+    bundle: &ProgramBundle,
 ) -> Vec<SymbolDef> {
     defs.iter()
-        .map(|d| SymbolDef {
-            identity: d.identity.clone(),
-            name: d.name.clone(),
-            module_path: d.module_path.clone(),
-            def_span: d.def_span.into(),
-            kind: convert_kind(&d.kind),
-            view_provenance: view_provenance
-                .get(&d.identity)
-                .map(|map| {
-                    map.iter()
-                        .map(|(path, provenance)| convert_view_provenance(path, provenance))
-                        .collect()
-                })
-                .unwrap_or_default(),
+        .map(|d| {
+            let owner = match &d.kind {
+                SymKind::EnumVariant { parent } | SymKind::Field { parent, .. } => {
+                    Some(parent.as_str())
+                }
+                _ => None,
+            };
+            SymbolDef {
+                identity: d.identity.clone(),
+                name: d.name.clone(),
+                qualified_name: canonical_symbol_name(
+                    bundle,
+                    &d.module_path,
+                    &d.name,
+                    owner,
+                    Some((d.def_span.start, d.def_span.end)),
+                ),
+                module_path: d.module_path.clone(),
+                def_span: d.def_span.into(),
+                kind: convert_kind(&d.kind),
+                view_provenance: view_provenance
+                    .get(&d.identity)
+                    .map(|map| {
+                        map.iter()
+                            .map(|(path, provenance)| convert_view_provenance(path, provenance))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
         })
         .collect()
 }
@@ -824,8 +860,30 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
 fn convert_kind(kind: &SymKind) -> SymbolKind {
     match kind {
         SymKind::Module => SymbolKind::Module,
-        SymKind::Function { params, ret, .. } => SymbolKind::Function {
+        SymKind::Function {
+            params,
+            param_contract,
+            param_variadic,
+            ret,
+            ..
+        } => SymbolKind::Function {
             params: params.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
+            call_contract: param_contract
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label, zone))| {
+                    (
+                        label.clone(),
+                        match zone {
+                            ParamZone::PositionalOnly => "positional_only",
+                            ParamZone::Either => "either",
+                            ParamZone::LabelOnly => "label_only",
+                        }
+                        .to_string(),
+                        param_variadic.get(index).copied().unwrap_or(false),
+                    )
+                })
+                .collect(),
             ret: ret.as_ref().map(|t| t.name()),
         },
         SymKind::Struct { fields } => SymbolKind::Struct {

@@ -7,6 +7,7 @@ use crate::Publish::Index::{self, IndexEntry};
 use crate::Publish::Sign;
 use crate::SHA256;
 use super::Tuf::verify_registry_package;
+use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -239,13 +240,16 @@ fn registry_cache_component(name: &str) -> String {
 /// nothing to fast-forward yet); a real network/auth failure surfaces as E1235.
 pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
     let dir = index_repo_path(registry);
-    if let Ok(metadata) = std::fs::symlink_metadata(&dir) {
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    match std::fs::symlink_metadata(&dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(e1235(
                 &registry.url,
                 "the local registry cache path is not a real directory",
             ));
         }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(e1235(&registry.url, &error.to_string())),
     }
     if dir.join(".git").is_dir() {
         let pull = Command::new("git")
@@ -262,18 +266,32 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
         return Ok(dir);
     }
     if let Some(parent) = dir.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            return Err(e1235(&registry.url, &error.to_string()));
+        }
     }
-    let out = Command::new("git")
+    let owns_destination = match std::fs::create_dir(&dir) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(error) => return Err(e1235(&registry.url, &error.to_string())),
+    };
+    let clone = Command::new("git")
         .args(["clone", &registry.url, &dir.to_string_lossy()])
         .output();
-    match out {
+    match clone {
         Ok(o) if o.status.success() => Ok(dir),
-        Ok(o) => Err(e1235(
-            &registry.url,
-            String::from_utf8_lossy(&o.stderr).trim(),
+        Ok(o) => Err(clone_failure(
+            registry,
+            &dir,
+            owns_destination,
+            clone_output_detail(&o),
         )),
-        Err(e) => Err(e1235(&registry.url, &e.to_string())),
+        Err(error) => Err(clone_failure(
+            registry,
+            &dir,
+            owns_destination,
+            error.to_string(),
+        )),
     }
 }
 
@@ -283,26 +301,129 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
 /// commit by accident.
 pub struct PublishCheckout {
     path: PathBuf,
+    cleanup_attempted: Cell<bool>,
+    owns_path: bool,
 }
 
 impl PublishCheckout {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Remove this checkout before an orderly return.
+    pub fn cleanup(&self) -> io::Result<()> {
+        self.cleanup_attempted.set(true);
+        cleanup_publish_checkout(&self.path, self.owns_path)
+    }
 }
 
 impl Drop for PublishCheckout {
     fn drop(&mut self) {
-        let temp = std::env::temp_dir();
-        if self.path.parent() == Some(temp.as_path())
-            && self
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("jet-registry-publish-"))
-        {
-            let _ = std::fs::remove_dir_all(&self.path);
+        if self.cleanup_attempted.replace(true) {
+            return;
         }
+        if let Err(error) = cleanup_publish_checkout(&self.path, self.owns_path) {
+            let diagnostic = checkout_cleanup_diagnostic(&self.path, &error);
+            eprint!("{}", crate::Diagnostics::render_all("", "", &[diagnostic]));
+        }
+    }
+}
+
+fn checkout_cleanup_problem(path: &Path, error: &io::Error) -> String {
+    format!(
+        "couldn't remove registry checkout `{}`: {error}",
+        path.display()
+    )
+}
+
+fn checkout_cleanup_diagnostic(path: &Path, error: &io::Error) -> Diagnostic {
+    let problem = checkout_cleanup_problem(path, error);
+    jet_foundation::Diagnostics::Diagnostic::from_row(
+        "E2105",
+        &[("problem", problem.as_str())],
+        None,
+    )
+}
+
+fn attach_checkout_cleanup_failure(
+    mut primary: Diagnostic,
+    path: &Path,
+    error: &io::Error,
+) -> Diagnostic {
+    let detail = format!(
+        "cleanup failed: {}",
+        checkout_cleanup_problem(path, error)
+    );
+    if let Some(existing) = primary.detail.as_mut() {
+        if !existing.is_empty() && !existing.ends_with('\n') {
+            existing.push('\n');
+        }
+        existing.push_str(&detail);
+    } else {
+        primary.detail = Some(detail);
+    }
+    primary
+}
+
+fn finish_publish_checkout<T>(
+    checkout: PublishCheckout,
+    operation: impl FnOnce(&Path) -> Result<T, Diagnostic>,
+) -> Result<T, Diagnostic> {
+    let path = checkout.path().to_path_buf();
+    let result = operation(&path);
+    let cleanup = checkout.cleanup();
+    match cleanup {
+        Ok(()) => result,
+        Err(error) => match result {
+            Ok(_) => Err(checkout_cleanup_diagnostic(&path, &error)),
+            Err(primary) => Err(attach_checkout_cleanup_failure(primary, &path, &error)),
+        },
+    }
+}
+
+fn cleanup_owned_clone(path: &Path, owned: bool) -> io::Result<()> {
+    if !owned {
+        return Ok(());
+    }
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn cleanup_publish_checkout(path: &Path, owned: bool) -> io::Result<()> {
+    let temp = std::env::temp_dir();
+    let safe_name = path.parent() == Some(temp.as_path())
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("jet-registry-publish-"));
+    cleanup_owned_clone(path, owned && safe_name)
+}
+
+fn clone_output_detail(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    format!("git clone exited with {}", output.status)
+}
+
+fn clone_failure(
+    registry: &RegistryConfig,
+    path: &Path,
+    owns_destination: bool,
+    detail: String,
+) -> Diagnostic {
+    let primary = e1235(&registry.url, &detail);
+    match cleanup_owned_clone(path, owns_destination) {
+        Ok(()) => primary,
+        Err(cleanup_error) => attach_checkout_cleanup_failure(primary, path, &cleanup_error),
     }
 }
 
@@ -310,22 +431,38 @@ impl Drop for PublishCheckout {
 pub fn prepare_publish_checkout(registry: &RegistryConfig) -> Result<PublishCheckout, Diagnostic> {
     let suffix = unique_suffix();
     let path = std::env::temp_dir().join(format!("jet-registry-publish-{suffix}"));
+    let owns_path = match std::fs::create_dir(&path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(error) => return Err(e1235(&registry.url, &error.to_string())),
+    };
     let output = Command::new("git")
         .args(["clone", &registry.url, &path.to_string_lossy()])
-        .output()
-        .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => {
+            return Err(clone_failure(
+                registry,
+                &path,
+                owns_path,
+                error.to_string(),
+            ));
+        }
+    };
     if !output.status.success() {
-        // `git clone` may create the destination before it reports a
-        // transport/authentication failure.  Remove only the uniquely named
-        // checkout we allocated above; leaving a partial tree lets a later
-        // publish mistake it for a clean transaction.
-        let _ = std::fs::remove_dir_all(&path);
-        return Err(e1235(
-            &registry.url,
-            String::from_utf8_lossy(&output.stderr).trim(),
+        return Err(clone_failure(
+            registry,
+            &path,
+            owns_path,
+            clone_output_detail(&output),
         ));
     }
-    Ok(PublishCheckout { path })
+    Ok(PublishCheckout {
+        path,
+        cleanup_attempted: Cell::new(false),
+        owns_path,
+    })
 }
 
 /// Commit the working index tree and push it to the registry. Sets a fallback
@@ -450,14 +587,38 @@ fn push_index_inner(
         let rebase = run(&["rebase", &remote])
             .map_err(|e| e1235(&registry.url, &e.to_string()))?;
         if !rebase.status.success() {
-            let _ = run(&["rebase", "--abort"]);
+            let rebase_detail = String::from_utf8_lossy(&rebase.stderr).trim().to_owned();
+            let rebase_failure = if rebase_detail.is_empty() {
+                "concurrent registry publication changed an immutable version".to_owned()
+            } else {
+                format!(
+                    "concurrent registry publication changed an immutable version: {rebase_detail}"
+                )
+            };
+            let abort_failure = match run(&["rebase", "--abort"]) {
+                Ok(abort) if abort.status.success() => None,
+                Ok(abort) => {
+                    let detail = String::from_utf8_lossy(&abort.stderr).trim().to_owned();
+                    Some(if detail.is_empty() {
+                        "git rebase --abort exited unsuccessfully".to_owned()
+                    } else {
+                        format!("git rebase --abort failed: {detail}")
+                    })
+                }
+                Err(error) => Some(error.to_string()),
+            };
+            if let Some(abort_failure) = abort_failure {
+                return Err(e1235(
+                    &registry.url,
+                    &format!(
+                        "{rebase_failure}; rebase abort cleanup failed: {abort_failure}"
+                    ),
+                ));
+            }
             if recover_race {
                 return rebuild_publication_after_race(registry, repo, message, paths, expected);
             }
-            return Err(e1235(
-                &registry.url,
-                "concurrent registry publication changed an immutable version",
-            ));
+            return Err(e1235(&registry.url, &rebase_failure));
         }
         let retry = run(&["push", "origin", &format!("HEAD:refs/heads/{branch}")])
             .map_err(|e| e1235(&registry.url, &e.to_string()))?;
@@ -476,20 +637,24 @@ fn verify_remote_winner(
     expected: &IndexEntry,
 ) -> Result<bool, Diagnostic> {
     let checkout = prepare_publish_checkout(registry)?;
-    let repo = checkout.path();
-    let entries = crate::Publish::verify_registry_package(repo, &registry.name, &expected.name)?;
-    let Some(actual) = entries
-        .into_iter()
-        .find(|entry| entry.version == expected.version)
-    else {
-        return Ok(false);
-    };
-    if actual != *expected {
-        return Ok(false);
-    }
-    crate::Publish::verify_artifact(repo, &actual)
-        .map(|_| true)
-        .map_err(|error| super::Advisory::e2607("concurrent registry winner", &error.to_string()))
+    finish_publish_checkout(checkout, |repo| {
+        let entries =
+            crate::Publish::verify_registry_package(repo, &registry.name, &expected.name)?;
+        let Some(actual) = entries
+            .into_iter()
+            .find(|entry| entry.version == expected.version)
+        else {
+            return Ok(false);
+        };
+        if actual != *expected {
+            return Ok(false);
+        }
+        crate::Publish::verify_artifact(repo, &actual)
+            .map(|_| true)
+            .map_err(|error| {
+                super::Advisory::e2607("concurrent registry winner", &error.to_string())
+            })
+    })
 }
 
 fn rebuild_publication_after_race(
@@ -506,51 +671,52 @@ fn rebuild_publication_after_race(
         )
     })?;
     let checkout = prepare_publish_checkout(registry)?;
-    let repo = checkout.path();
-    let index = Index::index_entry_path(repo, &expected.name)
-        .map_err(|error| e1235(&registry.url, &error.to_string()))?;
-    if expected.yanked {
-        match Index::mark_yanked(repo, &expected.name, &expected.version) {
-            Ok(true) => {}
-            Ok(false) => {
+    finish_publish_checkout(checkout, |repo| {
+        let index = Index::index_entry_path(repo, &expected.name)
+            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+        if expected.yanked {
+            match Index::mark_yanked(repo, &expected.name, &expected.version) {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Err(e1235(
+                        &registry.url,
+                        "concurrent yank lost its immutable registry entry",
+                    ));
+                }
+                Err(error) => return Err(e1235(&registry.url, &error.to_string())),
+            }
+        } else {
+            Index::write_index_entry(repo, expected)
+                .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+            let source = artifact_path(stale_repo, &expected.name, &expected.version)
+                .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+            if !source.is_dir() {
                 return Err(e1235(
                     &registry.url,
-                    "concurrent yank lost its immutable registry entry",
+                    "concurrent publication lost its staged source artifact",
                 ));
             }
-            Err(error) => return Err(e1235(&registry.url, &error.to_string())),
-        }
-    } else {
-        Index::write_index_entry(repo, expected)
+            publish_artifact(
+                repo,
+                &source,
+                &expected.name,
+                &expected.version,
+                &expected.content_hash,
+            )
             .map_err(|error| e1235(&registry.url, &error.to_string()))?;
-        let source = artifact_path(stale_repo, &expected.name, &expected.version)
-            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
-        if !source.is_dir() {
-            return Err(e1235(
-                &registry.url,
-                "concurrent publication lost its staged source artifact",
-            ));
         }
-        publish_artifact(
-            repo,
-            &source,
-            &expected.name,
-            &expected.version,
-            &expected.content_hash,
-        )
-        .map_err(|error| e1235(&registry.url, &error.to_string()))?;
-    }
-    let metadata = crate::Publish::refresh_registry_metadata(repo, &registry.name)
-        .map_err(|diagnostic| e1235(&registry.url, &diagnostic.what))?;
-    let mut paths = vec![index];
-    if !expected.yanked {
-        paths.push(
-            artifact_path(repo, &expected.name, &expected.version)
-                .map_err(|error| e1235(&registry.url, &error.to_string()))?,
-        );
-    }
-    paths.extend(metadata.paths);
-    push_index_inner(registry, repo, message, &paths, Some(expected), false)
+        let metadata = crate::Publish::refresh_registry_metadata(repo, &registry.name)
+            .map_err(|diagnostic| e1235(&registry.url, &diagnostic.what))?;
+        let mut paths = vec![index];
+        if !expected.yanked {
+            paths.push(
+                artifact_path(repo, &expected.name, &expected.version)
+                    .map_err(|error| e1235(&registry.url, &error.to_string()))?,
+            );
+        }
+        paths.extend(metadata.paths);
+        push_index_inner(registry, repo, message, &paths, Some(expected), false)
+    })
 }
 
 fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bool {
@@ -708,11 +874,20 @@ pub fn publish_artifact(
     }
     copy_artifact_tree(source, &staging)?;
     if SHA256::tree_hash(&staging) != actual {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err(io::Error::new(
+        let hash_mismatch = io::Error::new(
             io::ErrorKind::InvalidData,
             "staged registry artifact does not match its source hash",
-        ));
+        );
+        return match std::fs::remove_dir_all(&staging) {
+            Ok(()) => Err(hash_mismatch),
+            Err(cleanup_error) => Err(io::Error::new(
+                hash_mismatch.kind(),
+                format!(
+                    "{hash_mismatch}; couldn't remove staged registry artifact `{}`: {cleanup_error}",
+                    staging.display()
+                ),
+            )),
+        };
     }
     std::fs::rename(&staging, &destination)?;
     Ok(destination)

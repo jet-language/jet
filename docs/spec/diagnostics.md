@@ -46,6 +46,11 @@ coverage checks accept both.
    row owns the unique code, severity, moment, What/Why/Fix templates, named
    holes, and any structured fix. The registry and this reference are generated
    projections; never ship a generic fallback for a known case.
+   A hole is written as `{name}` and is supplied by the emitter through the
+   row renderer; an emitter does not replace prose by hand. A structured fix
+   is a source marker such as `replace:;=>,`, `remove:->`, or
+   `generated:missing_arms`, projected into typed fix metadata before a report
+   is built. Fix prose is never parsed to recover an edit.
 3. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
    recoverable errors, and includes no raw rustc text.
@@ -259,7 +264,7 @@ renumbered, and no new `W` code may be allocated.
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0152 | sema  | a bare `String`, interpolated pattern, or invalid pattern is used as a typed `Regex` literal (D-REGEX-LIT1) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
-| E0155 | sema  | DateTime typed literal is invalid or contains interpolation (D-BOUND-HEAD1) |
+| E0155 | sema  | typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation (D-BOUND-HEAD1) |
 | E0160 | sema  | `++`/`--` operand is not an assignable lvalue (D-INCR1) |
 | E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |
 | E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
@@ -501,6 +506,7 @@ renumbered, and no new `W` code may be allocated.
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
+| E3004 | runtime | task cancelled at a cooperative wait point (D-CANCELMODEL1) |
 | E3005 | runtime | a `#Pre`/`#Post` contract clause failed — checked in every build, not a debug/release split (D-PREPOST1) |
 | E3101 | sema  | low-level memory operation used outside an `#Unsafe("…")` block (D-LL1/D-UNSAFE2) |
 | E3102 | sema  | low-level memory vocabulary used without `use core.mem` (D-LL1/D-UNSAFE2) |
@@ -687,8 +693,9 @@ renumbered, and no new `W` code may be allocated.
 | E1107 | sema  | `columnar [T]` per-container layout prefix is reserved (D-SOA2C) |
 | E1108 | sema  | list method not yet supported on a `#Layout(columnar)` list (D-SOA1) |
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
-| E1110 | sema  | `task` has no active lexical or parameter task group, targets a group other than the innermost active one, or lets `TaskGroup` escape (D-CONC-SPAWN1=D, D-TASKGROUP-PARAM1) |
+| E1110 | sema  | `task` has no lexical or parameter task group, uses the wrong lexical group, or lets `TaskGroup` escape (D-CONC-SPAWN1, D-TASKGROUP-PARAM1) |
 | E1111 | sema  | a parallel collection adapter captures mutable state or crosses a worker boundary with a non-shareable value (D-PARCAPTURE1=D) |
+| E1112 | sema  | `task.all`, `task.race`, or `task.any` has no task branch (D-CONCSELECT1) |
 | E1130 | sema/parse | `#Kernel(.parallel)` has a duplicate marker or its body cannot satisfy the safe-kernel proof obligations (D-COMPUTE-KERNEL-SURFACE1=B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
@@ -1049,8 +1056,8 @@ CLI.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1101 | A spawned task captures a value it does not own, or two `taskgroup` children borrow one place. | Tasks run concurrently and may outlive the scope that created them; shared mutable state is not allowed. A group joins its children, so it may lend borrowed places (D-TASKBORROW1=A) — but only where it can prove the places never overlap. | Give the task ordinary owned data. Copyable values copy at closure creation; other owned values move. Use a channel to send results back. Between group children, borrow separate fields or constant indexes. |
-| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads. A view, trait value, mutable capture, or borrowed closure cannot cross. | Send plain owned data, make an ordinary owned copy when permitted, or use `Shared<T>` for deliberate shared state. |
+| E1101 | A spawned task captures a value it does not own, or two task-group children borrow one place. | Tasks run concurrently and may outlive the scope that created them; shared mutable state is not allowed. A group joins its children, so it may lend borrowed places (D-TASKBORROW1=A) — but only where it can prove the places never overlap. | Give the task ordinary owned data. Copyable values copy at closure creation; other owned values move. Use a channel to send results back. Between group children, borrow separate fields or constant indexes. |
+| E1102 | A value crossing a `task` or `Sender.send` boundary is not sendable. | Task and channel boundaries move owned data between threads. A view, trait value, mutable capture, or borrowed closure cannot cross. | Send plain owned data, make an ordinary owned copy when permitted, or use `Shared<T>` for deliberate shared state. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
 | E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`. |
 | E1104 | `#Layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#Layout(c)` if C interop is not required. |
@@ -1058,8 +1065,9 @@ CLI.
 | E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#Layout(columnar)` on the `struct` declaration instead. |
 | E1108 | A list method (e.g. `.map`, `.filter`, `.sort`, `.pop`, `.remove`, `.get`) was called on a `#Layout(columnar)` list. | v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled. | Drop `#Layout(columnar)` from the struct to use the full list API, or rewrite the operation with indexing and a loop. |
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
-| E1110 | The bare `task` keyword needs a lexical `task.group` or a `TaskGroup` parameter, always targets the innermost active one, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the innermost active lexical `task.group` or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Write `task work()` inside the active group, or pass that handle directly to `fn helper(group: TaskGroup)`; do not store or capture it. |
+| E1110 | `task` has no lexical or parameter task group, uses the wrong lexical group, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical `task.group` or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Write `task work()` in the active group, or pass the group to `fn helper(group: TaskGroup)`; do not store or capture it. |
 | E1111 | A `para_*` callback changes captured state, hides capture facts, or its items, captures, or results cannot safely cross worker boundaries. | Parallel workers run without a hidden shared-mutation or merge rule; their callbacks, inputs, and outputs must expose thread-safe owned values. | Write the callback inline or use a top-level function; return extra data, use `para_partition`/`para_fold`, copy into plain owned data, or keep the operation sequential. |
+| E1112 | A task combinator has no task branch. | `task.all`, `task.race`, and `task.any` need at least one child so the shared selection policy has a value to join or select. | Write one or more task branches inside the combinator. |
 
 ### E1130 — safe kernel proof (D-COMPUTE-KERNEL-SURFACE1=B)
 
@@ -1068,7 +1076,7 @@ CLI.
 | `` `#Kernel(.parallel)` cannot prove `{obligation}` ``. | A safe kernel must carry sema facts for bounds, aliasing, captures, races, barrier uniformity, and control flow before TIR. The shipped subset is read-only, effect-free, straight-line code over checked Core compute operations. | Keep parameters read-only, remove effects/provider calls, and use the checked expression subset; put raw device code behind its typed `#Unsafe("reason")` boundary. |
 | a function has more than one `#Kernel` marker. | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
 | L1101 | A `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged only by joining it. | Join it with `.join()`, or write `.detach()` to let it go free. |
-| E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
+| E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Write `task work()` or use `task.all { work_a(), work_b() }`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 | E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
 
@@ -1091,7 +1099,7 @@ named cell.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`~x`) before crossing. |
+| E2303 | A `View<T>` (or a string view) crosses a `task` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`~x`) before crossing. |
 | E2305 | A `View<T>` would outlive an owner, or sema cannot stabilize a public owner set for each returned view slot. | Each returned or stored view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live. A local or temporary owner still dies too soon, and open dispatch must fail closed when it cannot publish that relation. | Keep every possible owner alive, return or store the view through a boundary with proven provenance, or cross the boundary with an owned copy (`~view`). |
 | E2307 | A string view would outlive a possible owning `String`, has no stable public owner set, reaches an operation that needs an owned `String`, or an owned `String` is used where `View<str>` is required. | `View<str>` follows the same inferred owner-set rule as `View<T>` through calls, aggregates, callbacks, and trait contracts. Local and temporary owners die too soon; an owned-`String` use cannot preserve a zero-copy view; filling a `View<str>` slot needs `.trim()`/`.after()`/`.before()` (or a tracked string-view binding), not a plain owned place. | Keep every possible owner alive and use a proven `View<str>` boundary, bind a string window, return a `View` of the owning element, or materialize an owned `String` with `~view`. |
 | E0212 | An owner is moved, replaced, or resized while a live view still points into it. | The operation could move or destroy the storage that the view reads or edits; Jet rejects before lowering instead of relying on a backend borrow error. | Finish using the view before changing the owner, narrow the view's scope, or make an owned copy. |
@@ -1231,7 +1239,7 @@ server built on top. E28xx is the block for M10.
 | E2806 | Convention file `{path}` has no `fn page`. | Files under a `.routes(from:)` root must declare `fn page` or start with `_` to opt out. A file without a page would register an endpoint the compiler cannot analyze. | Add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory. |
 | E2807 | Route `{path}` is registered both by `{a}` and `{b}`. | Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1). | Remove one registration, or rename the convention file. |
 | E2810 | `{kind}` `{name}` is not a statically known handler. | D-WEBAPP1 records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge. | Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees. |
-| L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `tasks.spawn(() => …)` so each connection runs in its own task. |
+| L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `task { … }` so each connection runs in its own task. |
 
 ## Testing and tooling diagnostics (E2-M11)
 
@@ -1365,6 +1373,7 @@ span is embedded in the message (Jet file + line + function name).
 | E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. An unhandled `CryptoError` at `fn run` instead reports `unhandled cryptographic error` plus its stable redacted Display text. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled `CryptoError`. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; handle `CryptoError` in `fn run`. Unhandled non-`Internal` crypto errors exit 70 after cleanup; unhandled `Internal` exits 101 after fail-closed cleanup. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
+| E3004 | `task cancelled at a cooperative wait point`. | The task control plane requested cancellation before this wait completed. | Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait. |
 | E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result). |
 
 ## Uninitialized binding diagnostics (D-UNINIT-SENTINEL2)
@@ -1619,7 +1628,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 |------|------|-----|-----|
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
-| E0155 | a `DateTime` literal is invalid or contains interpolation. | DateTime heads are complete RFC3339 values checked before the program runs; interpolation would move validation to runtime. | Write a complete `DateTime.{"…"}` literal, or parse a runtime `String` explicitly. |
+| E0155 | a typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation. | Typed literal heads are checked before the program runs; URL and Path holes must stay inside components, and DateTime heads must be complete. | Write a valid typed literal with holes only in URL or Path components, or parse a runtime `String` explicitly. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
 | E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-capability marker `&` if the function should change it. |

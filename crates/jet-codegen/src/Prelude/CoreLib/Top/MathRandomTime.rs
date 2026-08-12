@@ -1,14 +1,6 @@
-// Deadline clock, budget, and JetDeadlineGuard: card #1747, one home in
-// Prelude/Deadline.rs (included by this AOT emission list and by
-// jet_codegen::scheduler for the JIT host).
-
-fn jet_deadline_remaining_ms() -> Option<i64> {
-    let deadline = jet_ctx_deadline_ms()?;
-    Some(deadline.saturating_sub(jet_std_time_now()))
-}
-
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = jet_std::jet_task_deadline(wait_kind).render();
+    jet_std::jet_task_deadline_mark_pending();
     if jet_interrupt_handler_should_unwind()
         || jet_scheduler_wait_boundary_should_unwind()
         || jet_typed_deadline_boundary_should_unwind()
@@ -18,26 +10,6 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     jet_runtime_diagnostic(rendered);
 }
 
-fn jet_deadline_check(wait_kind: &str) {
-    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-        jet_deadline_exceeded(wait_kind);
-    }
-}
-
-fn jet_std_time_sleep(millis: i64) {
-    let want = millis.max(0);
-    if let Some(remaining) = jet_deadline_remaining_ms() {
-        if remaining <= 0 {
-            jet_deadline_exceeded("time sleep");
-        }
-        if want > remaining {
-            jet_scheduler_sleep_ms(remaining as u64);
-            jet_deadline_exceeded("time sleep");
-        }
-    }
-    jet_scheduler_sleep_ms(want as u64);
-    jet_deadline_check("time sleep");
-}
 fn jet_std_time_start() -> jet_std::Stopwatch {
     jet_std::Stopwatch {
         start: std::time::Instant::now(),
@@ -116,55 +88,20 @@ fn jet_rng_split(r: &mut jet_std::Rng) -> jet_std::Rng {
     }
 }
 fn jet_rng_pick<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>) -> JetOutcome<T, JetAbsent> {
-    if xs.is_empty() {
-        Err(JetAbsent)
-    } else {
-        Ok(xs[jet_rng_int(r, 0, xs.len() as i64 - 1) as usize].clone())
-    }
+    jet_seeded_rng_pick(&mut r.state, xs).ok_or(JetAbsent)
 }
 fn jet_rng_weighted_pick<T: Clone>(
     r: &mut jet_std::Rng,
     xs: &Vec<T>,
     weights: &Vec<f64>,
 ) -> JetOutcome<T, JetAbsent> {
-    if xs.is_empty() || xs.len() != weights.len() {
-        return Err(JetAbsent);
-    }
-    let mut total = 0.0;
-    for &w in weights {
-        if w.is_finite() && w > 0.0 {
-            total += w;
-        }
-    }
-    if total <= 0.0 {
-        return Err(JetAbsent);
-    }
-    let mut needle = jet_rng_float_range(r, 0.0, total);
-    for (item, &weight) in xs.iter().zip(weights.iter()) {
-        let w = if weight.is_finite() && weight > 0.0 { weight } else { 0.0 };
-        if needle < w {
-            return Ok(item.clone());
-        }
-        needle -= w;
-    }
-    jet_outcome_of(xs.last().cloned())
+    jet_seeded_rng_weighted_pick(&mut r.state, xs, weights).ok_or(JetAbsent)
 }
 fn jet_rng_sample<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>, k: i64) -> Vec<T> {
-    let want = (k.max(0) as usize).min(xs.len());
-    let mut pool = xs.clone();
-    for i in 0..want {
-        let j = jet_rng_int(r, i as i64, pool.len() as i64 - 1) as usize;
-        pool.swap(i, j);
-    }
-    pool.truncate(want);
-    pool
+    jet_seeded_rng_sample(&mut r.state, xs, k)
 }
 fn jet_rng_shuffle<T>(r: &mut jet_std::Rng, xs: &mut Vec<T>) {
-    let len = xs.len();
-    for i in (1..len).rev() {
-        let j = jet_rng_int(r, 0, i as i64) as usize;
-        xs.swap(i, j);
-    }
+    jet_seeded_rng_shuffle(&mut r.state, xs);
 }
 // D-TIMERES1=A / D-SHAPE-DURATIONCONVERT1=A: one checked nanosecond unit
 // model for every runtime constructor and whole-unit read.
@@ -196,6 +133,9 @@ fn jet_duration_in(
 }
 fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
     d.as_millis()
+}
+fn jet_duration_ns_value(d: &jet_std::Duration) -> i64 {
+    d.ns
 }
 fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
     jet_duration_kernel_is_zero(d.ns)

@@ -1,17 +1,18 @@
 //! Exhaustive TStmt evaluation (#777).
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 use crate::AST::Type;
 use crate::Codegen::mangle;
-use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
+use crate::Codegen::TIR::{TForInMethod, TIfCond, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{CtReport, CtValue};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, Span};
 use super::{
-    encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, raw_place_local,
-    progress_elapsed, progress_emit, progress_iter_parts, progress_no_color, progress_now,
-    progress_source_has_exact_total, store_view_mut_owner_list, unsupported, EvalCtx, Flow,
-    ViewMutPathStep,
+    encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, progress_elapsed,
+    progress_emit, progress_iter_parts, progress_no_color, progress_now,
+    progress_source_has_exact_total, store_view_mut_owner_list, store_view_mut_owner_value,
+    unsupported, view_mut_owner_value, view_mut_place, view_mut_window_args, EvalCtx, Flow,
+    view_mut_parts, ViewMutPathStep,
 };
 use crate::Codegen::TIR::{TExpr, TExprKind, THandleOp};
 
@@ -156,29 +157,20 @@ fn parse_place_region(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>, 
     Some((base?, parse_view_mut_path(fields), start?, end?))
 }
 
-fn owner_list_place(expr: &TExpr) -> Option<(String, Vec<ViewMutPathStep>)> {
-    match &expr.kind {
-        TExprKind::Local(local) => Some((local.name.clone(), Vec::new())),
-        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => owner_list_place(place),
-        TExprKind::Field { recv, field, .. } => {
-            let (base, mut path) = owner_list_place(recv)?;
-            path.push(ViewMutPathStep::Field(field.clone()));
-            Some((base, path))
-        }
-        TExprKind::Index {
-            base,
-            index,
-            is_map: false,
-            ..
-        } => {
-            let (root, mut path) = owner_list_place(base)?;
-            let TExprKind::IntLit(idx, _) = &index.kind else {
-                return None;
-            };
-            path.push(ViewMutPathStep::Index(*idx));
-            Some((root, path))
-        }
-        _ => raw_place_local(expr).map(|local| (local.name.clone(), Vec::new())),
+fn owner_list_place(
+    expr: &TExpr,
+    span: Span,
+) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+    let mut resolve_index = |index: &TExpr| match &index.kind {
+        TExprKind::IntLit(value, _) => Ok(*value),
+        _ => Err(unsupported("projected view index", span)),
+    };
+    match view_mut_place(expr, &mut resolve_index) {
+        Ok(place) => Ok(place),
+        // Whole-place and split planning historically fall back when a
+        // dynamic selector cannot be encoded in a persistent path. Tensor
+        // ViewMut acquisition itself evaluates dynamic selectors directly.
+        Err(_) => Ok(None),
     }
 }
 
@@ -217,24 +209,83 @@ impl<'a> EvalCtx<'a> {
         stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core(stmts, scope, None)
+    }
+
+    fn exec_stmts_with_names(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+        scope_names: &HashSet<String>,
+    ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core_with_names(stmts, scope, None, scope_names)
+    }
+
+    fn exec_stmts_core(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+        tail: Option<&'a TExpr>,
+    ) -> Result<Flow, Diagnostic> {
+        let scope_names = scope.keys().cloned().collect::<HashSet<_>>();
+        self.exec_stmts_core_with_names(stmts, scope, tail, &scope_names)
+    }
+
+    pub(super) fn exec_stmts_value_with_names(
+        &mut self,
+        stmts: &'a [TStmt],
+        value: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+        scope_names: &HashSet<String>,
+    ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core_with_names(stmts, scope, Some(value), scope_names)
+    }
+
+    fn exec_stmts_core_with_names(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+        tail: Option<&'a TExpr>,
+        scope_names: &HashSet<String>,
+    ) -> Result<Flow, Diagnostic> {
         let defer_mark = self.deferred_closes.len();
         let guard_mark = self.shared_guards.len();
         for stmt in stmts {
-            self.dispatch_pending_interrupts(scope)?;
+            if let Err(error) = self.dispatch_pending_interrupts(scope) {
+                let _ = self.finish_eval_scope_with_resources(
+                    defer_mark,
+                    guard_mark,
+                    scope,
+                    scope_names,
+                    &[],
+                    &[],
+                );
+                return Err(error);
+            }
             let flow = match self.exec_stmt(stmt, scope) {
                 Ok(flow) => flow,
                 Err(error) => {
-                    let _ = self.finish_eval_scope(defer_mark, guard_mark, scope);
+                    let _ = self.finish_eval_scope_with_resources(
+                        defer_mark,
+                        guard_mark,
+                        scope,
+                        scope_names,
+                        &[],
+                        &[],
+                    );
                     return Err(error);
                 }
             };
             if let Some(flow) = self.pending_flow.take() {
                 let preserved = returned_shared_guards(&flow);
-                self.finish_eval_scope_preserving(
+                let resource_values = returned_tensor_values(&flow);
+                self.finish_eval_scope_with_resources(
                     defer_mark,
                     guard_mark,
                     scope,
+                    scope_names,
                     &preserved,
+                    &resource_values,
                 )?;
                 return Ok(flow);
             }
@@ -242,39 +293,87 @@ impl<'a> EvalCtx<'a> {
                 Flow::Normal => {}
                 other => {
                     let preserved = returned_shared_guards(&other);
-                    self.finish_eval_scope_preserving(
+                    let resource_values = returned_tensor_values(&other);
+                    self.finish_eval_scope_with_resources(
                         defer_mark,
                         guard_mark,
                         scope,
+                        scope_names,
                         &preserved,
+                        &resource_values,
                     )?;
                     return Ok(other);
                 }
             }
         }
-        self.finish_eval_scope(defer_mark, guard_mark, scope)?;
+        if let Some(tail) = tail {
+            let result = self.eval_expr(tail, scope);
+            let preserve = result.as_ref().map_or_else(
+                |_| Vec::new(),
+                |value| {
+                    let mut resources = Vec::new();
+                    collect_tensor_resources(value, &mut resources);
+                    resources
+                },
+            );
+            let cleanup = self.finish_eval_scope_with_resources(
+                defer_mark,
+                guard_mark,
+                scope,
+                scope_names,
+                &[],
+                &preserve,
+            );
+            return match (result, cleanup) {
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+                (Ok(value), Ok(())) => Ok(Flow::Return(value)),
+            };
+        }
+        self.finish_eval_scope_with_resources(
+            defer_mark,
+            guard_mark,
+            scope,
+            scope_names,
+            &[],
+            &[],
+        )?;
         Ok(Flow::Normal)
     }
 
-    fn finish_eval_scope(
+    fn finish_eval_scope_with_resources(
         &mut self,
         defer_mark: usize,
         guard_mark: usize,
         scope: &mut HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        self.finish_eval_scope_preserving(defer_mark, guard_mark, scope, &[])
-    }
-
-    fn finish_eval_scope_preserving(
-        &mut self,
-        defer_mark: usize,
-        guard_mark: usize,
-        scope: &mut HashMap<String, CtValue>,
-        preserve: &[usize],
+        scope_names: &HashSet<String>,
+        preserve_guards: &[usize],
+        preserve: &[CtValue],
     ) -> Result<(), Diagnostic> {
         let deferred_result = self.run_deferred_closes(defer_mark, scope);
-        self.release_shared_guards_except(guard_mark, preserve);
-        deferred_result
+        self.release_shared_guards_except(guard_mark, preserve_guards);
+        let mut preserve_values = preserve.to_vec();
+        for name in scope_names {
+            if let Some(value) = scope.get(name) {
+                preserve_values.push(value.clone());
+                collect_tensor_resources(value, &mut preserve_values);
+            }
+        }
+        let owner_sources = preserve_values.clone();
+        for value in &owner_sources {
+            collect_preserved_tensor_owners(value, scope, &mut preserve_values, self.span());
+        }
+        let resource_result = drop_scope_tensor_resources(
+            scope,
+            scope_names,
+            &preserve_values,
+            self.span(),
+        );
+        match (deferred_result, resource_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     fn release_shared_guards_except(&mut self, mark: usize, preserve: &[usize]) {
@@ -283,16 +382,34 @@ impl<'a> EvalCtx<'a> {
             .copied()
             .partition(|guard| preserve.contains(guard));
         self.shared_guards.truncate(mark);
-        self.shared_guards.extend(keep);
-        let leases = {
+        self.shared_guards.extend(keep.iter().copied());
+        let permits = {
             let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            guard_ids
+            let kept_permits = keep
+                .iter()
+                .filter_map(|index| runtime.shared_guards.get(*index).cloned())
+                .map(|lease| lease.permit_arc())
+                .collect::<Vec<_>>();
+            let mut permits = Vec::new();
+            for lease in guard_ids
                 .into_iter()
                 .filter_map(|index| runtime.shared_guards.get(index).cloned())
-                .collect::<Vec<_>>()
+            {
+                let permit = lease.permit_arc();
+                if !kept_permits
+                    .iter()
+                    .any(|held| std::sync::Arc::ptr_eq(held, &permit))
+                    && !permits
+                    .iter()
+                    .any(|held| std::sync::Arc::ptr_eq(held, &permit))
+                {
+                    permits.push(permit);
+                }
+            }
+            permits
         };
-        for lease in leases.into_iter().rev() {
-            lease.release();
+        for permit in permits.into_iter().rev() {
+            permit.release();
         }
     }
 
@@ -340,7 +457,7 @@ impl<'a> EvalCtx<'a> {
                 // so bind an alias handle here instead of a copy — otherwise
                 // edits through the window vanish on this tier alone (I9).
                 if let TExprKind::Borrow { place, mutable: true } = &init.kind {
-                    if let Some((base, path)) = owner_list_place(place) {
+                    if let Some((base, path)) = owner_list_place(place, self.span())? {
                         // `x :: &x` would shadow its own owner and make the
                         // handle point at itself, so fall back to the value.
                         if &base != name && scope.contains_key(&base) {
@@ -371,7 +488,13 @@ impl<'a> EvalCtx<'a> {
                     return Ok(Flow::Return(ret));
                 }
                 if *clone_value {
-                    rhs = rhs.clone();
+                    rhs = if value.ty.is_compute_tensor_family()
+                        || self.clone_contains_compute_tensor(&value.ty)
+                    {
+                        self.clone_structural_value(rhs, &value.ty)?
+                    } else {
+                        rhs.clone()
+                    };
                 }
                 match place {
                     TPlace::Local(local) => {
@@ -382,6 +505,40 @@ impl<'a> EvalCtx<'a> {
                         }) = scope.get(&key).cloned()
                         {
                             if type_name == "__JetViewMut" {
+                                let owner = view_mut_owner_value(&fields, scope, self.span())?;
+                                if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                                    let window = view_mut_window_args(&fields)
+                                        .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                                    let mut replacement = rhs;
+                                    if let Some(binop) = op {
+                                        let current = crate::Comptime::ComputeLite::tensor_view_get_value(
+                                            &owner,
+                                            window,
+                                            0,
+                                            self.span(),
+                                        )?;
+                                        replacement = eval_binop(
+                                            *binop,
+                                            current,
+                                            replacement,
+                                            self.span(),
+                                        )?;
+                                    }
+                                    let updated = crate::Comptime::ComputeLite::tensor_view_set_value(
+                                        &owner,
+                                        window,
+                                        0,
+                                        &replacement,
+                                        self.span(),
+                                    )?;
+                                    store_view_mut_owner_value(
+                                        &fields,
+                                        scope,
+                                        updated,
+                                        self.span(),
+                                    )?;
+                                    return Ok(Flow::Normal);
+                                }
                                 let mut start = None;
                                 let mut end = None;
                                 for (n, v) in &fields {
@@ -496,7 +653,7 @@ impl<'a> EvalCtx<'a> {
                 let mut run_body = |this: &mut Self| {
                     let value = this.new_taskgroup(limit.as_ref(), scope)?;
                     let index = Self::taskgroup_index(&value)
-                        .expect("new taskgroup always carries an evaluator index");
+                        .expect("new task group always carries an evaluator index");
                     scope.insert(group.name.clone(), value);
                     let body_result = this.exec_stmts(body, scope);
                     let close_result = this.close_taskgroup(index);
@@ -545,12 +702,29 @@ impl<'a> EvalCtx<'a> {
                 else_body,
                 ..
             } => {
-                if self.eval_if_cond(cond, scope)? {
-                    self.exec_stmts(then_body, scope)
+                let branch_scope_names = scope.keys().cloned().collect();
+                let condition_defer_mark = self.deferred_closes.len();
+                let condition_guard_mark = self.shared_guards.len();
+                let condition = match self.eval_if_cond(cond, scope) {
+                    Ok(condition) => condition,
+                    Err(error) => {
+                        let _ = self.finish_eval_scope_with_resources(
+                            condition_defer_mark,
+                            condition_guard_mark,
+                            scope,
+                            &branch_scope_names,
+                            &[],
+                            &[],
+                        );
+                        return Err(error);
+                    }
+                };
+                if condition {
+                    self.exec_stmts_with_names(then_body, scope, &branch_scope_names)
                 } else if let Some(else_body) = else_body {
-                    self.exec_stmts(else_body, scope)
+                    self.exec_stmts_with_names(else_body, scope, &branch_scope_names)
                 } else {
-                    Ok(Flow::Normal)
+                    self.exec_stmts_with_names(&[], scope, &branch_scope_names)
                 }
             }
             TStmt::Loop { body, label } => self.exec_infinite(label.as_deref(), body, scope),
@@ -1223,6 +1397,26 @@ impl<'a> EvalCtx<'a> {
                 } = &base_value
                 {
                     if type_name == "__JetViewMut" {
+                        let owner = view_mut_owner_value(fields, scope, self.span())?;
+                        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                            let window = view_mut_window_args(fields)
+                                .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                            let idx = as_int(&idx_v, self.span())?;
+                            let updated = crate::Comptime::ComputeLite::tensor_view_set_value(
+                                &owner,
+                                window,
+                                idx,
+                                &rhs,
+                                self.span(),
+                            )?;
+                            store_view_mut_owner_value(
+                                fields,
+                                scope,
+                                updated,
+                                self.span(),
+                            )?;
+                            return Ok(Flow::Normal);
+                        }
                         let mut start = None;
                         for (n, v) in fields {
                             if let ("start", CtValue::Int(n)) = (n.as_str(), v) {
@@ -1293,9 +1487,63 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut rhs = self.eval_expr(&assign.value, scope)?;
                 if assign.clone_value {
-                    rhs = rhs.clone();
+                    rhs = self.clone_structural_value(rhs, &assign.value.ty)?;
                 }
-                let CtValue::List(mut items) = self.eval_expr(&assign.base, scope)? else {
+                let base_value = self.eval_expr(&assign.base, scope)?;
+                if let CtValue::Struct {
+                    type_name,
+                    fields,
+                } = &base_value
+                {
+                    if type_name == "__JetViewMut" {
+                        let owner = view_mut_owner_value(fields, scope, self.span())?;
+                        let (_, _, start, _) = view_mut_parts(fields)
+                            .ok_or_else(|| unsupported("view-mut fields", self.span()))?;
+                        let absolute = start
+                            .checked_add(idx)
+                            .ok_or_else(|| unsupported("view-mut index", self.span()))?;
+                        let CtValue::List(mut items) = owner else {
+                            return Err(unsupported("view-mut field owner", self.span()));
+                        };
+                        if absolute < 0 || absolute as usize >= items.len() {
+                            return Err(unsupported("view-mut OOB", self.span()));
+                        }
+                        let element = &mut items[absolute as usize];
+                        let CtValue::Struct {
+                            type_name: _,
+                            fields: element_fields,
+                        } = element
+                        else {
+                            return Err(unsupported("view-mut field element", self.span()));
+                        };
+                        let mangled = crate::Codegen::mangle(&assign.field);
+                        let slot = element_fields.iter_mut().find(|(name, _)| {
+                            name == &assign.field
+                                || name == &mangled
+                                || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    == Some(assign.field.as_str())
+                        });
+                        let Some((_, slot)) = slot else {
+                            return Err(unsupported(
+                                &format!("field `{}`", assign.field),
+                                self.span(),
+                            ));
+                        };
+                        if let Some(op) = assign.op {
+                            *slot = eval_binop(op, slot.clone(), rhs, self.span())?;
+                        } else {
+                            *slot = rhs;
+                        }
+                        return store_view_mut_owner_value(
+                            fields,
+                            scope,
+                            CtValue::List(items),
+                            self.span(),
+                        )
+                        .map(|()| Flow::Normal);
+                    }
+                }
+                let CtValue::List(mut items) = base_value else {
                     return Err(unsupported("index field assign list", self.span()));
                 };
                 let i = idx as usize;
@@ -1378,8 +1626,8 @@ impl<'a> EvalCtx<'a> {
                 // IndexAssign / field writes reach the owner (AOT emits real slices).
                 // Read-only windows still materialize.
                 let owner_path = if let Some(owner_expr) = owner {
-                    let (base_name, path) = owner_list_place(owner_expr)
-                        .ok_or_else(|| unsupported("split views owner", self.span()))?;
+                        let (base_name, path) = owner_list_place(owner_expr, self.span())?
+                            .ok_or_else(|| unsupported("split views owner", self.span()))?;
                     let items = {
                         let probe = place_region(&base_name, &path, 0, 0);
                         let CtValue::Struct { fields, .. } = &probe else {
@@ -1505,9 +1753,15 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { body } => {
+                if self.task_cancel.is_some() {
+                    crate::scheduler::jet_scheduler_shield_enter();
+                }
                 self.shield_depth += 1;
                 let result = self.exec_stmts(body, scope);
                 self.shield_depth -= 1;
+                if self.task_cancel.is_some() {
+                    let _ = crate::scheduler::jet_scheduler_shield_leave_status();
+                }
                 if self.shield_depth == 0 {
                     self.task_wait_cancel_check()?;
                 }
@@ -1516,7 +1770,7 @@ impl<'a> EvalCtx<'a> {
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
             TStmt::Transact {
                 snapshots,
-                uses_stm,
+                stm,
                 body,
                 ..
             } => {
@@ -1538,8 +1792,9 @@ impl<'a> EvalCtx<'a> {
                     on_commit: Vec::new(),
                     on_rollback: Vec::new(),
                 });
-                if *uses_stm {
-                    self.shared_transactions.push(Vec::new());
+                if stm.is_some() {
+                    self.shared_transactions
+                        .push(super::EvalSharedTransaction::new());
                 }
                 let flow = self.exec_stmts(body, scope);
                 let frame = self.txn_stack.pop().unwrap_or(super::EvalTxnFrame {
@@ -1547,56 +1802,62 @@ impl<'a> EvalCtx<'a> {
                     on_commit: Vec::new(),
                     on_rollback: Vec::new(),
                 });
-                let staged = if *uses_stm {
-                    self.shared_transactions.pop().unwrap_or_default()
+                let staged = if stm.is_some() {
+                    self.shared_transactions.pop()
                 } else {
-                    Vec::new()
+                    None
                 };
                 match flow {
                     Ok(Flow::Normal) => {
-                        let slots = {
-                            let runtime =
-                                self.runtime.lock().expect("evaluator runtime poisoned");
-                            staged
-                                .iter()
-                                .filter_map(|delta| {
-                                    runtime
-                                        .shared_values
-                                        .get(delta.shared_index)
-                                        .cloned()
-                                        .map(|slot| (delta.shared_index, slot))
-                                })
-                                .collect::<Vec<_>>()
-                        };
-                        let permits = super::shared_protocol::jet_shared_acquire_ordered(
-                            slots
-                                .iter()
-                                .map(|(_, slot)| slot.protocol.clone())
-                                .collect(),
-                        );
-                        for mut delta in staged {
-                            let slot = slots
-                                .iter()
-                                .find_map(|(index, slot)| {
-                                    (*index == delta.shared_index).then_some(slot)
-                                })
-                                .expect("staged Shared delta has a locked slot");
-                            let current = slot
-                                .value
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .clone();
-                            let (_, updated) = self.eval_tlambda_mut_arg(
-                                delta.lambda,
-                                current,
-                                &mut delta.captured,
-                            )?;
-                            *slot
-                                .value
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner()) = updated;
+                        if let Some(staged) = staged {
+                            let slots = {
+                                let runtime =
+                                    self.runtime.lock().expect("evaluator runtime poisoned");
+                                staged
+                                    .deltas
+                                    .iter()
+                                    .filter_map(|delta| {
+                                        runtime
+                                            .shared_values
+                                            .get(delta.shared_index)
+                                            .cloned()
+                                            .map(|slot| (delta.shared_index, slot))
+                                    })
+                                    .collect::<Vec<_>>()
+                            };
+                            let super::EvalSharedTransaction {
+                                transaction,
+                                deltas,
+                            } = staged;
+                            transaction.commit_with(|| {
+                                let result: Result<(), Diagnostic> = (|| {
+                                    for mut delta in deltas {
+                                        let slot = slots
+                                            .iter()
+                                            .find_map(|(index, slot)| {
+                                                (*index == delta.shared_index).then_some(slot)
+                                            })
+                                            .expect("staged Shared delta has a locked slot");
+                                        let current = slot
+                                            .value
+                                            .lock()
+                                            .unwrap_or_else(|error| error.into_inner())
+                                            .clone();
+                                        let (_, updated) = self.eval_tlambda_mut_arg(
+                                            delta.lambda,
+                                            current,
+                                            &mut delta.captured,
+                                        )?;
+                                        *slot
+                                            .value
+                                            .lock()
+                                            .unwrap_or_else(|error| error.into_inner()) = updated;
+                                    }
+                                    Ok(())
+                                })();
+                                result
+                            })?;
                         }
-                        drop(permits);
                         for lam in frame.on_commit.into_iter().rev() {
                             let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
                         }
@@ -1631,59 +1892,69 @@ impl<'a> EvalCtx<'a> {
         cond: &'a TIfCond,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<bool, Diagnostic> {
-        match cond {
-            TIfCond::Plain(e) => as_bool(&self.eval_expr(e, scope)?, self.span()),
-            TIfCond::And { left, right } => {
-                Ok(self.eval_if_cond(left, scope)? && self.eval_if_cond(right, scope)?)
-            }
-            TIfCond::IsNone { subj } => {
-                Ok(matches!(
-                    self.eval_expr(subj, scope)?,
-                    CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
-                ))
-            }
-            TIfCond::IfLet { pattern, subj } => {
-                let value = self.eval_expr(subj, scope)?;
-                if let TPatternPosition::DataEntries { temp } = &pattern.position {
-                    if let CtValue::Enum { args, .. } = &value {
-                        if let Some((_, payload)) = args.first() {
-                            scope.insert(temp.clone(), payload.clone());
-                        }
+        enum CondWork<'b> {
+            Eval(&'b TIfCond),
+            AfterLeft {
+                parent: &'b TIfCond,
+                left: &'b TIfCond,
+                right: &'b TIfCond,
+            },
+            AfterRight {
+                parent: &'b TIfCond,
+                right: &'b TIfCond,
+            },
+        }
+
+        let mut work = vec![CondWork::Eval(cond)];
+        let mut results = std::collections::HashMap::new();
+        while let Some(task) = work.pop() {
+            match task {
+                CondWork::Eval(cond) => match cond {
+                    TIfCond::And { left, right } => {
+                        work.push(CondWork::AfterLeft {
+                            parent: cond,
+                            left,
+                            right,
+                        });
+                        work.push(CondWork::Eval(left));
+                    }
+                    TIfCond::Plain(expr)
+                    | TIfCond::IsNone { subj: expr }
+                    | TIfCond::IfLet { subj: expr, .. }
+                    | TIfCond::Matches { subj: expr, .. } => {
+                        let value = self.eval_expr_child(expr, scope)?;
+                        results.insert(
+                            cond as *const TIfCond as usize,
+                            self.eval_if_cond_leaf(cond, value, scope)?,
+                        );
+                    }
+                },
+                CondWork::AfterLeft {
+                    parent,
+                    left,
+                    right,
+                } => {
+                    let left = results.remove(&(left as *const TIfCond as usize)).ok_or_else(|| {
+                        unsupported("if condition result stack", self.span())
+                    })?;
+                    if left {
+                        work.push(CondWork::AfterRight { parent, right });
+                        work.push(CondWork::Eval(right));
+                    } else {
+                        results.insert(parent as *const TIfCond as usize, false);
                     }
                 }
-                match &pattern.pattern {
-                    crate::AST::Pattern::Ok { binding, .. } => match value {
-                        CtValue::Present(inner) => {
-                            scope.insert(binding.clone(), *inner);
-                            Ok(true)
-                        }
-                        _ => Ok(false),
-                    },
-                    crate::AST::Pattern::Err { binding, .. } => match value {
-                        CtValue::Failed(CtReport::Told(inner)) => {
-                            scope.insert(binding.clone(), *inner);
-                            Ok(true)
-                        }
-                        _ => Ok(false),
-                    },
-                    crate::AST::Pattern::Present { binding, .. } => match value {
-                        CtValue::Present(inner) => {
-                            scope.insert(binding.clone(), *inner);
-                            Ok(true)
-                        }
-                        _ => Ok(false),
-                    },
-                    crate::AST::Pattern::Absent(_) => {
-                        Ok(matches!(value, CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit))
-                    }
-                    _ => bind_match_pattern(&pattern.pattern, &value, scope),
+                CondWork::AfterRight { parent, right } => {
+                    let right = results.remove(&(right as *const TIfCond as usize)).ok_or_else(|| {
+                        unsupported("if condition result stack", self.span())
+                    })?;
+                    results.insert(parent as *const TIfCond as usize, right);
                 }
-            }
-            TIfCond::Matches { pattern, subj } => {
-                let value = self.eval_expr(subj, scope)?;
-                bind_match_pattern(&pattern.pattern, &value, scope)
             }
         }
+        results
+            .remove(&(cond as *const TIfCond as usize))
+            .ok_or_else(|| unsupported("empty if condition", self.span()))
     }
 
     fn exec_infinite(
@@ -1705,6 +1976,183 @@ impl<'a> EvalCtx<'a> {
         }
         Ok(Flow::Normal)
     }
+}
+
+fn collect_tensor_resources(value: &CtValue, out: &mut Vec<CtValue>) {
+    match value {
+        CtValue::Struct { type_name, fields }
+            if type_name == "Tensor" || type_name == "JetTensor"
+                || type_name == "__JetViewMut" =>
+        {
+            out.push(value.clone());
+            if type_name == "__JetViewMut" {
+                for (_, field) in fields {
+                    collect_tensor_resources(field, out);
+                }
+            }
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                collect_tensor_resources(field, out);
+            }
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                collect_tensor_resources(arg, out);
+            }
+        }
+        CtValue::List(values) => {
+            for value in values {
+                collect_tensor_resources(value, out);
+            }
+        }
+        CtValue::Map(values) => {
+            for value in values.values() {
+                collect_tensor_resources(value, out);
+            }
+        }
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
+            collect_tensor_resources(value, out);
+        }
+        _ => {}
+    }
+}
+
+fn contains_tensor_resource(value: &CtValue) -> bool {
+    let mut resources = Vec::new();
+    collect_tensor_resources(value, &mut resources);
+    !resources.is_empty()
+}
+
+fn collect_preserved_tensor_owners(
+    value: &CtValue,
+    scope: &HashMap<String, CtValue>,
+    out: &mut Vec<CtValue>,
+    span: Span,
+) {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "__JetViewMut" => {
+            if let Some((base, path, _, _)) = view_mut_parts(fields) {
+                if let Some(root) = scope.get(&base) {
+                    if let Ok(owner) = super::project_list_place(root, &path, span) {
+                        collect_tensor_resources(owner, out);
+                    }
+                }
+            }
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                collect_preserved_tensor_owners(field, scope, out, span);
+            }
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                collect_preserved_tensor_owners(arg, scope, out, span);
+            }
+        }
+        CtValue::List(values) => {
+            for value in values {
+                collect_preserved_tensor_owners(value, scope, out, span);
+            }
+        }
+        CtValue::Map(values) => {
+            for value in values.values() {
+                collect_preserved_tensor_owners(value, scope, out, span);
+            }
+        }
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
+            collect_preserved_tensor_owners(value, scope, out, span);
+        }
+        _ => {}
+    }
+}
+
+fn shares_preserved_resource(value: &CtValue, preserve: &[CtValue]) -> bool {
+    preserve.iter().any(|candidate| {
+        crate::Comptime::ComputeLite::tensor_values_share_handle(value, candidate)
+            || crate::Comptime::ComputeLite::tensor_window_values_share_handle(value, candidate)
+    })
+}
+
+fn drop_tensor_resources(
+    value: &CtValue,
+    preserve: &[CtValue],
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if shares_preserved_resource(value, preserve) {
+        return Ok(());
+    }
+    match value {
+        CtValue::Struct {
+            type_name,
+            fields: _,
+        }
+            if type_name == "Tensor" || type_name == "JetTensor" => {
+                crate::Comptime::ComputeLite::tensor_drop_value(value, span)
+            }
+        CtValue::Struct { type_name, .. } if type_name == "__JetViewMut" => {
+            crate::Comptime::ComputeLite::tensor_window_drop_value(value, span)
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                drop_tensor_resources(field, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                drop_tensor_resources(arg, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::List(values) => {
+            for value in values {
+                drop_tensor_resources(value, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::Map(values) => {
+            for value in values.values() {
+                drop_tensor_resources(value, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
+            drop_tensor_resources(value, preserve, span)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn drop_scope_tensor_resources(
+    scope: &mut HashMap<String, CtValue>,
+    scope_names: &HashSet<String>,
+    preserve: &[CtValue],
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let names = scope
+        .iter()
+        .filter(|(name, value)| {
+            !scope_names.contains(*name) && contains_tensor_resource(value)
+        })
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    for name in names {
+        if let Some(value) = scope.remove(&name) {
+            drop_tensor_resources(&value, preserve, span)?;
+        }
+    }
+    Ok(())
+}
+
+fn returned_tensor_values(flow: &Flow) -> Vec<CtValue> {
+    let value = match flow {
+        Flow::BreakValue(_, value) | Flow::Return(value) => value,
+        _ => return Vec::new(),
+    };
+    let mut resources = Vec::new();
+    collect_tensor_resources(value, &mut resources);
+    resources
 }
 
 fn returned_shared_guards(flow: &Flow) -> Vec<usize> {

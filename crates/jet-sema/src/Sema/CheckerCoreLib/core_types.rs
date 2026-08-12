@@ -199,7 +199,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "U8" | Syntax::TYPE_ERR | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
@@ -375,6 +375,30 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         || is_utf8_error_type_name(name)
 }
 
+/// D-CONC-FAIL1=A: the task wait report is a normal closed enum. Its variants
+/// are synthesized here because the runtime owns the type, but user code can
+/// construct and match the same values on every tier.
+pub(crate) fn core_task_failure_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    if enum_name != Syntax::TYPE_TASK_FAILURE {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        [
+            ("Cancelled".to_string(), (zero, VariantPayload::Unit)),
+            ("DeadlineBlown".to_string(), (zero, VariantPayload::Unit)),
+            (
+                "Panicked".to_string(),
+                (zero, VariantPayload::Single(Type::String, zero)),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )
+}
+
 /// D-RULEARG-TYPES1=A: enum variants generated from the marker registry.
 pub(crate) fn core_lang_variants(
     enum_name: &str,
@@ -446,6 +470,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
+            "not_before" => Some(Type::Option(Box::new(Type::Int))),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };
@@ -745,7 +770,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == Syntax::TYPE_TYPE_INFO {
         return match field {
-            "name" | "module" | "identity" | "kind" => Some(Type::String),
+            "name" | "path" | "module" | "identity" | "kind" => Some(Type::String),
             "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
@@ -1080,28 +1105,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-pub(super) fn game_run_label_error(
-    diags: &mut Vec<Diagnostic>,
-    label: &str,
-    arg: &crate::AST::CallArg,
-    index: usize,
-    span: Span,
-) {
-    let (expected, fix) = if index == 1 {
-        ("replay or backend", "write `replay:` here, `backend:` here for a two-argument backend call, or drop the label")
-    } else {
-        ("backend", "write `backend:` here, or drop the label")
-    };
-    let label_span = arg.label.as_ref().map(|(_, s)| *s).unwrap_or(span);
-    diags.push(Diagnostic::error(
-        "E0764",
-        format!("`game.run` has no `{label}:` option at argument {}", index + 1),
-        format!("this position accepts {expected}"),
-        fix.to_string(),
-        Some(label_span),
-    ));
-}
-
 /// D-MIGRATE3=A: field access on the reserved generic `DecodeResult<T>` —
 /// `.value: T` and `.migration: MigrationStatus`. Mirrors [`core_struct_field`]
 /// for the one reserved core type that carries a generic type argument
@@ -1134,6 +1137,7 @@ pub(crate) fn core_generic_struct_field(
                 ret: Some(Box::new(args[0].clone())),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             }),
             "grads" => Some(args[0].clone()),
@@ -2131,5 +2135,6 @@ pub(crate) fn core_auth_variants(
             ]),
         ),
     );
+    variants.insert("TokenNotYetValid".to_string(), (zero, VariantPayload::Unit));
     Some(variants)
 }

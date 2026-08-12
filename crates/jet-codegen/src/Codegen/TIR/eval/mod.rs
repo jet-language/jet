@@ -39,6 +39,11 @@ mod disjoint_semantics {
 }
 
 #[allow(dead_code)]
+mod interrupt_queue {
+    include!("../../../Prelude/CoreLib/Top/Interrupt.rs");
+}
+
+#[allow(dead_code)]
 mod uninit_semantics {
     include!("../../../Prelude/Uninit.rs");
 }
@@ -51,7 +56,7 @@ mod shared_protocol {
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -59,7 +64,8 @@ use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
 use crate::Codegen::mangle;
 use super::Cx;
 use crate::Codegen::TIR::{
-    self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
+    self, JitProgram, LowerEnv, TExpr, TExprKind, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal,
+    TStmt,
 };
 use super::build_cx_items;
 use crate::Comptime::{self, CtReport, CtValue, DevSink};
@@ -80,11 +86,19 @@ pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
 }
 
-static INTERPRETER_INTERRUPT_PENDING: AtomicUsize = AtomicUsize::new(0);
+static INTERPRETER_INTERRUPT_QUEUE: interrupt_queue::JetInterruptQueue =
+    interrupt_queue::JetInterruptQueue::new();
 static INTERPRETER_INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
+fn wall_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
 fn note_interpreter_interrupt() {
-    INTERPRETER_INTERRUPT_PENDING.fetch_add(1, Ordering::Relaxed);
+    INTERPRETER_INTERRUPT_QUEUE.note();
 }
 
 #[cfg(unix)]
@@ -95,16 +109,7 @@ extern "C" fn interpreter_unix_mark(_: i32) {
 fn install_interpreter_interrupt_handler() -> Result<(), String> {
     #[cfg(unix)]
     {
-        extern "C" {
-            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-        }
-        const SIGINT: i32 = 2;
-        let previous = unsafe { signal(SIGINT, interpreter_unix_mark) };
-        return if previous == usize::MAX {
-            Err("could not install the SIGINT handler".to_string())
-        } else {
-            Ok(())
-        };
+        return interrupt_queue::jet_interrupt_install_unix_handler(interpreter_unix_mark);
     }
     #[cfg(windows)]
     {
@@ -116,20 +121,11 @@ fn install_interpreter_interrupt_handler() -> Result<(), String> {
                 0
             }
         }
-        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
-        extern "system" {
-            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
-        }
-        unsafe { SetConsoleCtrlHandler(None, 0) };
-        return if unsafe { SetConsoleCtrlHandler(Some(mark), 1) } == 0 {
-            Err("could not install the Windows console Ctrl-C handler".to_string())
-        } else {
-            Ok(())
-        };
+        return interrupt_queue::jet_interrupt_install_windows_handler(Some(mark));
     }
     #[cfg(not(any(unix, windows)))]
     {
-        Err("interrupt handling is unavailable on this target".to_string())
+        Err(interrupt_queue::jet_interrupt_unavailable_error().to_string())
     }
 }
 
@@ -153,6 +149,37 @@ pub use exprs::{stable_place_address, tir_place_address_key};
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::e0956_unsupported(what, span)
+}
+
+/// D-CONC-FAIL1=A: the evaluator turns a child diagnostic into the same
+/// normal TaskFailure enum that the shared scheduler reports. A diagnostic
+/// raised by the joining parent remains a control diagnostic and is not
+/// converted here.
+fn task_failure_value(error: &Diagnostic) -> CtValue {
+    let failure = crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone());
+    let (variant, args) = match failure {
+        crate::task_group::JetTaskFailure::Cancelled => ("Cancelled", Vec::new()),
+        crate::task_group::JetTaskFailure::DeadlineBlown => ("DeadlineBlown", Vec::new()),
+        crate::task_group::JetTaskFailure::Panicked(reason) => (
+            "Panicked",
+            vec![(None, CtValue::Str(reason))],
+        ),
+    };
+    CtValue::Enum {
+        type_name: crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+        variant: variant.to_string(),
+        args,
+    }
+}
+
+fn task_child_panic(message: String, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0953",
+        message,
+        "a child task panicked".to_string(),
+        String::new(),
+        Some(span),
+    )
 }
 
 pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
@@ -269,28 +296,34 @@ pub(super) fn range_window(
         Some(CtValue::Int(value)) => *value,
         _ => return Err(unsupported("Range.end", span)),
     };
-    let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
-    range_semantics::jet_range_bounds(start, end, exclusive, len as i64)
-        .ok_or_else(|| view_bounds_diagnostic(len, start, end, exclusive, span))
+    let exclusive = match field("exclusive") {
+        Some(CtValue::Bool(value)) => *value,
+        _ => return Err(unsupported("Range.exclusive", span)),
+    };
+    checked_view_window(start, end, exclusive, len, span)
 }
 
-pub(super) fn view_bounds_diagnostic(
-    len: usize,
+pub(super) fn checked_view_window(
     start: i64,
     end: i64,
     exclusive: bool,
+    len: usize,
+    span: Span,
+) -> Result<(i64, i64), Diagnostic> {
+    range_semantics::jet_checked_view_bounds(start, end, exclusive, len as i64)
+        .map_err(|message| view_bounds_diagnostic(message, span))
+}
+
+pub(super) fn view_bounds_diagnostic(
+    message: String,
     span: Span,
 ) -> Diagnostic {
     // Same E0953 voice as the JIT trap / comptime panic path so every tier
     // reports one code for an out-of-bounds view (I9).
-    let msg = format!(
-        "can't view {len} items from {start} to {end} ({})",
-        if exclusive { "exclusive" } else { "inclusive" }
-    );
     Diagnostic::error(
         "E0953",
         "your comptime code stopped the build".to_string(),
-        format!("while computing this value at compile time, the program panicked: {msg}"),
+        format!("while computing this value at compile time, the program panicked: {message}"),
         "this is the sanctioned way to validate at compile time — fix the input the check rejects"
             .to_string(),
         Some(span),
@@ -516,6 +549,41 @@ pub(super) enum ViewMutPathStep {
     Index(i64),
 }
 
+/// Recover the complete owner place carried by a view expression. The caller
+/// supplies index evaluation so dynamic projected indexes retain their TIR
+/// provenance instead of being reduced to a bare root local.
+pub(super) fn view_mut_place(
+    expr: &TExpr,
+    resolve_index: &mut impl FnMut(&TExpr) -> Result<i64, Diagnostic>,
+) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+    match &expr.kind {
+        TExprKind::Local(local) => Ok(Some((local.name.clone(), Vec::new()))),
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+            view_mut_place(place, resolve_index)
+        }
+        TExprKind::Field { recv, field, .. } => {
+            let Some((base, mut path)) = view_mut_place(recv, resolve_index)? else {
+                return Ok(None);
+            };
+            path.push(ViewMutPathStep::Field(field.clone()));
+            Ok(Some((base, path)))
+        }
+        TExprKind::Index {
+            base,
+            index,
+            is_map: false,
+            ..
+        } => {
+            let Some((root, mut path)) = view_mut_place(base, resolve_index)? else {
+                return Ok(None);
+            };
+            path.push(ViewMutPathStep::Index(resolve_index(index)?));
+            Ok(Some((root, path)))
+        }
+        _ => Ok(None),
+    }
+}
+
 pub(super) fn parse_view_mut_path(fields: &[(String, CtValue)]) -> Vec<ViewMutPathStep> {
     let Some((_, CtValue::List(steps))) = fields.iter().find(|(name, _)| name == "path") else {
         return Vec::new();
@@ -550,7 +618,7 @@ pub(super) fn encode_view_mut_path(path: &[ViewMutPathStep]) -> CtValue {
     )
 }
 
-fn view_mut_parts(
+pub(super) fn view_mut_parts(
     fields: &[(String, CtValue)],
 ) -> Option<(String, Vec<ViewMutPathStep>, i64, i64)> {
     let mut base = None;
@@ -567,7 +635,7 @@ fn view_mut_parts(
     Some((base?, parse_view_mut_path(fields), start?, end?))
 }
 
-fn project_list_place<'a>(
+pub(super) fn project_list_place<'a>(
     root: &'a CtValue,
     path: &[ViewMutPathStep],
     span: Span,
@@ -596,7 +664,7 @@ fn project_list_place<'a>(
     Ok(cur)
 }
 
-fn replace_list_place(
+pub(super) fn replace_list_place(
     root: CtValue,
     path: &[ViewMutPathStep],
     replacement: CtValue,
@@ -633,6 +701,51 @@ fn replace_list_place(
     }
 }
 
+pub(super) fn view_mut_window_args(fields: &[(String, CtValue)]) -> Option<&[CtValue]> {
+    if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
+        return None;
+    }
+    fields.iter().find_map(|(name, value)| {
+        (name == "window").then(|| match value {
+            CtValue::List(args) => Some(args.as_slice()),
+            _ => None,
+        })
+    }).flatten()
+}
+
+pub(super) fn view_mut_owner_value(
+    fields: &[(String, CtValue)],
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
+        return Err(unsupported("Tensor view window", span));
+    }
+    let (base, path, _, _) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let root = scope
+        .get(&base)
+        .ok_or_else(|| unsupported("view-mut owner", span))?;
+    project_list_place(root, &path, span).cloned()
+}
+
+pub(super) fn store_view_mut_owner_value(
+    fields: &[(String, CtValue)],
+    scope: &mut HashMap<String, CtValue>,
+    replacement: CtValue,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let (base, path, _, _) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let root = scope
+        .get(&base)
+        .cloned()
+        .ok_or_else(|| unsupported("view-mut owner", span))?;
+    let updated = replace_list_place(root, &path, replacement, span)?;
+    scope.insert(base, updated);
+    Ok(())
+}
+
 pub(super) fn load_view_mut_owner_list(
     fields: &[(String, CtValue)],
     scope: &HashMap<String, CtValue>,
@@ -643,19 +756,22 @@ pub(super) fn load_view_mut_owner_list(
     let root = scope
         .get(&base)
         .ok_or_else(|| unsupported("view-mut owner", span))?;
-    match project_list_place(root, &path, span)? {
+    let owner = project_list_place(root, &path, span)?;
+    match owner {
         CtValue::List(items) => Ok(items.clone()),
-        CtValue::Struct { type_name, fields }
-            if path.is_empty() && (type_name == "Tensor" || type_name == "JetTensor") =>
+        CtValue::Struct {
+            type_name,
+            fields: _,
+        }
+            if type_name == "Tensor" || type_name == "JetTensor" =>
         {
-            fields
-                .iter()
-                .find_map(|(name, value)| (name == "data").then_some(value))
-                .and_then(|value| match value {
-                    CtValue::List(items) => Some(items.clone()),
-                    _ => None,
-                })
-                .ok_or_else(|| unsupported("Tensor view owner data", span))
+            match crate::Comptime::ComputeLite::tensor_to_list_value(
+                owner,
+                span,
+            )? {
+                CtValue::List(items) => Ok(items),
+                _ => Err(unsupported("Tensor view owner data", span)),
+            }
         }
         _ => Err(unsupported("view-mut owner list", span)),
     }
@@ -673,14 +789,19 @@ pub(super) fn store_view_mut_owner_list(
         .get(&base)
         .cloned()
         .ok_or_else(|| unsupported("view-mut owner", span))?;
-    if path.is_empty()
-        && matches!(&root, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
-    {
-        let updated = crate::Comptime::ComputeLite::tensor_replace_data(&root, items, span)?;
-        scope.insert(base, updated);
-        return Ok(());
-    }
-    let updated = replace_list_place(root, &path, CtValue::List(items), span)?;
+    let replacement = match project_list_place(&root, &path, span)? {
+        CtValue::Struct { type_name, .. }
+            if type_name == "Tensor" || type_name == "JetTensor" =>
+        {
+            crate::Comptime::ComputeLite::tensor_replace_data(
+                project_list_place(&root, &path, span)?,
+                items,
+                span,
+            )?
+        }
+        _ => CtValue::List(items),
+    };
+    let updated = replace_list_place(root, &path, replacement, span)?;
     scope.insert(base, updated);
     Ok(())
 }
@@ -693,19 +814,43 @@ pub(super) fn materialize_view_mut_window(
 ) -> Result<CtValue, Diagnostic> {
     let (_, _, start, end) =
         view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let owner = view_mut_owner_value(fields, scope, span)?;
+    if let Some(window) = view_mut_window_args(fields) {
+        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+            return crate::Comptime::ComputeLite::tensor_view_list(&owner, window, span);
+        }
+    }
     let items = load_view_mut_owner_list(fields, scope, span)?;
-    if start < 0
-        || end < start - 1
-        || (end >= start && end as usize >= items.len())
-        || start as usize > items.len()
-    {
-        return Err(unsupported("view-mut bounds", span));
-    }
-    if end < start {
-        Ok(CtValue::List(Vec::new()))
+    let (start, end_exclusive) = if end < start {
+        if end.checked_add(1) != Some(start) {
+            return Err(view_bounds_diagnostic(
+                range_semantics::jet_view_bounds_error(
+                    start,
+                    end,
+                    false,
+                    items.len() as i64,
+                ),
+                span,
+            ));
+        }
+        range_semantics::jet_checked_view_bounds(start, start, true, items.len() as i64)
+            .map_err(|_| {
+                view_bounds_diagnostic(
+                    range_semantics::jet_view_bounds_error(
+                        start,
+                        end,
+                        false,
+                        items.len() as i64,
+                    ),
+                    span,
+                )
+            })?
     } else {
-        Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
-    }
+        checked_view_window(start, end, false, items.len(), span)?
+    };
+    Ok(CtValue::List(
+        items[start as usize..end_exclusive as usize].to_vec(),
+    ))
 }
 
 fn rebase_view_mut_owners(
@@ -764,14 +909,6 @@ const DEV_FUEL: u64 = 1_000_000_000;
 #[allow(dead_code)]
 const CT_FUEL: u64 = 10_000_000;
 
-fn wall_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(i64::MAX as u128) as i64
-}
-
 pub(super) struct EvalCtx<'a> {
     pub(super) funcs: HashMap<String, &'a TFunc>,
     #[allow(dead_code)]
@@ -811,6 +948,8 @@ pub(super) struct EvalCtx<'a> {
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
+    /// Canonical typeable paths for runtime reflection.
+    pub(super) reflect_paths: HashMap<String, String>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
     pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     /// Sema-compiled published-schema plans. These contain wire keys and
@@ -825,7 +964,7 @@ pub(super) struct EvalCtx<'a> {
     runtime: Arc<Mutex<EvalRuntime<'a>>>,
     /// Thread-confined Cell values and loans. Never shared with spawned tasks.
     local_cells: local_cell::EvalLocalCells,
-    shared_transactions: Vec<Vec<EvalSharedDelta<'a>>>,
+    shared_transactions: Vec<EvalSharedTransaction<'a>>,
     /// Spawn bodies are lowered separately because native tiers compile them as
     /// independent functions. The evaluator records each outcome behind a task
     /// handle, then observes it only at join/group boundaries.
@@ -857,6 +996,20 @@ pub(super) struct EvalSharedDelta<'a> {
     pub(super) shared_index: usize,
     pub(super) lambda: &'a TIR::TLambda,
     pub(super) captured: HashMap<String, CtValue>,
+}
+
+pub(super) struct EvalSharedTransaction<'a> {
+    pub(super) transaction: shared_protocol::JetSharedTransaction,
+    pub(super) deltas: Vec<EvalSharedDelta<'a>>,
+}
+
+impl<'a> EvalSharedTransaction<'a> {
+    pub(super) fn new() -> Self {
+        Self {
+            transaction: shared_protocol::jet_shared_transaction_begin(),
+            deltas: Vec::new(),
+        }
+    }
 }
 
 enum EvalCallable<'a> {
@@ -940,12 +1093,11 @@ struct EvalRuntime<'a> {
     interrupt_handlers: Vec<usize>,
     streams: Vec<EvalStream<'a>>,
     shared_values: Vec<Arc<EvalSharedState>>,
-    shared_guards: Vec<Arc<shared_protocol::JetSharedPermit>>,
+    shared_guards: Vec<Arc<shared_protocol::JetSharedGuardState>>,
     shared_conditions: Vec<Arc<shared_protocol::JetConditionProtocol>>,
     clocks: Vec<i64>,
     channels: Vec<EvalChannel>,
-    task_groups: Vec<Vec<usize>>,
-    task_group_limits: Vec<Option<i64>>,
+    task_groups: Vec<Arc<crate::task_group::JetTaskGroupRuntime<usize>>>,
     tasks: Vec<Option<EvalTask>>,
     web_apps: Vec<EvalWebApp>,
     completion_order: AtomicU64,
@@ -969,7 +1121,17 @@ impl EvalSharedState {
         editable: bool,
         cancel: Option<&Arc<AtomicBool>>,
     ) -> Option<Arc<shared_protocol::JetSharedPermit>> {
-        self.protocol.acquire(editable, || {
+        shared_protocol::jet_shared_acquire(&self.protocol, editable, || {
+            cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
+        })
+    }
+
+    fn acquire_guard(
+        self: &Arc<Self>,
+        editable: bool,
+        cancel: Option<&Arc<AtomicBool>>,
+    ) -> Option<Arc<shared_protocol::JetSharedGuardState>> {
+        shared_protocol::jet_shared_guard_acquire(&self.protocol, editable, || {
             cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
         })
     }
@@ -979,14 +1141,16 @@ struct EvalConditionWaiter {
     notified: Mutex<bool>,
     wake: Condvar,
     cancel: Option<Arc<AtomicBool>>,
+    deadline: Option<i64>,
 }
 
 impl EvalConditionWaiter {
-    fn new(cancel: Option<Arc<AtomicBool>>) -> Self {
+    fn new(cancel: Option<Arc<AtomicBool>>, deadline: Option<i64>) -> Self {
         Self {
             notified: Mutex::new(false),
             wake: Condvar::new(),
             cancel,
+            deadline,
         }
     }
 }
@@ -1002,6 +1166,7 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
                 .cancel
                 .as_ref()
                 .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+                || self.deadline.is_some_and(|deadline| wall_now_ms() >= deadline)
             {
                 return Err(());
             }
@@ -1021,19 +1186,33 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
             .unwrap_or_else(|error| error.into_inner()) = true;
         self.wake.notify_one();
     }
+
+    fn interrupted(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            || self.deadline.is_some_and(|deadline| wall_now_ms() >= deadline)
+    }
 }
 
 struct EvalTask {
     completion: mpsc::Receiver<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
-    cancel: Arc<AtomicBool>,
-    /// D-COROUTINE1=A, the evaluator twin of `JetTaskControl::paused`. Honored
-    /// at the same cooperative wait points the cancel flag is.
-    paused: Arc<AtomicBool>,
+    completion_wait: Arc<crate::scheduler::ParkSlot>,
+    control: Arc<crate::scheduler::JetTaskControl>,
 }
 
 struct EvalTaskCompletion {
     result: Result<CtValue, Diagnostic>,
+}
+
+#[derive(Debug)]
+enum EvalTaskSelectError {
+    /// The parent reached its own cancellation/deadline wait policy.
+    Wait(Diagnostic),
+    /// A child failed while completing. This becomes `? TaskFailure` at the
+    /// task surface instead of escaping as an interpreter diagnostic.
+    Child(Diagnostic),
 }
 
 struct EvalTaskJob<'a> {
@@ -1043,8 +1222,9 @@ struct EvalTaskJob<'a> {
     context_deadline: Option<i64>,
     completion: mpsc::SyncSender<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
-    cancel: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
+    completion_wait: Arc<crate::scheduler::ParkSlot>,
+    control: Arc<crate::scheduler::JetTaskControl>,
+    permit: Option<crate::task_group::JetTaskGroupPermit>,
 }
 
 fn select_eval_tasks(
@@ -1052,20 +1232,23 @@ fn select_eval_tasks(
     mode: crate::task_group::JetTaskSelectMode,
     span: Span,
     mut wait_check: impl FnMut() -> Result<(), Diagnostic>,
-) -> Result<Vec<CtValue>, Diagnostic> {
+) -> Result<Vec<CtValue>, EvalTaskSelectError> {
     crate::task_group::jet_task_select(
         tasks,
         mode,
-        &mut wait_check,
+        || wait_check().map_err(EvalTaskSelectError::Wait),
         |task| task.completion_order.get().copied().map(Into::into),
         |task| match task.completion.try_recv() {
-            Ok(completion) => Some(completion.result),
+            Ok(completion) => Some(completion.result.map_err(EvalTaskSelectError::Child)),
             Err(mpsc::TryRecvError::Empty) => None,
             Err(mpsc::TryRecvError::Disconnected) => {
-                Some(Err(unsupported("task completion", span)))
+                Some(Err(EvalTaskSelectError::Child(unsupported(
+                    "task completion",
+                    span,
+                ))))
             }
         },
-        |task| task.cancel.store(true, Ordering::Release),
+        |task| task.control.cancel(),
         |task| {
             let _ = task.completion.recv();
         },
@@ -1086,6 +1269,7 @@ struct EvalTaskConfig<'a> {
     repl_mode: bool,
     repl_grants: Vec<String>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
+    reflect_paths: HashMap<String, String>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
     distinct_bases: HashMap<String, Type>,
@@ -1096,6 +1280,9 @@ struct EvalTaskConfig<'a> {
 
 impl EvalRuntime<'_> {
     fn new() -> Self {
+        // A fresh interpreter runtime is a teardown boundary. Do not deliver
+        // a SIGINT that was marked for a previous dev/restart instance.
+        INTERPRETER_INTERRUPT_QUEUE.clear();
         Self {
             callables: Vec::new(),
             interrupt_handlers: Vec::new(),
@@ -1106,7 +1293,6 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             channels: Vec::new(),
             task_groups: Vec::new(),
-            task_group_limits: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
@@ -1121,12 +1307,48 @@ struct YieldConsumer<'a> {
 }
 
 impl<'a> EvalCtx<'a> {
-    fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
-        self.task_wait_while_paused();
-        let deadline = self
-            .context_deadline
-            .filter(|deadline| wall_now_ms() >= *deadline)
-            .map(|_| crate::task_group::jet_task_deadline("task selection"));
+    fn scheduler_wait<T>(
+        &self,
+        wait_kind: &str,
+        wait: impl FnOnce() -> T,
+    ) -> Result<T, Diagnostic> {
+        match crate::scheduler::jet_scheduler_wait_without_unwind(wait) {
+            crate::scheduler::JetSchedulerWait::Ready(value) => Ok(value),
+            crate::scheduler::JetSchedulerWait::Cancelled => {
+                let cancelled = crate::task_group::jet_task_cancellation();
+                Err(Diagnostic::error(
+                    cancelled.code,
+                    cancelled.what.to_string(),
+                    cancelled.why.to_string(),
+                    cancelled.fix.to_string(),
+                    Some(self.span()),
+                ))
+            }
+            crate::scheduler::JetSchedulerWait::Deadline(_) => {
+                let deadline = crate::task_group::jet_task_deadline(wait_kind);
+                Err(Diagnostic::error(
+                    "E3003",
+                    deadline.what,
+                    deadline.why,
+                    deadline.fix,
+                    Some(self.span()),
+                ))
+            }
+            crate::scheduler::JetSchedulerWait::Panicked(message) => {
+                Err(task_child_panic(message, self.span()))
+            }
+        }
+    }
+
+    fn task_wait_check(&self, wait_kind: &str) -> Result<(), Diagnostic> {
+        self.task_wait_while_paused()?;
+        let deadline = crate::task_group::jet_task_deadline_if_expired(
+            self.context_deadline
+                .map(|deadline| {
+                    deadline.saturating_sub(crate::scheduler::jet_std_time_now())
+                }),
+            wait_kind,
+        );
         let cancelled = self
             .task_cancel
             .as_ref()
@@ -1148,19 +1370,26 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
+        self.task_wait_check("task selection")
+    }
+
+    fn task_join_wait_check(&self) -> Result<(), Diagnostic> {
+        self.task_wait_check("task join")
+    }
+
     /// The evaluator twin of `JetTaskControl::wait_while_paused`: a paused task
     /// stops at its next cooperative wait point and stays there until it is
-    /// resumed or cancelled. The scheduler parks; the evaluator has no park
-    /// slot, so it sleeps in short steps instead.
-    fn task_wait_while_paused(&self) {
-        let (Some(paused), cancel) = (self.task_paused.as_ref(), self.task_cancel.as_ref()) else {
-            return;
-        };
-        while paused.load(Ordering::Acquire)
-            && !cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
-        {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+    /// resumed or cancelled. The shared scheduler owns the park, wake, and
+    /// deadline behavior; this method only maps its boundary status.
+    fn task_wait_while_paused(&self) -> Result<(), Diagnostic> {
+        if self.task_paused.is_none() {
+            return Ok(());
         }
+        self.scheduler_wait(
+            "task pause",
+            crate::scheduler::jet_scheduler_wait_while_paused,
+        )
     }
 
     /// D-VERDICT-1323-1 / D-COROUTINE1=A: set or clear one task's pause flag
@@ -1180,29 +1409,13 @@ impl<'a> EvalCtx<'a> {
             .tasks
             .get(index)
         {
-            task.paused.store(paused, Ordering::Release);
+            if paused {
+                task.control.pause();
+            } else {
+                task.control.resume();
+            }
         }
         Ok(())
-    }
-
-    /// The evaluator twin of `JetTask::trace`. The rendering must match the
-    /// Prelude symbol byte for byte — it is user-visible output (I9).
-    pub(super) fn trace_task_value(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
-        let index = Self::task_index(value)
-            .ok_or_else(|| unsupported("task receiver", self.span()))?;
-        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-        let (paused, cancel) = match runtime.tasks.get(index) {
-            Some(Some(task)) => (
-                task.paused.load(Ordering::Acquire),
-                task.cancel.load(Ordering::Acquire),
-            ),
-            // Already joined or detached: the handle is gone, so neither flag
-            // is set, exactly as a dropped `JetTaskControl` would report.
-            _ => (false, false),
-        };
-        Ok(CtValue::Str(jet_foundation::StructuralDebug::jet_task_control_trace(
-            paused, cancel,
-        )))
     }
 
     /// The evaluator twin of `JetTask::detach`: drop the join handle so the
@@ -1236,6 +1449,7 @@ impl<'a> EvalCtx<'a> {
             repl_mode: self.repl_mode,
             repl_grants: self.repl_grants.clone(),
             struct_fields: self.struct_fields.clone(),
+            reflect_paths: self.reflect_paths.clone(),
             struct_field_types: self.struct_field_types.clone(),
             codec_migrations: self.codec_migrations.clone(),
             distinct_bases: self.distinct_bases.clone(),
@@ -1282,6 +1496,11 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn run_task_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
+        let _permit = job.permit;
+        crate::scheduler::jet_scheduler_set_task_control(Some(job.control.clone()));
+        let _deadline = job
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
         let mut ctx = EvalCtx {
             funcs: config.funcs,
             base_dir: config.base_dir,
@@ -1306,6 +1525,7 @@ impl<'a> EvalCtx<'a> {
             emitted_fragments: None,
             embed_inputs: None,
             struct_fields: config.struct_fields,
+            reflect_paths: config.reflect_paths,
             struct_field_types: config.struct_field_types,
             codec_migrations: config.codec_migrations,
             distinct_bases: config.distinct_bases,
@@ -1316,8 +1536,8 @@ impl<'a> EvalCtx<'a> {
             shared_transactions: Vec::new(),
             spawn_lambdas: config.spawn_lambdas,
             task_sender: Some(job.task_sender),
-            task_cancel: Some(job.cancel),
-            task_paused: Some(job.paused),
+            task_cancel: Some(job.control.cancelled.clone()),
+            task_paused: Some(job.control.paused.clone()),
             context_deadline: job.context_deadline,
             shield_depth: 0,
             yield_consumer: None,
@@ -1341,7 +1561,38 @@ impl<'a> EvalCtx<'a> {
                 )),
                 Err(error) => Err(error),
             },
+            TJitSpawnBody::SharedBlock { body, tail } => {
+                if *tail {
+                    match body[..].split_last() {
+                        Some((last, prefix)) => match ctx.exec_stmts(prefix, &mut scope) {
+                            Ok(Flow::Return(value)) => Ok(value),
+                            Ok(Flow::Normal) => match last {
+                                TStmt::ExprStmt(expr) => ctx.eval_expr(expr, &mut scope),
+                                TStmt::Return(Some(expr)) => ctx.eval_expr(expr, &mut scope),
+                                _ => Ok(CtValue::Unit),
+                            },
+                            Ok(other) => Err(unsupported(
+                                &format!("control flow {other:?} escaping shared spawn"),
+                                ctx.span(),
+                            )),
+                            Err(error) => Err(error),
+                        },
+                        None => Err(unsupported("empty shared spawn body", ctx.span())),
+                    }
+                } else {
+                    match ctx.exec_stmts(&body[..], &mut scope) {
+                        Ok(Flow::Return(value)) => Ok(value),
+                        Ok(Flow::Normal) => Ok(CtValue::Unit),
+                        Ok(other) => Err(unsupported(
+                            &format!("control flow {other:?} escaping shared spawn"),
+                            ctx.span(),
+                        )),
+                        Err(error) => Err(error),
+                    }
+                }
+            },
         };
+        crate::scheduler::jet_scheduler_set_task_control(None);
         let order = config
             .runtime
             .lock()
@@ -1352,6 +1603,7 @@ impl<'a> EvalCtx<'a> {
             .set(order)
             .expect("task completion recorded twice");
         let _ = job.completion.send(EvalTaskCompletion { result });
+        job.completion_wait.wake();
     }
 
     fn eval_spawn(
@@ -1363,7 +1615,7 @@ impl<'a> EvalCtx<'a> {
         let group = match group {
             Some(group) => Some(
                 Self::taskgroup_index(&self.eval_expr(group, scope)?)
-                    .ok_or_else(|| unsupported("taskgroup handle", self.span()))?,
+                    .ok_or_else(|| unsupported("task group handle", self.span()))?,
             ),
             None => None,
         };
@@ -1376,30 +1628,59 @@ impl<'a> EvalCtx<'a> {
             child.insert(
                 capture.name.clone(),
                 scope
-                    .get(&capture.name)
+                    .get(&capture.source)
                     .cloned()
-                    .or_else(|| self.globals.get(&capture.name).cloned())
+                    .or_else(|| self.globals.get(&capture.source).cloned())
                     .unwrap_or(CtValue::Unit),
             );
         }
         let sender = self
             .task_sender
             .as_ref()
-            .ok_or_else(|| unsupported("spawn outside a taskgroup", self.span()))?;
+            .ok_or_else(|| unsupported("spawn outside a task group", self.span()))?;
         let (completion, receiver) = mpsc::sync_channel(1);
         let completion_order = Arc::new(OnceLock::new());
-        let cancel = Arc::new(AtomicBool::new(false));
-        let paused = Arc::new(AtomicBool::new(false));
+        let completion_wait = crate::scheduler::ParkSlot::new();
+        let control = crate::scheduler::JetTaskControl::new();
+        let group_runtime = match group {
+            Some(group) => Some(
+                self.runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .task_groups
+                    .get(group)
+                    .cloned()
+                    .ok_or_else(|| unsupported("task group handle", self.span()))?,
+            ),
+            None => None,
+        };
+        let _deadline = group_runtime
+            .as_ref()
+            .and_then(|_| self.context_deadline.map(crate::scheduler::jet_ctx_push_deadline));
+        let permit = match group_runtime.as_ref() {
+            Some(group) => {
+                let waiter = crate::scheduler::ParkSlot::new();
+                group.acquire_with(waiter, |waiter| {
+                    self.task_wait_check("task admission")?;
+                    self.scheduler_wait("task admission", || {
+                        crate::scheduler::jet_scheduler_yield("task admission", waiter, None)
+                    })?;
+                    Ok(())
+                })?
+            }
+            None => None,
+        };
+        drop(_deadline);
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
         runtime.tasks.push(Some(EvalTask {
             completion: receiver,
             completion_order: completion_order.clone(),
-            cancel: cancel.clone(),
-            paused: paused.clone(),
+            completion_wait: completion_wait.clone(),
+            control: control.clone(),
         }));
-        if let Some(group) = group {
-            runtime.task_groups[group].push(task);
+        if let Some(group) = group_runtime {
+            group.register(task);
         }
         drop(runtime);
         sender
@@ -1410,10 +1691,11 @@ impl<'a> EvalCtx<'a> {
                 context_deadline: self.context_deadline,
                 completion,
                 completion_order,
-                cancel,
-                paused,
+                completion_wait,
+                control,
+                permit,
             })
-            .map_err(|_| unsupported("closed taskgroup", self.span()))?;
+            .map_err(|_| unsupported("closed task group", self.span()))?;
         Ok(CtValue::Struct {
             type_name: "__JetTirTask".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(task as i64))],
@@ -1448,16 +1730,18 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let limit = match limit {
             Some(limit) => match self.eval_expr(limit, scope)? {
-                CtValue::Int(value) if value > 0 => Some(value),
-                CtValue::Int(_) => return Err(unsupported("non-positive task-group limit", self.span())),
+                // The shared Prelude owns defaulting and bound clamping for
+                // every execution tier.
+                CtValue::Int(value) => Some(value),
                 _ => return Err(unsupported("task-group limit", self.span())),
             },
             None => None,
         };
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.task_groups.len();
-        runtime.task_groups.push(Vec::new());
-        runtime.task_group_limits.push(limit);
+        runtime.task_groups.push(Arc::new(
+            crate::task_group::JetTaskGroupRuntime::new_defaulted(limit),
+        ));
         Ok(CtValue::Struct {
             type_name: "__JetTirTaskGroup".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -1549,9 +1833,7 @@ impl<'a> EvalCtx<'a> {
 
     pub(super) fn new_eval_channel(&mut self, capacity: Option<i64>) -> CtValue {
         let channel = match capacity {
-            Some(capacity) => {
-                crate::scheduler::JetSchedulerChannel::bounded(capacity.max(1) as usize)
-            }
+            Some(capacity) => crate::scheduler::JetSchedulerChannel::bounded(capacity),
             None => crate::scheduler::JetSchedulerChannel::new(),
         };
         let sender = channel.sender();
@@ -1580,6 +1862,7 @@ impl<'a> EvalCtx<'a> {
         index: usize,
         value: CtValue,
     ) -> Result<(), Diagnostic> {
+        self.task_wait_cancel_check()?;
         let sender = self
             .runtime
             .lock()
@@ -1588,7 +1871,12 @@ impl<'a> EvalCtx<'a> {
             .get(index)
             .map(|channel| channel.sender.clone())
             .ok_or_else(|| unsupported("channel sender", self.span()))?;
-        sender.send(value);
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        self.scheduler_wait("channel send", || sender.send(value))?;
+        drop(_deadline);
+        self.task_wait_cancel_check()?;
         Ok(())
     }
 
@@ -1605,7 +1893,11 @@ impl<'a> EvalCtx<'a> {
             .get(index)
             .map(|channel| channel.channel.clone())
             .ok_or_else(|| unsupported("channel receiver", self.span()))?;
-        let value = channel.receive();
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let value = self.scheduler_wait("channel receive", || channel.receive())?;
+        drop(_deadline);
         self.task_wait_cancel_check()?;
         Ok(match value {
             Some(value) => CtValue::Present(Box::new(value)),
@@ -1692,9 +1984,20 @@ impl<'a> EvalCtx<'a> {
             .collect();
         let timers = after_values
             .into_iter()
-            .map(|(ms, value)| (ms.max(0) as u64, Some(value)))
+            .map(|(ms, value)| {
+                (
+                    crate::scheduler::jet_task_delay_ms_defaulted(ms),
+                    Some(value),
+                )
+            })
             .collect();
-        let value = crate::scheduler::jet_scheduler_select_values(recvs, timers);
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let value = self.scheduler_wait("select wait", || {
+            crate::scheduler::jet_scheduler_select_values(recvs, timers)
+        })?;
+        drop(_deadline);
         self.task_wait_cancel_check()?;
         Ok(value)
     }
@@ -1711,22 +2014,32 @@ impl<'a> EvalCtx<'a> {
             .tasks
             .get(index)
         {
-            task.cancel.store(true, Ordering::Release);
+            task.control.cancel();
         }
         Ok(())
     }
 
-    fn take_task_entry(&mut self, value: &CtValue) -> Result<EvalTask, Diagnostic> {
+    fn take_task_entry(&mut self, value: &CtValue) -> Result<(usize, EvalTask), Diagnostic> {
         let index = Self::task_index(value)
             .ok_or_else(|| unsupported("task receiver", self.span()))?;
-        self
+        let task = self
             .runtime
             .lock()
             .expect("evaluator runtime poisoned")
             .tasks
             .get_mut(index)
             .and_then(Option::take)
-            .ok_or_else(|| unsupported("task already joined", self.span()))
+            .ok_or_else(|| unsupported("task already joined", self.span()))?;
+        Ok((index, task))
+    }
+
+    fn restore_task_entry(&mut self, index: usize, task: EvalTask) {
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        if let Some(slot) = runtime.tasks.get_mut(index) {
+            if slot.is_none() {
+                *slot = Some(task);
+            }
+        }
     }
 
     pub(super) fn take_task(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
@@ -1740,19 +2053,47 @@ impl<'a> EvalCtx<'a> {
                     // Prelude wait policy (bd15-rev): a cancelled scope or an
                     // expired deadline refuses the join here exactly as
                     // jet_task_wait_policy does on the other tiers.
-                    self.task_wait_cancel_check()?;
-                    return Ok(result);
+                    self.task_join_wait_check()?;
+                    return Ok(CtValue::Present(Box::new(result)));
                 }
             }
         }
-        self.task_wait_cancel_check()?;
-        let task = self.take_task_entry(value)?;
-        let result = task.completion
-            .recv()
-            .map_err(|_| unsupported("task completion", self.span()))?
-            .result;
-        self.task_wait_cancel_check()?;
-        result
+        self.task_join_wait_check()?;
+        let (index, task) = self.take_task_entry(value)?;
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let result = loop {
+            if let Err(error) = self.task_join_wait_check() {
+                self.restore_task_entry(index, task);
+                return Err(error);
+            }
+            match task.completion.try_recv() {
+                Ok(completion) => break completion.result,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.restore_task_entry(index, task);
+                    return Err(unsupported("task completion", self.span()));
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    if let Err(error) = self.scheduler_wait("task join", || {
+                        crate::scheduler::jet_scheduler_yield(
+                            "task join",
+                            &task.completion_wait,
+                            None,
+                        )
+                    }) {
+                        self.restore_task_entry(index, task);
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        drop(_deadline);
+        self.task_join_wait_check()?;
+        match result {
+            Ok(value) => Ok(CtValue::Present(Box::new(value))),
+            Err(error) => Ok(CtValue::failed(Box::new(task_failure_value(&error)))),
+        }
     }
 
     pub(super) fn task_select(
@@ -1762,91 +2103,69 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let tasks = values
             .iter()
-            .map(|value| self.take_task_entry(value))
+            .map(|value| self.take_task_entry(value).map(|(_, task)| task))
             .collect::<Result<Vec<_>, _>>()?;
         if tasks.is_empty() {
-            return Err(unsupported("empty taskgroup combinator", self.span()));
+            unreachable!("sema must reject an empty task group combinator");
         }
-        let span = self.span();
-        select_eval_tasks(tasks, mode, span, || self.task_wait_cancel_check())
-            .map(|mut values| {
-                if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
+        match select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()) {
+            Ok(mut values) => {
+                let value = if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
                     CtValue::List(values)
                 } else {
                     values.pop().expect("race/any result missing")
-                }
-            })
-            .map_err(|error| self.task_select_failure(error, span))
-    }
-
-    /// D-CONC-FAIL1=A: `task.all`/`task.race`/`task.any` never expose the
-    /// per-branch failure as a `Result` to Jet source — mirrors AOT's
-    /// `jet_task_outcome_unwrap` (Prelude/CoreLib/JetStd/MathTaskMem.rs), which
-    /// panics/soft-exits a second time on top of whatever the failing branch's
-    /// own `panic`/deadline/cancel already rendered, matching the golden fixed
-    /// trailer text (`panic: a task panicked`, `examples/features/expected/
-    /// concurrency/all_failfast.err.out`). A branch failure already wrote its
-    /// own message and `sink.exit_code` via `Diagnostic::soft_exit`; this only
-    /// adds the combinator's own trailing line for that already-caught case —
-    /// an unrelated evaluator error (no sink write yet) passes through as-is.
-    fn task_select_failure(&mut self, error: Diagnostic, span: Span) -> Diagnostic {
-        let Some(sink) = self.sink.as_ref() else {
-            return error;
-        };
-        let mut sink = sink.lock().expect("evaluator sink poisoned");
-        if sink.exit_code.is_none() {
-            return error;
+                };
+                Ok(CtValue::Present(Box::new(value)))
+            }
+            Err(EvalTaskSelectError::Wait(error)) => Err(error),
+            Err(EvalTaskSelectError::Child(error)) => {
+                Ok(CtValue::failed(Box::new(task_failure_value(&error))))
+            }
         }
-        if !sink.stderr.ends_with('\n') {
-            sink.stderr.push('\n');
-        }
-        sink.stderr.push_str("panic: a task panicked\n");
-        Diagnostic::soft_exit("70".to_string(), "task combinator failed".to_string(), Some(span))
     }
 
     fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
         let span = self.span();
-        let children = {
-            let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            std::mem::take(
-                runtime
-                    .task_groups
-                    .get_mut(index)
-                    .ok_or_else(|| unsupported("taskgroup handle", span))?,
-            )
-        };
-        let mut first = None;
-        {
-            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            for child in &children {
-                if let Some(Some(task)) = runtime.tasks.get(*child) {
-                    task.cancel.store(true, Ordering::Release);
-                }
-            }
-        }
-        for child in children {
-            let task = self
-                .runtime
+        let group = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .task_groups
+            .get(index)
+            .cloned()
+            .ok_or_else(|| unsupported("task group handle", span))?;
+        let join_runtime = self.runtime.clone();
+        let drain = move |child| {
+            let task: Option<EvalTask> = join_runtime
                 .lock()
                 .expect("evaluator runtime poisoned")
                 .tasks
                 .get_mut(child)
-                .and_then(Option::take);
-            let result = task.and_then(|task| task.completion.recv().ok());
-            if let Some(EvalTaskCompletion {
-                result: Err(error),
-                ..
-            }) = result
-            {
-                if first.is_none() {
-                    first = Some(error);
-                }
+                .and_then(|slot: &mut Option<EvalTask>| slot.take());
+            if let Some(task) = task {
+                let _ = task.completion.recv();
             }
+        };
+        if let Err(interruption) = self.task_wait_cancel_check() {
+            let cancel_runtime = self.runtime.clone();
+            group.close_with_cancel(
+                move |child| {
+                    if let Some(task) = cancel_runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
+                        .tasks
+                        .get(*child)
+                        .and_then(Option::as_ref)
+                    {
+                        task.control.cancel();
+                    }
+                },
+                drain,
+            );
+            return Err(interruption);
         }
-        match first {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        group.close_with(drain);
+        self.task_wait_cancel_check()
     }
 
     pub(crate) fn span(&self) -> Span {
@@ -2048,11 +2367,16 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         ensure_interpreter_interrupt_handler().map_err(|message| {
-            unsupported(&format!("core.os.on_interrupt: {message}"), self.span())
+            unsupported(&interrupt_queue::jet_interrupt_core_error(&message), self.span())
         })?;
         let value = self.eval_expr(callback, scope)?;
         let index = Self::callable_index(&value)
-            .ok_or_else(|| unsupported("core.os.on_interrupt callback", self.span()))?;
+            .ok_or_else(|| {
+                unsupported(
+                    interrupt_queue::jet_interrupt_invalid_callback_value_error(),
+                    self.span(),
+                )
+            })?;
         self.runtime
             .lock()
             .expect("evaluator runtime poisoned")
@@ -2065,10 +2389,6 @@ impl<'a> EvalCtx<'a> {
         &mut self,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
-        let count = INTERPRETER_INTERRUPT_PENDING.swap(0, Ordering::Acquire);
-        if count == 0 {
-            return Ok(());
-        }
         let handlers = self
             .runtime
             .lock()
@@ -2076,27 +2396,32 @@ impl<'a> EvalCtx<'a> {
             .interrupt_handlers
             .clone();
         let mut deferred_panic = None;
-        for _ in 0..count {
-            for index in &handlers {
-                let value = Self::callable_value(*index);
-                match self.call_callable(&value, Vec::new()) {
-                    Ok(_) => {}
-                    Err(error) if error.code == "SOFT_EXIT" => {
-                        let panic_stop = self.sink.as_ref().is_some_and(|sink| {
-                            sink.lock()
-                                .expect("evaluator sink poisoned")
-                                .exit_code
-                                == Some(70)
-                        });
-                        if panic_stop {
-                            deferred_panic.get_or_insert(error);
-                            continue;
-                        }
-                        return Err(error);
-                    }
-                    Err(error) => return Err(error),
-                }
+        let mut failure = None;
+        INTERPRETER_INTERRUPT_QUEUE.dispatch(&handlers, |index| {
+            if failure.is_some() {
+                return;
             }
+            let value = Self::callable_value(*index);
+            match self.call_callable(&value, Vec::new()) {
+                Ok(_) => {}
+                Err(error) if error.code == "SOFT_EXIT" => {
+                    let panic_stop = self.sink.as_ref().is_some_and(|sink| {
+                        sink.lock()
+                            .expect("evaluator sink poisoned")
+                            .exit_code
+                            == Some(70)
+                    });
+                    if panic_stop {
+                        deferred_panic.get_or_insert(error);
+                    } else {
+                        failure = Some(error);
+                    }
+                }
+                Err(error) => failure = Some(error),
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
         }
         if let Some(error) = deferred_panic {
             return Err(error);
@@ -2231,6 +2556,54 @@ impl<'a> EvalCtx<'a> {
             } => self.eval_compute_grads(output, anchor, args, targets, &gradient_ty),
         }
     }
+
+    /// Call the canonical callable slot and publish mutable captures back to
+    /// the active lexical scope. The runtime slot remains authoritative for
+    /// returned/escaped closures; the scope write-back is the local-variable
+    /// half of the same FnMut storage contract.
+    pub(super) fn call_callable_in_scope(
+        &mut self,
+        value: &CtValue,
+        args: Vec<CtValue>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let result = self.call_callable(value, args);
+        self.sync_callable_captures(value, scope);
+        result
+    }
+
+    pub(super) fn sync_callable_captures(
+        &self,
+        value: &CtValue,
+        scope: &mut HashMap<String, CtValue>,
+    ) {
+        let Some(index) = Self::callable_index(value) else {
+            return;
+        };
+        let updates = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            let Some(EvalCallable::Lambda { lambda, captured }) = runtime.callables.get(index)
+            else {
+                return;
+            };
+            lambda
+                .captures
+                .iter()
+                .filter_map(|(source, runtime_name, _)| {
+                    let updated = captured
+                        .get(runtime_name)
+                        .or_else(|| captured.get(source))?
+                        .clone();
+                    Some((source.clone(), updated))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (source, updated) in updates {
+            if scope.contains_key(&source) {
+                scope.insert(source, updated);
+            }
+        }
+    }
 }
 
 fn empty_cx() -> Cx {
@@ -2306,7 +2679,27 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                     .collect(),
                 ret: function.return_type.clone().map(Box::new),
                 effect_bound: None, return_view_provenance: None,
-                param_contract: None,
+                param_contract: (!function.params.is_empty()).then(|| {
+                    function
+                        .params
+                        .iter()
+                        .map(|parameter| (parameter.call_label().to_string(), parameter.zone))
+                        .collect()
+                }),
+                call_metadata: Some(crate::AST::FunctionCallMetadata {
+                    names: function.params.iter().map(|parameter| parameter.name.clone()).collect(),
+                    defaults: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.default.as_deref().cloned())
+                        .collect(),
+                    variadic: function.params.iter().map(|parameter| parameter.variadic).collect(),
+                    conventions: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.convention)
+                        .collect(),
+                }),
             },
         );
     }
@@ -2388,7 +2781,14 @@ fn seed_fragment_structs(
                 .params
                 .iter()
                 .filter(|param| param.name != crate::Syntax::KW_SELF)
-                .map(|param| (param.convention, param.ty.clone()))
+                .map(|param| {
+                    let ty = if param.variadic {
+                        Type::List(Box::new(param.ty.clone()))
+                    } else {
+                        param.ty.clone()
+                    };
+                    (param.convention, ty)
+                })
                 .collect(),
         );
         cx.method_rets.insert(key, method.return_type.clone());
@@ -2407,6 +2807,15 @@ pub fn lower_expr_for_eval(
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<TExpr, Diagnostic> {
+    let mut diagnostic = None;
+    crate::Comptime::walk_expr_nodes_for_validation(expr, &mut |node| {
+        if diagnostic.is_none() {
+            diagnostic = crate::Codegen::TIR::validate_typed_boundary_before_lowering(node);
+        }
+    });
+    if let Some(diagnostic) = diagnostic {
+        return Err(diagnostic);
+    }
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
@@ -2443,6 +2852,15 @@ pub fn lower_stmts_for_eval(
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<Vec<TStmt>, Diagnostic> {
+    let mut diagnostic = None;
+    crate::Comptime::walk_stmt_expr_nodes_for_validation(stmts, &mut |expr| {
+        if diagnostic.is_none() {
+            diagnostic = crate::Codegen::TIR::validate_typed_boundary_before_lowering(expr);
+        }
+    });
+    if let Some(diagnostic) = diagnostic {
+        return Err(diagnostic);
+    }
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
@@ -2476,18 +2894,35 @@ fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
     program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
 }
 
+fn struct_metadata_keys(
+    bundle: &ProgramBundle,
+    owner_idx: usize,
+    type_name: &str,
+) -> Vec<String> {
+    let keys = if owner_idx == bundle.entry {
+        vec![type_name.to_string()]
+    } else {
+        crate::Codegen::TIR::imported_type_owners(bundle, owner_idx)
+            .into_iter()
+            .map(|owner| crate::Codegen::TIR::imported_type_name(&owner, type_name))
+            .collect()
+    };
+    keys
+}
+
 fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String, bool)>> {
     let mut out = HashMap::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
-                out.insert(
-                    s.name.clone(),
-                    s.fields
-                        .iter()
-                        .map(|f| (f.name.clone(), f.redact))
-                        .collect(),
-                );
+                let fields = s
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.redact))
+                    .collect::<Vec<(String, bool)>>();
+                for key in struct_metadata_keys(bundle, module_idx, &s.name) {
+                    out.insert(key, fields.clone());
+                }
             }
         }
     }
@@ -2498,16 +2933,17 @@ fn collect_struct_field_types(
     bundle: &ProgramBundle,
 ) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
     let mut out = HashMap::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
-                out.insert(
-                    s.name.clone(),
-                    s.fields
-                        .iter()
-                        .map(|f| (f.name.clone(), f.ty.clone()))
-                        .collect(),
-                );
+                let fields = s
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect::<Vec<(String, crate::AST::Type)>>();
+                for key in struct_metadata_keys(bundle, module_idx, &s.name) {
+                    out.insert(key, fields.clone());
+                }
             }
         }
     }
@@ -2749,6 +3185,7 @@ fn run_program_with_structs_on_stack(
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields,
+        reflect_paths: program.reflect_paths.clone(),
         struct_field_types,
         codec_migrations: program.codec_migrations.clone(),
         distinct_bases: program.distinct_bases.clone(),
@@ -2825,6 +3262,7 @@ pub fn run_named_func(
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
+        reflect_paths: program.reflect_paths.clone(),
         struct_field_types: program_struct_field_types(program),
         codec_migrations: program.codec_migrations.clone(),
         distinct_bases: program.distinct_bases.clone(),
@@ -2921,13 +3359,16 @@ fn run_bundle_at_stage(
             }
         }
         for imp in &module.imports {
-            if let crate::AST::ImportKind::Unqualified { items, .. } = &imp.kind {
-                for (original, alias) in items {
-                    let local = crate::AST::import_item_alias(original, alias.as_deref());
-                    if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, local) {
+            if matches!(imp.kind, crate::AST::ImportKind::Unqualified { .. }) {
+                for binding in imp.walk_bindings() {
+                    let Some(_original) = binding.original else {
+                        continue;
+                    };
+                    let local = binding.local;
+                    if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, &local) {
                         if binding.target == "core" || binding.target.starts_with("core.") {
                             core_imports
-                                .entry(local.to_string())
+                                .entry(local)
                                 .or_insert_with(|| binding.target.clone());
                         }
                     }
@@ -3045,6 +3486,7 @@ fn eval_expr_hook(
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
+        reflect_paths: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),
         distinct_bases: HashMap::new(),
@@ -3166,6 +3608,7 @@ fn eval_block_hook(
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
+        reflect_paths: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),
         distinct_bases: HashMap::new(),
@@ -3204,10 +3647,11 @@ fn eval_block_hook(
 #[cfg(test)]
 mod tests {
     use super::{
-        mpsc, select_eval_tasks, unsupported, Arc, AtomicBool, CtValue, EvalTask,
+        mpsc, select_eval_tasks, unsupported, Arc, CtValue, EvalTask,
         EvalTaskCompletion, OnceLock, Span,
     };
     use crate::task_group::JetTaskSelectMode;
+    use crate::scheduler::JetTaskControl;
 
     fn ready_task(
         order: u64,
@@ -3220,8 +3664,8 @@ mod tests {
         EvalTask {
             completion,
             completion_order,
-            cancel: Arc::new(AtomicBool::new(false)),
-            paused: Arc::new(AtomicBool::new(false)),
+            completion_wait: crate::scheduler::ParkSlot::new(),
+            control: JetTaskControl::new(),
         }
     }
 

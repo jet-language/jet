@@ -14,18 +14,25 @@
 
 use crate::AST::{CallArg, ParamZone};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Diagnostics::{
+    binder_ambiguous_positional, binder_label_forbidden, binder_label_required,
+    binder_missing_argument, binder_repeated_label, binder_unknown_label,
+};
 
 /// One parameter's public call contract, as the binder needs to see it.
 pub(crate) struct BindParam<'a> {
     /// The label a caller writes (`Param::call_label`).
     pub label: &'a str,
-    /// The local name the body reads. A later parameter's default expression
-    /// may reference it, so substitution keys off this and not `label`.
+    /// The declaration-local name a default expression may reference. The
+    /// binder rewrites that reference to a private slot temp; it never copies
+    /// a supplied argument AST into the default.
     pub name: &'a str,
     pub zone: ParamZone,
     /// D-NARG-D2: the `= expr` default, already registered on the signature.
     pub default: Option<&'a crate::AST::Expr>,
     pub convention: crate::AST::AccessConvention,
+    /// Declaration type used to type compiler-private default references.
+    pub ty: Option<&'a crate::AST::Type>,
     /// D-VARIADIC1: a rest parameter. It collects the trailing arguments, so
     /// it is never "missing" and never carries a default.
     pub variadic: bool,
@@ -114,6 +121,7 @@ pub(crate) fn bind_params_from_sig(sig: &crate::AST::FuncSig) -> Vec<BindParam<'
                 .get(index)
                 .map(|(convention, _)| *convention)
                 .unwrap_or(crate::AST::AccessConvention::Read),
+            ty: sig.params.get(index).map(|(_, ty)| ty),
             variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
             core_default: None,
         })
@@ -136,8 +144,13 @@ pub(crate) fn bind_call_args(
     call_span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Binding> {
-    let mut slots: Vec<Option<usize>> = vec![None; params.len()];
+    // A variadic parameter is one declaration slot but may receive many
+    // written arguments. Keep every source index instead of collapsing the
+    // tail to its first argument; the variadic normalizer packs the tail only
+    // after the call has been bound.
+    let mut slots: Vec<Vec<usize>> = vec![Vec::new(); params.len()];
     let mut first_label: Option<Span> = None;
+    let mut next_positional = 0usize;
     let mut ok = true;
 
     for (index, arg) in args.iter().enumerate() {
@@ -150,18 +163,31 @@ pub(crate) fn bind_call_args(
                     // One report per call: every later bare argument has the
                     // same cause, and repeating it just buries the fix.
                     if ok {
-                        diags.push(ambiguous_positional(callee, arg.span));
+                        diags.push(binder_ambiguous_positional(callee, arg.span));
                     }
                     ok = false;
                     continue;
                 }
                 // Positional arguments fill declaration order from the left.
-                match params.get(index) {
+                // Once the fixed parameters are full, a final variadic slot
+                // owns every remaining bare argument.
+                while next_positional < params.len()
+                    && !params[next_positional].variadic
+                    && !slots[next_positional].is_empty()
+                {
+                    next_positional += 1;
+                }
+                match params.get(next_positional) {
                     Some(param) if param.zone == ParamZone::LabelOnly => {
-                        diags.push(label_required(callee, param.label, arg.span));
+                        diags.push(binder_label_required(callee, param.label, arg.span));
                         ok = false;
                     }
-                    Some(_) => slots[index] = Some(index),
+                    Some(param) => {
+                        slots[next_positional].push(index);
+                        if !param.variadic {
+                            next_positional += 1;
+                        }
+                    }
                     // Arity is reported by the caller's own check.
                     None => {}
                 }
@@ -171,21 +197,26 @@ pub(crate) fn bind_call_args(
                     first_label = Some(*label_span);
                 }
                 let Some(position) = params.iter().position(|p| p.label == label) else {
-                    diags.push(unknown_label(callee, label, params, *label_span));
+                    let callable: Vec<&str> = params
+                        .iter()
+                        .filter(|param| param.zone != ParamZone::PositionalOnly)
+                        .map(|param| param.label)
+                        .collect();
+                    diags.push(binder_unknown_label(callee, label, &callable, *label_span));
                     ok = false;
                     continue;
                 };
                 if params[position].zone == ParamZone::PositionalOnly {
-                    diags.push(label_forbidden(callee, label, *label_span));
+                    diags.push(binder_label_forbidden(callee, label, *label_span));
                     ok = false;
                     continue;
                 }
-                if slots[position].is_some() {
-                    diags.push(repeated_label(callee, label, *label_span));
+                if !slots[position].is_empty() {
+                    diags.push(binder_repeated_label(callee, label, *label_span));
                     ok = false;
                     continue;
                 }
-                slots[position] = Some(index);
+                slots[position].push(index);
             }
         }
     }
@@ -197,7 +228,7 @@ pub(crate) fn bind_call_args(
     let missing: Vec<usize> = slots
         .iter()
         .enumerate()
-        .filter(|(position, slot)| slot.is_none() && !params[*position].optional())
+        .filter(|(position, slot)| slot.is_empty() && !params[*position].optional())
         .map(|(position, _)| position)
         .collect();
 
@@ -220,7 +251,7 @@ pub(crate) fn bind_call_args(
     }
 
     for position in missing {
-        diags.push(missing_argument(callee, params[position].label, call_span));
+        diags.push(binder_missing_argument(callee, params[position].label, call_span));
         ok = false;
     }
     if !ok {
@@ -232,60 +263,96 @@ pub(crate) fn bind_call_args(
 
 /// Reorder `args` into declaration order and fill every unbound parameter with
 /// its default. Defaults run after the supplied arguments, in declaration
-/// order, and may reference an earlier parameter — so each one is substituted
-/// against the arguments already placed to its left (D-NARG-D2).
+/// order. A default reference names a private declaration-slot temp, so a
+/// supplied side-effect expression is evaluated once by source-order lowering
+/// and is never cloned into the default (D-NARG-D2).
 fn rewrite(
     params: &[BindParam<'_>],
     args: &mut Vec<CallArg>,
-    slots: &[Option<usize>],
+    slots: &[Vec<usize>],
     call_span: Span,
 ) -> Binding {
-    // Arguments the binder never placed (a variadic tail, or an arity error
-    // the caller reports) keep their written order after the bound prefix.
+    // Arguments the binder never placed (an arity error the caller reports)
+    // keep their written order after the bound prefix.
     let mut taken: Vec<Option<CallArg>> = args.drain(..).map(Some).collect();
     let mut sources = Vec::with_capacity(params.len());
 
-    for (position, slot) in slots.iter().enumerate() {
-        match slot {
-            Some(index) => {
+    for (position, indices) in slots.iter().enumerate() {
+        if !indices.is_empty() {
+            for index in indices {
                 let mut arg = taken[*index]
                     .take()
                     .expect("each argument binds to at most one parameter");
                 // Lowering reads this back to keep the ratified evaluation
                 // order across the reorder the binder just performed.
                 arg.flags.source_index = Some(*index);
+                arg.flags.binder_slot = Some(position);
+                arg.flags.binder_site = Some(call_span.start as u32);
                 args.push(arg);
                 sources.push(ArgSource::Written(*index));
             }
-            None => {
-                let Some(default) = params[position].default_expr(call_span) else {
-                    // A variadic rest parameter, or a slot a diagnostic
-                    // already covered. Nothing to place.
-                    continue;
-                };
-                let earlier: Vec<String> = params
-                    .iter()
-                    .take(position)
-                    .map(|p| p.name.to_string())
-                    .collect();
-                args.push(CallArg {
-                    convention: params[position].convention,
-                    expr: super::substitute_param_refs(default, &earlier, args),
-                    span: call_span,
-                    flags: Default::default(),
-                    label: None,
-                    spread: false,
-                });
-                sources.push(ArgSource::Default);
-            }
+            continue;
         }
-    }
-    for arg in taken.into_iter().flatten() {
-        args.push(arg);
+        let Some(default) = params[position].default_expr(call_span) else {
+            // A variadic rest parameter, or a slot a diagnostic already
+            // covered. Nothing to place.
+            continue;
+        };
+        let earlier: Vec<(String, String)> = params
+            .iter()
+            .take(position)
+            .enumerate()
+            .map(|(slot, p)| {
+                (
+                    p.name.to_string(),
+                    format!("__jet_binder_ref_{}_{}", call_span.start, slot),
+                )
+            })
+            .collect();
+        let ref_pairs: Vec<(&str, String)> = earlier
+            .iter()
+            .map(|(name, replacement)| (name.as_str(), replacement.clone()))
+            .collect();
+        let binder_refs = earlier
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, (_, replacement))| {
+                params
+                    .get(slot)
+                    .and_then(|param| param.ty)
+                    .map(|ty| (replacement.clone(), slot, ty.clone()))
+            })
+            .collect();
+        args.push(CallArg {
+            convention: params[position].convention,
+            expr: super::substitute_param_refs(default, &ref_pairs),
+            span: call_span,
+            flags: crate::AST::CallArgFlags {
+                binder_slot: Some(position),
+                binder_refs,
+                binder_site: Some(call_span.start as u32),
+                ..Default::default()
+            },
+            label: None,
+            spread: false,
+        });
         sources.push(ArgSource::Default);
     }
+    for (index, arg) in taken.into_iter().enumerate() {
+        if let Some(arg) = arg {
+            args.push(arg);
+            // This is a written argument that had no declaration slot. Keep
+            // its source identity so the normal arity diagnostic does not
+            // turn it into a fake default and source-order lowering stays
+            // truthful.
+            sources.push(ArgSource::Written(index));
+        }
+    }
     let binding = Binding { sources };
-    if binding.is_source_ordered() {
+    let has_inserted_slot = args
+        .iter()
+        .any(|arg| arg.flags.binder_slot.is_some() && arg.flags.source_index.is_none());
+    if binding.is_source_ordered() && !has_inserted_slot {
         // Nothing moved, so lowering needs no temporaries. Clearing the marks
         // keeps the ordinary call shape identical to before the binder ran.
         for arg in args.iter_mut() {
@@ -293,82 +360,4 @@ fn rewrite(
         }
     }
     binding
-}
-
-// ── diagnostics (D-APILABEL1=A) ──────────────────────────────────────────────
-
-fn unknown_label(
-    callee: &str,
-    label: &str,
-    params: &[BindParam<'_>],
-    span: Span,
-) -> Diagnostic {
-    let callable: Vec<&str> = params
-        .iter()
-        .filter(|p| p.zone != ParamZone::PositionalOnly)
-        .map(|p| p.label)
-        .collect();
-    Diagnostic::error(
-        "E0764",
-        format!("`{callee}` has no parameter labelled `{label}`"),
-        "a label binds an argument to the parameter of that name".to_string(),
-        if callable.is_empty() {
-            format!("`{callee}` takes no labelled arguments")
-        } else {
-            format!("`{callee}` accepts `{}`", callable.join("`, `"))
-        },
-        Some(span),
-    )
-}
-
-fn repeated_label(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0765",
-        format!("`{label}:` is written twice in this call to `{callee}`"),
-        "each parameter takes exactly one argument".to_string(),
-        format!("remove one of the `{label}:` arguments"),
-        Some(span),
-    )
-}
-
-fn missing_argument(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0766",
-        format!("this call to `{callee}` is missing `{label}`"),
-        "`{label}` has no default, so every call has to supply it".replace("{label}", label),
-        format!("add `{label}: …` to the call"),
-        Some(span),
-    )
-}
-
-fn label_forbidden(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0767",
-        format!("`{label}` is a positional-only parameter of `{callee}`"),
-        "the `/` in the declaration keeps these parameters positional, so their names stay free to change"
-            .to_string(),
-        format!("drop the `{label}:` label and pass the value by position"),
-        Some(span),
-    )
-}
-
-fn ambiguous_positional(callee: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0768",
-        format!("this argument to `{callee}` follows a labelled one without a label"),
-        "labels bind by name, so a bare argument after one has no parameter to fill".to_string(),
-        "label this argument, or move it before the labelled ones".to_string(),
-        Some(span),
-    )
-}
-
-fn label_required(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0769",
-        format!("`{label}` is a label-only parameter of `{callee}`"),
-        "the `*` in the declaration requires the label, so the call says what the value means"
-            .to_string(),
-        format!("write `{label}: …` for this argument"),
-        Some(span),
-    )
 }

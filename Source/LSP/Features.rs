@@ -21,6 +21,15 @@ fn semantic_hover(symbol: &jet_semindex::SemanticSymbol, requested_path: &str) -
         out.push_str(&symbol.module_path);
         out.push_str("`\n\n");
     }
+    if matches!(
+        &symbol.kind,
+        jet_semindex::SemanticSymbolKind::Type | jet_semindex::SemanticSymbolKind::Member
+    ) && symbol.qualified_name != symbol.name
+    {
+        out.push('`');
+        out.push_str(&symbol.qualified_name);
+        out.push_str("`\n\n");
+    }
     if !symbol.summary.is_empty() {
         out.push_str(&symbol.summary);
         out.push_str("\n\n---\n\n");

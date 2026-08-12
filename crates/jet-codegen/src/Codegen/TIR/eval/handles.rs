@@ -1,5 +1,6 @@
 //! Exhaustive THandleOp dispatch (#777).
-use crate::Comptime::Builtins::{apply_method, apply_mutating};
+use crate::AST::Type;
+use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_mutating_with_type};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::THandleOp;
@@ -11,6 +12,10 @@ use super::browser;
 #[allow(dead_code)]
 mod duration_kernel {
     include!("../../../Prelude/Core/Duration.rs");
+}
+
+mod time_kernel {
+    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
 }
 
 fn handle_op_name(op: &THandleOp) -> String {
@@ -48,6 +53,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
         THandleOp::ProcessSpecMethod { method } => return format!("ProcessSpec:{method}"),
         THandleOp::ProcessChildMethod { method } => return format!("ProcessChild:{method}"),
+        THandleOp::EmailMethod { method } => return format!("EmailMethod:{method}"),
         THandleOp::TerminalSessionResize => "TerminalSessionResize",
         THandleOp::DBWithPolicy => "DBWithPolicy",
         THandleOp::ServiceRuntimeSend => "ServiceRuntimeSend",
@@ -95,6 +101,11 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::CBORWriterWrite => "CBORWriterWrite",
         THandleOp::CBORWriterFlush => "CBORWriterFlush",
         THandleOp::CBORWriterFinish => "CBORWriterFinish",
+        THandleOp::TcpStreamReady => "TcpStreamReady",
+        THandleOp::UdpSocketReady => "UdpSocketReady",
+        THandleOp::UdpSocketClose => "UdpSocketClose",
+        THandleOp::UdpSocketReceiveDeadline => "UdpSocketReceiveDeadline",
+        THandleOp::UdpSocketSendToDeadline => "UdpSocketSendToDeadline",
         _ => "",
     };
     name.to_string()
@@ -156,13 +167,25 @@ fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
 }
 
 fn reflect_type_name(value: &CtValue) -> String {
-    value.jet_type().name()
+    value.jet_type().leaf_name()
+}
+
+fn reflect_path(recv: &CtValue) -> Option<CtValue> {
+    match recv {
+        CtValue::Struct { type_name, fields } if type_name == "__Reflect" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "path").then_some(value.clone())),
+        _ => None,
+    }
 }
 
 fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
     match method {
         "type_name" => reflect_inner(recv)
             .map(|value| CtValue::Str(reflect_type_name(value)))
+            .ok_or_else(|| unsupported("reflect value", span)),
+        "path" => reflect_path(recv)
+            .or_else(|| reflect_inner(recv).map(|value| CtValue::Str(reflect_type_name(value))))
             .ok_or_else(|| unsupported("reflect value", span)),
         // `Value.display()` needs the evaluator's user-function table. The
         // HandleMethod evaluator routes it through `EvalCtx::show_value`; a
@@ -402,11 +425,35 @@ pub(super) fn eval_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    eval_handle_with_type(op, recv, args, span, None)
+}
+
+pub(super) fn eval_handle_with_type(
+    op: &THandleOp,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
     }
     let op_name = handle_op_name(op);
-    if !op_name.is_empty() {
+    // UDP readiness, deadline I/O, and close are runtime-only operations. Keep
+    // them on the ambient bridge so the interpreter marshals through the same
+    // Prelude socket operation as AOT and JIT, rather than growing local policy.
+    let udp_ambient = matches!(
+        op,
+        THandleOp::UdpSocketReady
+            | THandleOp::UdpSocketClose
+            | THandleOp::UdpSocketReceiveDeadline
+            | THandleOp::UdpSocketSendToDeadline
+    );
+    if udp_ambient {
+        if let Some(result) = crate::Comptime::try_ambient_handle(&op_name, recv, args, span) {
+            return result;
+        }
+    } else if !op_name.is_empty() {
         if let Some(result) = crate::Comptime::eval_args_handle(&op_name, recv, args, span) {
             return result;
         }
@@ -491,21 +538,21 @@ pub(super) fn eval_handle(
         THandleOp::DBClose => Err(unsupported("handle `DBClose`", span)),
         THandleOp::DurationNew { unit, float } => duration_new(recv, unit, *float, span),
         THandleOp::ClockNow => apply_method(recv, "now", args.to_vec(), span),
-        THandleOp::ClockTick => apply_mutating(recv, "tick", args.to_vec(), span),
-        THandleOp::ClockAdvance => apply_mutating(recv, "advance", args.to_vec(), span),
-        THandleOp::ClockWait => apply_mutating(recv, "wait", args.to_vec(), span),
-        THandleOp::RngInt => apply_mutating(recv, "int", args.to_vec(), span),
-        THandleOp::RngFloat => apply_mutating(recv, "float", args.to_vec(), span),
-        THandleOp::RngFloatRange => apply_mutating(recv, "float_range", args.to_vec(), span),
-        THandleOp::RngBool => apply_mutating(recv, "bool", args.to_vec(), span),
-        THandleOp::RngBoolP => apply_mutating(recv, "bool", args.to_vec(), span),
-        THandleOp::RngNormal => apply_mutating(recv, "normal", args.to_vec(), span),
-        THandleOp::RngExponential => apply_mutating(recv, "exponential", args.to_vec(), span),
-        THandleOp::RngBytes => apply_mutating(recv, "bytes", args.to_vec(), span),
-        THandleOp::RngSplit => apply_mutating(recv, "split", args.to_vec(), span),
-        THandleOp::RngPick => apply_mutating(recv, "pick", args.to_vec(), span),
-        THandleOp::RngWeightedPick => apply_mutating(recv, "weighted_pick", args.to_vec(), span),
-        THandleOp::RngSample => apply_mutating(recv, "sample", args.to_vec(), span),
+        THandleOp::ClockTick => apply_mutating_with_type(recv, "tick", args.to_vec(), span, resolved_ret),
+        THandleOp::ClockAdvance => apply_mutating_with_type(recv, "advance", args.to_vec(), span, resolved_ret),
+        THandleOp::ClockWait => apply_mutating_with_type(recv, "wait", args.to_vec(), span, resolved_ret),
+        THandleOp::RngInt => apply_mutating_with_type(recv, "int", args.to_vec(), span, resolved_ret),
+        THandleOp::RngFloat => apply_mutating_with_type(recv, "float", args.to_vec(), span, resolved_ret),
+        THandleOp::RngFloatRange => apply_mutating_with_type(recv, "float_range", args.to_vec(), span, resolved_ret),
+        THandleOp::RngBool => apply_mutating_with_type(recv, "bool", args.to_vec(), span, resolved_ret),
+        THandleOp::RngBoolP => apply_mutating_with_type(recv, "bool", args.to_vec(), span, resolved_ret),
+        THandleOp::RngNormal => apply_mutating_with_type(recv, "normal", args.to_vec(), span, resolved_ret),
+        THandleOp::RngExponential => apply_mutating_with_type(recv, "exponential", args.to_vec(), span, resolved_ret),
+        THandleOp::RngBytes => apply_mutating_with_type(recv, "bytes", args.to_vec(), span, resolved_ret),
+        THandleOp::RngSplit => apply_mutating_with_type(recv, "split", args.to_vec(), span, resolved_ret),
+        THandleOp::RngPick => apply_mutating_with_type(recv, "pick", args.to_vec(), span, resolved_ret),
+        THandleOp::RngWeightedPick => apply_mutating_with_type(recv, "weighted_pick", args.to_vec(), span, resolved_ret),
+        THandleOp::RngSample => apply_mutating_with_type(recv, "sample", args.to_vec(), span, resolved_ret),
         THandleOp::RngShuffle => {
             let mut state = match recv {
                 CtValue::Struct { type_name, fields }
@@ -524,7 +571,13 @@ pub(super) fn eval_handle(
                 }
             };
             let value =
-                crate::Comptime::apply_seeded_rng_method(&mut state, "shuffle", args, span)?;
+                crate::Comptime::apply_seeded_rng_method_with_type(
+                    &mut state,
+                    "shuffle",
+                    args,
+                    span,
+                    resolved_ret,
+                )?;
             *recv = CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(state as i64))],
@@ -658,7 +711,27 @@ pub(super) fn eval_handle(
         THandleOp::StderrFlush => Err(unsupported("handle `StderrFlush`", span)),
         THandleOp::StderrIsTty => Err(unsupported("handle `StderrIsTty`", span)),
         THandleOp::StopwatchElapsedMillis => {
-            Err(unsupported("handle `StopwatchElapsedMillis`", span))
+            let CtValue::Struct { type_name, fields } = recv else {
+                return Err(unsupported("StopwatchElapsedMillis receiver", span));
+            };
+            if type_name != "Stopwatch" {
+                return Err(unsupported("StopwatchElapsedMillis receiver", span));
+            }
+            let start_ms = fields
+                .iter()
+                .find_map(|(name, value)| {
+                    (name == "start_ms").then_some(match value {
+                        CtValue::Int(value) => Some(*value),
+                        _ => None,
+                    })
+                })
+                .flatten()
+                .ok_or_else(|| unsupported("StopwatchElapsedMillis start", span))?;
+            Ok(CtValue::Int(
+                time_kernel::jet_time_monotonic_now_ns()
+                    .saturating_div(1_000_000)
+                    .saturating_sub(start_ms),
+            ))
         }
         THandleOp::GameSceneNew => Err(unsupported("handle `GameSceneNew`", span)),
         THandleOp::GameReplayRecord => Err(unsupported("handle `GameReplayRecord`", span)),
@@ -798,34 +871,28 @@ pub(super) fn eval_handle(
         }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
         THandleOp::ReflectValueTypeName => reflect_handle(recv, "type_name", span),
+        THandleOp::ReflectValuePath => reflect_handle(recv, "path", span),
         // Handled before this context-free dispatch in `eval/exprs.rs`, where
         // the Display-aware evaluator is available.
         THandleOp::ReflectValueDisplay => Err(unsupported("reflect display evaluator", span)),
         THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
         THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
         THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),
-        THandleOp::TaskJoin | THandleOp::TaskScopeJoin => match recv {
+        THandleOp::TaskJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()
-                .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                .find_map(|(name, value)| {
+                    (name == "value").then(|| CtValue::Present(Box::new(value.clone())))
+                })
                 .ok_or_else(|| unsupported("task result", span)),
             _ => Err(unsupported("task receiver", span)),
         },
-        // D-VERDICT-1323-1 / D-COROUTINE1=A: the whole task control plane —
-        // both the single-handle methods and their `*_all` twins — is handled
-        // in `exprs.rs`, which can reach the evaluator's task table. Nothing
-        // routes here.
+        // D-COROUTINE1=A: task control is handled in `exprs.rs`, which can
+        // reach the evaluator's task table. Nothing routes here.
         THandleOp::TaskDetach
         | THandleOp::TaskPause
         | THandleOp::TaskResume
-        | THandleOp::TaskCancel
-        | THandleOp::TaskTrace
-        | THandleOp::TaskException
-        | THandleOp::TaskDetachAll
-        | THandleOp::TaskPauseAll
-        | THandleOp::TaskResumeAll
-        | THandleOp::TaskCancelAll
-        | THandleOp::TaskTraceAll => {
+        | THandleOp::TaskCancel => {
             Err(unsupported("task control outside the evaluator", span))
         }
         THandleOp::ChannelReceive => Err(unsupported("handle `ChannelReceive`", span)),
@@ -863,7 +930,13 @@ pub(super) fn eval_handle(
         THandleOp::ExpiringMethod { .. } => Err(unsupported("handle `ExpiringMethod`", span)),
         THandleOp::SketchMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::UrlMimeMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
-        THandleOp::EmailMethod { method } => apply_method(recv, method, args.to_vec(), span),
+        THandleOp::EmailMethod { method } => {
+            crate::Comptime::EmailAdapter::evaluate_method(recv, method, args, span)
+                .map_or_else(
+                    || apply_method(recv, method, args.to_vec(), span),
+                    |result| result,
+                )
+        }
         THandleOp::RegexMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::HTTPClientMethod { .. } => Err(unsupported("handle `HTTPClientMethod`", span)),
         THandleOp::HTTPServerMethod { .. } => Err(unsupported("handle `HTTPServerMethod`", span)),
@@ -984,14 +1057,21 @@ mod tests {
         let CtValue::Failed(CtReport::Told(error)) = value else {
             return None;
         };
-        let CtValue::Struct { fields, .. } = *error else {
+        let CtValue::List(errors) = *error else {
             return None;
         };
-        fields
+        errors
             .into_iter()
-            .find_map(|(name, value)| match (name.as_str(), value) {
-                ("reason", CtValue::Str(reason)) => Some(reason),
-                _ => None,
+            .find_map(|error| {
+                let CtValue::Struct { fields, .. } = error else {
+                    return None;
+                };
+                fields
+                    .into_iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("reason", CtValue::Str(reason)) => Some(reason),
+                        _ => None,
+                    })
             })
     }
 

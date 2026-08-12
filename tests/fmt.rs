@@ -1129,7 +1129,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     // already use parser shapes owned by existing generic/type/call/loop
     // grammar. Future task/shared/select forms stay on their implementation
     // cards and do not get parser stubs here.
-    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) => TaskFailure {
+    let src = r#"fn inspect(handle: Task<Int>, group: TaskGroup, rx: Receiver<Int>, tx: Sender<Int>) => TaskFailure {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown
@@ -1146,7 +1146,7 @@ fn open() {
     let once = jet::format_source(src).expect("parseable concurrency spellings should format");
     for spelling in [
         "Task<Int>",
-        "Group",
+        "TaskGroup",
         "Receiver<Int>",
         "Sender<Int>",
         "TaskFailure",
@@ -2271,6 +2271,9 @@ module math {
 }
 
 use math.[clamp, clamp as c2]
+use core.math.[abs as absolute, min]
+use core.encoding.[json, csv]
+use c.[raylib as rl, sqlite3]
 
 fn run() {
     print(clamp(15, 0, 10))
@@ -2279,7 +2282,12 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["use math.[clamp, clamp as c2]"],
+        &[
+            "use math.[clamp, clamp as c2]",
+            "use core.math.[abs as absolute, min]",
+            "use core.encoding.[json, csv]",
+            "use c.[raylib as rl, sqlite3]",
+        ],
         "selective import with alias",
     );
     let once = jet::format_source(src).expect("fmt should accept selective imports");

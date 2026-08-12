@@ -8,8 +8,7 @@ use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
 use crate::AST::{as_bytes, CtReport, CtValue};
 
-use super::repl_process::run_repl_process;
-
+use super::time_deadline_kernel;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
 
@@ -94,13 +93,54 @@ mod sketch_kernel {
 }
 
 mod time_kernel {
+    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+}
+
+mod crypto_entropy_kernel {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+}
+
+fn runtime_date_value(date: time_kernel::JetDate) -> CtValue {
+    CtValue::Struct {
+        type_name: "LocalDate".to_string(),
+        fields: vec![
+            ("year".to_string(), CtValue::Int(date.year())),
+            ("month".to_string(), CtValue::Int(date.month())),
+            ("day".to_string(), CtValue::Int(date.day())),
+        ],
+    }
+}
+
+fn runtime_datetime_value(datetime: time_kernel::JetDateTime) -> CtValue {
+    CtValue::Struct {
+        type_name: "DateTime".to_string(),
+        fields: vec![
+            ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
+            ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
+        ],
+    }
 }
 
 /// D-BOUND-HEAD1: typed DateTime heads validate against the same pure Prelude
 /// parser used by the runtime `core.time.parse_rfc3339` call.
 pub(crate) fn validate_datetime_literal(value: &str) -> Result<(), String> {
     time_kernel::JetDateTime::parse_rfc3339(value).map(|_| ())
+}
+
+/// D-BOUND-HEAD1: typed DateTime heads use the existing pure-parity value
+/// projection without entering the ambient `core.time` effect gate.
+pub(crate) fn evaluate_typed_datetime_literal(
+    value: &str,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let row = jet_foundation::Syntax::core_call("core.time", "parse_rfc3339")
+        .expect("core.time.parse_rfc3339 row is registered");
+    core_pure_parity::evaluate(row, &[CtValue::Str(value.to_string())], span)
+        .expect("core.time.parse_rfc3339 pure-parity evaluator is registered")
 }
 
 pub(super) mod duration_kernel {
@@ -213,6 +253,17 @@ mod data_plot_rt {
     pub use jet_foundation::Outcome::*;
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
 }
+
+#[path = "core_calls/data.rs"]
+mod data;
+#[path = "core_calls/impure.rs"]
+mod impure;
+
+pub use data::{apply_data_line_call, data_status_rows};
+use data::{
+    as_data_groups, as_float_list, data_error_value, data_float_value, data_result_value,
+};
+pub use impure::{apply_impure_core_call, apply_impure_core_call_with_type};
 
 pub(in super::super) fn apply_core_pure_method(
     recv: &CtValue,
@@ -388,280 +439,210 @@ fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
     Some(rows)
 }
 
-/// Mirrors AOT's `JetURL` field shape 1:1 so `.scheme`/`.host`/`.path`/
-/// `.query`/`.fragment` struct-field reads (generic member access,
-/// `Interpreter.rs`) work the same as any other `CtValue::Struct`.
+pub(super) const URL_INTERNAL_PREFIX: &str = "__jet_url_";
+const URL_RAW_HOST: &str = "__jet_url_raw_host";
+const URL_USERNAME: &str = "__jet_url_username";
+const URL_PASSWORD: &str = "__jet_url_password";
+const URL_TYPED_HOST: &str = "__jet_url_typed_host";
+const URL_TYPED_PATH: &str = "__jet_url_typed_path";
+
+fn url_option_string(value: Option<&String>, ty: Type) -> CtValue {
+    match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Str(value.clone()))),
+        None => CtValue::absent(ty),
+    }
+}
+
+fn url_typed_parts_value(parts: &[(String, bool)]) -> CtValue {
+    CtValue::List(
+        parts
+            .iter()
+            .map(|(part, hole)| {
+                CtValue::List(vec![CtValue::Str(part.clone()), CtValue::Bool(*hole)])
+            })
+            .collect(),
+    )
+}
+
+fn url_option_string_from_ct(
+    value: Option<&CtValue>,
+    label: &str,
+    span: Span,
+) -> Result<Option<String>, Diagnostic> {
+    match value {
+        None | Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
+        Some(CtValue::Present(value)) => match value.as_ref() {
+            CtValue::Str(value) => Ok(Some(value.clone())),
+            _ => Err(unsupported(&format!("malformed URL {label}"), span)),
+        },
+        Some(_) => Err(unsupported(&format!("malformed URL {label}"), span)),
+    }
+}
+
+fn url_option_int_from_ct(
+    value: Option<&CtValue>,
+    label: &str,
+    span: Span,
+) -> Result<Option<i64>, Diagnostic> {
+    match value {
+        None | Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
+        Some(CtValue::Present(value)) => match value.as_ref() {
+            CtValue::Int(value) => Ok(Some(*value)),
+            _ => Err(unsupported(&format!("malformed URL {label}"), span)),
+        },
+        Some(_) => Err(unsupported(&format!("malformed URL {label}"), span)),
+    }
+}
+
+fn url_typed_parts_from_ct(
+    value: Option<&CtValue>,
+    label: &str,
+    span: Span,
+) -> Result<Option<Vec<(String, bool)>>, Diagnostic> {
+    let Some(CtValue::List(rows)) = value else {
+        return if value.is_none() {
+            Ok(None)
+        } else {
+            Err(unsupported(&format!("malformed URL {label}"), span))
+        };
+    };
+    rows.iter()
+        .map(|row| match row {
+            CtValue::List(parts) => match parts.as_slice() {
+                [CtValue::Str(part), CtValue::Bool(hole)] => Ok((part.clone(), *hole)),
+                _ => Err(unsupported(&format!("malformed URL {label}"), span)),
+            },
+            _ => Err(unsupported(&format!("malformed URL {label}"), span)),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// Mirrors AOT's visible `JetURL` field shape 1:1. The internal fields retain
+/// the full canonical value across the `CtValue` boundary; they are filtered
+/// from user-facing structural display and never enter URL policy.
 /// parity: guard tests/repl.rs::repl_core_url_dispatch
-fn url_parts_to_ct(u: &super::super::UrlLite::UrlParts) -> CtValue {
+pub(crate) fn url_parts_to_ct(u: &super::super::UrlLite::UrlParts) -> CtValue {
+    let mut fields = vec![
+        ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
+        (
+            "host".to_string(),
+            match &u.host {
+                Some(h) if !h.is_empty() => CtValue::Present(Box::new(CtValue::Str(h.clone()))),
+                _ => CtValue::absent(Type::String),
+            },
+        ),
+        (
+            "port".to_string(),
+            match u.port {
+                Some(p) => CtValue::Present(Box::new(CtValue::Int(p))),
+                None => CtValue::absent(Type::Int),
+            },
+        ),
+        ("path".to_string(), CtValue::Str(u.path.clone())),
+        (
+            "query".to_string(),
+            CtValue::List(
+                u.query
+                    .iter()
+                    .map(|(k, v)| {
+                        CtValue::List(vec![CtValue::Str(k.clone()), CtValue::Str(v.clone())])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "fragment".to_string(),
+            match &u.fragment {
+                Some(f) => CtValue::Present(Box::new(CtValue::Str(f.clone()))),
+                None => CtValue::absent(Type::String),
+            },
+        ),
+        (
+            URL_RAW_HOST.to_string(),
+            url_option_string(u.host.as_ref(), Type::String),
+        ),
+        (
+            URL_USERNAME.to_string(),
+            url_option_string(u.username.as_ref(), Type::String),
+        ),
+        (
+            URL_PASSWORD.to_string(),
+            url_option_string(u.password.as_ref(), Type::String),
+        ),
+    ];
+    if let Some(parts) = &u.typed_host {
+        fields.push((URL_TYPED_HOST.to_string(), url_typed_parts_value(parts)));
+    }
+    if let Some(parts) = &u.typed_path {
+        fields.push((URL_TYPED_PATH.to_string(), url_typed_parts_value(parts)));
+    }
     CtValue::Struct {
         type_name: "Url".to_string(),
-        fields: vec![
-            ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
-            (
-                "host".to_string(),
-                match &u.host {
-                    Some(h) if !h.is_empty() => CtValue::Present(Box::new(CtValue::Str(h.clone()))),
-                    _ => CtValue::absent(Type::String),
-                },
-            ),
-            (
-                "port".to_string(),
-                match u.port {
-                    Some(p) => CtValue::Present(Box::new(CtValue::Int(p))),
-                    None => CtValue::absent(Type::Int),
-                },
-            ),
-            ("path".to_string(), CtValue::Str(u.path.clone())),
-            (
-                "query".to_string(),
-                CtValue::List(
-                    u.query
-                        .iter()
-                        .map(|(k, v)| {
-                            CtValue::List(vec![CtValue::Str(k.clone()), CtValue::Str(v.clone())])
-                        })
-                        .collect(),
-                ),
-            ),
-            (
-                "fragment".to_string(),
-                match &u.fragment {
-                    Some(f) => CtValue::Present(Box::new(CtValue::Str(f.clone()))),
-                    None => CtValue::absent(Type::String),
-                },
-            ),
-        ],
+        fields,
     }
 }
 
-/// `[Float]` argument — `core.data`'s stats functions all take `&Vec<f64>`.
-fn as_float_list(v: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
-    match v {
-        CtValue::List(xs) => xs.iter().map(|x| as_float(x, span)).collect(),
-        _ => Err(unsupported("core.data: argument must be `[Float]`", span)),
-    }
-}
-
-/// `[DataGroup]` argument for the bar and line renderers. Every field the
-/// kernel validates is read here, so comptime rejects exactly what AOT rejects.
-fn as_data_groups(
-    v: &CtValue,
+pub(super) fn url_parts_from_ct(
+    value: &CtValue,
     span: Span,
-) -> Result<Vec<data_kernel::jet_std::DataGroup>, Diagnostic> {
-    let CtValue::List(items) = v else {
-        return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+) -> Result<super::super::UrlLite::UrlParts, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("malformed URL value", span));
     };
-    items
-        .iter()
-        .map(|item| {
-            let CtValue::Struct { type_name, fields } = item else {
-                return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
-            };
-            if type_name != "DataGroup" {
-                return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
-            }
-            let field = |name: &str| {
-                fields
-                    .iter()
-                    .find(|(field, _)| field == name)
-                    .map(|(_, value)| value)
-            };
-            let (Some(CtValue::Str(key)), Some(CtValue::Int(count))) =
-                (field("key"), field("count"))
-            else {
-                return Err(unsupported(
-                    "core.data: a `DataGroup` needs `key: String` and `count: Int`",
-                    span,
-                ));
-            };
-            let (Some(sum), Some(mean)) = (field("sum"), field("mean")) else {
-                return Err(unsupported(
-                    "core.data: a `DataGroup` needs `sum: Float` and `mean: Float`",
-                    span,
-                ));
-            };
-            Ok(data_kernel::jet_std::DataGroup {
-                key: key.clone(),
-                count: *count,
-                sum: as_float(sum, span)?,
-                mean: as_float(mean, span)?,
-            })
-        })
-        .collect()
-}
-
-fn as_data_line_options(
-    v: &CtValue,
-    span: Span,
-) -> Result<data_kernel::jet_std::DataLineOptions, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = v else {
-        return Err(unsupported(
-            "core.data line renderers need `DataLineOptions`",
-            span,
-        ));
-    };
-    if type_name != "DataLineOptions" {
-        return Err(unsupported(
-            "core.data line renderers need `DataLineOptions`",
-            span,
-        ));
+    let type_name = type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name);
+    if type_name != "Url" {
+        return Err(unsupported("malformed URL value", span));
     }
     let field = |name: &str| {
         fields
             .iter()
             .find(|(field, _)| field == name)
-            .map(|(_, value)| value.clone())
-            .ok_or_else(|| unsupported("DataLineOptions is missing a required field", span))
+            .map(|(_, value)| value)
     };
-    let string = |name: &str| match field(name)? {
-        CtValue::Str(value) => Ok(value),
-        _ => Err(unsupported("DataLineOptions string field has the wrong type", span)),
+    let string_field = |name: &str| match field(name) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(unsupported(&format!("malformed URL {name}"), span)),
     };
-    let markers = match field("markers")? {
-        CtValue::Bool(value) => value,
-        _ => return Err(unsupported("DataLineOptions `markers` must be Bool", span)),
+    let scheme = string_field("scheme")?;
+    let hidden_field = |name: &str| {
+        field(name).ok_or_else(|| unsupported(&format!("malformed URL {name}"), span))
     };
-    let reference = match field("reference")? {
-        CtValue::Present(value) => Ok(as_float(&value, span)?),
-        CtValue::Failed(CtReport::Clean(_)) => Err(jet_foundation::Outcome::JetAbsent),
-        _ => return Err(unsupported("DataLineOptions `reference` must be Float?", span)),
-    };
-    Ok(data_kernel::jet_std::DataLineOptions {
-        title: string("title")?,
-        x_label: string("x_label")?,
-        y_label: string("y_label")?,
-        markers,
-        reference,
-        style: string("style")?,
-        color: string("color")?,
-        legend: string("legend")?,
+    let host = url_option_string_from_ct(Some(hidden_field(URL_RAW_HOST)?), "host", span)?;
+    let port = url_option_int_from_ct(field("port"), "port", span)?;
+    let path = string_field("path")?;
+    let query = as_string_rows(
+        field("query").ok_or_else(|| unsupported("malformed URL query", span))?,
+        span,
+    )?
+    .into_iter()
+    .map(|row| {
+        (
+            row.first().cloned().unwrap_or_default(),
+            row.get(1).cloned().unwrap_or_default(),
+        )
     })
+    .collect();
+    let fragment = url_option_string_from_ct(field("fragment"), "fragment", span)?;
+    let username = url_option_string_from_ct(Some(hidden_field(URL_USERNAME)?), "username", span)?;
+    let password = url_option_string_from_ct(Some(hidden_field(URL_PASSWORD)?), "password", span)?;
+    let typed_host = url_typed_parts_from_ct(field(URL_TYPED_HOST), "typed host", span)?;
+    let typed_path = url_typed_parts_from_ct(field(URL_TYPED_PATH), "typed path", span)?;
+    Ok(super::super::UrlLite::from_marshaled(
+        scheme,
+        username,
+        password,
+        host,
+        port,
+        path,
+        query,
+        fragment,
+        typed_host,
+        typed_path,
+    ))
 }
-
-/// #1657 / I9: the checked `core.data` surface is the edition-2027 default and
-/// older editions type the same calls as plain values. Sema picks the return
-/// type from this same question (`fixed_sigs.rs`), so comptime asks it too.
-fn data_checked_surface() -> bool {
-    jet_foundation::PackageEdition::package_edition_at_least("2027")
-}
-
-/// One `DataError` value for every `core.data` failure, built from the kernel's
-/// own error — comptime never writes its own reason text.
-fn data_error_value(error: &data_kernel::jet_std::DataError) -> CtValue {
-    let index = |slot: &jet_foundation::Outcome::JetOutcome<i64, jet_foundation::Outcome::JetAbsent>| match slot {
-        Ok(value) => CtValue::Present(Box::new(CtValue::Int(*value))),
-        Err(_) => CtValue::absent(Type::Int),
-    };
-    CtValue::Struct {
-        type_name: "DataError".to_string(),
-        fields: vec![
-            (
-                "kind".to_string(),
-                CtValue::Enum {
-                    type_name: "DataErrorKind".to_string(),
-                    variant: format!("{:?}", error.kind),
-                    args: Vec::new(),
-                },
-            ),
-            ("operation".to_string(), CtValue::Str(error.operation.clone())),
-            ("row".to_string(), index(&error.row)),
-            ("column".to_string(), index(&error.column)),
-            ("index".to_string(), index(&error.index)),
-            ("reason".to_string(), CtValue::Str(error.reason.clone())),
-            (
-                "cause".to_string(),
-                CtValue::absent(Type::Named("EncodingError".to_string())),
-            ),
-        ],
-    }
-}
-
-/// Marshal one kernel result onto the surface the current edition types.
-fn data_result_value<T>(
-    checked: Result<T, data_kernel::jet_std::DataError>,
-    unchecked: impl FnOnce() -> T,
-    to_value: impl Fn(T) -> CtValue,
-) -> CtValue {
-    if !data_checked_surface() {
-        return to_value(unchecked());
-    }
-    match checked {
-        Ok(value) => CtValue::Present(Box::new(to_value(value))),
-        Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-    }
-}
-
-fn data_float_value(value: f64) -> CtValue {
-    CtValue::Float(CtFloat::f64(value))
-}
-
-/// D-DATA-STATUS1 / #708: the `data.status()` rows for `jet inspect dossier`,
-/// read from the one kernel rather than a second table.
-pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
-    data_kernel::jet_data_status()
-        .into_iter()
-        .map(|row| {
-            (
-                row.step,
-                row.path,
-                row.copy,
-                row.ownership,
-                row.trust,
-                row.fallback,
-                row.replacement,
-            )
-        })
-        .collect()
-}
-
-pub fn apply_data_line_call(
-    method: &str,
-    args: Vec<CtValue>,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    let groups = as_data_groups(
-        args.first()
-            .ok_or_else(|| unsupported("core.data line renderers need groups", span))?,
-        span,
-    )?;
-    let options = as_data_line_options(
-        args.get(1)
-            .ok_or_else(|| unsupported("core.data line renderers need options", span))?,
-        span,
-    )?;
-    let plot_error = |error: data_plot_rt::DataPlotError| data_kernel::jet_std::DataError {
-        kind: match error.kind {
-            "NonFinite" => data_kernel::jet_std::DataErrorKind::NonFinite,
-            _ => data_kernel::jet_std::DataErrorKind::InvalidArgument,
-        },
-        operation: error.operation.to_string(),
-        row: Err(jet_foundation::Outcome::JetAbsent),
-        column: Err(jet_foundation::Outcome::JetAbsent),
-        index: match error.index {
-            Some(index) => Ok(index),
-            None => Err(jet_foundation::Outcome::JetAbsent),
-        },
-        reason: error.reason.to_string(),
-        cause: Err(jet_foundation::Outcome::JetAbsent),
-    };
-    match method {
-        "line_text" => Ok(data_result_value(
-            data_plot_rt::jet_data_line_text_plot_checked(&groups, &options).map_err(plot_error),
-            || data_plot_rt::jet_data_line_text(&groups, &options),
-            CtValue::Str,
-        )),
-        "line_svg" => Ok(data_result_value(
-            data_plot_rt::jet_data_line_svg_plot_checked(&groups, &options).map_err(plot_error),
-            || data_plot_rt::jet_data_line_svg(&groups, &options),
-            CtValue::Str,
-        )),
-        _ => Err(unsupported(
-            &format!("unsupported core.data line renderer `{method}`"),
-            span,
-        )),
-    }
-}
-
 fn hex_encode(bytes: Vec<u8>) -> String {
     encoding_base_kernel::jet_std_hex_encode(&bytes)
 }
@@ -687,7 +668,7 @@ fn repl_native_only_module(module: &str) -> Option<&'static str> {
         "core.db" => Some("`core.db` (SQLite)"),
         "core.net" => Some("network sockets (`core.net`)"),
         "core.reactive" => Some("`core.reactive`"),
-        "core.crypto" | "core.crypto.random" => Some("`core.crypto`"),
+        "core.crypto" => Some("`core.crypto`"),
         "core.auth" => Some("`core.auth` token verification"),
         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
         "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
@@ -732,147 +713,69 @@ pub(super) fn io_error_value(path: &str, e: std::io::Error) -> CtValue {
     }
 }
 
-fn splitmix64(state: &mut u64) -> u64 {
-    let mut x = *state;
-    x ^= x << 7;
-    x ^= x >> 9;
-    x = x.wrapping_mul(0x9e3779b97f4a7c15);
-    *state = x;
-    x
-}
-
-pub(in super::super) fn random_int(state: &mut u64, low: i64, high: i64) -> i64 {
-    if high <= low {
-        return low;
-    }
-    low + (splitmix64(state) % ((high - low + 1) as u64)) as i64
-}
-
-pub(in super::super) fn random_float(state: &mut u64) -> f64 {
-    (splitmix64(state) as f64) / (u64::MAX as f64)
-}
-
-/// D-DET1 widened ambient draws. Mirrors AOT's `jet_std_random_*` (Process.rs)
-/// byte-for-byte — same `jet_rng_next`-equivalent `splitmix64` stream, same
-/// formulas — so an ambient `core.random.*` call at comptime and the same
-/// call at AOT runtime draw the identical sequence from the identical seed
-/// (R12 parity).
-/// parity: guard tests/comptime_diff.rs::comptime_module_calls_match_runtime
-fn random_float_open(state: &mut u64) -> f64 {
-    let x = random_float(state);
-    if x <= 0.0 {
-        f64::MIN_POSITIVE
-    } else {
-        x
-    }
-}
-
-fn random_float_range(state: &mut u64, low: f64, high: f64) -> f64 {
-    if !(high > low) {
-        return low;
-    }
-    low + (high - low) * random_float(state)
-}
-
-fn random_bool_p(state: &mut u64, p: f64) -> bool {
-    if p <= 0.0 || p.is_nan() {
-        false
-    } else if p >= 1.0 {
-        true
-    } else {
-        random_float(state) < p
-    }
-}
-
-fn random_normal(state: &mut u64, mean: f64, stddev: f64) -> f64 {
-    let u1 = random_float_open(state);
-    let u2 = random_float(state);
-    let z0 = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
-    mean + z0 * stddev.max(0.0)
-}
-
-fn random_exponential(state: &mut u64, lambda: f64) -> f64 {
-    if lambda <= 0.0 || lambda.is_nan() {
-        return 0.0;
-    }
-    -random_float_open(state).ln() / lambda
-}
-
-fn random_bytes(state: &mut u64, n: i64) -> Vec<u8> {
-    let n = n.max(0) as usize;
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        out.push(splitmix64(state) as u8);
-    }
-    out
-}
-
-fn random_pick_ct(state: &mut u64, xs: &[CtValue]) -> Option<CtValue> {
-    if xs.is_empty() {
-        None
-    } else {
-        Some(xs[random_int(state, 0, xs.len() as i64 - 1) as usize].clone())
-    }
-}
-
-fn random_weighted_pick_ct(
-    state: &mut u64,
-    xs: &[CtValue],
-    weights: &[f64],
-) -> Option<CtValue> {
-    if xs.is_empty() || xs.len() != weights.len() {
-        return None;
-    }
-    let mut total = 0.0;
-    for &w in weights {
-        if w.is_finite() && w > 0.0 {
-            total += w;
+// D-DET1 / I9: ambient random behavior is the runtime Prelude kernel. These
+// wrappers only marshal CtValue containers around that kernel.
+mod ambient_random_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone)]
+        pub(crate) struct Rng {
+            pub(crate) state: u64,
         }
     }
-    if total <= 0.0 {
-        return None;
-    }
-    let mut needle = random_float_range(state, 0.0, total);
-    for (item, &weight) in xs.iter().zip(weights.iter()) {
-        let w = if weight.is_finite() && weight > 0.0 { weight } else { 0.0 };
-        if needle < w {
-            return Some(item.clone());
-        }
-        needle -= w;
-    }
-    xs.last().cloned()
-}
 
-fn random_sample_ct(state: &mut u64, xs: &[CtValue], k: i64) -> Vec<CtValue> {
-    let want = (k.max(0) as usize).min(xs.len());
-    let mut pool = xs.to_vec();
-    for i in 0..want {
-        let j = random_int(state, i as i64, pool.len() as i64 - 1) as usize;
-        pool.swap(i, j);
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs");
+
+    pub(crate) fn seed(seed: i64) {
+        jet_std_random_seed(seed);
     }
-    pool.truncate(want);
-    pool
-}
 
-pub(super) fn shuffle_ct_list(state: &mut u64, xs: &mut [CtValue]) {
-    let len = xs.len();
-    for i in (1..len).rev() {
-        let j = random_int(state, 0, i as i64) as usize;
-        xs.swap(i, j);
+    pub(crate) fn int(low: i64, high: i64) -> i64 {
+        jet_std_random_int(low, high)
     }
-}
 
-thread_local! {
-    static JET_AMBIENT_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173);
-}
+    pub(crate) fn float() -> f64 {
+        jet_std_random_float()
+    }
 
-pub(super) fn with_ambient_rng<R>(f: impl FnOnce(&mut u64) -> R) -> R {
-    JET_AMBIENT_RNG.with(|cell| {
-        let mut state = cell.get();
-        let out = f(&mut state);
-        cell.set(state);
-        out
-    })
+    pub(crate) fn split(seed: i64) -> u64 {
+        jet_std_random_split(seed).state
+    }
+
+    pub(crate) fn float_range(low: f64, high: f64) -> f64 {
+        jet_std_random_float_range(low, high)
+    }
+
+    pub(crate) fn bool_p(p: f64) -> bool {
+        jet_std_random_bool(p)
+    }
+
+    pub(crate) fn normal(mean: f64, stddev: f64) -> f64 {
+        jet_std_random_normal(mean, stddev)
+    }
+
+    pub(crate) fn exponential(lambda: f64) -> f64 {
+        jet_std_random_exponential(lambda)
+    }
+
+    pub(crate) fn bytes(count: i64) -> Vec<u8> {
+        jet_std_random_bytes(count)
+    }
+
+    pub(crate) fn pick<T: Clone>(items: &Vec<T>) -> Option<T> {
+        jet_std_random_pick(items)
+    }
+
+    pub(crate) fn weighted_pick<T: Clone>(items: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
+        jet_std_random_weighted_pick(items, weights)
+    }
+
+    pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
+        jet_std_random_sample(items, count)
+    }
+
+    pub(crate) fn shuffle<T>(items: &mut Vec<T>) {
+        jet_std_random_shuffle(items);
+    }
 }
 
 /// D-TEXTWIDTH1=B: pull the two policy flags back out of a `TextWidth`
@@ -911,6 +814,20 @@ pub fn apply_core_call(
     span: Span,
     repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
+    apply_core_call_with_type(module, method, args, span, repl_mode, None)
+}
+
+/// Apply a Core call with sema's resolved return type available to erased
+/// adapters. The type is marshalling metadata only; effects and policy remain
+/// owned by the existing registries and Prelude kernels.
+pub fn apply_core_call_with_type(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    repl_mode: bool,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(
@@ -937,8 +854,13 @@ pub fn apply_core_call(
             return result;
         }
     }
-    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
-    {
+    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+        module,
+        method,
+        args.clone(),
+        span,
+        resolved_ret.cloned(),
+    ) {
         return result;
     }
 
@@ -1835,15 +1757,25 @@ pub fn apply_core_call(
                 Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
-        // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
+        // --- core.encoding.cbor (shared Foundation kernel adapter) ---
         // D-ENC-CBOR-SURFACE1: current whole-value names return the same
         // Result shape as AOT. Edition compatibility names remain below.
-        ("core.encoding.cbor", "to_bytes") => Ok(CtValue::Present(Box::new(
-            CtValue::Bytes(super::super::EncodingLite::cbor_encode(one(0)?)),
-        ))),
-        ("core.encoding.cbor", "to_bytes_canonical") => Ok(CtValue::Present(Box::new(
-            CtValue::Bytes(super::super::EncodingLite::cbor_encode_canonical(one(0)?)),
-        ))),
+        ("core.encoding.cbor", "to_bytes") => {
+            match super::super::EncodingLite::cbor_encode(one(0)?) {
+                Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+                Err(error) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::cbor_error_value(error),
+                ))),
+            }
+        }
+        ("core.encoding.cbor", "to_bytes_canonical") => {
+            match super::super::EncodingLite::cbor_encode_canonical(one(0)?) {
+                Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+                Err(error) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::cbor_error_value(error),
+                ))),
+            }
+        }
         ("core.encoding.cbor", "parse") => {
             let bytes = as_bytes(one(0)?, span)?;
             let options = match super::super::EncodingLite::cbor_options(args.get(1)) {
@@ -1862,7 +1794,9 @@ pub fn apply_core_call(
             }
         }
         ("core.encoding.cbor", "encode") => {
-            Ok(CtValue::Bytes(super::super::EncodingLite::cbor_encode(one(0)?)))
+            super::super::EncodingLite::cbor_encode(one(0)?)
+                .map(CtValue::Bytes)
+                .map_err(|error| unsupported(&error.reason, span))
         }
         ("core.encoding.cbor", "decode") => {
             let bytes = as_bytes(one(0)?, span)?;
@@ -1873,6 +1807,41 @@ pub fn apply_core_call(
             }
         }
         // --- core.time pure constructors ---
+        // Runtime-only clock reads stay on the same Prelude time kernel as
+        // AOT/JIT. The fold gate rejects them before this adapter is reached.
+        ("core.time", "now") => Ok(CtValue::Int(time_deadline_kernel::jet_std_time_now())),
+        ("core.time", "now_utc") => {
+            Ok(runtime_datetime_value(time_kernel::JetDateTime::now()))
+        }
+        ("core.time", "today") => Ok(runtime_date_value(time_kernel::JetDate::today_utc())),
+        ("core.time", "instant") => Ok(CtValue::Struct {
+            type_name: "Instant".to_string(),
+            fields: vec![(
+                "start_ns".to_string(),
+                CtValue::Int(time_kernel::jet_time_monotonic_now_ns()),
+            )],
+        }),
+        ("core.time", "sleep") => {
+            let millis = match one(0)? {
+                CtValue::Int(value) => *value,
+                _ => return Err(unsupported("time.sleep expects an Int", span)),
+            };
+            time_deadline_kernel::jet_std_time_sleep(millis);
+            Ok(CtValue::Unit)
+        }
+        ("core.time", "start") => Ok(CtValue::Struct {
+            type_name: "Stopwatch".to_string(),
+            fields: vec![(
+                "start_ms".to_string(),
+                CtValue::Int(time_kernel::jet_time_monotonic_now_ns() / 1_000_000),
+            )],
+        }),
+        ("core.time.date", "today") => {
+            Ok(runtime_date_value(time_kernel::JetDate::today_utc()))
+        }
+        ("core.time.datetime", "now") => {
+            Ok(runtime_datetime_value(time_kernel::JetDateTime::now()))
+        }
         // D-DET1: testing.fake_clock is the test-facing spelling of the
         // caller-seeded deterministic Clock capability built by Clock.new.
         ("core.testing", "fake_clock") => {
@@ -1922,7 +1891,7 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n as u64,
                 _ => return Err(unsupported("random.seed expects an Int", span)),
             };
-            with_ambient_rng(|st| *st = seed);
+            ambient_random_kernel::seed(seed as i64);
             Ok(CtValue::Unit)
         }
         ("core.random", "int") => {
@@ -1934,13 +1903,11 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.int expects Int bounds", span)),
             };
-            Ok(CtValue::Int(with_ambient_rng(|st| {
-                random_int(st, low, high)
-            })))
+            Ok(CtValue::Int(ambient_random_kernel::int(low, high)))
         }
-        ("core.random", "float") => Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-            random_float(st)
-        })))),
+        ("core.random", "float") => {
+            Ok(CtValue::Float(CtFloat::f64(ambient_random_kernel::float())))
+        }
         // D-DET1: testing.fake_rng is the test-facing spelling of the same
         // caller-seeded deterministic Rng capability as random.rng.
         ("core.random", "rng") | ("core.testing", "fake_rng") => {
@@ -1965,7 +1932,7 @@ pub fn apply_core_call(
                 CtValue::Int(n) => *n as u64,
                 _ => return Err(unsupported("random.split expects an Int seed", span)),
             };
-            let mixed = with_ambient_rng(|st| seed ^ splitmix64(st).rotate_left(17));
+            let mixed = ambient_random_kernel::split(seed as i64);
             Ok(CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
@@ -1974,48 +1941,52 @@ pub fn apply_core_call(
         ("core.random", "float_range") => {
             let low = as_float(one(0)?, span)?;
             let high = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-                random_float_range(st, low, high)
-            }))))
+            Ok(CtValue::Float(CtFloat::f64(
+                ambient_random_kernel::float_range(low, high),
+            )))
         }
         ("core.random", "bool") => {
             let p = as_float(one(0)?, span)?;
-            Ok(CtValue::Bool(with_ambient_rng(|st| random_bool_p(st, p))))
+            Ok(CtValue::Bool(ambient_random_kernel::bool_p(p)))
         }
         ("core.random", "normal") => {
             let mean = as_float(one(0)?, span)?;
             let stddev = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-                random_normal(st, mean, stddev)
-            }))))
+            Ok(CtValue::Float(CtFloat::f64(
+                ambient_random_kernel::normal(mean, stddev),
+            )))
         }
         ("core.random", "exponential") => {
             let lambda = as_float(one(0)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
-                random_exponential(st, lambda)
-            }))))
+            Ok(CtValue::Float(CtFloat::f64(
+                ambient_random_kernel::exponential(lambda),
+            )))
         }
         ("core.random", "bytes") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.bytes expects an Int count", span)),
             };
-            Ok(CtValue::Bytes(with_ambient_rng(|st| random_bytes(st, n))))
+            Ok(CtValue::Bytes(ambient_random_kernel::bytes(n)))
         }
         ("core.random", "pick") => {
-            let CtValue::List(xs) = one(0)? else {
+            let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.pick needs a list", span));
             };
-            Ok(match with_ambient_rng(|st| random_pick_ct(st, xs)) {
-                Some(v) => CtValue::Present(Box::new(v)),
-                None => CtValue::absent(Type::Int),
-            })
+            match ambient_random_kernel::pick(&xs) {
+                Some(v) => Ok(CtValue::Present(Box::new(v))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         ("core.random", "weighted_pick") => {
-            let CtValue::List(xs) = one(0)? else {
+            let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.weighted_pick needs a list", span));
             };
-            let CtValue::List(ws) = one(1)? else {
+            let CtValue::List(ws) = one(1)?.clone() else {
                 return Err(unsupported(
                     "random.weighted_pick needs a [Float] weights list",
                     span,
@@ -2025,24 +1996,47 @@ pub fn apply_core_call(
                 .iter()
                 .map(|w| as_float(w, span))
                 .collect::<Result<_, _>>()?;
-            Ok(
-                match with_ambient_rng(|st| random_weighted_pick_ct(st, xs, &weights)) {
-                    Some(v) => CtValue::Present(Box::new(v)),
-                    None => CtValue::absent(Type::Int),
-                },
-            )
+            match ambient_random_kernel::weighted_pick(&xs, &weights) {
+                Some(v) => Ok(CtValue::Present(Box::new(v))),
+                None => Ok(CtValue::absent(
+                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+                        unsupported("random.weighted_pick needs a resolved element type", span)
+                    })?,
+                )),
+            }
         }
         ("core.random", "sample") => {
-            let CtValue::List(xs) = one(0)? else {
+            let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.sample needs a list", span));
             };
             let k = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.sample count must be Int", span)),
             };
-            Ok(CtValue::List(with_ambient_rng(|st| {
-                random_sample_ct(st, xs, k)
-            })))
+            Ok(CtValue::List(ambient_random_kernel::sample(&xs, k)))
+        }
+        ("core.random", "shuffle") => {
+            let CtValue::List(mut xs) = one(0)?.clone() else {
+                return Err(unsupported("random.shuffle needs a list", span));
+            };
+            ambient_random_kernel::shuffle(&mut xs);
+            // TIR writes this returned list back through the borrowed place;
+            // the AST dispatcher owns the equivalent write-back path.
+            Ok(CtValue::List(xs))
+        }
+        ("core.crypto.random", "bytes") => {
+            let count = match one(0)? {
+                CtValue::Int(value) => *value,
+                _ => {
+                    return Err(unsupported(
+                        "crypto.random.bytes expects an Int",
+                        span,
+                    ))
+                }
+            };
+            crypto_entropy_kernel::jet_crypto_entropy_bytes(count)
+                .map(CtValue::Bytes)
+                .map_err(|error| unsupported(&error.to_string(), span))
         }
         // --- core.fmt: CtValue adapters over the shared Prelude kernel ---
         ("core.fmt", "number") => {
@@ -2569,469 +2563,5 @@ pub fn apply_core_call(
                 span,
             ))
         }
-    }
-}
-
-/// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
-/// Only called when `impure_depth > 0` and `allow_impure` (comptime) or from the
-/// runtime TIR evaluator used by `jet run` deopt (#778).
-pub fn apply_impure_core_call(
-    module: &str,
-    method: &str,
-    args: Vec<CtValue>,
-    span: Span,
-    base_dir: &std::path::Path,
-    sink: Option<&mut super::super::Interpreter::DevSink>,
-    repl_mode: bool,
-    pinned_executable: Option<&std::fs::File>,
-    verified_root: Option<&std::fs::File>,
-) -> Result<CtValue, Diagnostic> {
-    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-        if !row.accepts_arity(args.len()) {
-            return Err(unsupported(
-                &format!(
-                    "{}.{}(): expected {}..{} argument(s), got {}",
-                    module,
-                    method,
-                    row.arity(),
-                    row.signature.max_arity,
-                    args.len()
-                ),
-                span,
-            ));
-        }
-    }
-    // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
-    // must still resolve under ambient impure depth — same as apply_core_call.
-    if let Some(row) = jet_foundation::Syntax::core_call(module, method)
-        .filter(|row| core_call_allows_pure_parity(row))
-    {
-        if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
-            return result;
-        }
-    }
-    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
-    {
-        return result;
-    }
-    let one = |i: usize| {
-        args.get(i).ok_or_else(|| {
-            unsupported(
-                &format!("`{}.{}` (wrong number of arguments)", module, method),
-                span,
-            )
-        })
-    };
-    match (module, method) {
-        ("core.files", "read") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
-            match std::fs::read_to_string(&path) {
-                Ok(s) => Ok(CtValue::Present(Box::new(CtValue::Str(s)))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
-                    e,
-                )))),
-            }
-        }
-        ("core.files", "read_bytes") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
-            match std::fs::read(&path) {
-                Ok(bs) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bs)))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
-                    e,
-                )))),
-            }
-        }
-        // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not `append`,
-        // which names the streaming handle's method).
-        ("core.files", "write" | "append_all") => {
-            let path_str = as_string(one(0)?, span)?;
-            let content = as_string(one(1)?, span)?;
-            let path = base_dir.join(path_str);
-            let result = if method == "append_all" {
-                use std::io::Write;
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path)
-                    .and_then(|mut f| f.write_all(content.as_bytes()).map(|_| ()))
-            } else {
-                std::fs::write(&path, content)
-            };
-            match result {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
-                    e,
-                )))),
-            }
-        }
-        ("core.files", "exists" | "is_dir") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
-            let meta = std::fs::metadata(&path);
-            Ok(CtValue::Bool(match (method, meta) {
-                ("exists", Ok(_)) => true,
-                ("exists", Err(_)) => false,
-                ("is_dir", Ok(m)) => m.is_dir(),
-                ("is_dir", Err(_)) => false,
-                _ => false,
-            }))
-        }
-        ("core.files", "create_dir") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
-            match std::fs::create_dir_all(&path) {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
-                    e,
-                )))),
-            }
-        }
-        // D-LSDIR1: mirror AOT jet_std_fs_list_dir (sorted by name).
-        ("core.files", "list_dir") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
-            match std::fs::read_dir(&path) {
-                Ok(rd) => {
-                    let mut entries = Vec::new();
-                    let mut err: Option<std::io::Error> = None;
-                    for entry in rd {
-                        match entry {
-                            Ok(entry) => {
-                                let name = entry.file_name().to_string_lossy().to_string();
-                                let full_path = path
-                                    .join(&name)
-                                    .to_string_lossy()
-                                    .to_string();
-                                let is_dir =
-                                    entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-                                entries.push((name, full_path, is_dir));
-                            }
-                            Err(e) => {
-                                err = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                    if let Some(e) = err {
-                        Ok(CtValue::failed(Box::new(io_error_value(
-                            &path.to_string_lossy(),
-                            e,
-                        ))))
-                    } else {
-                        entries.sort_by(|a, b| a.0.cmp(&b.0));
-                        Ok(CtValue::Present(Box::new(CtValue::List(
-                            entries
-                                .into_iter()
-                                .map(|(name, full_path, is_dir)| CtValue::Struct {
-                                    type_name: "DirEntry".to_string(),
-                                    fields: vec![
-                                        ("name".to_string(), CtValue::Str(name)),
-                                        ("path".to_string(), CtValue::Str(full_path)),
-                                        ("is_dir".to_string(), CtValue::Bool(is_dir)),
-                                    ],
-                                })
-                                .collect(),
-                        ))))
-                    }
-                }
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
-                    e,
-                )))),
-            }
-        }
-        ("core.files", "remove") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
-            let result = if path.is_dir() {
-                std::fs::remove_dir_all(&path)
-            } else {
-                std::fs::remove_file(&path)
-            };
-            match result {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
-                    e,
-                )))),
-            }
-        }
-        ("core.env", "get") => {
-            let key = as_string(one(0)?, span)?;
-            match std::env::var(key) {
-                Ok(v) => Ok(CtValue::Present(Box::new(CtValue::Str(v)))),
-                Err(_) => Ok(CtValue::absent(crate::AST::Type::String)),
-            }
-        }
-        ("core.env", "set") => {
-            let key = as_string(one(0)?, span)?;
-            let val = as_string(one(1)?, span)?;
-            std::env::set_var(key, val);
-            Ok(CtValue::Unit)
-        }
-        ("core.env", "current_dir") => match std::env::current_dir() {
-            Ok(p) => Ok(CtValue::Present(Box::new(CtValue::Str(
-                p.to_string_lossy().into_owned(),
-            )))),
-            Err(e) => Ok(CtValue::failed(Box::new(io_error_value(".", e)))),
-        },
-        ("core.env", "home_dir") => Ok(
-            match std::env::var("HOME")
-                .ok()
-                .or_else(|| std::env::var("USERPROFILE").ok())
-            {
-                Some(v) => CtValue::Present(Box::new(CtValue::Str(v))),
-                None => CtValue::absent(crate::AST::Type::String),
-            },
-        ),
-        ("core.io", "args") => {
-            // Prefer argv installed for this jet run/deopt. Never fall back to
-            // the host process argv — `cargo test` flags would leak into output.
-            let argv = super::super::Interpreter::runtime_argv()
-                .unwrap_or_else(|| vec!["jet".to_string()]);
-            Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
-        }
-        ("core.io", "progress") => {
-            let Some(source) = args.first() else {
-                return Err(unsupported("`core.io.progress` needs a source", span));
-            };
-            if let CtValue::Str(text) = source {
-                if args.len() != 1 {
-                    return Err(unsupported(
-                        "`core.io.progress` text form takes one argument",
-                        span,
-                    ));
-                }
-                if let Some(sink) = sink {
-                    sink.stdout.push_str(text);
-                    sink.stdout.push('\n');
-                }
-                return Ok(CtValue::Unit);
-            }
-            let CtValue::List(items) = source else {
-                return Err(unsupported(
-                    "`core.io.progress` expects a List or Iter source",
-                    span,
-                ));
-            };
-            let description = args
-                .get(1)
-                .map(|value| as_string(value, span))
-                .transpose()?
-                .unwrap_or("Progress")
-                .to_string();
-            let format = args
-                .get(2)
-                .map(|value| as_string(value, span))
-                .transpose()?
-                .unwrap_or("")
-                .to_string();
-            // Keep the adapter lazy in the TIR interpreter.  The loop evaluator
-            // unwraps this erased carrier and renders one update per pulled
-            // item.  Rendering here would report progress before the caller
-            // consumes anything and would diverge from AOT/JIT.
-            let started_at = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_secs_f64())
-                .unwrap_or(0.0);
-            Ok(CtValue::Struct {
-                type_name: "__JetProgressIter".to_string(),
-                fields: vec![
-                    ("items".to_string(), CtValue::List(items.clone())),
-                    ("description".to_string(), CtValue::Str(description)),
-                    ("format".to_string(), CtValue::Str(format)),
-                    ("started_at".to_string(), CtValue::Float(crate::AST::CtFloat::f64(started_at))),
-                    (
-                        "pulls".to_string(),
-                        CtValue::List(vec![CtValue::Int(1); items.len()]),
-                    ),
-                    ("tail".to_string(), CtValue::Int(0)),
-                    ("total".to_string(), CtValue::Int(items.len() as i64)),
-                    ("known_total".to_string(), CtValue::Bool(true)),
-                ],
-            })
-        }
-        // D-VERDICT-1321-1: variadic — each argument renders on its own line.
-        ("core.io", "print") => {
-            let text = args
-                .iter()
-                .map(|v| v.jet_show())
-                .collect::<Vec<_>>()
-                .join("\n");
-            if let Some(s) = sink {
-                s.stdout.push_str(&text);
-                s.stdout.push('\n');
-            }
-            Ok(CtValue::Unit)
-        }
-        ("core.io", "eprint") => {
-            let text = args
-                .iter()
-                .map(|v| v.jet_show())
-                .collect::<Vec<_>>()
-                .join("\n");
-            if let Some(s) = sink {
-                s.stderr.push_str(&text);
-                s.stderr.push('\n');
-            }
-            Ok(CtValue::Unit)
-        }
-        ("core.io", "input") | ("core.io", "read_all_input") => {
-            if repl_mode {
-                Err(repl_native_module_diag("core.io", method, span))
-            } else {
-                Ok(CtValue::Present(Box::new(CtValue::Str(String::new()))))
-            }
-        }
-        ("core.io", "stdin") if repl_mode => Err(repl_native_module_diag("core.io", method, span)),
-        ("core.io", "stdin") => Ok(CtValue::Struct {
-            type_name: "StdinHandle".to_string(),
-            fields: vec![],
-        }),
-        ("core.process", "exit") => {
-            let code = match one(0)? {
-                CtValue::Int(n) => *n,
-                _ => 0,
-            };
-            // In-process interpreter/deopt must not kill the host (cargo test,
-            // jet dev). Soft-exit via the sink; bare comptime keeps hard exit.
-            if let Some(s) = sink {
-                s.exit_code = Some(code as i32);
-                return Err(Diagnostic::soft_exit(
-                    code.to_string(),
-                    "process.exit requested".to_string(),
-                    Some(span),
-                ));
-            }
-            std::process::exit(code as i32);
-        }
-        ("core.process", "run") => {
-            let cmd = match one(0)? {
-                CtValue::List(items) => items.iter().map(|v| v.jet_show()).collect::<Vec<_>>(),
-                _ => {
-                    return Err(unsupported(
-                        "process.run expects a list of command words",
-                        span,
-                    ))
-                }
-            };
-            if cmd.is_empty() {
-                return Ok(CtValue::failed(Box::new(CtValue::Struct {
-                    type_name: "IOError".to_string(),
-                    fields: vec![(
-                        "message".to_string(),
-                        CtValue::Str("process.run needs at least one command word".to_string()),
-                    )],
-                })));
-            }
-            match run_repl_process(
-                &cmd,
-                base_dir,
-                pinned_executable,
-                verified_root,
-                std::time::Duration::from_secs(30),
-            ) {
-                Ok(out) => Ok(CtValue::Present(Box::new(CtValue::Struct {
-                    type_name: "ProcessResult".to_string(),
-                    fields: vec![
-                        (
-                            "code".to_string(),
-                            CtValue::Int(out.status.code().unwrap_or(-1) as i64),
-                        ),
-                        (
-                            "output".to_string(),
-                            CtValue::Str(String::from_utf8_lossy(&out.stdout).into_owned()),
-                        ),
-                        (
-                            "errors".to_string(),
-                            CtValue::Str(String::from_utf8_lossy(&out.stderr).into_owned()),
-                        ),
-                    ],
-                }))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(&cmd[0], e)))),
-            }
-        }
-        ("core.tls", _) => Err(Diagnostic::error(
-            "E3412",
-            format!("`core.tls.{}()` is not available at comptime", method),
-            "live TLS sessions cannot be opened during compile-time evaluation".to_string(),
-            "move the TLS operation to runtime; use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned build-time downloads"
-                .to_string(),
-            Some(span),
-        )),
-        // Pure compress/archive/encoding codecs live on apply_core_call; reuse
-        // them when the runtime evaluator has ambient impure depth open (#778
-        // deopt / #715 default-dev encoding parity). Whole-value encoding must
-        // not die as E0956 impure-tier after silent deopt.
-        ("core.compress.gzip", _)
-        | ("core.compress.zstd", _)
-        | ("core.archive", _)
-        | ("core.perf", _) => apply_core_call(module, method, args, span, repl_mode),
-        (module, _) if module.starts_with("core.encoding.") => {
-            apply_core_call(module, method, args, span, repl_mode)
-        }
-        // Ambient impure depth must not block pure-tier CorePureParity surfaces
-        // that TirBridge already evaluates (date/math/measurement/testing/…).
-        // Pure style/net helpers share the implementation dispatch so
-        // impure_depth>0 (TirBridge / jet run deopt) still hits CorePureParity.
-        ("core.io", method)
-            if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
-        {
-            apply_core_call(module, method, args, span, repl_mode)
-        }
-        ("core.random", _) | ("core.testing", "fake_rng") => {
-            apply_core_call(module, method, args, span, repl_mode)
-        }
-        ("core.time.date", _)
-        | ("core.time.duration", _)
-        | ("core.time.instant", _)
-        | ("core.math", _)
-        | ("core.measurement", _)
-        | ("core.testing", _)
-        | ("core.data", _)
-        | ("core.compute", _)
-        | ("core.services", _)
-        | ("core.auth", _)
-        | ("core.sync", _)
-        | ("app", _)
-        | ("core.ui", _)
-        | ("core.crypto", _)
-        | ("core.crypto.expert", _)
-        | ("core.linalg", _)
-        | ("core.email", _)
-        | ("core.xml", _)
-        | ("core.json", _)
-        | ("core.regex", _)
-        | ("core.color", _)
-        | ("core.units", _)
-        | ("core.time", _)
-        | ("core.time.datetime", _)
-        | ("core.science.measurement", _) => apply_core_call(module, method, args, span, repl_mode),
-        // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
-        // Keep E3412 for the rest. D-META-EFFECT1: "pure" is what the effect
-        // table says, so both tiers agree without a second list here.
-        ("core.net", method)
-            if jet_foundation::Effects::core_effect("core.net", method).is_none() =>
-        {
-            apply_core_call(module, method, args, span, repl_mode)
-        }
-        ("core.net", _) => Err(Diagnostic::error(
-            "E3412",
-            format!("`core.net.{}()` is not available at comptime", method),
-            "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
-            "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads"
-                .to_string(),
-            Some(span),
-        )),
-        _ => Err(unsupported(
-            &format!("`{}.{}()` at comptime (impure tier)", module, method),
-            span,
-        )),
     }
 }

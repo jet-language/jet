@@ -32,6 +32,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_service_error = etype == Some("ServiceError");
     let is_hook_outcome = etype == Some("HookOutcome");
     let is_data_event = etype == Some("DataEvent");
+    // D-CONC-FAIL1=A: task failures are published by the shared Prelude, not
+    // emitted as a user enum (`user_TaskFailure`).
+    let is_task_failure = etype == Some(crate::Syntax::TYPE_TASK_FAILURE);
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
     let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
@@ -53,7 +56,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             if is_json_type_name(t) {
                 format!("{}jet_std::DataTree", cx.root_prefix)
             } else if t.starts_with("__JetUnion_") {
-                user_type_rust(t)
+                mangle_path(t)
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
             } else if t == "DataEvent" {
@@ -77,10 +80,12 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}JetServiceError", cx.root_prefix)
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
+            } else if t == crate::Syntax::TYPE_TASK_FAILURE {
+                format!("{}jet_std::JetTaskFailure", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(t))
+                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(t))
             } else {
-                user_type_rust(t)
+                mangle_path(t)
             }
         })
         .unwrap_or_else(|| {
@@ -95,10 +100,13 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON/Key/union tags keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
+        if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_task_failure || is_anon_union {
+            if is_task_failure {
+                return v.strip_prefix("user_").unwrap_or(v).to_string();
+            }
             v.to_string()
         } else {
-            mangle_variant(v)
+            mangle_path(v)
         }
     };
     match pattern {
@@ -109,7 +117,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             if bindings.is_empty() {
                 // D-TAG1: a group name matches its whole subtree — expand to an
                 // or-pattern over its leaves, payloads wildcarded.
-                if !is_json && !is_key {
+                if !is_json && !is_key && !is_task_failure {
                     let leaves = group_leaves(cx, etype, variant);
                     if !leaves.is_empty() {
                         return leaves
@@ -415,7 +423,7 @@ fn emit_named_fn_value_with_storage(
         ordinary
             .strip_prefix("std::rc::Rc<")
             .and_then(|inner| inner.strip_suffix('>'))
-            .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync>"))
+            .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync + 'static>"))
             .unwrap_or(ordinary)
     } else {
         cx.rust_type(ft)

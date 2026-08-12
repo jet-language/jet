@@ -10,11 +10,11 @@ fn fast_seven() => Int = 7
 
 fn run() {
     task.group race_group {
-        // Listed slow-first: race still returns the fast branch's value,
-        // proving completion order (not list order) picks the winner.
-        print(task.race { slow_one(), fast_seven() })
+        time.sleep(200)
+        print(task.race { slow_one(), fast_seven() } ?? panic("race failed"))
     }
     task.group any_group {
-        print(task.any { slow_one(), fast_seven() })
+        time.sleep(200)
+        print(task.any { slow_one(), fast_seven() } ?? panic("any failed"))
     }
 }

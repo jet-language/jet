@@ -1,3 +1,4 @@
+use crate::AST::Expr;
 use crate::Diagnostics::Span;
 
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
@@ -168,7 +169,23 @@ impl Measure {
 pub struct FunctionObligations {
     pub effect_bound: Option<Vec<String>>,
     pub param_contract: Option<Vec<(String, super::ParamZone)>>,
+    /// Declaration-ordered rest-slot facts. Local names and default bodies
+    /// stay out of callable identity.
+    pub variadic: Option<Vec<bool>>,
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
+}
+
+/// Declaration-side call slots carried by a function value. Public labels and
+/// zones remain callable obligations; this row carries the defaults,
+/// conventions, and rest slots needed to bind a value call.
+#[derive(Debug, Clone)]
+pub struct FunctionCallMetadata {
+    /// Declaration-local names used only to resolve default bodies. They are
+    /// not public callable labels or semantic-index identity.
+    pub names: Vec<String>,
+    pub defaults: Vec<Option<Expr>>,
+    pub variadic: Vec<bool>,
+    pub conventions: Vec<AccessConvention>,
 }
 
 impl FunctionObligations {
@@ -188,12 +205,20 @@ impl FunctionObligations {
                     .join(",")
             })
             .unwrap_or_default();
+        let variadic = self.variadic.as_ref().map_or_else(String::new, |row| {
+            row.iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        });
         let provenance = self
             .return_view_provenance
             .as_ref()
             .map(super::canonical_view_provenance_map)
             .unwrap_or_default();
-        format!("effects=[{effects}];contract=[{contract}];provenance=[{provenance}]")
+        format!(
+            "effects=[{effects}];contract=[{contract}];variadic=[{variadic}];provenance=[{provenance}]"
+        )
     }
 
     /// required is the contract at the use site. offered is the contract
@@ -226,6 +251,17 @@ impl FunctionObligations {
             }),
         };
         if !contract_ok {
+            return false;
+        }
+
+        let variadic_ok = match &required.variadic {
+            None => true,
+            Some(required) => self
+                .variadic
+                .as_ref()
+                .is_none_or(|offered| offered == required),
+        };
+        if !variadic_ok {
             return false;
         }
 
@@ -355,21 +391,23 @@ impl KnowledgeVector {
                     if entry.plane != crate::Registry::TYPE_PLANE_OBLIGATION {
                         return None;
                     }
-                    // D-APILABEL1: this mixed plane contributes only its call
-                    // contract to identity; effects and return provenance
-                    // remain directional obligations.
+                    // D-APILABEL1/D-VARIADIC1: this mixed plane contributes
+                    // only declaration-ordered public call facts to identity;
+                    // effects, defaults, and return provenance remain
+                    // directional or local implementation details.
                     let KnowledgeFact::Obligation(obligations) = &entry.fact else {
                         return None;
                     };
-                    let Some(param_contract) = &obligations.param_contract else {
+                    if obligations.param_contract.is_none() && obligations.variadic.is_none() {
                         return None;
-                    };
+                    }
                     Some(KnowledgeEntry {
                         path: entry.path.clone(),
                         plane: entry.plane,
                         fact: KnowledgeFact::Obligation(FunctionObligations {
                             effect_bound: None,
-                            param_contract: Some(param_contract.clone()),
+                            param_contract: obligations.param_contract.clone(),
+                            variadic: obligations.variadic.clone(),
                             return_view_provenance: None,
                         }),
                     })
@@ -587,6 +625,9 @@ pub enum Type {
         /// identity; sema also checks directional compatibility. `None` means
         /// the callable has no declared call contract.
         param_contract: Option<Vec<(String, super::ParamZone)>>,
+        /// D-APILABEL1/D-NARG-D2/D-VARIADIC1: declaration-side call slots for
+        /// function-value calls.
+        call_metadata: Option<FunctionCallMetadata>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
         /// at parse time (names resolve then and are not kept on the type).
@@ -825,6 +866,20 @@ fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)
 }
 
 impl Type {
+    /// D-QUAL4=A: remove only user value-fact tags while preserving compiler
+    /// tags that carry nominal identity or access policy.
+    pub fn without_user_tags(&self) -> &Type {
+        let mut ty = self;
+        while let Type::Tagged {
+            marker: TagMarker::User(_),
+            inner,
+        } = ty
+        {
+            ty = inner.as_ref();
+        }
+        ty
+    }
+
     /// Visit matched pairs under the shared composite carriers.
     ///
     /// The walker owns structural recursion for `List`, `Option`, `Result`,
@@ -1043,14 +1098,23 @@ impl Type {
         let Type::Fn {
             effect_bound,
             param_contract,
+            call_metadata,
             return_view_provenance,
             ..
         } = self
         else {
             return None;
         };
+        let variadic = call_metadata.as_ref().and_then(|metadata| {
+            metadata
+                .variadic
+                .iter()
+                .any(|is_variadic| *is_variadic)
+                .then(|| metadata.variadic.clone())
+        });
         if effect_bound.is_none()
             && param_contract.is_none()
+            && variadic.is_none()
             && return_view_provenance.is_none()
         {
             return None;
@@ -1060,6 +1124,7 @@ impl Type {
                 .as_ref()
                 .map(|row| row.iter().map(|(name, _)| name.clone()).collect()),
             param_contract: param_contract.clone(),
+            variadic,
             return_view_provenance: return_view_provenance.clone(),
         })
     }
@@ -1218,6 +1283,7 @@ impl Type {
                     .map(|return_type| Box::new(return_type.erased_carrier())),
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1323,7 +1389,12 @@ impl Type {
         let Type::Apply { name, args } = self else {
             return None;
         };
-        if !matches!(name.as_str(), "Vec" | "Matrix") {
+        let expected = match name.as_str() {
+            "Vec" => 1,
+            "Matrix" => 2,
+            _ => return None,
+        };
+        if args.len() != expected {
             return None;
         }
         args.iter().map(Self::compute_dimension_value).collect()
@@ -1333,8 +1404,36 @@ impl Type {
     /// `Tensor` is compatible with a shaped alias; two shaped aliases still
     /// require exact equality, so `Vec<3>` cannot silently become `Vec<4>`.
     pub fn is_compute_tensor_family(&self) -> bool {
-        matches!(self, Type::Named(name) if name == "Tensor")
-            || matches!(self, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix"))
+        match self {
+            Type::Tagged { inner, .. } => inner.is_compute_tensor_family(),
+            Type::Named(name) => name == "Tensor",
+            Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "Vec" | "Matrix") =>
+            {
+                let expected = if name == "Vec" { 1 } else { 2 };
+                args.len() == expected
+                    // Sema retains the fixed ComputeDim facts. TIR receives
+                    // only their erased Int carrier, so both exact forms
+                    // belong to the same compiler-owned compute family.
+                    && (self.compute_shape_dimensions().is_some()
+                        || args.iter().all(|arg| matches!(arg, Type::Int)))
+            }
+            _ => false,
+        }
+    }
+
+    /// Compiler-internal mutable Tensor windows retain the Tensor owner and
+    /// original range through all backends. This is not a user-typeable form;
+    /// lowering introduces it for a written Tensor place.
+    pub fn is_compute_view_mut(&self) -> bool {
+        matches!(
+            self,
+            Type::Apply { name, args }
+                if name == "ComputeViewMut"
+                    && args.len() == 1
+                    && matches!(args.first(), Some(Type::Float))
+        )
     }
 
     pub fn compute_tensor_compatible(want: &Type, got: &Type) -> bool {
@@ -1363,11 +1462,12 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
+            Type::Fn { params, ret, effect_bound, param_contract, call_metadata, return_view_provenance } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1552,6 +1652,25 @@ impl Type {
                 .map(|m| m.name())
                 .collect::<Vec<_>>()
                 .join(" | "),
+        }
+    }
+
+    /// User-facing leaf spelling of a nominal type. Generic arguments keep
+    /// their full spelling; only the nominal head loses its module qualifier.
+    pub fn leaf_name(&self) -> String {
+        match self {
+            Type::Named(name) => name
+                .rsplit_once('.')
+                .map_or_else(|| name.clone(), |(_, leaf)| leaf.to_string()),
+            Type::Apply { name, .. } => {
+                let full = self.name();
+                let leaf = name
+                    .rsplit_once('.')
+                    .map_or(name.as_str(), |(_, leaf)| leaf);
+                full.strip_prefix(name.as_str())
+                    .map_or(full.clone(), |suffix| format!("{leaf}{suffix}"))
+            }
+            _ => self.name(),
         }
     }
 
@@ -1753,6 +1872,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let labelled = Type::Fn {
@@ -1760,6 +1880,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), ParamZone::LabelOnly)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
 
@@ -1767,6 +1888,15 @@ mod tests {
         assert_eq!(bare.name(), "fn(Bool) => Int");
         assert_eq!(labelled.name(), "fn(*, force: Bool) => Int");
         assert_eq!(labelled.show(), "fn(*, force: Bool) => Int");
+        assert_eq!(Type::Named("dep.Point".to_string()).leaf_name(), "Point");
+        assert_eq!(
+            Type::Apply {
+                name: "dep.Box".to_string(),
+                args: vec![Type::Named("other.Item".to_string())],
+            }
+            .leaf_name(),
+            "Box<other.Item>"
+        );
     }
 
     #[test]
@@ -1810,6 +1940,7 @@ mod tests {
             })),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));
@@ -1891,6 +2022,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), zone)]),
+                call_metadata: None,
             return_view_provenance: None,
         };
         let positional = callable(ParamZone::PositionalOnly);
@@ -1901,6 +2033,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
+                call_metadata: None,
             return_view_provenance: None,
         };
 

@@ -1,7 +1,7 @@
 Error [E1101]: `count` is a mutable value — the new task might outlive this scope
-  --> tests/ui/data_race_taskgroup_mutable_capture.jet:4:28
+  --> tests/ui/data_race_taskgroup_mutable_capture.jet:4:14
     |
-  4 |         task :: group.task => {
-    |                            ^^^^
+  4 |         task {
+    |              ^
  Why: tasks run concurrently; changing an outer binding inside a task would make ownership unclear
  Fix: create task-local state inside the task, or send updates through a channel

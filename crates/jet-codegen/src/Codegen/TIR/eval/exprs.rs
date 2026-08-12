@@ -1,26 +1,54 @@
 //! Exhaustive TExprKind evaluation (#777).
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::{
-    ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
-    TOrFallback, TPlace, TStrPart,
+    ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TFnValueKind,
+    THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
+    TStmt,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{
-    apply_core_call, apply_impure_core_call, apply_repl_authorized_core_call, CtReport, CtValue,
-    DevSink,
+    apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
+    apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
 };
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
 use super::builtins::eval_builtin;
-use super::handles::eval_handle;
+use super::handles::eval_handle_with_type;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
     progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
-    unsupported, EvalCallable, EvalCtx, Flow,
+    unsupported, view_mut_owner_value, view_mut_window_args, EvalCallable, EvalCtx, Flow,
+    ViewMutPathStep,
 };
+
+struct EvalOptionValue(CtValue);
+
+impl crate::option_lift2::JetOptionValue for EvalOptionValue {
+    type Item = CtValue;
+
+    fn jet_option_is_present(&self) -> bool {
+        matches!(self.0, CtValue::Present(_))
+    }
+
+    fn jet_option_into_item(self) -> Self::Item {
+        match self.0 {
+            CtValue::Present(value) => *value,
+            _ => unreachable!("option payload requested from absence"),
+        }
+    }
+}
+
+mod codec_rt {
+    pub(crate) mod jet_std {
+        pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
+    }
+    include!("../../../Prelude/Core/Codec.rs");
+}
 
 fn progress_parts(
     value: &CtValue,
@@ -552,6 +580,61 @@ fn append_shared_guard_path(value: &mut CtValue, suffix: &[String]) -> bool {
     true
 }
 
+fn set_shared_guard_editable(value: &mut CtValue, editable: bool) -> bool {
+    let CtValue::Struct { type_name, fields } = value else {
+        return false;
+    };
+    if type_name != "__JetTirSharedGuard" {
+        return false;
+    }
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "editable") {
+        *value = CtValue::Bool(editable);
+    } else {
+        fields.push(("editable".to_string(), CtValue::Bool(editable)));
+    }
+    true
+}
+
+fn set_shared_guard_lease(value: &mut CtValue, lease: usize) -> bool {
+    let CtValue::Struct { type_name, fields } = value else {
+        return false;
+    };
+    if type_name != "__JetTirSharedGuard" {
+        return false;
+    }
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "lease") {
+        *value = CtValue::Int(lease as i64);
+        true
+    } else {
+        false
+    }
+}
+
+fn shared_guard_field_id(field: &str) -> i64 {
+    // Evaluator payload projections use field names. The Prelude state still
+    // records the same projection sequence as a compact identity token; the
+    // evaluator resolves the names against its CtValue payload.
+    field.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
+        hash.wrapping_mul(0x100000001b3)
+            .wrapping_add(u64::from(byte))
+    }) as i64
+}
+
+fn map_shared_guard_state(
+    mut state: std::sync::Arc<super::shared_protocol::JetSharedGuardState>,
+    path: &[String],
+    editable: bool,
+) -> Result<std::sync::Arc<super::shared_protocol::JetSharedGuardState>, &'static str> {
+    for field in path {
+        state = super::shared_protocol::jet_shared_guard_map(
+            &state,
+            shared_guard_field_id(field),
+            editable,
+        )?;
+    }
+    Ok(state)
+}
+
 fn condition_index(value: &CtValue) -> Option<usize> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
@@ -741,6 +824,470 @@ fn ambient_http_json_decode_error(span: crate::Diagnostics::Span) -> Result<CtVa
     .unwrap_or_else(|| Err(unsupported("HTTP JSON decode error adapter", span)))
 }
 
+struct EvalExprWorklistCache {
+    values: HashMap<usize, VecDeque<CtValue>>,
+    conditions: HashMap<usize, VecDeque<bool>>,
+}
+
+thread_local! {
+    static EVAL_EXPR_WORKLIST_CACHE: RefCell<Vec<EvalExprWorklistCache>> =
+        RefCell::new(Vec::new());
+}
+
+fn eval_expr_key(expr: &TExpr) -> usize {
+    expr as *const TExpr as usize
+}
+
+fn eval_expr_cache_begin() {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .push(EvalExprWorklistCache {
+                values: HashMap::new(),
+                conditions: HashMap::new(),
+            });
+    });
+}
+
+fn eval_expr_cache_end() {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache.borrow_mut().pop();
+    });
+}
+
+fn eval_expr_cache_take(expr: &TExpr) -> Option<CtValue> {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let current = cache.last_mut()?;
+        let key = eval_expr_key(expr);
+        let (value, empty) = {
+            let values = current.values.get_mut(&key)?;
+            let value = values.pop_front();
+            (value, values.is_empty())
+        };
+        if empty {
+            current.values.remove(&key);
+        }
+        value
+    })
+}
+
+fn eval_expr_cache_put(expr: &TExpr, value: CtValue) {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .last_mut()
+            .expect("expression worklist cache is not active")
+            .values
+            .entry(eval_expr_key(expr))
+            .or_default()
+            .push_back(value);
+    });
+}
+
+fn eval_if_cond_key(cond: &TIfCond) -> usize {
+    cond as *const TIfCond as usize
+}
+
+fn eval_if_cond_cache_take(cond: &TIfCond) -> Option<bool> {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let current = cache.last_mut()?;
+        let key = eval_if_cond_key(cond);
+        let (value, empty) = {
+            let values = current.conditions.get_mut(&key)?;
+            let value = values.pop_front();
+            (value, values.is_empty())
+        };
+        if empty {
+            current.conditions.remove(&key);
+        }
+        value
+    })
+}
+
+fn eval_if_cond_cache_put(cond: &TIfCond, value: bool) {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .last_mut()
+            .expect("expression worklist cache is not active")
+            .conditions
+            .entry(eval_if_cond_key(cond))
+            .or_default()
+            .push_back(value);
+    });
+}
+
+fn eval_call_children(args: &[TCallArg]) -> Vec<&TExpr> {
+    args.iter().map(|arg| &arg.value).collect()
+}
+
+fn eval_enum_children(payload: &TEnumPayload) -> Vec<&TExpr> {
+    match payload {
+        TEnumPayload::Unit => Vec::new(),
+        TEnumPayload::Positional(args) => args.iter().map(|arg| &arg.value).collect(),
+        TEnumPayload::Named(args) => args.iter().map(|(_, arg)| &arg.value).collect(),
+    }
+}
+
+fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
+    match host {
+        THostCall::Helper { args, .. } => args
+            .iter()
+            .filter_map(|arg| match arg {
+                THostArg::Expr(expr) | THostArg::Borrow(expr) => Some(expr),
+                THostArg::Lambda(_) => None,
+            })
+            .collect(),
+        THostCall::Method { recv, method, args } => {
+            let lazy_callback = matches!(method.as_str(), "read" | "edit" | "get_or_set" | "with");
+            std::iter::once(recv.as_ref())
+                .chain(args.iter().filter(move |arg| {
+                    !(lazy_callback && matches!(&arg.kind, TExprKind::Lambda(_)))
+                }))
+                .collect()
+        }
+        THostCall::CarrierFact { recv, .. }
+        | THostCall::CellGuardProject { recv, .. }
+        | THostCall::TypedText { arg: recv, .. }
+        | THostCall::OptionProbe { inner: recv, .. }
+        | THostCall::TupleIndex { base: recv, .. }
+        | THostCall::YieldSend { value: recv }
+        | THostCall::ExpectSnapshot { value: recv, .. } => vec![recv.as_ref()],
+        THostCall::FixedListIndex { base, index, .. } => vec![base.as_ref(), index.as_ref()],
+        THostCall::GcEdit {
+            edit, index_temp, ..
+        } => std::iter::once(edit.as_ref())
+            .chain(index_temp.iter().map(|(_, expr)| expr))
+            .collect(),
+        THostCall::TypedTextInterp { holes, .. } => holes.iter().collect(),
+        THostCall::EnvSet { name, value, .. } => vec![name.as_ref(), value.as_ref()],
+        THostCall::ExpiringSecretNew {
+            value,
+            duration,
+            clock,
+            ..
+        }
+        | THostCall::ExpiringValueNew {
+            value,
+            duration,
+            clock,
+        } => vec![value.as_ref(), duration.as_ref(), clock.as_ref()],
+        THostCall::GcRead { .. }
+        | THostCall::FnName(_)
+        | THostCall::StrMatchScan { .. }
+        | THostCall::BinMatchScan { .. }
+        | THostCall::SwitchSubjectField { .. }
+        | THostCall::SwitchSubjectValue
+        | THostCall::NumericBounds { .. }
+        | THostCall::CCallback { .. } => Vec::new(),
+    }
+}
+
+fn eval_closure_children(args: &[TExpr]) -> Vec<&TExpr> {
+    args.iter()
+        .filter(|arg| !matches!(&arg.kind, TExprKind::Lambda(_)))
+        .collect()
+}
+
+fn eval_core_closure_children(kind: &TCoreClosureKind) -> Vec<&TExpr> {
+    match kind {
+        TCoreClosureKind::Spawn { group, .. } => group.iter().map(|expr| expr.as_ref()).collect(),
+        TCoreClosureKind::Serve { addr, .. } => vec![addr.as_ref()],
+        TCoreClosureKind::OnInterrupt { callback } => vec![callback.as_ref()],
+        TCoreClosureKind::UiButtonOnClick { label, .. } => vec![label.as_ref()],
+        TCoreClosureKind::Guard { .. }
+        | TCoreClosureKind::OnCommit { .. }
+        | TCoreClosureKind::OnRollback { .. }
+        | TCoreClosureKind::ReactiveDerived { .. }
+        | TCoreClosureKind::ReactiveEffect { .. }
+        | TCoreClosureKind::UiReactiveRender { .. } => Vec::new(),
+    }
+}
+
+fn eval_place_children(place: &TPlace) -> Vec<&TExpr> {
+    match place {
+        TPlace::Local(_) => Vec::new(),
+        TPlace::Expr(expr) => vec![expr.as_ref()],
+    }
+}
+
+/// Every strict child is scheduled in source order. Lazy bodies and
+/// short-circuit/control-flow edges are resumed by explicit work items instead
+/// of being placed in this list.
+fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
+    match &expr.kind {
+        TExprKind::StrLit(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                TStrPart::Lit(_) => None,
+                TStrPart::Interp(expr, _) => Some(expr),
+            })
+            .collect(),
+        TExprKind::HostCall(host) => eval_host_children(host),
+        TExprKind::Call { args, .. } | TExprKind::ModuleCall { args, .. } => {
+            eval_call_children(args)
+        }
+        TExprKind::ExternCall { args, .. } => args.iter().map(|arg| &arg.value).collect(),
+        TExprKind::DistinctCtor { arg, .. }
+        | TExprKind::RangeCheckedCtor { arg, .. }
+        | TExprKind::DistinctConvert { arg, .. }
+        | TExprKind::Print(arg)
+        | TExprKind::Drop(arg)
+        | TExprKind::Close(arg)
+        | TExprKind::ResourceNew(arg)
+        | TExprKind::LayoutLit { inner: arg }
+        | TExprKind::Unary { operand: arg, .. }
+        | TExprKind::Field { recv: arg, .. }
+        | TExprKind::SharedGuardValue { guard: arg, .. }
+        | TExprKind::SharedGuardMap { guard: arg, .. }
+        | TExprKind::SharedGuardSplit { guard: arg, .. }
+        | TExprKind::PtrFromAddr { addr: arg, .. }
+        | TExprKind::Deref(arg)
+        | TExprKind::RawOf(arg)
+        | TExprKind::DistinctRaw(arg)
+        | TExprKind::Present(arg)
+        | TExprKind::Ok(arg)
+        | TExprKind::Err(arg)
+        | TExprKind::Try { inner: arg, .. }
+        | TExprKind::OptField { base: arg, .. }
+        | TExprKind::PatternMatches { subj: arg, .. }
+        | TExprKind::HostBorrowCallback { callable: arg, .. }
+        | TExprKind::NumericMethod { recv: arg, .. }
+        | TExprKind::TaskGroupAll { tasks: arg }
+        | TExprKind::TaskGroupRace { tasks: arg }
+        | TExprKind::TaskGroupAny { tasks: arg }
+        | TExprKind::SelectWait { builder: arg } => vec![arg.as_ref()],
+        TExprKind::AmbientInput { prompt } => prompt
+            .as_ref()
+            .map(|expr| vec![expr.as_ref()])
+            .unwrap_or_default(),
+        TExprKind::UnitConvert { arg, rounding, .. } => std::iter::once(arg.as_ref())
+            .chain(rounding.iter().map(|(_, expr)| expr.as_ref()))
+            .collect(),
+        TExprKind::MathBuiltin { args, .. }
+        | TExprKind::PreciseBuiltin { args, .. }
+        | TExprKind::ListLit(args)
+        | TExprKind::ColumnarListLit { elems: args, .. } => args.iter().collect(),
+        TExprKind::RequireStop { .. } => Vec::new(),
+        TExprKind::Binary { op, lhs, rhs, .. }
+            if !matches!(*op, BinOp::And | BinOp::Or) => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::Binary { .. } => Vec::new(),
+        TExprKind::OverflowOpt { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::CompareChain { operands, .. } => operands.iter().collect(),
+        TExprKind::LayoutCompare { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::IncDec { place, .. } => eval_place_children(place),
+        TExprKind::StructLit { fields, .. } => fields.iter().map(|(_, value, _)| value).collect(),
+        TExprKind::TupleLit { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
+        TExprKind::MapLit(entries) => entries.iter().flat_map(|(key, value)| [key, value]).collect(),
+        TExprKind::SharedGuardWait {
+            guard, condition, ..
+        } => vec![guard.as_ref(), condition.as_ref()],
+        TExprKind::ConditionNotify { condition, .. } => vec![condition.as_ref()],
+        TExprKind::EnumLit { payload, .. } => eval_enum_children(payload),
+        TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => arg
+            .as_ref()
+            .map(|arg| vec![&arg.0])
+            .unwrap_or_default(),
+        TExprKind::ListSpread { parts } => parts
+            .iter()
+            .map(|part| match part {
+                ListSpreadPart::Elem(expr) | ListSpreadPart::Spread(expr) => expr,
+            })
+            .collect(),
+        TExprKind::ColumnarGather { base, index, .. }
+        | TExprKind::ColumnarColumnRead { base, index, .. }
+        | TExprKind::Index { base, index, .. }
+        | TExprKind::IndexHook { base, index, .. }
+        | TExprKind::MathLaneIndex { base, index, .. }
+        | TExprKind::PoolSlot {
+            pool: base,
+            id: index,
+            ..
+        } => vec![base.as_ref(), index.as_ref()],
+        TExprKind::MathSwizzleRead { recv, .. } => vec![recv.as_ref()],
+        TExprKind::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            let mut children = vec![base.as_ref()];
+            if let Some(range) = range {
+                children.push(range.as_ref());
+            } else {
+                children.push(start.as_ref());
+                children.push(end.as_ref());
+            }
+            children
+        }
+        TExprKind::Clone(arg)
+        | TExprKind::ExplicitCopy(arg)
+        | TExprKind::Borrow { place: arg, .. }
+        | TExprKind::MaterializeView(arg) => vec![arg.as_ref()],
+        TExprKind::MethodCall { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(eval_call_children(args))
+            .collect(),
+        TExprKind::StaticCall { args, .. } => eval_call_children(args),
+        TExprKind::FnFieldCall { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(eval_call_children(args))
+            .collect(),
+        TExprKind::DecodeUnder { segment, inner } => vec![segment.as_ref(), inner.as_ref()],
+        TExprKind::BuiltinMethod { recv, op, args }
+            if !matches!(
+                op,
+                crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
+                    | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
+                    | crate::Codegen::TIR::TBuiltinOp::SplitWrite { .. }
+                    | crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite
+            ) => std::iter::once(recv.as_ref())
+                .chain(args.iter())
+                .collect(),
+        TExprKind::BuiltinMethod { args, .. } => args.iter().collect(),
+        TExprKind::CoreCall { args, .. } => args.iter().collect(),
+        TExprKind::IfExpr { .. } | TExprKind::OrFallback { .. } | TExprKind::InlineBlock(_) => {
+            Vec::new()
+        }
+        TExprKind::OptionLift2 { f, a, b } => vec![f.as_ref(), a.as_ref(), b.as_ref()],
+        TExprKind::ClosureMethod { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(eval_closure_children(args))
+            .collect(),
+        TExprKind::HandleMethod { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(args.iter())
+            .collect(),
+        TExprKind::CoreClosureCall { kind } => eval_core_closure_children(kind),
+        TExprKind::SelectRecv { builder, channel }
+        | TExprKind::SelectRead {
+            builder,
+            stream: channel,
+        } => vec![builder.as_ref(), channel.as_ref()],
+        TExprKind::SelectAfter {
+            builder,
+            millis,
+            value,
+        } => std::iter::once(builder.as_ref())
+            .chain(std::iter::once(millis.as_ref()))
+            .chain(value.iter().map(|expr| expr.as_ref()))
+            .collect(),
+        TExprKind::FnValue { kind } => match kind {
+            TFnValueKind::NamedFn { .. } => Vec::new(),
+            TFnValueKind::Call { callee, args } => std::iter::once(callee.as_ref())
+                .chain(eval_call_children(args))
+                .collect(),
+            TFnValueKind::Interrupt { value } => vec![value.as_ref()],
+        },
+        TExprKind::Lambda(_)
+        | TExprKind::Todo { .. }
+        | TExprKind::Unreachable { .. }
+        | TExprKind::Absent
+        | TExprKind::SelectStart
+        | TExprKind::ResourceTake(_)
+        | TExprKind::ConstRef(_)
+        | TExprKind::DataEntriesToMap(_)
+        | TExprKind::IntLit(_, _)
+        | TExprKind::FloatLit(_)
+        | TExprKind::BoolLit(_)
+        | TExprKind::CharLit(_)
+        | TExprKind::Local(_)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(_)
+        | TExprKind::AllocNew { .. } => Vec::new(),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct EvalIfWork<'a> {
+    original: &'a TExpr,
+    cond: &'a TIfCond,
+    then_body: &'a [TStmt],
+    then_value: &'a TExpr,
+    else_body: &'a [TStmt],
+    else_value: &'a TExpr,
+}
+
+#[derive(Clone, Copy)]
+struct EvalOrWork<'a> {
+    original: &'a TExpr,
+    value: &'a TExpr,
+    fallback: &'a TOrFallback,
+}
+
+#[derive(Clone, Copy)]
+struct EvalRequireWork<'a> {
+    original: &'a TExpr,
+    kind: &'a TRequireKind,
+    loc: &'a crate::Codegen::TIR::TPanicLoc,
+    always_stops: bool,
+}
+
+enum EvalExprWork<'a> {
+    Enter(&'a TExpr),
+    Build {
+        original: &'a TExpr,
+        leaf: &'a TExpr,
+    },
+    BinaryAfterLeft {
+        original: &'a TExpr,
+        op: BinOp,
+        left: &'a TExpr,
+        rhs: &'a TExpr,
+    },
+    BinaryAfterRight {
+        original: &'a TExpr,
+        op: BinOp,
+        left: CtValue,
+        rhs: &'a TExpr,
+    },
+    IfStart(EvalIfWork<'a>),
+    IfCondition {
+        state: EvalIfWork<'a>,
+        cond: &'a TIfCond,
+    },
+    IfAfterAndLeft {
+        state: EvalIfWork<'a>,
+        parent: &'a TIfCond,
+        left: &'a TIfCond,
+        right: &'a TIfCond,
+    },
+    IfAfterAndRight {
+        parent: &'a TIfCond,
+        right: &'a TIfCond,
+    },
+    IfAfterLeaf {
+        cond: &'a TIfCond,
+        expr: &'a TExpr,
+    },
+    IfAfterCondition(EvalIfWork<'a>),
+    OrStart(EvalOrWork<'a>),
+    OrAfterValue(EvalOrWork<'a>),
+    OrAfterFallback {
+        original: &'a TExpr,
+        fallback: &'a TOrFallback,
+    },
+    OrAfterPanic {
+        original: &'a TExpr,
+        loc: &'a crate::Codegen::TIR::TPanicLoc,
+        message: &'a TExpr,
+    },
+    RequireStart(EvalRequireWork<'a>),
+    RequireAfterCond(EvalRequireWork<'a>),
+    RequireAfterLeft {
+        state: EvalRequireWork<'a>,
+        left: &'a TExpr,
+        right: &'a TExpr,
+    },
+    RequireAfterRight {
+        state: EvalRequireWork<'a>,
+        left: CtValue,
+    },
+    RequireAfterMessage(EvalRequireWork<'a>),
+    Leave(usize),
+}
+
 fn datatree_kind(value: &CtValue) -> &'static str {
     match datatree_variant(value) {
         Some(("Null", _)) => "null",
@@ -752,6 +1299,204 @@ fn datatree_kind(value: &CtValue) -> &'static str {
         Some(("Object", _)) => "an object",
         Some(("Bytes", _)) => "Bytes",
         _ => "value",
+    }
+}
+
+fn builtin_codec_name(ty: &Type) -> Option<&'static str> {
+    let Type::Named(name) = ty else {
+        return None;
+    };
+    match name.as_str() {
+        "Date" | "LocalDate" => Some("Date"),
+        "LocalTime" => Some("LocalTime"),
+        "DateTime" => Some("DateTime"),
+        "Duration" => Some("Duration"),
+        "Decimal" => Some("Decimal"),
+        _ => None,
+    }
+}
+
+fn codec_date_from_value(value: &CtValue) -> Option<(i64, i64, i64)> {
+    Some((
+        struct_int(value, "year")?,
+        struct_int(value, "month")?,
+        struct_int(value, "day")?,
+    ))
+}
+
+fn codec_local_time_from_value(value: &CtValue) -> Option<(i64, i64, i64)> {
+    Some((
+        struct_int(value, "hour")?,
+        struct_int(value, "minute")?,
+        struct_int(value, "second")?,
+    ))
+}
+
+fn codec_datetime_from_value(value: &CtValue) -> Option<(i64, u32)> {
+    let nanos = u32::try_from(struct_int(value, "nanos").unwrap_or(0)).ok()?;
+    Some((struct_int(value, "secs")?, nanos))
+}
+
+fn builtin_codec_encode(
+    value: CtValue,
+    name: &str,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let tree = match name {
+        "Date" => {
+            let (year, month, day) = codec_date_from_value(&value)
+                .ok_or_else(|| unsupported("malformed Date value", span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_date_encode(year, month, day))),
+            )
+        }
+        "LocalTime" => {
+            let (hour, minute, second) = codec_local_time_from_value(&value)
+                .ok_or_else(|| unsupported("malformed LocalTime value", span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_local_time_encode(
+                    hour, minute, second,
+                ))),
+            )
+        }
+        "DateTime" => {
+            let (secs, nanos) = codec_datetime_from_value(&value)
+                .ok_or_else(|| unsupported("malformed DateTime value", span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_datetime_encode(secs, nanos))),
+            )
+        }
+        "Duration" => {
+            let ns = struct_int(&value, "ns")
+                .ok_or_else(|| unsupported("malformed Duration value", span))?;
+            datatree(
+                "Int",
+                Some(CtValue::Int(codec_rt::jet_codec_duration_encode(ns))),
+            )
+        }
+        "Decimal" => {
+            let decimal = jet_foundation::Numeric::CtDecimal::from_value(&value)
+                .map_err(|error| unsupported(&error, span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_decimal_encode(&decimal))),
+            )
+        }
+        _ => return Err(unsupported(&format!("Encode body for `{name}`"), span)),
+    };
+    Ok(tree)
+}
+
+fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
+    match name {
+        "Date" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_date_decode(text) {
+                    Ok((year, month, day)) => CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "LocalDate".to_string(),
+                        fields: vec![
+                            ("year".to_string(), CtValue::Int(year)),
+                            ("month".to_string(), CtValue::Int(month)),
+                            ("day".to_string(), CtValue::Int(day)),
+                        ],
+                    })),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected Date: {error}"),
+                    ))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Date, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "LocalTime" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_local_time_decode(text) {
+                    Ok((hour, minute, second)) => CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "LocalTime".to_string(),
+                        fields: vec![
+                            ("hour".to_string(), CtValue::Int(hour)),
+                            ("minute".to_string(), CtValue::Int(minute)),
+                            ("second".to_string(), CtValue::Int(second)),
+                        ],
+                    })),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected LocalTime: {error}"),
+                    ))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected LocalTime, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "DateTime" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_datetime_decode(text) {
+                    Ok((secs, nanos)) => CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "DateTime".to_string(),
+                        fields: vec![
+                            ("secs".to_string(), CtValue::Int(secs)),
+                            ("nanos".to_string(), CtValue::Int(nanos as i64)),
+                        ],
+                    })),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected DateTime: {error}"),
+                    ))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected DateTime, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "Duration" => match datatree_variant(&tree) {
+            Some(("Int", Some(CtValue::Int(ns)))) => CtValue::Present(Box::new(
+                CtValue::Struct {
+                    type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                    fields: vec![(
+                        "ns".to_string(),
+                        CtValue::Int(codec_rt::jet_codec_duration_decode(*ns)),
+                    )],
+                },
+            )),
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Duration, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "Decimal" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_decimal_decode_text(text) {
+                    Ok(decimal) => CtValue::Present(Box::new(decimal.to_value())),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected Decimal: {error}"),
+                    ))),
+                }
+            }
+            Some(("Int", Some(CtValue::Int(value)))) => {
+                match codec_rt::jet_codec_decimal_decode_int(*value) {
+                    Ok(decimal) => CtValue::Present(Box::new(decimal.to_value())),
+                    Err(error) => CtValue::failed(Box::new(decode_error("", error))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Decimal, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        _ => CtValue::failed(Box::new(decode_error(
+            "",
+            format!("unknown codec type {name}"),
+        ))),
     }
 }
 
@@ -816,13 +1561,13 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             Some(crate::Comptime::MathLayout::integer_show(*value, signed))
         }
         (CtValue::Present(value), Type::Option(inner)) => {
-            let rendered = show_typed_value(value, inner, debug).unwrap_or_else(|| {
+            let rendered = show_typed_value(value, inner, debug).or_else(|| {
                 if debug {
-                    value.debug_rust()
+                    Some(value.debug_rust())
                 } else {
-                    value.jet_show()
+                    crate::Comptime::render_typed_hole(value)
                 }
-            });
+            })?;
             Some(if debug {
                 jet_foundation::StructuralDebug::jet_debug_optional(Some(rendered))
             } else {
@@ -837,41 +1582,281 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             let parts = values
                 .iter()
                 .map(|value| {
-                    show_typed_value(value, inner, debug).unwrap_or_else(|| {
+                    show_typed_value(value, inner, debug).or_else(|| {
                         if debug {
-                            value.debug_rust()
+                            Some(value.debug_rust())
                         } else {
-                            value.jet_show()
+                            crate::Comptime::render_typed_hole(value)
                         }
                     })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Option<Vec<_>>>()?;
             Some(format!("[{}]", parts.join(", ")))
         }
+        _ if !debug => crate::Comptime::display_core_pure_value(value),
         _ => None,
     }
 }
 
 impl<'a> EvalCtx<'a> {
-    // #1799: these calls read or mutate runtime-owned clock/global state. A
-    // build-time fold uses a throwaway evaluator, so materializing any of them
-    // would freeze state that the running program cannot resync. Runtime and
-    // REPL evaluation are the live execution paths and remain allowed. Keep
-    // argument-only time constructors/conversions and the constant
-    // `core.perf.default_fidelity` out of this list. The current parity leaks
-    // are `date.today`'s SystemTime read and `time.instant`'s placeholder
-    // monotonic sample. E3403 remains the determinism gate, while this
-    // predicate only backs off D-VERDICT-1308-1.
+    pub(super) fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
+        fn visit(ctx: &EvalCtx<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            if ty.is_compute_tensor_family() {
+                return true;
+            }
+            match ty {
+                Type::Tagged { inner, .. }
+                | Type::List(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Option(inner) => visit(ctx, inner, seen),
+                Type::Map { value, .. } => visit(ctx, value, seen),
+                Type::Result { ok, err } => visit(ctx, ok, seen) || visit(ctx, err, seen),
+                Type::Tuple(fields) => fields.iter().any(|(_, field)| visit(ctx, field, seen)),
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let result = ctx.struct_field_types.get(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, field)| visit(ctx, field, seen))
+                    });
+                    seen.remove(name);
+                    result
+                }
+                _ => false,
+            }
+        }
+
+        visit(self, ty, &mut HashSet::new())
+    }
+
+    fn clone_structural_untyped(&self, value: CtValue) -> Result<CtValue, Diagnostic> {
+        match value {
+            CtValue::Struct {
+                type_name,
+                fields,
+            } if type_name == "Tensor" || type_name == "JetTensor" => {
+                crate::Comptime::ComputeLite::tensor_clone_value(
+                    &CtValue::Struct { type_name, fields },
+                    self.span(),
+                )
+            }
+            CtValue::Struct { type_name, fields } => Ok(CtValue::Struct {
+                type_name,
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((name, self.clone_structural_untyped(value)?))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            }),
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => Ok(CtValue::Enum {
+                type_name,
+                variant,
+                args: args
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((name, self.clone_structural_untyped(value)?))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            }),
+            CtValue::List(values) => Ok(CtValue::List(
+                values
+                    .into_iter()
+                    .map(|value| self.clone_structural_untyped(value))
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            )),
+            CtValue::Map(values) => Ok(CtValue::Map(
+                values
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, self.clone_structural_untyped(value)?)))
+                    .collect::<Result<_, Diagnostic>>()?,
+            )),
+            CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                self.clone_structural_untyped(*value)?,
+            ))),
+            CtValue::Failed(CtReport::Told(value)) => Ok(CtValue::Failed(CtReport::Told(
+                Box::new(self.clone_structural_untyped(*value)?),
+            ))),
+            other => Ok(other),
+        }
+    }
+
+    fn clone_structural_fields(
+        &self,
+        type_name: String,
+        fields: Vec<(String, CtValue)>,
+        field_types: Option<&[(String, Type)]>,
+    ) -> Result<CtValue, Diagnostic> {
+        let fields = fields
+            .into_iter()
+            .map(|(name, value)| {
+                let field_type = field_types
+                    .and_then(|types| types.iter().find(|(field, _)| field == &name))
+                    .map(|(_, ty)| ty);
+                let cloned = match field_type {
+                    Some(ty) => self.clone_structural_value(value, ty),
+                    None => self.clone_structural_untyped(value),
+                }?;
+                Ok((name, cloned))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        Ok(CtValue::Struct { type_name, fields })
+    }
+
+    pub(super) fn clone_structural_value(
+        &self,
+        value: CtValue,
+        ty: &Type,
+    ) -> Result<CtValue, Diagnostic> {
+        if ty.is_compute_tensor_family() {
+            return crate::Comptime::ComputeLite::tensor_clone_value(&value, self.span());
+        }
+        match ty {
+            Type::Tagged { inner, .. } => self.clone_structural_value(value, inner),
+            Type::Shared(_) => Ok(value),
+            Type::Apply { name, .. }
+                if name == crate::Syntax::TYPE_SHARED_WEAK
+                    || name == crate::Syntax::TYPE_SHARED_GUARD => Ok(value),
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => match value {
+                CtValue::List(values) => Ok(CtValue::List(
+                    values
+                        .into_iter()
+                        .map(|value| self.clone_structural_value(value, inner))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                )),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Map { value: inner, .. } => match value {
+                CtValue::Map(values) => Ok(CtValue::Map(
+                    values
+                        .into_iter()
+                        .map(|(key, value)| {
+                            Ok((key, self.clone_structural_value(value, inner)?))
+                        })
+                        .collect::<Result<_, Diagnostic>>()?,
+                )),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Option(inner) => match value {
+                CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                    self.clone_structural_value(*value, inner)?,
+                ))),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Result { ok, err } => match value {
+                CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                    self.clone_structural_value(*value, ok)?,
+                ))),
+                CtValue::Failed(CtReport::Told(value)) => Ok(CtValue::Failed(CtReport::Told(
+                    Box::new(self.clone_structural_value(*value, err)?),
+                ))),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Tuple(types) => match value {
+                CtValue::Struct { type_name, fields } => {
+                    let fields = fields
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (name, value))| {
+                            let ty = types
+                                .iter()
+                                .find(|(field, _)| field == &name)
+                                .map(|(_, ty)| ty.as_ref())
+                                .or_else(|| types.get(index).map(|(_, ty)| ty.as_ref()));
+                            let cloned = match ty {
+                                Some(ty) => self.clone_structural_value(value, ty)?,
+                                None => self.clone_structural_untyped(value)?,
+                            };
+                            Ok((name, cloned))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?;
+                    Ok(CtValue::Struct { type_name, fields })
+                }
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Named(_) | Type::Apply { .. } => match value {
+                CtValue::Struct { type_name, fields } => {
+                    let field_types = self.struct_field_types.get(&type_name).map(Vec::as_slice);
+                    self.clone_structural_fields(type_name, fields, field_types)
+                }
+                other => self.clone_structural_untyped(other),
+            },
+            _ => self.clone_structural_untyped(value),
+        }
+    }
+
+    // #1799: a build-time fold uses a throwaway evaluator, so materializing an
+    // ambient clock/PRNG result would freeze state that the running program
+    // cannot resync. Runtime and REPL evaluation are the live execution paths
+    // and remain allowed. The nondeterministic call set is shared with sema;
+    // perf fidelity is a separate runtime-global signal.
     fn should_decline_ambient_fold(&self, module: &str, method: &str) -> bool {
         !self.runtime_execution
             && !self.repl_mode
-            && matches!(
-                (module, method),
-                ("core.time", "now" | "now_utc" | "today" | "instant" | "start")
-                    | ("core.time.date", "today")
-                    | ("core.time.datetime", "now")
-                    | ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
-            )
+            && (is_nondeterministic_core(module, method)
+                || matches!(
+                    (module, method),
+                    ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
+                ))
+    }
+
+    fn comptime_core_fold_diagnostic(
+        &self,
+        module: &str,
+        method: &str,
+        span: Span,
+    ) -> Option<Diagnostic> {
+        if self.runtime_execution || self.repl_mode {
+            return None;
+        }
+        // These two calls have dedicated ownership/authorization diagnostics
+        // below; do not let the generic effect law replace them.
+        if (module == "core.net" && method == "fetch") || module == "core.vault" {
+            return None;
+        }
+        if is_nondeterministic_core(module, method) {
+            let api = format!(
+                "{}.{}",
+                module.rsplit('.').next().unwrap_or(module),
+                method
+            );
+            return Some(Diagnostic::e3403(&api, Some(span)));
+        }
+        if self.should_decline_ambient_fold(module, method) {
+            return Some(unsupported(
+                &format!("`{module}.{method}()` at compile time"),
+                span,
+            ));
+        }
+        if core_effect(module, method).is_some() && self.impure_depth == 0 {
+            return Some(Diagnostic::error(
+                "E3410",
+                format!(
+                    "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                ),
+                "effectful Core APIs are not allowed in pure comptime evaluation".to_string(),
+                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime".to_string(),
+                Some(span),
+            ));
+        }
+        None
+    }
+
+    fn runtime_time_now(
+        &self,
+        module: &str,
+        method: &str,
+        argv: &[CtValue],
+    ) -> Option<CtValue> {
+        (self.runtime_execution
+            && module == "core.time"
+            && method == "now"
+            && argv.is_empty())
+            .then(|| CtValue::Int(crate::scheduler::jet_std_time_now()))
     }
 
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
@@ -953,6 +1938,9 @@ impl<'a> EvalCtx<'a> {
             Type::Tagged { inner, .. } => self.eval_serde_encode_value(value, inner),
             Type::Named(_) | Type::Apply { .. } => {
                 if let Type::Named(name) = ty {
+                    if let Some(codec_name) = builtin_codec_name(ty) {
+                        return builtin_codec_encode(value, codec_name, self.span());
+                    }
                     if let Some(base) = self.distinct_bases.get(name).cloned() {
                         return self.eval_serde_encode_value(value, &base);
                     }
@@ -1530,6 +2518,10 @@ impl<'a> EvalCtx<'a> {
                         }
                         return Ok(decoded);
                     }
+                    if let Some(codec_name) = builtin_codec_name(ty) {
+                        *status = Some(migration_status_fresh());
+                        return Ok(builtin_codec_decode(tree, codec_name));
+                    }
                 }
                 let func = self
                     .serde_codec(ty, "decode")
@@ -1593,7 +2585,7 @@ impl<'a> EvalCtx<'a> {
         edit_paths_disjoint: bool,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let handle = self.eval_expr(recv, scope)?;
+        let handle = self.eval_expr_child(recv, scope)?;
         if editable {
             let index = local_cell_index(&handle, "__JetTirCellEditGuard")
                 .ok_or_else(|| unsupported("Cell edit guard projection", self.span()))?;
@@ -1699,7 +2691,7 @@ impl<'a> EvalCtx<'a> {
             return match method {
                 "get" => Ok(cell.get()),
                 "set" => {
-                    let value = self.eval_expr(
+                    let value = self.eval_expr_child(
                         args.first()
                             .ok_or_else(|| unsupported("Cell.set argument", self.span()))?,
                         scope,
@@ -1708,7 +2700,7 @@ impl<'a> EvalCtx<'a> {
                     Ok(CtValue::Unit)
                 }
                 "replace" => {
-                    let value = self.eval_expr(
+                    let value = self.eval_expr_child(
                         args.first()
                             .ok_or_else(|| unsupported("Cell.replace argument", self.span()))?,
                         scope,
@@ -1793,7 +2785,7 @@ impl<'a> EvalCtx<'a> {
         match method {
             "get" => Ok(guard.get()),
             "set" => {
-                let value = self.eval_expr(
+                let value = self.eval_expr_child(
                     args.first().ok_or_else(|| {
                         unsupported("Cell guard set argument", self.span())
                     })?,
@@ -1830,31 +2822,496 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    fn eval_view_mut_place(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+        match &expr.kind {
+            TExprKind::Local(local) => Ok(Some((local.name.clone(), Vec::new()))),
+            TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+                self.eval_view_mut_place(place, scope)
+            }
+            TExprKind::Field { recv, field, .. } => {
+                let Some((base, mut path)) = self.eval_view_mut_place(recv, scope)? else {
+                    return Ok(None);
+                };
+                path.push(ViewMutPathStep::Field(field.clone()));
+                Ok(Some((base, path)))
+            }
+            TExprKind::Index {
+                base,
+                index,
+                is_map: false,
+                ..
+            } => {
+                let Some((root, mut path)) = self.eval_view_mut_place(base, scope)? else {
+                    return Ok(None);
+                };
+                let value = self.eval_expr(index, scope)?;
+                path.push(ViewMutPathStep::Index(as_int(&value, self.span())?));
+                Ok(Some((root, path)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn eval_expr(
         &mut self,
         expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        self.enter_source_nesting()?;
-        let mut expr = expr;
-        let mut transparent_depth = 0;
-        while let TExprKind::Clone(inner) = &expr.kind {
-            if let Err(diagnostic) = self.enter_source_nesting() {
-                for _ in 0..=transparent_depth {
-                    self.leave_source_nesting();
+        if let Some(value) = eval_expr_cache_take(expr) {
+            return Ok(value);
+        }
+        self.eval_expr_worklist(expr, scope)
+    }
+
+    pub(super) fn eval_expr_child(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        if let Some(value) = eval_expr_cache_take(expr) {
+            return Ok(value);
+        }
+        // A statement body is itself a control-flow continuation. It can
+        // contain an expression that was not part of the enclosing expression
+        // node's strict-child list, so give that child its own worklist rather
+        // than reopening eval_expr/eval_expr_inner recursively.
+        self.eval_expr_worklist(expr, scope)
+    }
+
+    fn eval_expr_worklist(
+        &mut self,
+        root: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        eval_expr_cache_begin();
+        let mut entered = 0usize;
+        let mut work = vec![EvalExprWork::Enter(root)];
+        let result = (|| -> Result<(), Diagnostic> {
+            while let Some(task) = work.pop() {
+                match task {
+                    EvalExprWork::Enter(expr) => {
+                        self.enter_source_nesting()?;
+                        entered += 1;
+
+                        let mut leaf = expr;
+                        let mut transparent_depth = 0;
+                        while let TExprKind::Clone(inner) = &leaf.kind {
+                            if leaf.ty.is_compute_tensor_family()
+                                || self.clone_contains_compute_tensor(&leaf.ty)
+                            {
+                                break;
+                            }
+                            self.enter_source_nesting()?;
+                            entered += 1;
+                            transparent_depth += 1;
+                            leaf = inner;
+                        }
+
+                        let special = matches!(
+                            &leaf.kind,
+                            TExprKind::CoreCall { .. } | TExprKind::ListLit(_)
+                        );
+                        let short_binary = matches!(
+                            &leaf.kind,
+                            TExprKind::Binary {
+                                op: BinOp::And | BinOp::Or,
+                                ..
+                            }
+                        );
+                        let control = matches!(
+                            &leaf.kind,
+                            TExprKind::IfExpr { .. }
+                                | TExprKind::OrFallback { .. }
+                                | TExprKind::RequireStop { .. }
+                        );
+                        if !special || short_binary || control {
+                            // `eval_expr_inner` charges before it descends. Do
+                            // that at Enter so queued children retain the same
+                            // fuel and diagnostic order as the old call path.
+                            self.burn()?;
+                        }
+
+                        work.push(EvalExprWork::Leave(transparent_depth + 1));
+                        match &leaf.kind {
+                            TExprKind::Binary { op, lhs, rhs, .. }
+                                if matches!(*op, BinOp::And | BinOp::Or) => {
+                                    work.push(EvalExprWork::BinaryAfterLeft {
+                                        original: expr,
+                                        op: *op,
+                                        left: lhs.as_ref(),
+                                        rhs: rhs.as_ref(),
+                                    });
+                                    work.push(EvalExprWork::Enter(lhs));
+                                }
+                            TExprKind::IfExpr {
+                                cond,
+                                then_body,
+                                then_value,
+                                else_body,
+                                else_value,
+                            } => {
+                                work.push(EvalExprWork::IfStart(EvalIfWork {
+                                    original: expr,
+                                    cond: cond.as_ref(),
+                                    then_body,
+                                    then_value,
+                                    else_body,
+                                    else_value,
+                                }));
+                            }
+                            TExprKind::OrFallback { value, fallback } => {
+                                work.push(EvalExprWork::OrStart(EvalOrWork {
+                                    original: expr,
+                                    value,
+                                    fallback,
+                                }));
+                            }
+                            TExprKind::RequireStop {
+                                kind,
+                                loc,
+                                always_stops,
+                            } => {
+                                work.push(EvalExprWork::RequireStart(EvalRequireWork {
+                                    original: expr,
+                                    kind,
+                                    loc,
+                                    always_stops: *always_stops,
+                                }));
+                            }
+                            _ => {
+                                work.push(EvalExprWork::Build {
+                                    original: expr,
+                                    leaf,
+                                });
+                                for child in eval_expr_children(leaf).into_iter().rev() {
+                                    work.push(EvalExprWork::Enter(child));
+                                }
+                            }
+                        }
+                    }
+                    EvalExprWork::Build { original, leaf } => {
+                        let value = match self.eval_expr_special(leaf, scope) {
+                            Some(result) => result,
+                            None => self.eval_expr_inner(leaf, scope, false),
+                        }?;
+                        eval_expr_cache_put(original, value);
+                    }
+                    EvalExprWork::BinaryAfterLeft {
+                        original,
+                        op,
+                        left,
+                        rhs,
+                    } => {
+                        let left_value = eval_expr_cache_take(left).ok_or_else(|| {
+                            unreachable!("binary left value missing from evaluator worklist")
+                        })?;
+                        let left_bool = as_bool(&left_value, self.span())?;
+                        if (matches!(op, BinOp::And) && !left_bool)
+                            || (matches!(op, BinOp::Or) && left_bool)
+                        {
+                            eval_expr_cache_put(original, CtValue::Bool(left_bool));
+                        } else {
+                            work.push(EvalExprWork::BinaryAfterRight {
+                                original,
+                                op,
+                                left: left_value,
+                                rhs,
+                            });
+                            work.push(EvalExprWork::Enter(rhs));
+                        }
+                    }
+                    EvalExprWork::BinaryAfterRight {
+                        original,
+                        op,
+                        left,
+                        rhs,
+                    } => {
+                        let right = eval_expr_cache_take(rhs).ok_or_else(|| {
+                            unreachable!("binary right value missing from evaluator worklist")
+                        })?;
+                        let value = eval_binop(op, left, right, self.span())?;
+                        eval_expr_cache_put(original, value);
+                    }
+                    EvalExprWork::IfStart(state) => {
+                        work.push(EvalExprWork::IfAfterCondition(state));
+                        work.push(EvalExprWork::IfCondition {
+                            state,
+                            cond: state.cond,
+                        });
+                    }
+                    EvalExprWork::IfCondition { state, cond } => match cond {
+                        TIfCond::And { left, right } => {
+                            work.push(EvalExprWork::IfAfterAndLeft {
+                                state,
+                                parent: cond,
+                                left,
+                                right,
+                            });
+                            work.push(EvalExprWork::IfCondition {
+                                state,
+                                cond: left,
+                            });
+                        }
+                        TIfCond::Plain(expr)
+                        | TIfCond::IsNone { subj: expr }
+                        | TIfCond::IfLet { subj: expr, .. }
+                        | TIfCond::Matches { subj: expr, .. } => {
+                            work.push(EvalExprWork::IfAfterLeaf {
+                                cond,
+                                expr,
+                            });
+                            work.push(EvalExprWork::Enter(expr));
+                        }
+                    },
+                    EvalExprWork::IfAfterAndLeft {
+                        state,
+                        parent,
+                        left,
+                        right,
+                    } => {
+                        let value = eval_if_cond_cache_take(left).ok_or_else(|| {
+                            unreachable!("if condition left value missing from evaluator worklist")
+                        })?;
+                        if value {
+                            work.push(EvalExprWork::IfAfterAndRight {
+                                parent,
+                                right,
+                            });
+                            work.push(EvalExprWork::IfCondition {
+                                state,
+                                cond: right,
+                            });
+                        } else {
+                            eval_if_cond_cache_put(parent, false);
+                        }
+                    }
+                    EvalExprWork::IfAfterAndRight {
+                        parent, right, ..
+                    } => {
+                        let value = eval_if_cond_cache_take(right).ok_or_else(|| {
+                            unreachable!("if condition right value missing from evaluator worklist")
+                        })?;
+                        eval_if_cond_cache_put(parent, value);
+                    }
+                    EvalExprWork::IfAfterLeaf { cond, expr, .. } => {
+                        let value = eval_expr_cache_take(expr).ok_or_else(|| {
+                            unreachable!("if condition value missing from evaluator worklist")
+                        })?;
+                        let result = self.eval_if_cond_leaf(cond, value, scope)?;
+                        eval_if_cond_cache_put(cond, result);
+                    }
+                    EvalExprWork::IfAfterCondition(state) => {
+                        let selected = eval_if_cond_cache_take(state.cond).ok_or_else(|| {
+                            unreachable!("if condition result missing from evaluator worklist")
+                        })?;
+                        let (body, value) = if selected {
+                            (state.then_body, state.then_value)
+                        } else {
+                            (state.else_body, state.else_value)
+                        };
+                        let branch_scope_names = scope.keys().cloned().collect();
+                        match self.exec_stmts_value_with_names(
+                            body,
+                            value,
+                            scope,
+                            &branch_scope_names,
+                        )? {
+                            Flow::Return(value) => eval_expr_cache_put(state.original, value),
+                            other => {
+                                self.pending_flow = Some(other);
+                                return Err(unsupported("pending loop control", self.span()));
+                            }
+                        }
+                    }
+                    EvalExprWork::OrStart(state) => {
+                        work.push(EvalExprWork::OrAfterValue(state));
+                        work.push(EvalExprWork::Enter(state.value));
+                    }
+                    EvalExprWork::OrAfterValue(state) => {
+                        let value = eval_expr_cache_take(state.value).ok_or_else(|| {
+                            unreachable!("fallback value missing from evaluator worklist")
+                        })?;
+                        let miss = matches!(
+                            &value,
+                            CtValue::Failed(CtReport::Clean(_))
+                                | CtValue::Failed(CtReport::Told(_))
+                        );
+                        if !miss {
+                            eval_expr_cache_put(
+                                state.original,
+                                match value {
+                                    CtValue::Present(inner) => *inner,
+                                    other => other,
+                                },
+                            );
+                            continue;
+                        }
+                        match state.fallback {
+                            TOrFallback::Value(expr) | TOrFallback::Return(Some(expr)) => {
+                                work.push(EvalExprWork::OrAfterFallback {
+                                    original: state.original,
+                                    fallback: state.fallback,
+                                });
+                                work.push(EvalExprWork::Enter(expr));
+                            }
+                            TOrFallback::Return(None) => {
+                                self.pending_return = Some(CtValue::Unit);
+                                eval_expr_cache_put(state.original, CtValue::Unit);
+                            }
+                            TOrFallback::Panic { msg, loc } => {
+                                work.push(EvalExprWork::OrAfterPanic {
+                                    original: state.original,
+                                    loc,
+                                    message: msg,
+                                });
+                                work.push(EvalExprWork::Enter(msg));
+                            }
+                            _ => return Err(unsupported("or-fallback form", self.span())),
+                        }
+                    }
+                    EvalExprWork::OrAfterFallback { original, fallback } => {
+                        let expr = match fallback {
+                            TOrFallback::Value(expr) | TOrFallback::Return(Some(expr)) => expr,
+                            _ => unreachable!("invalid fallback continuation"),
+                        };
+                        let value = eval_expr_cache_take(expr).ok_or_else(|| {
+                            unreachable!("fallback branch value missing from evaluator worklist")
+                        })?;
+                        if matches!(fallback, TOrFallback::Return(Some(_))) {
+                            self.pending_return = Some(value);
+                            eval_expr_cache_put(original, CtValue::Unit);
+                        } else {
+                            eval_expr_cache_put(original, value);
+                        }
+                    }
+                    EvalExprWork::OrAfterPanic {
+                        original,
+                        loc,
+                        message,
+                    } => {
+                        let message = eval_expr_cache_take(message).ok_or_else(|| {
+                            unreachable!("fallback panic message missing from evaluator worklist")
+                        })?;
+                        self.eval_or_fallback_panic(message, loc)?;
+                        eval_expr_cache_put(original, CtValue::Unit);
+                    }
+                    EvalExprWork::RequireStart(state) => {
+                        if state.always_stops {
+                            let message = match state.kind {
+                                TRequireKind::Require { msg: Some(msg), .. }
+                                | TRequireKind::Panic { msg } => Some(msg.as_ref()),
+                                TRequireKind::Require { msg: None, .. }
+                                | TRequireKind::RequireEq { .. } => None,
+                            };
+                            if let Some(message) = message {
+                                work.push(EvalExprWork::RequireAfterMessage(state));
+                                work.push(EvalExprWork::Enter(message));
+                            } else {
+                                let fallback = match state.kind {
+                                    TRequireKind::Require { .. } => "requirement failed",
+                                    TRequireKind::RequireEq { .. } => "values are not equal",
+                                    TRequireKind::Panic { .. } => unreachable!(
+                                        "panic always-stop must carry its message"
+                                    ),
+                                };
+                                self.eval_require_failure(state.loc, fallback)?;
+                                eval_expr_cache_put(state.original, CtValue::Unit);
+                            }
+                            continue;
+                        }
+                        match state.kind {
+                            TRequireKind::Require { cond, .. } => {
+                                work.push(EvalExprWork::RequireAfterCond(state));
+                                work.push(EvalExprWork::Enter(cond));
+                            }
+                            TRequireKind::RequireEq { left, right } => {
+                                work.push(EvalExprWork::RequireAfterLeft {
+                                    state,
+                                    left,
+                                    right,
+                                });
+                                work.push(EvalExprWork::Enter(left));
+                            }
+                            TRequireKind::Panic { msg } => {
+                                work.push(EvalExprWork::RequireAfterMessage(state));
+                                work.push(EvalExprWork::Enter(msg));
+                            }
+                        }
+                    }
+                    EvalExprWork::RequireAfterCond(state) => {
+                        let TRequireKind::Require { cond, msg } = state.kind else {
+                            unreachable!("require condition continuation has non-require kind")
+                        };
+                        let value = eval_expr_cache_take(cond).ok_or_else(|| {
+                            unreachable!("require condition missing from evaluator worklist")
+                        })?;
+                        if as_bool(&value, self.span())? {
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        } else if let Some(msg) = msg {
+                            work.push(EvalExprWork::RequireAfterMessage(state));
+                            work.push(EvalExprWork::Enter(msg));
+                        } else {
+                            self.eval_require_failure(state.loc, "requirement failed")?;
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        }
+                    }
+                    EvalExprWork::RequireAfterLeft { state, left, right } => {
+                        let left = eval_expr_cache_take(left).ok_or_else(|| {
+                            unreachable!("require_eq left missing from evaluator worklist")
+                        })?;
+                        work.push(EvalExprWork::RequireAfterRight { state, left });
+                        work.push(EvalExprWork::Enter(right));
+                    }
+                    EvalExprWork::RequireAfterRight { state, left } => {
+                        let TRequireKind::RequireEq { right, .. } = state.kind else {
+                            unreachable!("require_eq right continuation has non-equality kind")
+                        };
+                        let right = eval_expr_cache_take(right).ok_or_else(|| {
+                            unreachable!("require_eq right missing from evaluator worklist")
+                        })?;
+                        if left == right {
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        } else {
+                            self.eval_require_failure(state.loc, "values are not equal")?;
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        }
+                    }
+                    EvalExprWork::RequireAfterMessage(state) => {
+                        let message = match state.kind {
+                            TRequireKind::Require { msg: Some(msg), .. }
+                            | TRequireKind::Panic { msg } => msg,
+                            _ => unreachable!("require message continuation has no message"),
+                        };
+                        let message = eval_expr_cache_take(message).ok_or_else(|| {
+                            unreachable!("require message missing from evaluator worklist")
+                        })?;
+                        self.eval_require_failure(state.loc, &message.jet_show())?;
+                        eval_expr_cache_put(state.original, CtValue::Unit);
+                    }
+                    EvalExprWork::Leave(count) => {
+                        for _ in 0..count {
+                            self.leave_source_nesting();
+                            entered -= 1;
+                        }
+}
                 }
-                return Err(diagnostic);
             }
-            transparent_depth += 1;
-            expr = inner;
-        }
-        let result = match self.eval_expr_special(expr, scope) {
-            Some(result) => result,
-            None => self.eval_expr_inner(expr, scope),
-        };
-        for _ in 0..=transparent_depth {
+            Ok(())
+        })();
+        while entered > 0 {
             self.leave_source_nesting();
+            entered -= 1;
         }
+        let result = result.and_then(|()| {
+            eval_expr_cache_take(root).ok_or_else(|| {
+                unreachable!("TIR expression worklist lost its root value")
+            })
+        });
+        eval_expr_cache_end();
         result
     }
 
@@ -1879,11 +3336,128 @@ impl<'a> EvalCtx<'a> {
                 scope,
             )),
             TExprKind::ListLit(elems) => Some(self.eval_list_lit_expr(expr, elems, scope)),
-            TExprKind::OrFallback { value, fallback } => {
-                Some(self.eval_or_fallback_expr(value, fallback, scope))
-            }
             _ => None,
         }
+    }
+
+    pub(super) fn eval_if_cond_leaf(
+        &mut self,
+        cond: &TIfCond,
+        value: CtValue,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<bool, Diagnostic> {
+        match cond {
+            TIfCond::Plain(_) => as_bool(&value, self.span()),
+            TIfCond::IsNone { .. } => Ok(matches!(
+                value,
+                CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
+            )),
+            TIfCond::IfLet { pattern, .. } => {
+                if let crate::Codegen::TIR::TPatternPosition::DataEntries { temp } = &pattern.position
+                {
+                    if let CtValue::Enum { args, .. } = &value {
+                        if let Some((_, payload)) = args.first() {
+                            scope.insert(temp.clone(), payload.clone());
+                        }
+                    }
+                }
+                match &pattern.pattern {
+                    crate::AST::Pattern::Ok { binding, .. }
+                    | crate::AST::Pattern::Present { binding, .. } => match value {
+                        CtValue::Present(inner) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Err { binding, .. } => match value {
+                        CtValue::Failed(CtReport::Told(inner)) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Absent(_) => Ok(matches!(
+                        value,
+                        CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
+                    )),
+                    _ => super::stmts::bind_match_pattern(&pattern.pattern, &value, scope),
+                }
+            }
+            TIfCond::Matches { pattern, .. } => {
+                super::stmts::bind_match_pattern(&pattern.pattern, &value, scope)
+            }
+            TIfCond::And { .. } => unreachable!("and condition reached leaf evaluator"),
+        }
+    }
+
+    fn eval_or_fallback_panic(
+        &mut self,
+        message: CtValue,
+        loc: &crate::Codegen::TIR::TPanicLoc,
+    ) -> Result<(), Diagnostic> {
+        let message = message.jet_show();
+        if self.task_cancel.is_some() {
+            return Err(super::task_child_panic(message, self.span()));
+        }
+        let file = loc.file.trim_matches('"');
+        let fn_name = loc.fn_name.trim_matches('"');
+        let src_line = loc.src_line.trim_matches('"');
+        let line_s = loc.line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        let col_offset = loc.col.saturating_sub(1) as usize;
+        let caret = "^".repeat(loc.caret.max(1) as usize);
+        let rendered = format!(
+            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+            loc.line,
+            " ".repeat(col_offset)
+        );
+        if let Some(sink) = self.sink.as_ref() {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&rendered);
+            sink.exit_code = Some(70);
+            return Err(Diagnostic::soft_exit(
+                "70".to_string(),
+                "or-fallback panic stop".to_string(),
+                Some(self.span()),
+            ));
+        }
+        Err(unsupported("or-fallback panic", self.span()))
+    }
+
+    fn eval_require_failure(
+        &mut self,
+        loc: &crate::Codegen::TIR::TPanicLoc,
+        message: &str,
+    ) -> Result<(), Diagnostic> {
+        if self.task_cancel.is_some() {
+            return Err(super::task_child_panic(message.to_string(), self.span()));
+        }
+        let file = loc.file.trim_matches('"');
+        let fn_name = loc.fn_name.trim_matches('"');
+        let src_line = loc.src_line.trim_matches('"');
+        let line_s = loc.line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        let col_offset = loc.col.saturating_sub(1) as usize;
+        let caret = "^".repeat(loc.caret.max(1) as usize);
+        let rendered = format!(
+            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+            loc.line,
+            " ".repeat(col_offset)
+        );
+        if let Some(sink) = self.sink.as_ref() {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&rendered);
+            sink.exit_code = Some(70);
+            return Err(Diagnostic::soft_exit(
+                "70".to_string(),
+                "require/panic stop".to_string(),
+                Some(self.span()),
+            ));
+        }
+        Err(unsupported("require/panic stop", self.span()))
     }
 
     fn eval_list_lit_expr(
@@ -1897,76 +3471,14 @@ impl<'a> EvalCtx<'a> {
             // Early typed-list lowering wraps `T.{ value }` in one ListLit. Preserve
             // the value when it already has T.
             if expr.ty == inner.ty {
-                return self.eval_expr(inner, scope);
+                return self.eval_expr_child(inner, scope);
             }
         }
         let mut out = Vec::with_capacity(elems.len());
         for e in elems {
-            out.push(self.eval_expr(e, scope)?);
+            out.push(self.eval_expr_child(e, scope)?);
         }
         Ok(CtValue::List(out))
-    }
-
-    fn eval_or_fallback_expr(
-        &mut self,
-        value: &'a TExpr,
-        fallback: &'a TOrFallback,
-        scope: &mut HashMap<String, CtValue>,
-    ) -> Result<CtValue, Diagnostic> {
-        self.burn()?;
-        let v = self.eval_expr(value, scope)?;
-        // D-FAIL-CARRIER1=A: one carrier — the report side is the miss,
-        // whether the report is a clean absence or a failure.
-        let miss = matches!(
-            v,
-            CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_))
-        );
-        if !miss {
-            return match v {
-                CtValue::Present(inner) => Ok(*inner),
-                other => Ok(other),
-            };
-        }
-        match fallback {
-            TOrFallback::Value(fb) => self.eval_expr(fb, scope),
-            TOrFallback::Return(Some(fb)) => {
-                let ret = self.eval_expr(fb, scope)?;
-                self.pending_return = Some(ret);
-                Ok(CtValue::Unit)
-            }
-            TOrFallback::Return(None) => {
-                self.pending_return = Some(CtValue::Unit);
-                Ok(CtValue::Unit)
-            }
-            TOrFallback::Panic { msg, loc } => {
-                let message = self.eval_expr(msg, scope)?.jet_show();
-                let file = loc.file.trim_matches('"');
-                let fn_name = loc.fn_name.trim_matches('"');
-                let src_line = loc.src_line.trim_matches('"');
-                let line_s = loc.line.to_string();
-                let margin = line_s.len();
-                let pad = " ".repeat(margin);
-                let col_offset = loc.col.saturating_sub(1) as usize;
-                let caret = "^".repeat(loc.caret.max(1) as usize);
-                let rendered = format!(
-                    "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-                    loc.line,
-                    " ".repeat(col_offset)
-                );
-                if let Some(sink) = self.sink.as_ref() {
-                    let mut sink = sink.lock().expect("evaluator sink poisoned");
-                    sink.stderr.push_str(&rendered);
-                    sink.exit_code = Some(70);
-                    return Err(Diagnostic::soft_exit(
-                        "70".to_string(),
-                        "or-fallback panic stop".to_string(),
-                        Some(self.span()),
-                    ));
-                }
-                Err(unsupported("or-fallback panic", self.span()))
-            }
-            _ => Err(unsupported("or-fallback form", self.span())),
-        }
     }
 
     fn eval_core_call_expr(
@@ -1993,6 +3505,9 @@ impl<'a> EvalCtx<'a> {
                     source_span,
                 ));
             }
+        }
+        if let Some(diagnostic) = self.comptime_core_fold_diagnostic(module, method, source_span) {
+            return Err(diagnostic);
         }
         if module == "core.data" {
             return self.eval_core_data_call(method, args, &expr.ty, scope);
@@ -2022,7 +3537,7 @@ impl<'a> EvalCtx<'a> {
             }
             let capacity = args
                 .first()
-                .map(|arg| self.eval_expr(arg, scope))
+                .map(|arg| self.eval_expr_child(arg, scope))
                 .transpose()?
                 .map(|value| as_int(&value, self.span()))
                 .transpose()?;
@@ -2038,8 +3553,8 @@ impl<'a> EvalCtx<'a> {
             ));
         }
         if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
-            let pointer = self.eval_expr(&args[0], scope)?;
-            let value = self.eval_expr(&args[1], scope)?;
+            let pointer = self.eval_expr_child(&args[0], scope)?;
+            let value = self.eval_expr_child(&args[1], scope)?;
             let CtValue::Struct { type_name, fields } = pointer else {
                 return Err(unsupported("raw pointer carrier", self.span()));
             };
@@ -2059,7 +3574,7 @@ impl<'a> EvalCtx<'a> {
             return Ok(CtValue::Unit);
         }
         if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
-            let pointer = self.eval_expr(&args[0], scope)?;
+            let pointer = self.eval_expr_child(&args[0], scope)?;
             let CtValue::Struct { type_name, fields } = pointer else {
                 return Err(unsupported("raw pointer carrier", self.span()));
             };
@@ -2078,7 +3593,7 @@ impl<'a> EvalCtx<'a> {
         }
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
-            argv.push(self.eval_expr(a, scope)?);
+            argv.push(self.eval_expr_child(a, scope)?);
         }
         let progress_known_total = if module == "core.io" && method == "progress" {
             if let Some((items, known_total)) = argv.first().and_then(progress_iter_parts) {
@@ -2105,8 +3620,16 @@ impl<'a> EvalCtx<'a> {
             let value = argv
                 .pop()
                 .ok_or_else(|| unsupported("reflect value", source_span))?;
+            let path = match &args[0].ty {
+                Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
+                    .reflect_paths
+                    .get(type_name)
+                    .cloned()
+                    .unwrap_or_else(|| type_name.clone()),
+                ty => ty.name(),
+            };
             let field_names = match &args[0].ty {
-                Type::Named(type_name) => self
+                Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
                     .struct_fields
                     .get(type_name)
                     .or_else(|| {
@@ -2126,7 +3649,10 @@ impl<'a> EvalCtx<'a> {
                     }),
                 _ => None,
             };
-            let mut fields = vec![("value".to_string(), value)];
+            let mut fields = vec![
+                ("value".to_string(), value),
+                ("path".to_string(), CtValue::Str(path)),
+            ];
             if let Some(field_names) = field_names {
                 fields.push(("field_names".to_string(), field_names));
             }
@@ -2255,34 +3781,44 @@ impl<'a> EvalCtx<'a> {
                 source_span,
             ));
         }
-        if !self.runtime_execution
-            && !self.repl_mode
-            && module == "core.random"
-            && method != "rng"
-        {
-            return Err(unsupported(
-                &format!("`{module}.{method}()` at compile time"),
-                source_span,
-            ));
-        }
-        if self.should_decline_ambient_fold(module, method) {
-            return Err(unsupported(
-                &format!("`{module}.{method}()` at compile time"),
-                source_span,
-            ));
+        if let Some(value) = self.runtime_time_now(module, method, &argv) {
+            return Ok(value);
         }
         let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
+        let is_shuffle = module == "core.random" && method == "shuffle";
         if !is_tier2 {
-            return apply_core_call(module, method, argv, source_span, self.repl_mode).map(|value| {
-                mark_unknown_progress_total(value, module, method, args, progress_known_total)
-            });
+            let value = apply_core_call_with_type(
+                module,
+                method,
+                argv,
+                source_span,
+                self.repl_mode,
+                Some(&expr.ty),
+            )?;
+            if is_shuffle {
+                if let Some(place) = args.first() {
+                    let items = match &value {
+                        CtValue::List(items) => items.clone(),
+                        _ => return Err(unsupported("random.shuffle needs a list", source_span)),
+                    };
+                    self.write_back_place(place, CtValue::List(items), scope)?;
+                    return Ok(CtValue::Unit);
+                }
+            }
+            return Ok(mark_unknown_progress_total(
+                value,
+                module,
+                method,
+                args,
+                progress_known_total,
+            ));
         }
-        if self.repl_mode {
+        let value = if self.repl_mode {
             let mut sink = self
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            apply_repl_authorized_core_call(
+            apply_repl_authorized_core_call_with_type(
                 module,
                 method,
                 argv,
@@ -2291,14 +3827,14 @@ impl<'a> EvalCtx<'a> {
                 sink.as_deref_mut(),
                 &self.repl_grants,
                 reborrow_repl_authorizer(&mut self.repl_authorizer),
+                Some(&expr.ty),
             )
-            .map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
         } else if self.impure_depth > 0 && self.allow_impure {
             let mut sink = self
                 .sink
                 .as_ref()
                 .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            let result = apply_impure_core_call(
+            apply_impure_core_call_with_type(
                 module,
                 method,
                 argv,
@@ -2308,10 +3844,10 @@ impl<'a> EvalCtx<'a> {
                 false,
                 None,
                 None,
-            );
-            result.map(|value| mark_unknown_progress_total(value, module, method, args, progress_known_total))
+                Some(&expr.ty),
+            )
         } else if self.impure_depth == 0 {
-            Err(Diagnostic::error(
+            return Err(Diagnostic::error(
                 "E3410",
                 format!(
                     "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
@@ -2321,9 +3857,9 @@ impl<'a> EvalCtx<'a> {
                 "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime"
                     .to_string(),
                 Some(source_span),
-            ))
+            ));
         } else {
-            Err(Diagnostic::error(
+            return Err(Diagnostic::error(
                 "E3411",
                 format!(
                     "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
@@ -2331,16 +3867,30 @@ impl<'a> EvalCtx<'a> {
                 "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
                 "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
                 Some(source_span),
-            ))
+            ));
+        }?;
+        if is_shuffle {
+            if let Some(place) = args.first() {
+                let items = match &value {
+                    CtValue::List(items) => items.clone(),
+                    _ => return Err(unsupported("random.shuffle needs a list", source_span)),
+                };
+                self.write_back_place(place, CtValue::List(items), scope)?;
+                return Ok(CtValue::Unit);
+            }
         }
+        Ok(mark_unknown_progress_total(value, module, method, args, progress_known_total))
     }
 
     fn eval_expr_inner(
         &mut self,
         expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
+        charge: bool,
     ) -> Result<CtValue, Diagnostic> {
-        self.burn()?;
+        if charge {
+            self.burn()?;
+        }
         match &expr.kind {
             TExprKind::IntLit(n, _) => Ok(CtValue::Int(*n)),
             TExprKind::FloatLit(v) => {
@@ -2350,16 +3900,27 @@ impl<'a> EvalCtx<'a> {
             TExprKind::BoolLit(b) => Ok(CtValue::Bool(*b)),
             TExprKind::CharLit(c) => Ok(CtValue::Char(*c)),
             TExprKind::SharedGuardValue { guard, .. } => {
-                let guard = self.eval_expr(guard, scope)?;
-                let (index, _, _, path) = shared_guard_parts(&guard)
+                let guard = self.eval_expr_child(guard, scope)?;
+                let (index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard handle", self.span()))?;
-                let value = self.runtime
-                    .lock()
-                    .expect("evaluator runtime poisoned")
-                    .shared_values
-                    .get(index)
-                    .cloned()
-                    .ok_or_else(|| unsupported("SharedGuard value", self.span()))?;
+                let (shared, held) = {
+                    let runtime = self.runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned");
+                    let held = runtime
+                        .shared_guards
+                        .get(lease_index)
+                        .is_some_and(|state| state.held());
+                    let shared = runtime.shared_values.get(index).cloned();
+                    (shared, held)
+                };
+                if !held {
+                    return Err(unsupported(
+                        super::shared_protocol::JET_SHARED_GUARD_INVALID,
+                        self.span(),
+                    ));
+                }
+                let value = shared.ok_or_else(|| unsupported("SharedGuard value", self.span()))?;
                 let value = value
                     .value
                     .lock()
@@ -2368,23 +3929,86 @@ impl<'a> EvalCtx<'a> {
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard projection", self.span()))
             }
-            TExprKind::SharedGuardMap { guard, path, .. } => {
-                let mut guard = self.eval_expr(guard, scope)?;
-                append_shared_guard_path(&mut guard, path)
-                    .then_some(guard)
-                    .ok_or_else(|| unsupported("SharedGuard map", self.span()))
+            TExprKind::SharedGuardMap {
+                guard,
+                path,
+                editable,
+            } => {
+                let mut guard = self.eval_expr_child(guard, scope)?;
+                let (_, lease_index, _, _) = shared_guard_parts(&guard)
+                    .ok_or_else(|| unsupported("SharedGuard map", self.span()))?;
+                let state = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .shared_guards
+                    .get(lease_index)
+                    .cloned()
+                    .ok_or_else(|| unsupported("SharedGuard map", self.span()))?;
+                let mapped = map_shared_guard_state(state, path, *editable)
+                    .map_err(|message| unsupported(message, self.span()))?;
+                let mapped_lease = {
+                    let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                    let mapped_lease = runtime.shared_guards.len();
+                    runtime.shared_guards.push(mapped);
+                    mapped_lease
+                };
+                self.shared_guards.retain(|index| *index != lease_index);
+                self.shared_guards.push(mapped_lease);
+                if append_shared_guard_path(&mut guard, path)
+                    && set_shared_guard_editable(&mut guard, *editable)
+                    && set_shared_guard_lease(&mut guard, mapped_lease)
+                {
+                    Ok(guard)
+                } else {
+                    Err(unsupported("SharedGuard map", self.span()))
+                }
             }
             TExprKind::SharedGuardSplit {
                 guard,
                 first,
                 second,
-                ..
+                editable,
             } => {
-                let guard = self.eval_expr(guard, scope)?;
+                let guard = self.eval_expr_child(guard, scope)?;
+                let (_, lease_index, _, _) = shared_guard_parts(&guard)
+                    .ok_or_else(|| unsupported("SharedGuard split", self.span()))?;
+                let state = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .shared_guards
+                    .get(lease_index)
+                    .cloned()
+                    .ok_or_else(|| unsupported("SharedGuard split", self.span()))?;
+                let second_state = super::shared_protocol::jet_shared_guard_clone(
+                    &state,
+                    *editable,
+                )
+                .map_err(|message| unsupported(message, self.span()))?;
+                let first_state = map_shared_guard_state(state, first, *editable)
+                    .map_err(|message| unsupported(message, self.span()))?;
+                let second_state = map_shared_guard_state(second_state, second, *editable)
+                    .map_err(|message| unsupported(message, self.span()))?;
+                let (first_lease, second_lease) = {
+                    let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                    let first_lease = runtime.shared_guards.len();
+                    runtime.shared_guards.push(first_state);
+                    let second_lease = runtime.shared_guards.len();
+                    runtime.shared_guards.push(second_state);
+                    (first_lease, second_lease)
+                };
+                self.shared_guards.retain(|index| *index != lease_index);
+                self.shared_guards.push(first_lease);
+                self.shared_guards.push(second_lease);
                 let mut first_guard = guard.clone();
                 let mut second_guard = guard;
                 if !append_shared_guard_path(&mut first_guard, first)
                     || !append_shared_guard_path(&mut second_guard, second)
+                    || !set_shared_guard_editable(&mut first_guard, *editable)
+                    || !set_shared_guard_editable(&mut second_guard, *editable)
+                    || !set_shared_guard_lease(&mut first_guard, first_lease)
+                    || !set_shared_guard_lease(&mut second_guard, second_lease)
                 {
                     return Err(unsupported("SharedGuard split", self.span()));
                 }
@@ -2401,15 +4025,10 @@ impl<'a> EvalCtx<'a> {
                 condition,
                 predicate,
             } => {
-                let guard = self.eval_expr(guard, scope)?;
-                let (shared_index, lease_index, editable, path) = shared_guard_parts(&guard)
+                let guard = self.eval_expr_child(guard, scope)?;
+                let (shared_index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard wait", self.span()))?;
-                if !editable {
-                    return Ok(CtValue::failed(Box::new(CtValue::Str(
-                        "a condition wait needs an edit guard".to_string(),
-                    ))));
-                }
-                let condition = self.eval_expr(condition, scope)?;
+                let condition = self.eval_expr_child(condition, scope)?;
                 let condition_index = condition_index(&condition)
                     .ok_or_else(|| unsupported("Condition wait", self.span()))?;
                 let state = self
@@ -2420,7 +4039,7 @@ impl<'a> EvalCtx<'a> {
                     .get(condition_index)
                     .cloned()
                     .ok_or_else(|| unsupported("Condition wait", self.span()))?;
-                let lease = self
+                let guard_state = self
                     .runtime
                     .lock()
                     .expect("evaluator runtime poisoned")
@@ -2428,6 +4047,8 @@ impl<'a> EvalCtx<'a> {
                     .get(lease_index)
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard wait lease", self.span()))?;
+                super::shared_protocol::jet_shared_guard_require_edit(&guard_state)
+                    .map_err(|message| unsupported(message, self.span()))?;
                 let shared = self
                     .runtime
                     .lock()
@@ -2437,10 +4058,7 @@ impl<'a> EvalCtx<'a> {
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard wait value", self.span()))?;
                 let cancel = self.task_cancel.clone();
-                match super::shared_protocol::jet_shared_condition_wait(
-                    &lease,
-                    &state,
-                    || {
+                loop {
                     let root = shared
                         .value
                         .lock()
@@ -2449,30 +4067,43 @@ impl<'a> EvalCtx<'a> {
                         .cloned()
                         .ok_or_else(|| unsupported("SharedGuard wait value", self.span()))?;
                     drop(root);
-                        match self.eval_tlambda(predicate, vec![value], scope)? {
-                            CtValue::Bool(ready) => Ok(ready),
-                            _ => Err(unsupported(
+                    match self.eval_tlambda(predicate, vec![value], scope)? {
+                        CtValue::Bool(true) => {
+                            return Ok(CtValue::Present(Box::new(CtValue::Unit)));
+                        }
+                        CtValue::Bool(false) => {}
+                        _ => {
+                            return Err(unsupported(
                                 "SharedGuard wait predicate result",
                                 self.span(),
-                            )),
+                            ));
                         }
-                    },
-                    || {
-                        std::sync::Arc::new(super::EvalConditionWaiter::new(cancel.clone()))
-                    },
-                ) {
-                    Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                    Err(super::shared_protocol::JetConditionWaitError::Predicate(error)) => {
-                        Err(error)
                     }
-                    Err(super::shared_protocol::JetConditionWaitError::Cancelled) => {
-                        self.task_wait_cancel_check()?;
-                        Err(unsupported("SharedGuard condition wait", self.span()))
+                    let waiter = std::sync::Arc::new(super::EvalConditionWaiter::new(
+                        cancel.clone(),
+                        self.context_deadline,
+                    ));
+                    match super::shared_protocol::jet_shared_guard_wait_once(
+                        Some(guard_state.as_ref()),
+                        Some(&state),
+                        waiter,
+                    ) {
+                        Ok(()) => {}
+                        Err(super::shared_protocol::JetSharedGuardWaitError::Cancelled) => {
+                            self.task_wait_cancel_check()?;
+                            return Err(unsupported(
+                                super::shared_protocol::JET_SHARED_GUARD_WAIT_CANCELLED,
+                                self.span(),
+                            ));
+                        }
+                        Err(error) => {
+                            return Err(unsupported(error.message(), self.span()));
+                        }
                     }
                 }
             }
             TExprKind::ConditionNotify { condition, all } => {
-                let condition = self.eval_expr(condition, scope)?;
+                let condition = self.eval_expr_child(condition, scope)?;
                 let index = condition_index(&condition)
                     .ok_or_else(|| unsupported("Condition notify", self.span()))?;
                 let state = self
@@ -2484,9 +4115,9 @@ impl<'a> EvalCtx<'a> {
                     .cloned()
                     .ok_or_else(|| unsupported("Condition notify", self.span()))?;
                 if *all {
-                    state.notify_all();
+                    super::shared_protocol::jet_shared_condition_notify_all(&state);
                 } else {
-                    state.notify_one();
+                    super::shared_protocol::jet_shared_condition_notify_one(&state);
                 }
                 Ok(CtValue::Unit)
             }
@@ -2496,7 +4127,7 @@ impl<'a> EvalCtx<'a> {
                     match part {
                         TStrPart::Lit(s) => out.push_str(s),
                         TStrPart::Interp(e, fmt) => {
-                            let v = self.eval_expr(e, scope)?;
+                            let v = self.eval_expr_child(e, scope)?;
                             let text = match fmt {
                                 crate::AST::StrFormat::Debug => {
                                     let manual = match &e.ty {
@@ -2637,10 +4268,10 @@ impl<'a> EvalCtx<'a> {
                     return value;
                 }
                 let value = match tail {
-                    crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr(value, scope),
+                    crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr_child(value, scope),
                     crate::Codegen::TIR::TStmt::Return(value) => {
                         let value = match value {
-                            Some(value) => self.eval_expr(value, scope)?,
+                            Some(value) => self.eval_expr_child(value, scope)?,
                             None => CtValue::Unit,
                         };
                         self.pending_return = Some(value);
@@ -2673,7 +4304,7 @@ impl<'a> EvalCtx<'a> {
                 .cloned()
                 .ok_or_else(|| unsupported(&format!("const `{name}`"), self.span())),
             TExprKind::Print(inner) => {
-                let v = self.eval_expr(inner, scope)?;
+                let v = self.eval_expr_child(inner, scope)?;
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
@@ -2713,11 +4344,16 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Unit)
             }
             TExprKind::Drop(inner) => {
-                let _ = self.eval_expr(inner, scope)?;
+                let value = self.eval_expr_child(inner, scope)?;
+                if inner.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_drop_value(&value, self.span())?;
+                } else if inner.ty.is_compute_view_mut() {
+                    crate::Comptime::ComputeLite::tensor_window_drop_value(&value, self.span())?;
+                }
                 Ok(CtValue::Unit)
             }
             TExprKind::Close(inner) => {
-                let value = self.eval_expr(inner, scope)?;
+                let value = self.eval_expr_child(inner, scope)?;
                 let type_name = match &inner.ty {
                     Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
                     _ => return Ok(CtValue::Unit),
@@ -2731,8 +4367,8 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Unit)
             }
             TExprKind::Binary { op, lhs, rhs, .. } => {
-                let l = self.eval_expr(lhs, scope)?;
-                let r = self.eval_expr(rhs, scope)?;
+                let l = self.eval_expr_child(lhs, scope)?;
+                let r = self.eval_expr_child(rhs, scope)?;
                 if matches!(op, BinOp::Eq | BinOp::Ne)
                     && matches!(
                         &lhs.ty,
@@ -2779,7 +4415,7 @@ impl<'a> EvalCtx<'a> {
                 eval_binop(*op, l, r, self.span())
             }
             TExprKind::Unary { op, operand } => {
-                let v = self.eval_expr(operand, scope)?;
+                let v = self.eval_expr_child(operand, scope)?;
                 match (*op, v) {
                     (UnOp::Neg, CtValue::Int(n))
                         if matches!(&operand.ty, Type::IntN { signed: true, .. }) =>
@@ -2821,7 +4457,7 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CompareChain { operands, ops, .. } => {
                 let mut vals = Vec::with_capacity(operands.len());
                 for o in operands {
-                    vals.push(self.eval_expr(o, scope)?);
+                    vals.push(self.eval_expr_child(o, scope)?);
                 }
                 for (i, op) in ops.iter().enumerate() {
                     let part = if let Type::IntN { signed, bits } = &operands[i].ty {
@@ -2848,105 +4484,83 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Bool(true))
             }
             TExprKind::Call { name, args, .. } => self.eval_call(name, args, scope),
-            TExprKind::IfExpr {
-                cond,
-                then_body,
-                then_value,
-                else_body,
-                else_value,
-            } => {
-                if self.eval_if_cond(cond, scope)? {
-                    match self.exec_stmts(then_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
-                        other => {
-                            self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
-                        }
-                    }
-                    self.eval_expr(then_value, scope)
-                } else {
-                    match self.exec_stmts(else_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
-                        other => {
-                            self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
-                        }
-                    }
-                    self.eval_expr(else_value, scope)
-                }
+            TExprKind::IfExpr { .. } => {
+                unreachable!("if expression bypassed its evaluator continuation")
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
-                let is_tensor = matches!(&recv.ty, Type::Named(name) if name == "Tensor")
-                    || matches!(&recv.ty, Type::Apply { name, .. } if name == "Tensor");
+                let is_tensor = recv.ty.is_compute_tensor_family();
                 if matches!(
                     op,
                     crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
                         | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
                 ) {
-                    let base_name = match &recv.kind {
-                        TExprKind::Local(local) => local.name.clone(),
-                        TExprKind::Borrow { place, .. } => match &place.kind {
-                            TExprKind::Local(local) => local.name.clone(),
-                            _ => {
-                                return Err(unsupported("view-mut base", self.span()));
-                            }
-                        },
-                        _ => return Err(unsupported("view-mut base", self.span())),
+                    let Some((base_name, path)) = self.eval_view_mut_place(recv, scope)?
+                    else {
+                        return Err(unsupported("view-mut base", self.span()));
                     };
-                    let base_value = scope
+                    let root = scope
                         .get(&base_name)
-                        .cloned()
                         .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?;
+                    let base_value = super::project_list_place(root, &path, self.span())?.clone();
+                    let mut fields = vec![
+                        ("base".into(), CtValue::Str(base_name)),
+                    ];
+                    if !path.is_empty() {
+                        fields.push(("path".into(), super::encode_view_mut_path(&path)));
+                    }
                     if is_tensor {
                         let evaluated_args = args
                             .iter()
-                            .map(|arg| self.eval_expr(arg, scope))
+                            .map(|arg| self.eval_expr_child(arg, scope))
                             .collect::<Result<Vec<_>, _>>()?;
                         let (start, end_exclusive) =
-                            crate::Comptime::ComputeLite::tensor_view_window(
+                            crate::Comptime::ComputeLite::tensor_view_mut_window(
                                 &base_value,
                                 &evaluated_args,
                                 self.span(),
                             )?;
+                        let start = i64::try_from(start)
+                            .map_err(|_| unsupported("view-mut start is too large", self.span()))?;
+                        let end = i64::try_from(end_exclusive)
+                            .map_err(|_| unsupported("view-mut end is too large", self.span()))?
+                            .checked_sub(1)
+                            .unwrap_or(-1);
                         return Ok(CtValue::Struct {
                             type_name: "__JetViewMut".into(),
-                            fields: vec![
-                                ("base".into(), CtValue::Str(base_name)),
-                                ("start".into(), CtValue::Int(start as i64)),
-                                ("end".into(), CtValue::Int(end_exclusive as i64 - 1)),
-                            ],
+                            fields: {
+                                fields.push(("start".into(), CtValue::Int(start)));
+                                fields.push(("end".into(), CtValue::Int(end)));
+                                fields.push(("window".into(), CtValue::List(evaluated_args)));
+                                fields.push((
+                                    "__jet_tensor_window_handle".into(),
+                                    crate::Comptime::ComputeLite::tensor_window_handle(
+                                        &base_value,
+                                        self.span(),
+                                    )?,
+                                ));
+                                fields
+                            },
                         });
                     }
                     let CtValue::List(xs) = base_value else {
                         return Err(unsupported("view-mut list base", self.span()));
                     };
                     let (start, end_exclusive) = if args.len() == 1 {
-                        let range = self.eval_expr(&args[0], scope)?;
+                        let range = self.eval_expr_child(&args[0], scope)?;
                         super::range_window(&range, xs.len(), self.span())?
                     } else {
-                        let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
-                        let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
-                        if start < 0 || end < start || end as usize >= xs.len() {
-                            return Err(super::view_bounds_diagnostic(
-                                xs.len(),
-                                start,
-                                end,
-                                false,
-                                self.span(),
-                            ));
-                        }
-                        (start, end + 1)
+                        let start = as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
+                        let end = as_int(&self.eval_expr_child(&args[1], scope)?, self.span())?;
+                        super::checked_view_window(start, end, false, xs.len(), self.span())?
                     };
-                    let end = end_exclusive - 1;
+                    let end = i64::try_from(end_exclusive)
+                        .map_err(|_| unsupported("view-mut end is too large", self.span()))?
+                        - 1;
+                    fields.push(("start".into(), CtValue::Int(start)));
+                    fields.push(("end".into(), CtValue::Int(end)));
                     return Ok(CtValue::Struct {
                         type_name: "__JetViewMut".into(),
-                        fields: vec![
-                            ("base".into(), CtValue::Str(base_name)),
-                            ("start".into(), CtValue::Int(start)),
-                            ("end".into(), CtValue::Int(end)),
-                        ],
+                        fields,
                     });
                 }
                 if matches!(
@@ -2980,7 +4594,7 @@ impl<'a> EvalCtx<'a> {
                     match op {
                         crate::Codegen::TIR::TBuiltinOp::SplitWrite { tuple_struct } => {
                             let mid =
-                                as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                                as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
                             let ((left_start, left_end), (right_start, right_end)) =
                                 match super::disjoint_semantics::split(xs.len(), mid) {
                                     Ok(bounds) => bounds,
@@ -3003,7 +4617,7 @@ impl<'a> EvalCtx<'a> {
                             })));
                         }
                         crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite => {
-                            let CtValue::List(targets) = self.eval_expr(&args[0], scope)? else {
+                            let CtValue::List(targets) = self.eval_expr_child(&args[0], scope)? else {
                                 return Err(unsupported("disjoint-view targets", self.span()));
                             };
                             let mut indexes = Vec::with_capacity(targets.len());
@@ -3031,7 +4645,7 @@ impl<'a> EvalCtx<'a> {
                         _ => unreachable!(),
                     }
                 }
-                let mut r = self.eval_expr(recv, scope)?;
+                let mut r = self.eval_expr_child(recv, scope)?;
                 let progress = progress_parts(&r);
                 let iter = progress_iter_parts(&r);
                 if let Some((items, _, _, _, _, _, _, _)) = &progress {
@@ -3070,7 +4684,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 let progress_arg = argv.first().cloned();
                 if let Some((source_items, description, format, started_at, pulls, tail, total, known_total)) = &progress {
@@ -3124,10 +4738,10 @@ impl<'a> EvalCtx<'a> {
                 Ok(result)
             }
             TExprKind::HandleMethod { recv, op, args } => {
-                let mut r = self.eval_expr(recv, scope)?;
+                let mut r = self.eval_expr_child(recv, scope)?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 if matches!(op, crate::Codegen::TIR::THandleOp::ReflectValueDisplay) {
                     let CtValue::Struct { type_name, fields } = &r else {
@@ -3188,14 +4802,25 @@ impl<'a> EvalCtx<'a> {
                         }
                         _ => return Err(unsupported("clock method", self.span())),
                     };
+                    let now = *clock;
+                    drop(runtime);
+                    if let CtValue::Struct { fields, .. } = &mut r {
+                        if let Some((_, value)) =
+                            fields.iter_mut().find(|(name, _)| name == "now")
+                        {
+                            *value = CtValue::Int(now);
+                        } else {
+                            fields.push(("now".to_string(), CtValue::Int(now)));
+                        }
+                    }
+                    self.write_back_place(recv, r, scope)?;
                     return Ok(result);
                 }
                 if let crate::Codegen::TIR::THandleOp::EventMethod { method } = op {
                     return self.eval_event_method(method, &mut r, &argv);
                 }
                 match op {
-                    crate::Codegen::TIR::THandleOp::TaskJoin
-                    | crate::Codegen::TIR::THandleOp::TaskScopeJoin => {
+                    crate::Codegen::TIR::THandleOp::TaskJoin => {
                         return self.take_task(&r);
                     }
                     crate::Codegen::TIR::THandleOp::TaskDetach => {
@@ -3265,10 +4890,8 @@ impl<'a> EvalCtx<'a> {
                     };
                     return Ok(result);
                 }
-                // D-VERDICT-1323-1 / D-COROUTINE1=A: the task control plane
-                // reaches the evaluator's task table, which the shared handle
-                // dispatch has no access to. Each `*_all` twin is exactly its
-                // single-handle counterpart applied in order.
+                // D-COROUTINE1=A: task control reaches the evaluator's task
+                // table, which the shared handle dispatch cannot access.
                 {
                     use crate::Codegen::TIR::THandleOp as Op;
                     match op {
@@ -3296,69 +4919,28 @@ impl<'a> EvalCtx<'a> {
                         }
                         _ => {}
                     }
-                    let each = |this: &mut Self, value: &CtValue| -> Result<(), Diagnostic> {
-                        match op {
-                            Op::TaskCancel | Op::TaskCancelAll => this.cancel_task_value(value),
-                            Op::TaskPause | Op::TaskPauseAll => {
-                                this.set_task_paused_value(value, true)
-                            }
-                            Op::TaskResume | Op::TaskResumeAll => {
-                                this.set_task_paused_value(value, false)
-                            }
-                            Op::TaskDetach | Op::TaskDetachAll => this.detach_task_value(value),
-                            _ => unreachable!("guarded by the outer match"),
-                        }
-                    };
                     match op {
                         Op::TaskCancel | Op::TaskPause | Op::TaskResume | Op::TaskDetach => {
                             let receiver = r.clone();
-                            each(self, &receiver)?;
-                            return Ok(CtValue::Unit);
-                        }
-                        Op::TaskCancelAll
-                        | Op::TaskPauseAll
-                        | Op::TaskResumeAll
-                        | Op::TaskDetachAll => {
-                            let CtValue::List(tasks) = &r else {
-                                return Err(unsupported("task group receiver", self.span()));
-                            };
-                            for task in tasks.clone() {
-                                each(self, &task)?;
+                            match op {
+                                Op::TaskCancel => self.cancel_task_value(&receiver)?,
+                                Op::TaskPause => self.set_task_paused_value(&receiver, true)?,
+                                Op::TaskResume => self.set_task_paused_value(&receiver, false)?,
+                                Op::TaskDetach => self.detach_task_value(&receiver)?,
+                                _ => unreachable!(),
                             }
                             return Ok(CtValue::Unit);
-                        }
-                        Op::TaskTrace => return self.trace_task_value(&r.clone()),
-                        Op::TaskException => {
-                            let index = Self::task_index(&r)
-                                .ok_or_else(|| unsupported("task receiver", self.span()))?;
-                            let runtime =
-                                self.runtime.lock().expect("evaluator runtime poisoned");
-                            let cancel = match runtime.tasks.get(index) {
-                                Some(Some(task)) => {
-                                    task.cancel.load(std::sync::atomic::Ordering::Acquire)
-                                }
-                                _ => false,
-                            };
-                            return Ok(CtValue::Str(if cancel {
-                                "cancelled".to_string()
-                            } else {
-                                String::new()
-                            }));
-                        }
-                        Op::TaskTraceAll => {
-                            let CtValue::List(tasks) = &r else {
-                                return Err(unsupported("task group receiver", self.span()));
-                            };
-                            let mut traces = Vec::new();
-                            for task in tasks.clone() {
-                                traces.push(self.trace_task_value(&task)?);
-                            }
-                            return Ok(CtValue::List(traces));
                         }
                         _ => {}
                     }
                 }
-                let mut result = eval_handle(op, &mut r, &mut argv, self.span())?;
+                let mut result = eval_handle_with_type(
+                    op,
+                    &mut r,
+                    &mut argv,
+                    self.span(),
+                    Some(&expr.ty),
+                )?;
                 let http_json = matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
@@ -3440,7 +5022,7 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, val, _) in fields {
-                    out.push((name.clone(), self.eval_expr(val, scope)?));
+                    out.push((name.clone(), self.eval_expr_child(val, scope)?));
                 }
                 let type_name = as_trait
                     .as_ref()
@@ -3462,7 +5044,7 @@ impl<'a> EvalCtx<'a> {
                         Type::Apply { name, args }
                             if name == "VjpRun" && args.len() == 1
                     );
-                let r = self.eval_expr(recv, scope)?;
+                let r = self.eval_expr_child(recv, scope)?;
                 if vjp_grads {
                     let CtValue::Struct { fields, .. } = &r else {
                         return Err(unsupported("compute.vjp result", self.span()));
@@ -3631,17 +5213,28 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::ListLit(elems) => self.eval_list_lit_expr(expr, elems, scope),
-            TExprKind::Clone(inner) => self.eval_expr(inner, scope),
+            TExprKind::Clone(inner) => {
+                let value = self.eval_expr_child(inner, scope)?;
+                self.clone_structural_value(value, &expr.ty)
+            }
+            TExprKind::ExplicitCopy(inner) => {
+                let value = self.eval_expr_child(inner, scope)?;
+                if expr.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_copy_value(&value, self.span())
+                } else {
+                    Ok(value)
+                }
+            }
             TExprKind::Present(inner) => {
-                Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?)))
+                Ok(CtValue::Present(Box::new(self.eval_expr_child(inner, scope)?)))
             }
             TExprKind::Absent => Ok(CtValue::absent(expr.ty.clone())),
-            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?))),
-            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(self.eval_expr(inner, scope)?))),
+            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(self.eval_expr_child(inner, scope)?))),
+            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(self.eval_expr_child(inner, scope)?))),
             TExprKind::TupleLit { fields, .. } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, e) in fields {
-                    out.push((name.clone(), self.eval_expr(e, scope)?));
+                    out.push((name.clone(), self.eval_expr_child(e, scope)?));
                 }
                 Ok(CtValue::Struct {
                     type_name: "tuple".into(),
@@ -3651,9 +5244,9 @@ impl<'a> EvalCtx<'a> {
             TExprKind::MapLit(entries) => {
                 let mut m = std::collections::BTreeMap::new();
                 for (k, v) in entries {
-                    let key = crate::AST::CtKey::from_value(self.eval_expr(k, scope)?)
+                    let key = crate::AST::CtKey::from_value(self.eval_expr_child(k, scope)?)
                         .ok_or_else(|| unsupported("map key", self.span()))?;
-                    m.insert(key, self.eval_expr(v, scope)?);
+                    m.insert(key, self.eval_expr_child(v, scope)?);
                 }
                 Ok(CtValue::Map(m))
             }
@@ -3663,11 +5256,11 @@ impl<'a> EvalCtx<'a> {
                 is_map,
                 ..
             } => {
-                let b = match self.eval_expr(base, scope)? {
+                let b = match self.eval_expr_child(base, scope)? {
                     CtValue::Present(inner) => *inner,
                     other => other,
                 };
-                let i = self.eval_expr(index, scope)?;
+                let i = self.eval_expr_child(index, scope)?;
                 if *is_map || matches!(&b, CtValue::Map(_)) {
                     let key = crate::AST::CtKey::from_value(i)
                         .ok_or_else(|| unsupported("map index key", self.span()))?;
@@ -3687,6 +5280,17 @@ impl<'a> EvalCtx<'a> {
                     } = &b
                     {
                         if type_name == "__JetViewMut" {
+                            let owner = view_mut_owner_value(fields, scope, self.span())?;
+                            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                                let window = view_mut_window_args(fields)
+                                    .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                                return crate::Comptime::ComputeLite::tensor_view_get_value(
+                                    &owner,
+                                    window,
+                                    idx,
+                                    self.span(),
+                                );
+                            }
                             let window =
                                 materialize_view_mut_window(fields, scope, self.span())?;
                             let CtValue::List(xs) = window else {
@@ -3748,9 +5352,9 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Slice {
                 base, start, end, range, ..
             } => {
-                let b = self.eval_expr(base, scope)?;
+                let b = self.eval_expr_child(base, scope)?;
                 let (a, z, exclusive) = if let Some(range) = range {
-                    let value = self.eval_expr(range, scope)?;
+                    let value = self.eval_expr_child(range, scope)?;
                     let CtValue::Struct { type_name, fields } = value else {
                         return Err(unsupported("Range slice", self.span()));
                     };
@@ -3771,8 +5375,8 @@ impl<'a> EvalCtx<'a> {
                     )
                 } else {
                     (
-                        as_int(&self.eval_expr(start, scope)?, self.span())?,
-                        as_int(&self.eval_expr(end, scope)?, self.span())?,
+                        as_int(&self.eval_expr_child(start, scope)?, self.span())?,
+                        as_int(&self.eval_expr_child(end, scope)?, self.span())?,
                         false,
                     )
                 };
@@ -3822,8 +5426,8 @@ impl<'a> EvalCtx<'a> {
                     _ => Err(unsupported("slice recv", self.span())),
                 }
             }
-            TExprKind::Borrow { place, .. } => self.eval_expr(place, scope),
-            TExprKind::MaterializeView(inner) => self.eval_expr(inner, scope),
+            TExprKind::Borrow { place, .. } => self.eval_expr_child(place, scope),
+            TExprKind::MaterializeView(inner) => self.eval_expr_child(inner, scope),
             TExprKind::MethodCall {
                 recv,
                 method,
@@ -3831,13 +5435,13 @@ impl<'a> EvalCtx<'a> {
                 source_first_string_literal,
                 ..
             } => {
-                let mut r = self.eval_expr(recv, scope)?;
+                let mut r = self.eval_expr_child(recv, scope)?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(&a.value, scope)?);
+                    argv.push(self.eval_expr_child(&a.value, scope)?);
                 }
                 if method.name == "clone" {
-                    return Ok(r);
+                    return self.clone_structural_value(r, &recv.ty);
                 }
                 if method.name == "apply" {
                     if let (
@@ -3988,11 +5592,12 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                     }
-                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating(
+                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating_with_type(
                         &mut r,
                         &method.name,
                         argv.clone(),
                         self.span(),
+                        Some(&expr.ty),
                     ) {
                         self.write_back_place(recv, r, scope)?;
                         return Ok(ret);
@@ -4077,7 +5682,7 @@ impl<'a> EvalCtx<'a> {
                 line,
                 fn_name,
             } => {
-                let v = self.eval_expr(inner, scope)?;
+                let v = self.eval_expr_child(inner, scope)?;
                 match v {
                     CtValue::Present(inner) => Ok(*inner),
                     CtValue::Failed(CtReport::Told(e)) => {
@@ -4119,8 +5724,8 @@ impl<'a> EvalCtx<'a> {
                     other => Ok(other),
                 }
             }
-            TExprKind::OrFallback { value, fallback } => {
-                self.eval_or_fallback_expr(value, fallback, scope)
+            TExprKind::OrFallback { .. } => {
+                unreachable!("or-fallback bypassed its evaluator continuation")
             }
             TExprKind::EnumLit {
                 enum_type,
@@ -4134,14 +5739,14 @@ impl<'a> EvalCtx<'a> {
                     crate::Codegen::TIR::TEnumPayload::Positional(pos) => {
                         let mut out = Vec::with_capacity(pos.len());
                         for a in pos {
-                            out.push((None, self.eval_expr(&a.value, scope)?));
+                            out.push((None, self.eval_expr_child(&a.value, scope)?));
                         }
                         out
                     }
                     crate::Codegen::TIR::TEnumPayload::Named(named) => {
                         let mut out = Vec::with_capacity(named.len());
                         for (name, a) in named {
-                            out.push((Some(name.clone()), self.eval_expr(&a.value, scope)?));
+                            out.push((Some(name.clone()), self.eval_expr_child(&a.value, scope)?));
                         }
                         out
                     }
@@ -4156,7 +5761,7 @@ impl<'a> EvalCtx<'a> {
                 crate::Codegen::TIR::THostCall::ExpectSnapshot { value, .. } => {
                     // Comptime/transcript: evaluate the wrapped value; snapshot I/O
                     // is an AOT harness concern.
-                    let _ = self.eval_expr(value, scope)?;
+                    let _ = self.eval_expr_child(value, scope)?;
                     Ok(CtValue::Unit)
                 }
                 crate::Codegen::TIR::THostCall::NumericBounds { ty, member } => {
@@ -4243,17 +5848,16 @@ impl<'a> EvalCtx<'a> {
                         )),
                     }
                 }
-                crate::Codegen::TIR::THostCall::FixedListIndex { base, index } => {
-                    let b = self.eval_expr(base, scope)?;
-                    let idx = as_int(&self.eval_expr(index, scope)?, self.span())?;
+                crate::Codegen::TIR::THostCall::FixedListIndex { base, index, .. } => {
+                    let b = self.eval_expr_child(base, scope)?;
+                    let idx = as_int(&self.eval_expr_child(index, scope)?, self.span())?;
                     match b {
-                        CtValue::List(xs) => {
-                            if idx < 0 || idx as usize >= xs.len() {
-                                Err(unsupported("fixed-list index oob", self.span()))
-                            } else {
-                                Ok(xs[idx as usize].clone())
-                            }
-                        }
+                        CtValue::List(xs) => crate::fixed_list::jet_fixed_list_index(
+                            xs.len(),
+                            idx,
+                            |position| xs[position].clone(),
+                        )
+                        .map_err(|error| unsupported(&error.message(), self.span())),
                         other => {
                             if let Some(r) =
                                 crate::Comptime::MathLayout::lane_at(&other, idx, self.span())
@@ -4267,7 +5871,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 crate::Codegen::TIR::THostCall::TypedText { kind, arg } => {
                     use crate::Codegen::TIR::TTypedTextForm;
-                    let value = self.eval_expr(arg, scope)?;
+                    let value = self.eval_expr_child(arg, scope)?;
                     match kind {
                         TTypedTextForm::SQLRaw => match value {
                             CtValue::Str(template) => {
@@ -4309,14 +5913,15 @@ impl<'a> EvalCtx<'a> {
                     use crate::Codegen::TIR::TTypedTextInterpKind;
                     let mut values = Vec::with_capacity(holes.len());
                     for hole in holes {
-                        values.push(self.eval_expr(hole, scope)?);
+                        values.push(self.eval_expr_child(hole, scope)?);
                     }
                     match kind {
                         TTypedTextInterpKind::SQL => {
                             let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             let (template, params) = crate::typed_text::jet_typed_sql_interpolate(
                                 &literal_refs,
-                                values.into_iter().map(|value| value.jet_show()).collect(),
+                                shown,
                             );
                             Ok(typed_sql_value(
                                 template,
@@ -4325,29 +5930,30 @@ impl<'a> EvalCtx<'a> {
                         }
                         TTypedTextInterpKind::Sh => {
                             let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             let argv = crate::typed_text::jet_typed_sh_interpolate(
                                 &literal_refs,
-                                values.into_iter().map(|value| value.jet_show()).collect(),
+                                shown,
                             );
                             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
                         }
                         TTypedTextInterpKind::HTML => {
                             let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             Ok(CtValue::Str(crate::typed_text::jet_typed_html_interpolate(
                                 &literal_refs,
-                                values.into_iter().map(|value| value.jet_show()).collect(),
+                                shown,
                             )))
                         }
                         TTypedTextInterpKind::URL
                         | TTypedTextInterpKind::Path
                         | TTypedTextInterpKind::DateTime => {
-                            let name = match kind {
-                                TTypedTextInterpKind::URL => crate::Syntax::TYPE_URL,
-                                TTypedTextInterpKind::Path => crate::Syntax::TYPE_PATH,
-                                TTypedTextInterpKind::DateTime => crate::Syntax::TYPE_DATETIME,
-                                _ => unreachable!("typed boundary kind was matched above"),
-                            };
-                            crate::Comptime::evaluate_typed_head(name, literals, &values, self.span())
+                            crate::Comptime::evaluate_typed_head(
+                                *kind,
+                                literals,
+                                &values,
+                                self.span(),
+                            )
                         }
                     }
                 }
@@ -4386,7 +5992,7 @@ impl<'a> EvalCtx<'a> {
                 // prelude reader every other tier calls, so what a success and
                 // a failure each answer is decided in one place.
                 crate::Codegen::TIR::THostCall::CarrierFact { recv, field, notes } => {
-                    let outcome = self.eval_expr(recv, scope)?;
+                    let outcome = self.eval_expr_child(recv, scope)?;
                     crate::Comptime::Builtins::carrier_fact(&outcome, field, *notes)
                         .ok_or_else(|| {
                             unsupported(
@@ -4396,7 +6002,7 @@ impl<'a> EvalCtx<'a> {
                         })
                 }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
-                    let mut r = self.eval_expr(recv, scope)?;
+                    let mut r = self.eval_expr_child(recv, scope)?;
                     if matches!(
                         &r,
                         CtValue::Struct { type_name, .. }
@@ -4521,13 +6127,13 @@ impl<'a> EvalCtx<'a> {
                                 .get(index)
                                 .cloned()
                                 .ok_or_else(|| unsupported("shared handle", self.span()))?;
-                            let lease = shared
-                                .acquire(editable, self.task_cancel.as_ref())
+                            let state = shared
+                                .acquire_guard(editable, self.task_cancel.as_ref())
                                 .ok_or_else(|| Diagnostic::task_cancelled(Some(self.span())))?;
                             let mut runtime =
                                 self.runtime.lock().expect("evaluator runtime poisoned");
                             let lease_index = runtime.shared_guards.len();
-                            runtime.shared_guards.push(lease);
+                            runtime.shared_guards.push(state);
                             drop(runtime);
                             self.shared_guards.push(lease_index);
                             return Ok(CtValue::Struct {
@@ -4564,7 +6170,10 @@ impl<'a> EvalCtx<'a> {
                                     self.span(),
                                 ));
                             };
-                            transaction.push(super::EvalSharedDelta {
+                            transaction
+                                .transaction
+                                .touch(shared.protocol.clone());
+                            transaction.deltas.push(super::EvalSharedDelta {
                                 shared_index: index,
                                 lambda,
                                 captured: scope.clone(),
@@ -4593,13 +6202,14 @@ impl<'a> EvalCtx<'a> {
                     }
                     let mut argv = Vec::with_capacity(args.len());
                     for a in args {
-                        argv.push(self.eval_expr(a, scope)?);
+                        argv.push(self.eval_expr_child(a, scope)?);
                     }
-                    let result = match crate::Comptime::Builtins::apply_mutating(
+                    let result = match crate::Comptime::Builtins::apply_mutating_with_type(
                         &mut r,
                         method,
                         argv.clone(),
                         self.span(),
+                        Some(&expr.ty),
                     ) {
                         Ok(v) => v,
                         Err(_) => crate::Comptime::Builtins::apply_method(
@@ -4613,7 +6223,7 @@ impl<'a> EvalCtx<'a> {
                     Ok(result)
                 }
                 crate::Codegen::TIR::THostCall::YieldSend { value } => {
-                    let yielded = self.eval_expr(value, scope)?;
+                    let yielded = self.eval_expr_child(value, scope)?;
                     if let Some(items) = self.collecting_items.last_mut() {
                         items.push(yielded);
                         return Ok(CtValue::Unit);
@@ -4651,7 +6261,7 @@ impl<'a> EvalCtx<'a> {
                         match a {
                             crate::Codegen::TIR::THostArg::Expr(e)
                             | crate::Codegen::TIR::THostArg::Borrow(e) => {
-                                argv.push(self.eval_expr(e, scope)?);
+                                argv.push(self.eval_expr_child(e, scope)?);
                             }
                             crate::Codegen::TIR::THostArg::Lambda(_) => {
                                 return Err(unsupported(
@@ -4677,7 +6287,10 @@ impl<'a> EvalCtx<'a> {
                         runtime.clocks.push(seed);
                         return Ok(CtValue::Struct {
                             type_name: "__JetTirClock".to_string(),
-                            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+                            fields: vec![
+                                ("index".to_string(), CtValue::Int(index as i64)),
+                                ("now".to_string(), CtValue::Int(seed)),
+                            ],
                         });
                     }
                     if leaf == "jet_std_clock_system" || leaf.ends_with("jet_std_clock_system") {
@@ -4724,11 +6337,11 @@ impl<'a> EvalCtx<'a> {
                     clock,
                     ..
                 } => {
-                    let value = self.eval_expr(value, scope)?;
-                    let duration = self.eval_expr(duration, scope)?;
+                    let value = self.eval_expr_child(value, scope)?;
+                    let duration = self.eval_expr_child(duration, scope)?;
                     let duration = struct_int(&duration, "ms")
                         .ok_or_else(|| unsupported("expiring duration", self.span()))?;
-                    let clock = self.eval_expr(clock, scope)?;
+                    let clock = self.eval_expr_child(clock, scope)?;
                     let clock_index = handle_index(&clock, "__JetTirClock")
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
                     let now = *self
@@ -4803,10 +6416,10 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::DistinctCtor { name: _, arg, base: _ } => {
                 // Distinct is a zero-cost nominal wrapper over its base scalar.
-                self.eval_expr(arg, scope)
+                self.eval_expr_child(arg, scope)
             }
             TExprKind::RangeCheckedCtor { name, arg } => {
-                let v = self.eval_expr(arg, scope)?;
+                let v = self.eval_expr_child(arg, scope)?;
                 Ok(CtValue::Present(Box::new(v)))
                 // Range bounds are enforced by sema for literals; dynamic checks
                 // reuse the same ok-wrapping Result shape as AOT try_new.
@@ -4822,7 +6435,7 @@ impl<'a> EvalCtx<'a> {
                 range,
                 fallible,
             } => {
-                let v = self.eval_expr(arg, scope)?;
+                let v = self.eval_expr_child(arg, scope)?;
                 let converted = self.eval_numeric_op(&v, op, &arg.ty, &expr.ty)?;
                 let inner = match converted {
                     CtValue::Present(v) => *v,
@@ -4857,11 +6470,11 @@ impl<'a> EvalCtx<'a> {
                 fallible,
                 ..
             } => {
-                let CtValue::Float(value) = self.eval_expr(arg, scope)? else {
+                let CtValue::Float(value) = self.eval_expr_child(arg, scope)? else {
                     return Err(unsupported("unit conversion on non-Float", self.span()));
                 };
                 let converted = if let Some((mode, digits)) = rounding {
-                    let CtValue::Int(digits) = self.eval_expr(digits, scope)? else {
+                    let CtValue::Int(digits) = self.eval_expr_child(digits, scope)? else {
                         return Err(unsupported(
                             "unit conversion digits on non-Int",
                             self.span(),
@@ -4905,7 +6518,7 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                     type_name,
@@ -4940,11 +6553,11 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 eval_precise_builtin(type_name, func, argv, self.span())
             }
-            TExprKind::ResourceNew(inner) => self.eval_expr(inner, scope),
+            TExprKind::ResourceNew(inner) => self.eval_expr_child(inner, scope),
             TExprKind::ResourceTake(place) => scope
                 .get(place)
                 .cloned()
@@ -4952,63 +6565,8 @@ impl<'a> EvalCtx<'a> {
                 .or_else(|| self.globals.get(place).cloned())
                 .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
-            TExprKind::RequireStop {
-                kind,
-                loc,
-                always_stops,
-            } => {
-                let failed = if *always_stops {
-                    true
-                } else {
-                    match kind {
-                        crate::Codegen::TIR::TRequireKind::Require { cond, .. } => {
-                            !as_bool(&self.eval_expr(cond, scope)?, self.span())?
-                        }
-                        crate::Codegen::TIR::TRequireKind::RequireEq { left, right, .. } => {
-                            self.eval_expr(left, scope)? != self.eval_expr(right, scope)?
-                        }
-                        crate::Codegen::TIR::TRequireKind::Panic { .. } => true,
-                    }
-                };
-                if !failed {
-                    return Ok(CtValue::Unit);
-                }
-                let msg = match kind {
-                    crate::Codegen::TIR::TRequireKind::Require { msg: Some(msg), .. }
-                    | crate::Codegen::TIR::TRequireKind::Panic { msg } => {
-                        self.eval_expr(msg, scope)?.jet_show()
-                    }
-                    crate::Codegen::TIR::TRequireKind::Require { msg: None, .. } => {
-                        "requirement failed".to_string()
-                    }
-                    crate::Codegen::TIR::TRequireKind::RequireEq { .. } => {
-                        "values are not equal".to_string()
-                    }
-                };
-                let file = loc.file.trim_matches('"');
-                let fn_name = loc.fn_name.trim_matches('"');
-                let src_line = loc.src_line.trim_matches('"');
-                let line_s = loc.line.to_string();
-                let margin = line_s.len();
-                let pad = " ".repeat(margin);
-                let col_offset = loc.col.saturating_sub(1) as usize;
-                let caret = "^".repeat(loc.caret.max(1) as usize);
-                let rendered = format!(
-                    "panic: {msg}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-                    loc.line,
-                    " ".repeat(col_offset)
-                );
-                if let Some(sink) = self.sink.as_ref() {
-                    let mut sink = sink.lock().expect("evaluator sink poisoned");
-                    sink.stderr.push_str(&rendered);
-                    sink.exit_code = Some(70);
-                    return Err(Diagnostic::soft_exit(
-                        "70".to_string(),
-                        "require/panic stop".to_string(),
-                        Some(self.span()),
-                    ));
-                }
-                Err(unsupported("require/panic stop", self.span()))
+            TExprKind::RequireStop { .. } => {
+                unreachable!("require/panic stop bypassed its evaluator continuation")
             }
             TExprKind::LayoutCompare { .. } => Err(unsupported("expr `LayoutCompare`", self.span())),
             TExprKind::LayoutLit { .. } => Err(unsupported("expr `LayoutLit`", self.span())),
@@ -5041,7 +6599,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::PtrFromAddr { .. } => Err(unsupported("expr `PtrFromAddr`", self.span())),
             TExprKind::Deref(inner) => {
-                let pointer = self.eval_expr(inner, scope)?;
+                let pointer = self.eval_expr_child(inner, scope)?;
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
                 };
@@ -5066,13 +6624,13 @@ impl<'a> EvalCtx<'a> {
                     Type::Apply { name, args }
                         if name == crate::Syntax::TYPE_PTR && args.len() == 1
                 ) {
-                    return self.eval_expr(inner, scope);
+                    return self.eval_expr_child(inner, scope);
                 }
                 let local = super::raw_place_local(inner);
                 let fields = if let Some(local) = local {
                     vec![("name".to_string(), CtValue::Str(local.name.clone()))]
                 } else {
-                    vec![("value".to_string(), self.eval_expr(inner, scope)?)]
+                    vec![("value".to_string(), self.eval_expr_child(inner, scope)?)]
                 };
                 Ok(CtValue::Struct {
                     type_name: "__JetRawLocal".to_string(),
@@ -5085,7 +6643,7 @@ impl<'a> EvalCtx<'a> {
             }),
             TExprKind::JSONLit { variant, arg } => {
                 let payload = match arg {
-                    Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
+                    Some(inner) => Some(self.eval_expr_child(&inner.0, scope)?),
                     None => None,
                 };
                 Ok(CtValue::Enum {
@@ -5099,7 +6657,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::DBValueLit { variant, arg } => {
                 let payload = match arg {
-                    Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
+                    Some(inner) => Some(self.eval_expr_child(&inner.0, scope)?),
                     None => None,
                 };
                 Ok(CtValue::Enum {
@@ -5116,10 +6674,10 @@ impl<'a> EvalCtx<'a> {
                 for part in parts {
                     match part {
                         ListSpreadPart::Elem(expr) => {
-                            values.push(self.eval_expr(expr, scope)?);
+                            values.push(self.eval_expr_child(expr, scope)?);
                         }
                         ListSpreadPart::Spread(expr) => {
-                            let CtValue::List(items) = self.eval_expr(expr, scope)? else {
+                            let CtValue::List(items) = self.eval_expr_child(expr, scope)? else {
                                 return Err(unsupported("list spread operand", self.span()));
                             };
                             values.extend(items);
@@ -5143,8 +6701,8 @@ impl<'a> EvalCtx<'a> {
                 field,
                 ..
             } => {
-                let pool_value = self.eval_expr(pool, scope)?;
-                let id_value = self.eval_expr(id, scope)?;
+                let pool_value = self.eval_expr_child(pool, scope)?;
+                let id_value = self.eval_expr_child(id, scope)?;
                 let Some((index, generation)) = pool_id_parts(&id_value) else {
                     return Err(pool_stale_diagnostic());
                 };
@@ -5188,8 +6746,8 @@ impl<'a> EvalCtx<'a> {
                 index,
                 ..
             } => {
-                let recv = self.eval_expr(base, scope)?;
-                let key = self.eval_expr(index, scope)?;
+                let recv = self.eval_expr_child(base, scope)?;
+                let key = self.eval_expr_child(index, scope)?;
                 let func = self
                     .funcs
                     .get(&format!("{type_name}::get"))
@@ -5204,8 +6762,8 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::MathLaneIndex { base, index, .. } => {
-                let b = self.eval_expr(base, scope)?;
-                let i = as_int(&self.eval_expr(index, scope)?, self.span())?;
+                let b = self.eval_expr_child(base, scope)?;
+                let i = as_int(&self.eval_expr_child(index, scope)?, self.span())?;
                 match crate::Comptime::MathLayout::lane_at(&b, i, self.span()) {
                     Some(r) => r,
                     None => Err(unsupported("expr `MathLaneIndex`", self.span())),
@@ -5215,7 +6773,7 @@ impl<'a> EvalCtx<'a> {
                 Err(unsupported("expr `MathSwizzleRead`", self.span()))
             }
             TExprKind::FnFieldCall { recv, field, args } => {
-                let value = self.eval_expr(recv, scope)?;
+                let value = self.eval_expr_child(recv, scope)?;
                 let CtValue::Struct { fields, .. } = value else {
                     return Err(unsupported("function field receiver", self.span()));
                 };
@@ -5225,16 +6783,16 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported(&format!("function field `{field}`"), self.span()))?;
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
-                    argv.push(self.eval_expr(&arg.value, scope)?);
+                    argv.push(self.eval_expr_child(&arg.value, scope)?);
                 }
                 self.call_callable(&callable, argv)
             }
             TExprKind::DecodeUnder { segment, inner } => {
-                let segment = match self.eval_expr(segment, scope)? {
+                let segment = match self.eval_expr_child(segment, scope)? {
                     CtValue::Str(value) => value,
                     other => other.jet_show(),
                 };
-                let result = self.eval_expr(inner, scope)?;
+                let result = self.eval_expr_child(inner, scope)?;
                 match result {
                     CtValue::Failed(CtReport::Told(error)) => Ok(CtValue::failed(Box::new(
                         decode_error_under(&segment, *error),
@@ -5251,7 +6809,7 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(&a.value, scope)?);
+                    argv.push(self.eval_expr_child(&a.value, scope)?);
                 }
                 match owner {
                     crate::Codegen::TIR::TStaticOwner::User(type_name) => {
@@ -5305,19 +6863,39 @@ impl<'a> EvalCtx<'a> {
                         // Core-import alias may still lower as StaticCall when
                         // function bodies were typed before imports propagated.
                         if let Some(module) = self.core_imports.get(type_name) {
-                            if self.should_decline_ambient_fold(module, &method.name) {
-                                return Err(unsupported(
-                                    &format!("`{module}.{}()` at compile time", method.name),
-                                    self.span(),
-                                ));
+                            if let Some(value) =
+                                self.runtime_time_now(module, &method.name, &argv)
+                            {
+                                return Ok(value);
                             }
-                            return apply_core_call(
+                            if let Some(diagnostic) = self.comptime_core_fold_diagnostic(
+                                module,
+                                &method.name,
+                                self.span(),
+                            ) {
+                                return Err(diagnostic);
+                            }
+                            let value = apply_core_call_with_type(
                                 module,
                                 &method.name,
                                 argv,
                                 self.span(),
                                 self.repl_mode,
-                            );
+                                Some(&expr.ty),
+                            )?;
+                            if module == "core.random" && method.name == "shuffle" {
+                                if let (Some(place), CtValue::List(items)) =
+                                    (args.first(), &value)
+                                {
+                                    self.write_back_place(
+                                        &place.value,
+                                        CtValue::List(items.clone()),
+                                        scope,
+                                    )?;
+                                    return Ok(CtValue::Unit);
+                                }
+                            }
+                            return Ok(value);
                         }
                         // Match Cranelift JIT `static_method_key`: mono methods are
                         // keyed by the concrete owner (`Box<Int>::new`). When a
@@ -5349,6 +6927,11 @@ impl<'a> EvalCtx<'a> {
                         ))
                     }
                     crate::Codegen::TIR::TStaticOwner::Prelude { path, .. } => {
+                        if let Some(value) =
+                            crate::Comptime::email_safe_static_for_tir(path, &method.name)
+                        {
+                            return Ok(value);
+                        }
                         if let Some(value) =
                             crate::Comptime::xml_safe_static_for_tir(path, &method.name)
                         {
@@ -5438,13 +7021,13 @@ impl<'a> EvalCtx<'a> {
                 &format!("proven-unreachable exhaustive-dispatch arm (line {line})"),
                 self.span(),
             )),
-            TExprKind::DistinctRaw(inner) => self.eval_expr(inner, scope),
+            TExprKind::DistinctRaw(inner) => self.eval_expr_child(inner, scope),
             TExprKind::OptField {
                 base,
                 member,
                 flatten,
             } => {
-                let v = self.eval_expr(base, scope)?;
+                let v = self.eval_expr_child(base, scope)?;
                 match v {
                     CtValue::Failed(CtReport::Clean(_)) => Ok(CtValue::absent(expr.ty.clone())),
                     CtValue::Present(inner) => {
@@ -5497,7 +7080,7 @@ impl<'a> EvalCtx<'a> {
                 Ok(self.store_callable(EvalCallable::Lambda { lambda, captured }))
             }
             TExprKind::PatternMatches { subj, pattern } => {
-                let value = self.eval_expr(subj, scope)?;
+                let value = self.eval_expr_child(subj, scope)?;
                 // Binding-free `x == .Variant` — reuse match-arm binder, discard locals.
                 let mut scratch = HashMap::new();
                 Ok(CtValue::Bool(super::stmts::bind_match_pattern(
@@ -5506,7 +7089,32 @@ impl<'a> EvalCtx<'a> {
                     &mut scratch,
                 )?))
             }
-            TExprKind::OptionLift2 { .. } => Err(unsupported("expr `OptionLift2`", self.span())),
+            TExprKind::OptionLift2 { f, a, b } => {
+                let a = self.eval_expr(a, scope)?;
+                let b = self.eval_expr(b, scope)?;
+                if matches!(&a, CtValue::Failed(CtReport::Told(_)))
+                    || matches!(&b, CtValue::Failed(CtReport::Told(_)))
+                {
+                    return Err(unsupported("option lift2 operands", self.span()));
+                }
+                let mut callable = None;
+                crate::option_lift2::jet_option_lift2(
+                    EvalOptionValue(a),
+                    EvalOptionValue(b),
+                    || Ok(CtValue::absent(expr.ty.clone())),
+                    |value| value,
+                    || {
+                        move |left, right| {
+                            self.apply_callable_once(
+                                f,
+                                &mut callable,
+                                vec![left, right],
+                                scope,
+                            )
+                        }
+                    },
+                )
+            }
             TExprKind::ClosureMethod { recv, op, args } => {
                 self.eval_closure_method(recv, op, args, scope)
             }
@@ -5514,7 +7122,7 @@ impl<'a> EvalCtx<'a> {
                 Err(unsupported("expr `HostBorrowCallback`", self.span()))
             }
             TExprKind::NumericMethod { recv, op } => {
-                let v = self.eval_expr(recv, scope)?;
+                let v = self.eval_expr_child(recv, scope)?;
                 self.eval_numeric_op(&v, op, &recv.ty, &expr.ty)
             }
             TExprKind::OverflowOpt {
@@ -5523,8 +7131,8 @@ impl<'a> EvalCtx<'a> {
                 lhs,
                 rhs,
             } => {
-                let l = self.eval_expr(lhs, scope)?;
-                let r = self.eval_expr(rhs, scope)?;
+                let l = self.eval_expr_child(lhs, scope)?;
+                let r = self.eval_expr_child(rhs, scope)?;
                 let a = as_int(&l, self.span())?;
                 let b = as_int(&r, self.span())?;
                 let width_ty = match &expr.ty {
@@ -5611,27 +7219,27 @@ impl<'a> EvalCtx<'a> {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
             TExprKind::TaskGroupAll { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
-                    return Err(unsupported("taskgroup all list", self.span()));
+                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
+                    return Err(unsupported("task group all list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
             }
             TExprKind::TaskGroupRace { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
-                    return Err(unsupported("taskgroup race list", self.span()));
+                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
+                    return Err(unsupported("task group race list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Race)
             }
             TExprKind::TaskGroupAny { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
-                    return Err(unsupported("taskgroup any list", self.span()));
+                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
+                    return Err(unsupported("task group any list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Any)
             }
             TExprKind::SelectStart => Ok(self.new_eval_select()),
             TExprKind::SelectRecv { builder, channel } => {
-                let builder = self.eval_expr(builder, scope)?;
-                let channel = self.eval_expr(channel, scope)?;
+                let builder = self.eval_expr_child(builder, scope)?;
+                let channel = self.eval_expr_child(channel, scope)?;
                 let receiver = handle_index(&channel, "Receiver")
                     .ok_or_else(|| unsupported("select receiver", self.span()))?;
                 self.eval_select_recv(builder, receiver)
@@ -5641,39 +7249,60 @@ impl<'a> EvalCtx<'a> {
                 millis,
                 value,
             } => {
-                let builder = self.eval_expr(builder, scope)?;
-                let millis = as_int(&self.eval_expr(millis, scope)?, self.span())?;
+                let builder = self.eval_expr_child(builder, scope)?;
+                let millis = as_int(&self.eval_expr_child(millis, scope)?, self.span())?;
                 let value = value
                     .as_ref()
-                    .map(|value| self.eval_expr(value, scope))
+                    .map(|value| self.eval_expr_child(value, scope))
                     .transpose()?
                     .unwrap_or(CtValue::Unit);
                 self.eval_select_after(builder, millis, value)
             }
             TExprKind::SelectRead { builder, stream } => {
-                let builder = self.eval_expr(builder, scope)?;
-                let _ = self.eval_expr(stream, scope)?;
+                let builder = self.eval_expr_child(builder, scope)?;
+                let _ = self.eval_expr_child(stream, scope)?;
                 Ok(builder)
             }
             TExprKind::SelectWait { builder } => {
-                let builder = self.eval_expr(builder, scope)?;
+                let builder = self.eval_expr_child(builder, scope)?;
                 self.eval_select_wait(builder)
             }
             TExprKind::FnValue { kind } => match kind {
                 TFnValueKind::NamedFn {
                     name: Some(name), ..
                 } => Ok(self.store_callable(EvalCallable::Named(name))),
-                TFnValueKind::NamedFn { name: None, .. } => {
-                    Err(unsupported("rendered function coercion", self.span()))
+                TFnValueKind::NamedFn {
+                    name: None,
+                    lambda: Some(lambda),
+                    ..
+                } => {
+                    let mut captured = scope.clone();
+                    for (source, runtime, _) in &lambda.captures {
+                        if runtime != source {
+                            if let Some(value) = scope.get(source).cloned() {
+                                captured.insert(runtime.clone(), value);
+                            }
+                        }
+                    }
+                    Ok(self.store_callable(EvalCallable::Lambda {
+                        lambda,
+                        captured,
+                    }))
                 }
+                TFnValueKind::NamedFn {
+                    name: None,
+                    lambda: None,
+                    ..
+                } => Err(unsupported("rendered function coercion", self.span())),
                 TFnValueKind::Call { callee, args } => {
-                    let callable = self.eval_expr(callee, scope)?;
+                    let callable = self.eval_expr_child(callee, scope)?;
                     let mut argv = Vec::with_capacity(args.len());
                     for arg in args {
-                        argv.push(self.eval_expr(&arg.value, scope)?);
+                        argv.push(self.eval_expr_child(&arg.value, scope)?);
                     }
-                    self.call_callable(&callable, argv)
+                    self.call_callable_in_scope(&callable, argv, scope)
                 }
+                TFnValueKind::Interrupt { value } => self.eval_expr(value, scope),
             },
             TExprKind::ModuleCall { form, args, .. } => {
                 let target = match form {
@@ -5720,12 +7349,19 @@ impl<'a> EvalCtx<'a> {
                 Ok(())
             }
             TExprKind::SharedGuardValue { guard, .. } => {
-                let guard = self.eval_expr(guard, scope)?;
-                let (index, _, editable, path) = shared_guard_parts(&guard)
+                let guard = self.eval_expr_child(guard, scope)?;
+                let (index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))?;
-                if !editable {
-                    return Err(unsupported("read SharedGuard write-back", self.span()));
-                }
+                let guard_state = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .shared_guards
+                    .get(lease_index)
+                    .cloned()
+                    .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))?;
+                super::shared_protocol::jet_shared_guard_require_edit(&guard_state)
+                    .map_err(|message| unsupported(message, self.span()))?;
                 let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                 let shared = runtime
                     .shared_values
@@ -5742,7 +7378,7 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))
             }
             TExprKind::Deref(inner) => {
-                let pointer = self.eval_expr(inner, scope)?;
+                let pointer = self.eval_expr_child(inner, scope)?;
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
                 };
@@ -5823,7 +7459,7 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                 }
-                let mut base_val = self.eval_expr(recv, scope)?;
+                let mut base_val = self.eval_expr_child(recv, scope)?;
                 match &mut base_val {
                     CtValue::Struct {
                         type_name,
@@ -5855,8 +7491,8 @@ impl<'a> EvalCtx<'a> {
                 field,
                 ..
             } => {
-                let mut pool_value = self.eval_expr(pool, scope)?;
-                let id_value = self.eval_expr(id, scope)?;
+                let mut pool_value = self.eval_expr_child(pool, scope)?;
+                let id_value = self.eval_expr_child(id, scope)?;
                 let Some((index, generation)) = pool_id_parts(&id_value) else {
                     return Err(pool_stale_diagnostic());
                 };
@@ -5925,7 +7561,9 @@ impl<'a> EvalCtx<'a> {
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }
-            TNumericOp::Origin { origin } => Ok(CtValue::Str(origin.clone())),
+            TNumericOp::Origin { origin } => Ok(CtValue::Str(
+                crate::float_provenance::jet_float_origin(Some(origin.as_str())),
+            )),
             TNumericOp::CastAs { dst_rust } => {
                 // Match AOT `(({recv}) as {dst_rust})` / JIT CastAs lowering:
                 // int→float and F32↔F64 must change the CtFloat width tag so
@@ -6068,7 +7706,7 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
-            let mut v = self.eval_expr(&a.value, scope)?;
+            let mut v = self.eval_expr_child(&a.value, scope)?;
             // D-UNIONTYPE1=A: member → union inject at the call boundary (mirrors emit).
             if let Some(Type::Union(members)) = &a.widen_to_union {
                 let tag = crate::AST::union_member_tag(&a.value.ty);
@@ -6090,7 +7728,10 @@ impl<'a> EvalCtx<'a> {
         if name == "print" {
             let text = argv
                 .iter()
-                .map(|v| v.jet_show())
+                .map(|v| {
+                    crate::Comptime::display_core_pure_value(v)
+                        .unwrap_or_else(|| v.jet_show())
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             self.write_print(&text, false)?;
@@ -6099,7 +7740,10 @@ impl<'a> EvalCtx<'a> {
         if name == "eprint" {
             let text = argv
                 .iter()
-                .map(|v| v.jet_show())
+                .map(|v| {
+                    crate::Comptime::display_core_pure_value(v)
+                        .unwrap_or_else(|| v.jet_show())
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             self.write_print(&text, true)?;

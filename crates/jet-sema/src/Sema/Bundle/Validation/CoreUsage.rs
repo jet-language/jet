@@ -208,6 +208,24 @@ fn note_core_usage(
     }
 }
 
+fn note_typed_boundary_core_usage(
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    name: &str,
+    span: Option<crate::Diagnostics::Span>,
+) {
+    let Some(kind) = Syntax::typed_head_kind(name).filter(|kind| kind.is_boundary()) else {
+        return;
+    };
+    let key = match kind {
+        Syntax::TypedHeadKind::URL => "core.url::typed_head",
+        Syntax::TypedHeadKind::Path => "core.path::typed_head",
+        Syntax::TypedHeadKind::DateTime => "core.time::typed_head",
+        _ => unreachable!("typed boundary usage descriptor is complete"),
+    };
+    note_core_usage(used, spans, key, span);
+}
+
 fn is_http_nominal_type(name: &str) -> bool {
     matches!(
         name,
@@ -350,6 +368,14 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans, ffi_cb);
                 }
             }
+            Stmt::TaskGroup { body, span, .. } => {
+                // D-CONC-SPAWN1=D: the canonical `task.group` surface reaches
+                // the same embedded scheduler kernel as task combinators. It
+                // has no Core import for `collect_used_core` to observe, so
+                // record the compiler-owned runtime seam explicitly.
+                note_core_usage(used, spans, "core.concurrency::task", Some(*span));
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
+            }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
@@ -361,15 +387,6 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
-            // D-CONC-SPAWN1=D: `task.group name { … }` needs no `use core.X`
-            // import to reach the embedded `jet_std` task runtime (AOT embeds
-            // it, JIT/interpreter compile the same Prelude source) — parsed
-            // syntax, not raw source text, owns the requirement, exactly like
-            // `#Shield` below.
-            Stmt::TaskGroup { body, span, .. } => {
-                note_core_usage(used, spans, "core.concurrency::task", Some(*span));
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
-            }
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
@@ -498,6 +515,17 @@ pub(crate) fn collect_core_expr(
             // `use core.X` import required.
             if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::INTERNAL_TASK_RECEIVER)
             {
+                note_core_usage(used, spans, "core.concurrency::task", Some(*method_span));
+            }
+            // D-CONC-SPAWN1=D: `task`/`task.all`/`task.race`/`task.any`
+            // are compiler-owned syntax, not Core imports. Sema records their
+            // private dispatch type so this late reachability walk can pull in
+            // the scheduler kernel without relying on source spelling.
+            if matches!(
+                recv_type.as_deref(),
+                Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
+                    | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
+            ) {
                 note_core_usage(used, spans, "core.concurrency::task", Some(*method_span));
             }
             // Epoch 3 String surface delegates Unicode classification, title
@@ -674,22 +702,10 @@ pub(crate) fn collect_core_expr(
             if c.name == Syntax::BUILTIN_INPUT {
                 note_core_usage(used, spans, "core.io::input", Some(c.name_span));
             }
-            // D-BOUND-HEAD1=A: sema rewrites URL/Path/DateTime heads to their
+            // D-BOUND-HEAD1=A: sema rewrites typed boundary heads to their
             // ordinary alternating literal/hole call before this reachability
-            // walk. Keep the owning optional prelude fragment reachable from
-            // that canonical call instead of inspecting source text.
-            match c.name.as_str() {
-                Syntax::TYPE_URL => {
-                    note_core_usage(used, spans, "core.url::typed_head", Some(c.name_span))
-                }
-                Syntax::TYPE_PATH => {
-                    note_core_usage(used, spans, "core.path::typed_head", Some(c.name_span))
-                }
-                Syntax::TYPE_DATETIME => {
-                    note_core_usage(used, spans, "core.time::typed_head", Some(c.name_span))
-                }
-                _ => {}
-            }
+            // walk. The Syntax descriptor selects the owning prelude fragment.
+            note_typed_boundary_core_usage(used, spans, &c.name, Some(c.name_span));
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
                 // already proved this bare function name is passed as a stable
@@ -788,18 +804,7 @@ pub(crate) fn collect_core_expr(
         }
         Expr::TypedLit { head, body, span } => {
             if let Some(Type::Named(name)) = head {
-                match name.as_str() {
-                    Syntax::TYPE_URL => {
-                        note_core_usage(used, spans, "core.url::typed_head", Some(*span))
-                    }
-                    Syntax::TYPE_PATH => {
-                        note_core_usage(used, spans, "core.path::typed_head", Some(*span))
-                    }
-                    Syntax::TYPE_DATETIME => {
-                        note_core_usage(used, spans, "core.time::typed_head", Some(*span))
-                    }
-                    _ => {}
-                }
+                note_typed_boundary_core_usage(used, spans, name, Some(*span));
             }
             body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
         }

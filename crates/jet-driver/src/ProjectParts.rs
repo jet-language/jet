@@ -4,6 +4,7 @@
 use crate::AST::{ImportKind, Item};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::{Lexer, Parser, Syntax};
+use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -31,10 +32,24 @@ pub struct ProjectPart {
     pub state: ProjectPartState,
 }
 
+impl ProjectPart {
+    /// The source spelling accepted by `use` and shown by user-facing
+    /// projections. Keep the scanner's leaf `name` for lookup and storage.
+    pub fn canonical_name(&self) -> String {
+        format!("{}{}", Syntax::PROJECT_IMPORT_PREFIX, self.name)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectPartConflict {
     pub name: String,
     pub paths: Vec<PathBuf>,
+}
+
+impl ProjectPartConflict {
+    pub fn canonical_name(&self) -> String {
+        format!("{}{}", Syntax::PROJECT_IMPORT_PREFIX, self.name)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +57,7 @@ pub struct ProjectPartScanFailure {
     pub path: PathBuf,
     pub module_names: Vec<String>,
     pub problem: Diagnostic,
+    pub authority: bool,
 }
 
 impl ProjectPartScanFailure {
@@ -54,9 +70,17 @@ impl ProjectPartScanFailure {
             .replace('\\', "/");
         Diagnostic::error(
             "E0603",
-            format!("can't load project module `{name}` from `{path}`"),
+            format!(
+                "can't load project module `{}{}` from `{path}`",
+                Syntax::PROJECT_IMPORT_PREFIX,
+                name
+            ),
             format!("`{path}` has a source error: {}", self.problem.what),
-            format!("fix `{path}` first, then import `project.{name}` again"),
+            format!(
+                "fix `{path}` first, then import `{}{}` again",
+                Syntax::PROJECT_IMPORT_PREFIX,
+                name
+            ),
             Some(span),
         )
     }
@@ -77,7 +101,10 @@ impl ProjectPartConflict {
             .join(", ");
         Diagnostic::error(
             "E0606",
-            format!("project module `{}` is declared more than once", self.name),
+            format!(
+                "project module `{}` is declared more than once",
+                self.canonical_name()
+            ),
             "a project module name must resolve to one declaration".to_string(),
             format!("keep one `module {}` declaration; found {paths}", self.name),
             span,
@@ -120,8 +147,23 @@ pub fn scan_with_diagnostics(
     root: &Path,
     overlays: &[(PathBuf, String)],
 ) -> (ProjectPartsReport, Vec<ProjectPartScanFailure>) {
-    let mut files = Vec::new();
-    collect_jet_files(root, &mut files);
+    let (resolver, checked_files, authority_failure) = match AuthorityResolver::open(root) {
+        Ok(resolver) => match resolver.discover_source_files() {
+            Ok(files) => (Some(resolver), files, None),
+            Err(error) => (Some(resolver), Vec::new(), Some((root.to_path_buf(), error))),
+        },
+        Err(error) if error.is_missing() => (None, Vec::new(), None),
+        Err(error) => (None, Vec::new(), Some((root.to_path_buf(), error))),
+    };
+    let mut files = checked_files
+        .iter()
+        .filter(|file| {
+            !file.relative.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+                name == Syntax::PACKAGE_FILE || name == Syntax::PAYLOAD_FILE
+            })
+        })
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
     files.extend(
         overlays
             .iter()
@@ -138,30 +180,37 @@ pub fn scan_with_diagnostics(
     let mut explicit = BTreeSet::new();
     let mut declarations: BTreeMap<String, Vec<(PathBuf, bool)>> = BTreeMap::new();
     let mut failures = Vec::new();
+    if let Some((path, error)) = authority_failure {
+        failures.push(authority_failure_for(path, error));
+        return (ProjectPartsReport::default(), failures);
+    }
     for path in files {
         let source = if let Some((_, source)) = overlays.iter().rev().find(|(p, _)| p == &path) {
             source.clone()
         } else {
-            match std::fs::read_to_string(&path) {
+            let Some(file) = checked_files.iter().find(|file| file.path == path) else {
+                continue;
+            };
+            if let Some(resolver) = resolver.as_ref() {
+                if let Err(error) = resolver.revalidate_file(file) {
+                    failures.push(authority_failure_for(file.path.clone(), error));
+                    return (ProjectPartsReport::default(), failures);
+                }
+            }
+            match file.text() {
                 Ok(source) => source,
-                Err(_) => {
+                Err(error) => {
                     failures.push(ProjectPartScanFailure {
                         module_names: path
                             .file_stem()
                             .and_then(|stem| stem.to_str())
                             .map(|stem| vec![stem.to_string()])
                             .unwrap_or_default(),
-                        problem: Diagnostic::error(
-                            "E0603",
-                            format!("can't read the file `{}`", path.display()),
-                            "an explicit project import needs a readable Jet source file"
-                                .to_string(),
-                            "restore read access to the file, or remove the import".to_string(),
-                            None,
-                        ),
+                        problem: error.diagnostic(),
                         path,
+                        authority: true,
                     });
-                    continue;
+                    return (ProjectPartsReport::default(), failures);
                 }
             }
         };
@@ -171,6 +220,7 @@ pub fn scan_with_diagnostics(
                 path,
                 module_names: declared_module_names(&tokens),
                 problem: lex_diags[0].clone(),
+                authority: false,
             });
             continue;
         }
@@ -181,10 +231,19 @@ pub fn scan_with_diagnostics(
                     path,
                     module_names: declared_module_names(&tokens),
                     problem: parse_diags[0].clone(),
+                    authority: false,
                 });
                 continue;
             }
         };
+        if let Some(file) = checked_files.iter().find(|file| file.path == path) {
+            if let Some(resolver) = resolver.as_ref() {
+                if let Err(error) = resolver.revalidate_file(file) {
+                    failures.push(authority_failure_for(file.path.clone(), error));
+                    return (ProjectPartsReport::default(), failures);
+                }
+            }
+        }
         for import in &program.imports {
             let ImportKind::Module(name, _) = &import.kind else {
                 continue;
@@ -232,7 +291,22 @@ pub fn scan_with_diagnostics(
             });
         }
     }
+    if let Some(resolver) = resolver {
+        if let Err(error) = resolver.revalidate_root() {
+            failures.push(authority_failure_for(root.to_path_buf(), error));
+            return (ProjectPartsReport::default(), failures);
+        }
+    }
     (report, failures)
+}
+
+fn authority_failure_for(path: PathBuf, error: AuthorityError) -> ProjectPartScanFailure {
+    ProjectPartScanFailure {
+        path,
+        module_names: Vec::new(),
+        problem: error.diagnostic(),
+        authority: true,
+    }
 }
 
 fn declared_module_names(tokens: &[Lexer::Token]) -> Vec<String> {
@@ -243,34 +317,6 @@ fn declared_module_names(tokens: &[Lexer::Token]) -> Vec<String> {
             _ => None,
         })
         .collect()
-}
-
-fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || matches!(name.as_ref(), "target" | "build" | "node_modules") {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            collect_jet_files(&path, out);
-        } else if file_type.is_file()
-            && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
-            && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PACKAGE_FILE)
-            && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PAYLOAD_FILE)
-        {
-            out.push(path);
-        }
-    }
 }
 
 #[cfg(test)]

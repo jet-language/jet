@@ -499,7 +499,7 @@ provenance inferred by sema. **E2307** reports a local or temporary owner that
 cannot outlive the view, an unstable public source, or a use that requires an
 owned `String`. See `examples/features/memory/returned_views.jet` for a
 runtime-selected source, a multi-buffer parser, and a borrowing deserializer.
-Either kind of view crossing a `tasks.spawn`/
+Either kind of view crossing a `task`/
 `Sender.send` boundary is reported once, as **E1102** (unsendable value) —
 a task or channel moves owned data between threads, and a view can't cross
 without ownership.
@@ -515,7 +515,7 @@ copyable door":
 
 ```jet
 config :: Shared.new(AppConfig.{ name: "jet-server", hits: 0 })
-t1 :: tasks.spawn(() => handle(1, config))   // no `take` needed
+t1 :: task handle(1, config)   // no `take` needed
 label :: config.read(c => c.name)
 config.edit(c => { c.hits += 1 })
 ```
@@ -523,7 +523,7 @@ config.edit(c => { c.hits += 1 })
 (examples/features/memory/shared_config.jet) `Shared.new(x)` infers `T` from
 `x`; `.read(f)`/`.edit(f)` run a closure against a read- or write-locked view,
 the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
-handle clone, never a deep copy of `T` — so it crosses a `tasks.spawn`
+handle clone, never a deep copy of `T` — so it crosses a `task`
 boundary with no `^`.
 
 Expert code can hold the same lock across helper calls (D-SHAREDGUARD1=A,
@@ -1100,15 +1100,18 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 
 Every foreign ecosystem mounts through one model: a language root plus library
 name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
+Every root accepts the same single-library form and the same member list:
+`use <lang>.<lib> as alias` or `use <lang>.[lib as alias, other]`.
 C, C++, and JS are active namespace binders. C uses the namespace surface
-(`use c.<lib>` / `#Extern module c.<lib>`). C++ uses `use cpp.<lib>` over a
+(`use c.<lib>` or `use c.[lib as alias, other]` / `#Extern module c.<lib>`).
+C++ uses the same forms over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
 explicitly, public scalar classes become owned opaque handles, exceptions become
 `T ? CppError`, pure named callbacks keep their checked C ABI, and template
 instantiations are requested on demand. `jet inspect bind cpp` requires the
 selected target and absolute clang/archiver paths; include/library search paths
 and link libraries are audited in binding provenance and reused at final link.
-JS uses one `use js.<lib>` surface;
+JS uses the same single/member-list surface;
 the host is target-dispatched, with browser JS on web targets and the native
 JS-on-WASM host on native targets. Generated JS binding caches live under
 `.jet/bindings/js/`: `<lib>.jet` carries the callable Jet surface and
@@ -1161,7 +1164,7 @@ overlay. (Full spec follows in this section.)
 |---|---|
 | Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern module c.<lib> { … }` — empty `{ }` = no overrides |
-| Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
+| Call site | `use "header.h" as alias`, `use c.<lib> as alias`, or `use c.[lib as alias, other]` (one bring-in per lib per file) |
 
 Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
 "InitWindow";` (the string is the C linker symbol). On any C `use`, the compiler
@@ -1211,7 +1214,7 @@ functions whose parameters and optional result are `int64`, `float64`, or
 `uintptr`, runs
 the provisioned Go compiler with `go build -buildmode=c-archive`, and writes
 the archive plus a typed `.jet/bindings/go/<lib>.jet` cache. Programs import it
-with `use go.<lib> as alias`; calls execute in-process through the shared C ABI
+with `use go.<lib> as alias` or `use go.[lib as alias, other]`; calls execute in-process through the shared C ABI
 linker, so the Go runtime is part of the native program rather than a sidecar.
 `uintptr` maps to a private-field, move-only `go.<lib>.Handle`; passing it to a
 foreign function consumes it, preventing Jet from reusing a released
@@ -1858,7 +1861,7 @@ unreachable from outside its file or inline module: `math.helper()` where
 `helper` is private is **E0609** (inline) / **E0605** (cross-file). An unknown
 `pub(…)` qualifier is **E0411**. Inline-module function bodies are fully
 type-checked, and a sibling call (`area` → `square`) lowers to the
-module-mangled name (`geo__square`), so private siblings never leak into the
+module-mangled name (`__jet_geo__square`), so private siblings never leak into the
 file's namespace or to rustc.
 
 **Re-export (D-MOD4 — Rust-exact `pub use`).** A directory module's `module.jet`
@@ -2131,29 +2134,29 @@ filter/sort operations; `plan` inspects them without running selectors, while
 returns `DataJoin<L, R?>`, preserving every left row and representing an
 unmatched right row as `None`.
 
-## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
+## E2-M1 — Concurrency (tasks and channels, verified 2026-08-06)
 
-`core.tasks` provides blocking tasks and typed channels. Import it as a normal
-core module:
+`task` provides spawning and nested combinators. `core.tasks` remains the normal
+core module for typed channels and task control helpers:
 
 ```jet
 use core.tasks as tasks;
 ```
 
-`tasks.spawn(() => work()) => Task<T>` starts a task from a zero-parameter
-lambda. Copyable captures are copied at closure creation. Owned non-copyable
-captures move. Shared mutable captures are **E1101**; use task-local state or a
-channel to send results back. Values crossing the task boundary must be
-sendable (**E1102**): no `view` borrows, no structs that contain `ref` fields,
-no trait values, and no closures with non-sendable captures.
+`task work()` or `task { work() }` starts a zero-parameter child. Copyable
+captures are copied at closure creation. Owned non-copyable captures move.
+Shared mutable captures are **E1101**; use task-local state or a channel to send
+results back. Values crossing the task boundary must be sendable (**E1102**):
+no `view` borrows, no structs that contain `ref` fields, no trait values, and no
+closures with non-sendable captures.
 
-`task.join() => T` waits for the task and consumes the `Task<T>` handle. Calling
-`.join()` twice is ordinary use-after-move (**E0121**). Dropping a `Task`
-without joining or detaching emits **L1101** because the program may end before
-the task finishes. A panic inside a task is reported when joined and exits with
-the runtime panic code.
+`handle.join() => T ? TaskFailure` waits for the task and consumes its handle.
+Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a
+`Task` without joining or detaching emits **L1101** because the program may end
+before the task finishes. A panic, cancellation, or blown deadline is returned
+as `.Panicked(reason)`, `.Cancelled`, or `.DeadlineBlown`.
 
-`task.detach()` (D-DETACH1) fire-and-forgets the task — it consumes the
+`handle.detach()` (D-DETACH1) fire-and-forgets the task — it consumes the
 `Task<T>` handle so **L1101** is suppressed, and the task continues running in
 the background. Detach is sound only when the spawned lambda holds fully-owned
 data. Two detach-site diagnostics guard unsound cases:
@@ -2165,17 +2168,14 @@ data. Two detach-site diagnostics guard unsound cases:
   already fired); detaching an unsound task is doubly dangerous.
 
 D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
-task handles instead of new `coroutine` syntax. `task.wait()` aliases
-`task.join()`. `task.pause()`, `task.resume()`, and `task.cancel()` set
-control-plane state on the handle; `task.trace() => String` reports
-`paused=...,cancel=...`. `task.exception() => String` reports `"cancelled"`
-after cancel (otherwise `""`). `tasks.yield_now()` cooperatively yields at a wait
-point; `tasks.current_task() => String` returns the running task's control
-trace (idle defaults outside a task). `tasks.wait_any(^handles) => T` (and
-`handles.wait_any()`) waits for the first finished task. `sender.close()` /
+task handles instead of new `coroutine` syntax. `handle.pause()`, `handle.resume()`, and `handle.cancel()` set
+control-plane state on the handle. `tasks.yield_now()` cooperatively yields at
+a wait point; `tasks.current_task() => String` returns the running task's
+control trace (idle defaults outside a task). `sender.close()` /
 `receiver.close()` close a channel end explicitly. Pause holds a running task
 at its next wait point until `resume()`; these are enforced by the M:N
-scheduler, not mere flags.
+scheduler, not mere flags. `trace()` and `exception()` are retired; task
+failure uses `TaskFailure`.
 
 D-CANCELMODEL1=C (ratified 2026-07-11): cancellation is **preemptive at wait
 points**. A cancelled task — a race loser, a fail-fast sibling, or an explicit
@@ -2186,7 +2186,7 @@ is one unwind mechanism with two triggers (deadline, cancel). A cancelled task
 does not fall through to the code after the wait: a cancelled `receive()` unwinds
 instead of returning `Closed`, and a race loser stops at its next wait point and
 releases resources via Drop rather than running to completion. A cancelled
-`g.all` member reports `Cancelled` rather than a completed value. A scoped
+`task.all` member reports `Cancelled` rather than a completed value. A scoped
 shielded region defers (never discards) the unwind until a critical section
 finishes — its wait points complete normally and the deferred cancel/deadline
 lands when the region exits. D-SHIELDNAME1=A spells that lexical region
@@ -2251,7 +2251,7 @@ observe the inherited budget (task joins, channel receive, `time.sleep`, TCP
 read/write stubs). When the budget is exceeded, runtime report **E3003** is
 emitted in Jet terms and execution exits with the runtime error code.
 
-Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
+Teaching errors: **E0040** points `async`/`await` users at `task`;
 **E0041** points `Mutex`/`lock` users at channels.
 
 ### Parallel collection adapters (D-PARCAPTURE1=D)
@@ -2301,71 +2301,49 @@ serialization or implicit capture merge; callers
 return data, use `para_partition` or `para_fold`, or choose explicit synchronized
 state.
 
-### Task groups without a loop (D-VERDICT-1323-1)
+### Structured tasks and nested combinators (D-CONC-SPAWN1=D, D-CONC-FAIL1=A, D-CONC-JOIN1; ratified 2026-08-06)
 
-`tasks.spawn_group(n, body) => [Task<T>]` starts `n` tasks from one callable.
-Every single-handle method has a list twin on `[Task<T>]` that means the same
-thing applied in list order:
-
-| single | group | ownership |
-| --- | --- | --- |
-| `.join()` / `.wait()` | `.join_all()` / `.wait_all()` | consumes |
-| `.detach()` | `.detach_all()` | consumes |
-| `.cancel()` | `.cancel_all()` | borrows |
-| `.pause()` | `.pause_all()` | borrows |
-| `.resume()` | `.resume_all()` | borrows |
-| `.trace()` | `.trace_all()` | borrows |
+`task` is the one reserved concurrency word. `all`, `race`, `any`, and `group`
+remain ordinary names and become combinators only after `task.`. A task body is
+zero-parameter work captured from its surrounding scope:
 
 ```jet
-workers :: tasks.spawn_group(3, () => 7)
-workers.cancel_all()
-print(workers.wait_all())
+one :: task work()
+two :: task { work_again() }
+results :: (task.all { work_a(), work_b() }) ?? []
+winner :: (task.race { fast(), slow() }) ?? 0
+first :: (task.any { read_cache(), read_network() }) ?? fallback
 ```
 
-`handles.join_all()` is the method spelling of `tasks.join_all(^handles)` — one
-mechanism, two spellings, not two mechanisms. Example:
-`examples/features/concurrency/task_group_helpers.jet`.
+Each branch of `task.all`, `task.race`, or `task.any` starts one child. `all`
+waits for every branch and fail-fast cancels the remaining children. `race`
+returns the first successful result and cancels the losers. `any` returns the
+first completed result and cancels the remaining children. The combinators
+consume their children; there are no list twins or handle-list spellings.
 
-`.trace()` and `.trace_all()` render `paused=<bool>,cancel=<bool>` per handle.
-Pause is cooperative on every tier: a paused task stops at its next wait point,
-not mid-statement. Tier parity for the whole control plane — singles and twins,
-AOT, `jet run`, and the interpreter — is held by `tests/task_control_tiers.rs`.
-
-Iterating the handles yourself instead is a different thing: `loop h, hs { … }`
-hands you each handle, which takes the list, so the loop must own it. A borrowed
-list is **E0120** and points back at these methods.
-
-### Taskgroups and structured combinators (D-CONC-SPAWN1=D, respelling D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1; D-CONCSELECT1; verified 2026-08-10)
-
-Structured concurrency uses a scoped `task.group` (D-CONC-SPAWN1=D, respelling
-D-TASKSCOPE1=A). Inside `task.group g { … }`, the bare `task expression` or
-`task { … }` spawns a child owned by the innermost active group. Unjoined
-handles at scope exit are cancelled and joined before the block returns. The
-scope-exit join is cleanup, not another cancellable wait point: once the group
-has requested cancellation, it drains every child even if the owning task is
-already unwinding. A child with no wait point can therefore finish its current
-work before the caller continues. The cleanup preserves the first child
-failure for the group's own propagation path.
-
-`TaskGroup` may also be written as a direct parameter of a named function
-(D-TASKGROUP-PARAM1=A). This lets a lexical group flow down the call stack:
+`task.group name { … }` opens a lexical group. `task.group name(limit: n) { … }`
+also bounds the number of active children; an `n` below one is clamped to one
+before child admission. The group owns every child created in its body and
+joins the children when the block closes.
+The same `TaskGroup` parameter may be passed to a named helper; `task` in that
+helper uses the caller's group:
 
 ```jet
 fn add_work(group: TaskGroup, value: Int) {
-    handle :: task value + 1
-    print(handle.join() ?? 0)
+    task value + 1
+}
+
+fn run() {
+    task.group workers(limit: 4) {
+        add_work(workers, 41)
+    }
 }
 ```
 
-A spawn through a `TaskGroup` parameter may capture only copied or moved owned
-values. It may not capture a `view`: the group joins in the caller's frame, so
-this frame cannot prove a borrowed owner outlives the loan. `TaskGroup` remains a scoped authority, not
-a general value: it is illegal in fields, returns, local declarations, lambda
-parameters, and escaping closures. The parameter carries the lexical group's
-internal collector. A task spawned by a helper therefore remains owned by the
-caller's group and is cancelled and joined at that outer scope's exit. The bare
-`task` keyword always targets the innermost active group — a function cannot
-take two simultaneous `TaskGroup` parameters and address a specific one.
+`join()` is fallible: `Task<T>.join() => T ? TaskFailure`. The failure values
+are `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`,
+`TaskStatus`, `.trace()`, and `.exception()` are retired; cancellation and
+deadline behavior use the one failure rail.
 
 #### Borrowed captures in a group child (D-TASKBORROW1=A)
 
@@ -2380,40 +2358,26 @@ overlapping. Two children reaching one place is **E1101**.
 task.group g {
     left :: &particles[0]
     right :: &particles[2]
-    result :: task.all { { left.position += left.velocity; left.position }, { right.position += right.velocity; right.position } }
-    print(result)
+    print((task.all {
+        { left.position += left.velocity; left.position },
+        { right.position += right.velocity; right.position }
+    }) ?? [])
 }
 ```
 
 A group lends only what outlives its own join. An owner declared inside the
 group's own block drops before the group joins, and a group reached through a
-`TaskGroup` parameter joins in another frame; both stay **E1102**. Detached
-tasks, channels, and `tasks.spawn` are unchanged — they still require ownership.
+`TaskGroup` parameter joins in another frame; both stay **E1102**. Channels
+and task bodies still require sendable owned values.
 
-The fan-out combinators spawn and join their branches in one call — there is no
-separate spawn-then-combine step, so a combinator cannot join handles spawned
-earlier:
+Combinators are nested selectors, not methods on a group handle:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `task.all { e1, e2, … } => [T]` | Every branch must succeed. Fail-fast cancels siblings and exits with `panic: a task panicked` (example `all_failfast.jet`). |
-| `task.race { e1, e2, … } => T` | The first **successful** result wins. Losers are cancelled (D-RACEWIN1; example `race_cancel.jet`). |
-| `task.any { e1, e2, … } => T` | The first **completion** wins, including errors. |
-| `[Task<T>].join_all()` / `.wait_all()` | Both methods consume the list and return results in list order. They use the same fail-fast rule as `task.all`: a failure cancels remaining siblings. |
-| `[Task<T>].cancel_all()` | The method borrows the list and requests cancellation for every task. It does not select a winner or loser and does not wait. Each task unwinds at its next wait point under D-CANCELMODEL1. |
-
-When two branches are observed with the same scheduler completion sequence,
-`all`, `race`, and `any` break the tie by source order inside the task literal:
-the lower branch index wins. The scheduler completion sequence is the primary
-key, so distinct sequence values still follow completion order. Near-simultaneous
-wall-clock completion is deterministic only when the scheduler assigns the
-same sequence; source order is the deterministic tie-break in that case.
-
-`.join_all()` and `.wait_all()` therefore cancel remaining siblings and fail
-fast like `task.all`; `.cancel_all()` is explicit cancellation of every task,
-not loser selection. `task.all`/`task.race`/`task.any` also work outside a
-lexical `task.group` — each branch becomes its own detached task for the
-combinator's duration.
+| `task.all { a(), b() }` | Returns `[T] ? TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
+| `task.race { a(), b() }` | Returns `T ? TaskFailure`; the first successful result wins and cancels the losers. |
+| `task.any { a(), b() }` | Returns `T ? TaskFailure`; the first completed result wins and cancels the remaining children. |
+| `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
 
 - Waiting on several sources at once — a select — is a subjectless `if` table
   whose arm heads are a binding and a source (D-CONC-CHAN2=D; amends

@@ -81,7 +81,7 @@ Rows that had only projection or grep proof moved back to `planned`.
 | Events | Event graph entry nodes | Framework callback views project from ordinary `on_*` Jet functions. | planned | projection proof only; needs pointer or keyboard graph-entry proof |
 | Events | Event dispatchers/interfaces | `core.event` Event/Hook calls project dispatcher emit/subscription/lifetime/EventTrace facts from source. | planned | projection proof only; needs pointer or keyboard dispatcher proof |
 | Interfaces | Trait/impl authoring | Jet traits project Blueprint-interface parity facts and create ordinary checked impl stubs. | planned | protocol proof only; needs pointer or keyboard impl authoring proof |
-| Tasks | Latent action parity | `core.tasks` spawn/join/channel/taskgroup forms project async rails and task-flow facts. | planned | projection proof only; needs pointer or keyboard task-flow proof |
+| Tasks | Latent action parity | `task`/`task.group`/`join` and `core.tasks` channel forms project async rails and task-flow facts. | planned | projection proof only; needs pointer or keyboard task-flow proof |
 | Debugger | Debug session selector | Canvas selects the local source-span debug session. | planned | projection proof only; needs live pointer or keyboard debug-session proof |
 | Debugger | Step, next, continue, stop | Debug rail buttons drive a live session end to end under gesture coverage. | planned | debug-break/watch/step/next/continue/stop buttons exist in html.rs with zero behavior tests; largest untested surface |
 | Debugger | Breakpoints/watches | Local source-span debug state drives breakpoints and watches without editing source. | planned | projection proof only; needs live pointer or keyboard debug-state proof |

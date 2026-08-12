@@ -336,12 +336,11 @@ Single-module form stays as today: `use core.files as fs`.
 
 **What this replaces for groups**
 
-Today, selective *item* import uses braces: `use math.{sin, cos as c}`
-(D-SELIMPORT1). Under this proposal, that group form also moves to the
-same list:
+The retired selective *item* import spelling was a different delimiter
+(D-SELIMPORT1). The shipped group form uses the canonical list:
 
 ```jet
-use math.[sin, cos as c]    // items (was braces)
+use math.[sin, cos as c]    // items
 use core.[files as fs, http] // modules
 ```
 
@@ -477,7 +476,7 @@ with a count.
 - `core.auth` — verify_jwt/paseto, register_user, password_login,
   session_*, magic_link_*, oauth_*
 - `core.uuid` — v4, v7
-- `core.tasks` — spawn, spawn_group, join_all, channel, after, interval
+- `task`, `task.all`, `task.race`, `task.any`, `task.group`; `core.tasks` — channel, after, interval
 - `core.sync` — text_*/counter_*/map_*/list_*/policy_*
 - `core.event` — new, with_policy, hook, decision_hook, scope, …
 - `core.reactive` — signal, derived, computed, effect; `.loadable.*`

@@ -1156,7 +1156,7 @@ pub(crate) fn check_module_bodies(
                     for inner in body.iter_mut() {
                         if let Item::Func(f) = inner {
                             // Inline-module calls use their registered mangled
-                            // identity (`module__fn`). Preserve any top-level
+                            // identity (`__jet_module__fn`). Preserve any top-level
                             // same-name summary while the shared body checker
                             // emits this function's local summary.
                             let previous = summaries.remove(&f.name);
@@ -1480,11 +1480,17 @@ fn check_func_body_bundle_scoped(
     inline_module: Option<&str>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
+    let mut scoped_imports = st.imports.clone();
     let mut scoped_core_imports = st.core_imports.clone();
     let mut scoped_unqualified = st.unqualified.clone();
     let mut scoped_unqualified_file = st.unqualified_file.clone();
     let mut scoped_core_item_imports = st.core_item_imports.clone();
     if let Some(inline_module) = inline_module {
+        for ((scope, name), target) in &st.inline_foreign_imports {
+            if scope == inline_module {
+                scoped_imports.insert(name.clone(), *target);
+            }
+        }
         for ((scope, name), module) in &st.inline_core_imports {
             if scope == inline_module {
                 scoped_core_imports.insert(name.clone(), module.clone());
@@ -1513,7 +1519,7 @@ fn check_func_body_bundle_scoped(
         consts: &st.consts,
         modules: Some(states),
         module_idx,
-        imports: &st.imports,
+        imports: &scoped_imports,
         core_imports: &scoped_core_imports,
         code_modules: &st.code_modules,
         code_module_identities: &st.code_module_identities,
@@ -1526,6 +1532,7 @@ fn check_func_body_bundle_scoped(
         inline_reexport_inline: &st.inline_reexport_inline,
         inline_reexport_file: &st.inline_reexport_file,
         inline_reexport_core: &st.inline_reexport_core,
+        inline_reexport_foreign: &st.inline_reexport_foreign,
         module_path: &st.module_path,
         policy_declarations: &st.policy_declarations,
         rule_facts: st.rule_facts.clone(),
@@ -1585,6 +1592,7 @@ fn check_func_body_bundle_scoped(
             .filter(|param| param.name != crate::Syntax::KW_SELF)
             .map(|param| param.name.clone())
             .collect(),
+        binder_ref_types: HashMap::new(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
@@ -1609,6 +1617,7 @@ fn check_func_body_bundle_scoped(
         reactive_upgrade_names: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,
+        task_spawn_binding_name: None,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         trait_reg: &st.trait_reg,
@@ -1900,10 +1909,31 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
 
 pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
     Type::Fn {
-        params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+        params: sig
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, (_, ty))| {
+                if sig.param_variadic.get(index).copied().unwrap_or(false) {
+                    Type::List(Box::new(ty.clone()))
+                } else {
+                    ty.clone()
+                }
+            })
+            .collect(),
         ret: sig.return_type.clone().map(Box::new),
-        effect_bound: None,
+        // D-CABI-CALLBACK1 / D-EFF2: a function sema proved effect-free
+        // (`pure fn`, or an allocation-free panic-free scalar body) publishes
+        // the empty effect bound, so its value satisfies `=[]=>` callable
+        // positions without a second policing mechanism.
+        effect_bound: (sig.is_pure || sig.is_foreign_thread_safe).then(Vec::new),
         param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),
+        call_metadata: Some(crate::AST::FunctionCallMetadata {
+            names: sig.param_info.iter().map(|(name, _)| name.clone()).collect(),
+            defaults: sig.defaults.clone(),
+            variadic: sig.param_variadic.clone(),
+            conventions: sig.params.iter().map(|(convention, _)| *convention).collect(),
+        }),
         return_view_provenance: sig.return_view_provenance.get(),
     }
 }
@@ -2008,6 +2038,7 @@ mod callable_contract_tests {
                     .map(|(label, zone)| (label.to_string(), zone))
                     .collect()
             }),
+                call_metadata: None,
             return_view_provenance: None,
         }
     }
@@ -2032,6 +2063,7 @@ mod callable_contract_tests {
                 ret: Some(Box::new(Type::Int)),
                 effect_bound: None,
                 param_contract: Some(vec![("force".to_string(), zone)]),
+                call_metadata: None,
                 return_view_provenance: None,
             }
         }
@@ -2050,6 +2082,7 @@ mod callable_contract_tests {
                 ret: None,
                 effect_bound: None,
                 param_contract: None,
+                call_metadata: None,
                 return_view_provenance: None,
             }
         }

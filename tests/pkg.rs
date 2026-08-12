@@ -194,7 +194,7 @@ fn init_clean_project(dir: &Path, name: &str, version: &str) {
     write(dir, "package.jet", &min_manifest(name, version));
     write(
         dir,
-        "main.jet",
+        "run.jet",
         "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hi\"); }\n",
     );
     for args in &[
@@ -1300,7 +1300,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
         "package.jet",
         &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [IO],\n}\n"),
     );
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
 
     let result = jet::compile_with_path("", &entry.to_string_lossy());
@@ -1309,7 +1309,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
         "a well-formed effects: budget should not block compilation:\n{}",
         result
             .err()
-            .map(|d| jet::render_diagnostics("main.jet", "", &d))
+            .map(|d| jet::render_diagnostics("run.jet", "", &d))
             .unwrap_or_default()
     );
 
@@ -1379,11 +1379,11 @@ fn cli_build_enforces_effect_budget_e1220() {
     );
     write(
         &tmp,
-        "main.jet",
+        "run.jet",
         "use netdep;\nfn run() { netdep.ping(); }\n",
     );
 
-    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success(),
@@ -1414,9 +1414,9 @@ fn cli_build_rejects_undeclared_effect_budget_leaf() {
         &(min_manifest("app", "0.1.0")
             + "\neffects: {\n    allow: [FS.Raed],\n}\n"),
     );
-    write(&tmp, "main.jet", "fn run() {}\n");
+    write(&tmp, "run.jet", "fn run() {}\n");
 
-    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "{stderr}");
     assert!(
@@ -1445,11 +1445,11 @@ fn cli_build_lint_never_blocks_by_default() {
     write(&tmp, "package.jet", &min_manifest("app", "0.1.0"));
     write(
         &tmp,
-        "main.jet",
+        "run.jet",
         "struct Invoice { price: Float }\nfn run() { print(\"hi\"); }\n",
     );
 
-    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
     // A denied lint would fail *before* the effect summary prints (see
     // `cli_build_enforces_lint_policy_e1293`); reaching the summary with no
@@ -1494,11 +1494,11 @@ fn cli_build_enforces_lint_policy_e1293() {
     );
     write(
         &tmp,
-        "main.jet",
+        "run.jet",
         "struct Invoice { price: Float }\nfn run() { print(\"hi\"); }\n",
     );
 
-    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success(),
@@ -1534,9 +1534,9 @@ fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
         &(min_manifest("app", "0.1.0")
             + "\npolicy: { lints: { deny: [L0302] } }\n"),
     );
-    write(&tmp, "main.jet", "fn run() { print(\"hi\"); }\n");
+    write(&tmp, "run.jet", "fn run() { print(\"hi\"); }\n");
 
-    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "a lint code is not a policy value:\n{stderr}");
     assert!(
@@ -2052,7 +2052,7 @@ fn path_dep_compiles_ok() {
         "package.jet",
         &manifest_with_deps("myapp", "0.1.0", "    greeter: ./greeter,"),
     );
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     fs::write(
         &entry,
         "use greeter;\nfn run() { print(greeter.greet()); }\n",
@@ -2065,7 +2065,7 @@ fn path_dep_compiles_ok() {
         "path dep project should compile:\n{}",
         result
             .err()
-            .map(|d| jet::render_diagnostics("main.jet", "", &d))
+            .map(|d| jet::render_diagnostics("run.jet", "", &d))
             .unwrap_or_default()
     );
 
@@ -2091,7 +2091,7 @@ fn version_conflict_emits_e1201() {
             "    liba: ./liba,\n    libb: ./libb,",
         ),
     );
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() {}\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
@@ -2124,7 +2124,7 @@ fn stale_lock_emits_e1202() {
         "version = 1\n\n[[package]]\nname = \"app\"\nsource = { root = \".\" }\n\n[root]\ndependencies = []\n",
     );
 
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() {}\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
@@ -2143,7 +2143,7 @@ fn toolchain_mismatch_emits_e1208() {
         "package.jet",
         "name: \"app\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n",
     );
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
@@ -2162,7 +2162,7 @@ fn reserved_section_emits_e1209() {
         "package.jet",
         &(min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n"),
     );
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() {}\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
@@ -2965,8 +2965,8 @@ fn inferred_inline_module_effects_are_published() {
     let new_dir = dir.join("new");
     fs::create_dir_all(&old_dir).unwrap();
     fs::create_dir_all(&new_dir).unwrap();
-    let old_path = old_dir.join("main.jet");
-    let new_path = new_dir.join("main.jet");
+    let old_path = old_dir.join("run.jet");
+    let new_path = new_dir.join("run.jet");
     let old = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() {} }\n";
     let new = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() { print(\"bench\"); } }\n";
     fs::write(&old_path, old).unwrap();
@@ -3178,11 +3178,11 @@ fn vendored_offline_locked_build() {
     );
     write(
         &tmp,
-        "main.jet",
+        "run.jet",
         "use greeter;\nfn run() { print(greeter.greet()); }\n",
     );
 
-    let entry = tmp.join("main.jet");
+    let entry = tmp.join("run.jet");
     let pack_path = tmp.join("package.jet");
 
     // Fetch to create the lock.
@@ -3488,7 +3488,7 @@ fn cli_publish_refuses_dirty_git_tree() {
 
     // Create a minimal project.
     write(&tmp, "package.jet", &min_manifest("dirtypkg", "1.0.0"));
-    write(&tmp, "main.jet", "fn run() { print(\"hello\"); }\n");
+    write(&tmp, "run.jet", "fn run() { print(\"hello\"); }\n");
 
     // Init git, commit everything (clean tree first).
     for cmd_args in &[
@@ -3834,12 +3834,12 @@ fn pub_package_function_is_visible_inside_project_scope() {
     )
     .unwrap();
     fs::write(
-        s.join("main.jet"),
+        s.join("run.jet"),
         "use helper;\n\nfn run() {\n    print(helper.secret())\n}\n",
     )
     .unwrap();
 
-    let diags = jet::check_with_path(&s.join("main.jet").to_string_lossy());
+    let diags = jet::check_with_path(&s.join("run.jet").to_string_lossy());
     assert!(
         diags.is_empty(),
         "expected same-package access to pass, got {diags:?}"
@@ -3859,7 +3859,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     )
     .unwrap();
     fs::write(
-        app.join("main.jet"),
+        app.join("run.jet"),
         "use dep;\n\nfn run() {\n    print(dep.secret())\n}\n",
     )
     .unwrap();
@@ -3874,7 +3874,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     )
     .unwrap();
 
-    let diags = jet::check_with_path(&app.join("main.jet").to_string_lossy());
+    let diags = jet::check_with_path(&app.join("run.jet").to_string_lossy());
     assert!(
         diags.iter().any(|d| d.code == "E0605"),
         "expected downstream access to report E0605, got {diags:?}"
@@ -3890,12 +3890,12 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     )
     .unwrap();
     fs::write(
-        s.join("main.jet"),
+        s.join("run.jet"),
         "use helper;\n\nfn run() {\n    s :: helper.make()\n    print(s.value)\n}\n",
     )
     .unwrap();
 
-    let diags = jet::check_with_path(&s.join("main.jet").to_string_lossy());
+    let diags = jet::check_with_path(&s.join("run.jet").to_string_lossy());
     assert!(
         diags.is_empty(),
         "expected same-package type/field access to pass, got {diags:?}"

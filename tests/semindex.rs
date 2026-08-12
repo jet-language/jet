@@ -235,7 +235,7 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 #[test]
 fn semindex_schema_version() {
     // D-EFFECT-OMIT1 added effect provenance and normalized inferred rows.
-    assert_eq!(SCHEMA_VERSION, 12);
+    assert_eq!(SCHEMA_VERSION, 13);
 }
 
 #[test]
@@ -954,6 +954,33 @@ fn run() {
     assert!(json.contains("\"target\":\"Widget\""));
     assert!(json.contains("\"trait_impl\""));
     assert!(json.contains("\"inherent_impl\""));
+}
+
+#[test]
+fn semindex_dossier_preserves_method_call_contract() {
+    let src = r#"
+struct Client {
+    host: String
+}
+
+impl Client {
+    fn connect(self, host: String, /, timeout seconds: Int = 30, *, tls enabled: Bool = true, rest: ...String) => String {
+        return host
+    }
+}
+
+fn run() {}
+"#;
+    let path = temp_fixture("dossier_method_contract.jet", src);
+    let dossier = open(&path).expect("method contract fixture indexes").dossier("Client");
+    let connect = dossier
+        .members
+        .iter()
+        .find(|member| member.name == "connect")
+        .expect("connect method fact");
+    assert!(connect.signature.contains("timeout seconds: Int"), "{}", connect.signature);
+    assert!(connect.signature.contains("*, tls enabled: Bool"), "{}", connect.signature);
+    assert!(connect.signature.contains("rest: ...String"), "{}", connect.signature);
 }
 
 #[test]

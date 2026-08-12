@@ -11,7 +11,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_service_runtime_method(
         &mut self,
         method: &str,
-        args: &mut [crate::AST::CallArg],
+        args: &mut Vec<crate::AST::CallArg>,
         span: Span,
     ) -> Option<Option<Type>> {
         match method {

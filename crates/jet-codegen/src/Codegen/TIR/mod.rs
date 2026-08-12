@@ -45,7 +45,7 @@ pub(crate) use lower::*;
 pub(crate) use subset::*;
 
 use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp, VariantPayload};
-use crate::Codegen::{mangle, mangle_variant, user_type_rust};
+use crate::Codegen::{mangle, mangle_path};
 
 thread_local! {
     static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
@@ -61,9 +61,58 @@ pub struct TJitSpawnLambda {
 }
 
 pub struct JitSpawnCapture {
+    /// Local name used by the lowered spawn body.
     pub name: String,
+    /// Source local read at the spawn site.
+    pub source: String,
     pub ty: Type,
     pub clone_at_spawn: bool,
+}
+
+/// One bounded traversal primitive for TIR lowering consumers.
+///
+/// The stack is heap-owned and stores pending nodes, so deep source/TIR
+/// structure does not consume the host call stack. Consumers use the same
+/// push/pop order for AST scans, TIR statement lowering, and nested-lambda
+/// shape inspection.
+pub struct TirWorklist<T> {
+    pending: Vec<T>,
+}
+
+impl<T> TirWorklist<T> {
+    pub fn new() -> Self {
+        Self { pending: Vec::new() }
+    }
+
+    pub fn from_reversed<I>(items: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut pending = items.into_iter().collect::<Vec<_>>();
+        pending.reverse();
+        Self { pending }
+    }
+
+    pub fn push(&mut self, item: T) {
+        self.pending.push(item);
+    }
+
+    pub fn extend<I>(&mut self, items: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
+        self.pending.extend(items);
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        self.pending.pop()
+    }
+}
+
+impl<T> Default for TirWorklist<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub enum TJitSpawnBody {
@@ -71,6 +120,11 @@ pub enum TJitSpawnBody {
     Block {
         prefix: Vec<TStmt>,
         tail: Option<Box<TExpr>>,
+    },
+    /// A reactive body lowered once and shared with the normal lambda path.
+    SharedBlock {
+        body: std::sync::Arc<[TStmt]>,
+        tail: bool,
     },
 }
 
@@ -92,6 +146,8 @@ pub struct JitProgram {
     pub struct_fields: std::collections::HashMap<String, Vec<String>>,
     /// M5: field types parallel to `struct_fields` order.
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
+    /// Canonical typeable paths used by interpreter reflection.
+    pub reflect_paths: std::collections::HashMap<String, String>,
     /// Declared generic parameter names per struct, in source order.
     pub struct_type_params: std::collections::HashMap<String, Vec<String>>,
     /// M5: mangled variant names per enum type (discriminant order).
@@ -199,12 +255,43 @@ fn register_enum_variants(
         enum_name.to_string(),
         variants
             .iter()
-            .map(|variant| mangle_variant(&variant.name))
+            .map(|variant| mangle_path(&variant.name))
             .collect(),
     );
     for variant in variants {
-        let pattern = format!("{}::{}", user_type_rust(enum_name), mangle_variant(&variant.name));
+        let pattern = format!("{}::{}", mangle_path(enum_name), mangle_path(&variant.name));
         enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
+    }
+}
+
+fn register_imported_enum_variants(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    enum_name: &str,
+    variants: &[crate::AST::Variant],
+    enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
+    enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
+) {
+    let identity = crate::Codegen::TIR::imported_type_name(owner, enum_name);
+    enum_variants.insert(
+        identity.clone(),
+        variants
+            .iter()
+            .map(|variant| mangle_path(&variant.name))
+            .collect(),
+    );
+    for variant in variants {
+        let pattern = format!(
+            "{}::{}",
+            mangle_path(&identity),
+            mangle_path(&variant.name)
+        );
+        let payload = payload_types_for_variant(&variant.payload)
+            .into_iter()
+            .map(|ty| crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, &ty))
+            .collect();
+        enum_variant_payload_types.insert(pattern, payload);
     }
 }
 
@@ -392,6 +479,9 @@ pub struct TLocal {
     /// D-PROVENANCE1=B: source identity for the exact `#Track` Float binding.
     /// The metadata travels with the slot until TIR lowers `.origin()`.
     pub origin: Option<TBindingOrigin>,
+    /// The Rust binding is mutable. This is a TIR ownership fact, not an
+    /// emitter-side repair for a generated spelling.
+    pub mutable: bool,
     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
@@ -406,6 +496,7 @@ impl TLocal {
             generated: false,
             deref: false,
             origin: None,
+            mutable: false,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -418,6 +509,7 @@ impl TLocal {
             generated: true,
             deref: false,
             origin: None,
+            mutable: false,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -426,6 +518,16 @@ impl TLocal {
     /// Preserve the source identity when a lowering path rebinds this slot.
     pub fn with_origin(mut self, origin: TBindingOrigin) -> TLocal {
         self.origin = Some(origin);
+        self
+    }
+
+    /// The compiler-owned STM handle used by `#Transact` Shared edits.
+    pub fn stm() -> TLocal {
+        TLocal::generated("__jet_stm").as_mutable()
+    }
+
+    pub fn as_mutable(mut self) -> TLocal {
+        self.mutable = true;
         self
     }
 
@@ -1029,6 +1131,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         (None, None) => return None,
     };
     cx.jit_spawn_lambdas.borrow_mut().clear();
+    cx.jit_spawn_sites.borrow_mut().clear();
     cx.jit_method_calls.borrow_mut().clear();
     cx.jit_generic_calls.borrow_mut().clear();
     cx.jit_canonical_deopt.borrow_mut().clear();
@@ -1369,6 +1472,20 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             .map(str::to_string)
             .collect(),
     );
+    // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
+    // packed JIT/AOT shape even when the source only reaches it through
+    // `Task<T>.join()` and never constructs a variant explicitly.
+    enum_variants.insert(
+        crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+        ["user_Cancelled", "user_DeadlineBlown", "user_Panicked"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
+    enum_variant_payload_types.insert(
+        format!("user_{}::user_Panicked", crate::Syntax::TYPE_TASK_FAILURE),
+        vec![Type::String],
+    );
     let mut int_constants = std::collections::HashMap::new();
     let mut constants = std::collections::HashMap::new();
     // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
@@ -1519,21 +1636,34 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         for item in &imported.items {
             match item {
                 Item::Struct(s) => {
-                    struct_type_params.insert(
-                        s.name.clone(),
-                        s.type_params.iter().map(|param| param.name.clone()).collect(),
-                    );
-                    struct_fields.insert(
-                        s.name.clone(),
-                        s.fields
-                            .iter()
-                            .map(|field| mangle(&field.name))
-                            .collect(),
-                    );
-                    struct_field_types.insert(
-                        s.name.clone(),
-                        s.fields.iter().map(|field| field.ty.clone()).collect(),
-                    );
+                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                        let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
+                        struct_type_params.insert(
+                            name.clone(),
+                            s.type_params.iter().map(|param| param.name.clone()).collect(),
+                        );
+                        struct_fields.insert(
+                            name.clone(),
+                            s.fields
+                                .iter()
+                                .map(|field| mangle(&field.name))
+                                .collect(),
+                        );
+                        struct_field_types.insert(
+                            name,
+                            s.fields
+                                .iter()
+                                .map(|field| {
+                                    crate::Codegen::TIR::qualify_imported_type(
+                                        bundle,
+                                        module_idx,
+                                        &owner,
+                                        &field.ty,
+                                    )
+                                })
+                                .collect(),
+                        );
+                    }
                     for field in &s.fields {
                         register_union_type(
                             &field.ty,
@@ -1543,12 +1673,17 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     }
                 }
                 Item::Enum(e) if e.type_params.is_empty() => {
-                    register_enum_variants(
-                        &e.name,
-                        &e.variants,
-                        &mut enum_variants,
-                        &mut enum_variant_payload_types,
-                    );
+                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                        register_imported_enum_variants(
+                            bundle,
+                            module_idx,
+                            &owner,
+                            &e.name,
+                            &e.variants,
+                            &mut enum_variants,
+                            &mut enum_variant_payload_types,
+                        );
+                    }
                 }
                 Item::CodeModule(code_module) => {
                     let Some(body) = &code_module.body else {
@@ -1671,6 +1806,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
     let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
     let canonical_calls = cx.jit_canonical_calls.borrow().clone();
+    let reflect_paths = cx.reflect_paths.clone();
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -1679,6 +1815,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         spawn_lambdas,
         struct_fields,
         struct_field_types,
+        reflect_paths,
         struct_type_params,
         enum_variants,
         enum_variant_payload_types,
@@ -2075,10 +2212,11 @@ pub enum THostCall {
         editable: bool,
         edit_paths_disjoint: bool,
     },
-    /// `(({base})[({index}).0 as usize].clone())` FixedList index.
+    /// Checked fixed-list index through `jet_fixed_list_index`.
     FixedListIndex {
         base: Box<TExpr>,
         index: Box<TExpr>,
+        line: u32,
     },
     /// Typed-text audited escapes / projections.
     TypedText {
@@ -2219,15 +2357,9 @@ pub enum TTypedTextForm {
     HTMLText,
 }
 
-#[derive(Clone, Copy)]
-pub enum TTypedTextInterpKind {
-    SQL,
-    HTML,
-    Sh,
-    URL,
-    Path,
-    DateTime,
-}
+/// D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: TIR carries the same descriptor as the
+/// source surface. There is no second kind table in an execution tier.
+pub type TTypedTextInterpKind = crate::Syntax::TypedHeadKind;
 
 /// Let binding type annotation. Emit spells the `: …` clause (I3: no Rust text here).
 #[derive(Clone)]
@@ -2667,7 +2799,7 @@ pub enum TStmt {
     /// Body bindings live only in the child `LowerEnv` matching that Rust scope.
     Region(Vec<TStmt>),
     /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a Cassowary-style
-    /// constraint block. Unlike `Region`/the taskgroup path, this DOES need a
+    /// constraint block. Unlike `Region`/the `task.group` path, this DOES need a
     /// real runtime object: `handle` is the slot the fresh `jet_layout::Handle`
     /// binds into, `label` is the source name (for the
     /// handle's debug/conflict-report label), and `body` is the block's
@@ -2740,11 +2872,11 @@ pub enum TStmt {
         /// `jet_txn::snapshot_custom` and `<ty>::restore`, so the custom cheap diff
         /// runs instead of a full clone.
         snapshots: Vec<(TLocal, Option<Type>)>,
-        /// D-STM1=A (card #506): true when the block touches the `Shared<T>` plane
-        /// (some `.edit` inside routed to `edit_txn`), so emission wraps the body in
-        /// `jet_stm::begin()` … `.commit()` — the atomic multi-handle commit. False
-        /// for a plain local-only `#Transact` (byte-identical to the pre-STM output).
-        uses_stm: bool,
+        /// D-STM1=A (card #506): the compiler-owned mutable STM handle when the
+        /// block touches the `Shared<T>` plane. Its presence means emission wraps
+        /// the body in `jet_stm::begin()` … `.commit()` — the atomic multi-handle
+        /// commit. `None` preserves the plain local-only transaction shape.
+        stm: Option<TLocal>,
         body: Vec<TStmt>,
     },
     /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,
@@ -2797,6 +2929,8 @@ pub struct TPattern {
 pub enum TPatternPosition {
     /// A binding test that destructures payload slots into locals (`if x == Ok(v)`).
     Binding,
+    /// An Option binding test (`if x == Some(v)`).
+    OptionBinding,
     /// A match-arm head, which also binds payload slots.
     Arm,
     /// A payload-free variant path, compared by value.
@@ -2822,6 +2956,15 @@ impl TPattern {
             pattern,
             enum_type: None,
             position: TPatternPosition::Binding,
+        }
+    }
+
+    /// An Option payload-binding test (`if x == Some(v)`).
+    pub fn option_binding(pattern: crate::AST::Pattern) -> TPattern {
+        TPattern {
+            pattern,
+            enum_type: None,
+            position: TPatternPosition::OptionBinding,
         }
     }
 
@@ -3264,13 +3407,14 @@ pub enum TExprKind {
         line: usize,
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
-    /// or borrowed value. Also the lowering target for `Expr::Copy` — D-CAP2
-    /// (D-MEM1/S4) `copy x`, the one user-typable copy verb — so the compiler's
-    /// own internal duplication rewrites and the explicit `copy x` a user writes
-    /// share one TIR node (I8). The AST path emits `(recv).clone()`
-    /// unconditionally; the TIR carries the lowered receiver and the result type
-    /// (the receiver's type).
+    /// or borrowed value. This is ordinary sharing/cloning semantics. The
+    /// user-written `~` copy has its own `ExplicitCopy` node so a Tensor does not
+    /// silently turn compiler-inserted clones into deep storage copies.
     Clone(Box<TExpr>),
+    /// D-MEM1/D-CAP2: the explicit Jet `~` copy signal. Backends route Tensor
+    /// values through the shared Prelude copy operation; non-Tensor values keep
+    /// their ordinary clone/materialization semantics.
+    ExplicitCopy(Box<TExpr>),
     /// D-SHAPE-PLACE1=A: a checked local whole/field/index place borrow.
     /// Range places use `ViewNew`/`ViewMutNew` so bounds are checked once.
     Borrow {
@@ -3519,9 +3663,9 @@ pub enum TExprKind {
         op: THandleOp,
         args: Vec<TExpr>,
     },
-    /// c109 Phase 13: a closure-taking core/stdlib call — `tasks.spawn`,
-    /// `http.serve`, `scope.guard`. These are NOT in `core_fixed_sig` and each has a
-    /// bespoke emit shape the plain `CoreCall` cannot reproduce: `spawn` wraps a
+    /// c109 Phase 13: a closure-taking core/stdlib call.
+    /// `task`, `http.serve`, and `scope.guard` are NOT in `core_fixed_sig` and each
+    /// has a bespoke emit shape the plain `CoreCall` cannot reproduce: `task` wraps a
     /// `emit_spawn_lambda` (`move |…|`,
     /// NEVER `Box::new`) in `JetTask::spawn(…)`; `serve` (lambda handler) emits
     /// `jet_http_serve(&(addr), <lambda>)`; `guard` emits `jet_scope_guard(<lambda>)`.
@@ -3530,15 +3674,15 @@ pub enum TExprKind {
     CoreClosureCall {
         kind: TCoreClosureKind,
     },
-    /// D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join every handle, collect results.
+    /// D-CONC-SPAWN1=D: `task.all { … }` — join every child, collect results.
     TaskGroupAll {
         tasks: Box<TExpr>,
     },
-    /// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first completed result wins.
+    /// D-CONC-SPAWN1=D: `task.race { … }` — first successful child wins.
     TaskGroupRace {
         tasks: Box<TExpr>,
     },
-    /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result (v1 alias).
+    /// D-CONC-SPAWN1=D: `task.any { … }` — first completed child wins.
     TaskGroupAny {
         tasks: Box<TExpr>,
     },
@@ -3629,20 +3773,17 @@ pub struct TExternArg {
     pub clone: bool,
 }
 
-/// c109 Phase 13: the three closure-taking core-call shapes (see
+/// c109 Phase 13: the closure-taking core-call shapes (see
 /// `TExprKind::CoreClosureCall`). Each holds the already-rendered closure string
 /// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
 /// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
 pub enum TCoreClosureKind {
-    /// `tasks.spawn(<lambda>)` uses no group. `g.task => …` carries the same
+    /// `task <body>` uses no group. A `task.group` child carries the same
     /// internal group collector through every named helper call.
     Spawn {
         group: Option<Box<TExpr>>,
         site: usize,
         spawn_closure: String,
-        /// D-TASKBORROW1=A: sema proved this child's borrowed places disjoint,
-        /// so it launches through the group's scoped path (loan closed at join).
-        scoped: bool,
     },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
@@ -3685,7 +3826,8 @@ pub enum TCoreClosureKind {
     },
 }
 
-/// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
+/// c109 Phase 13: fn-typed values plus the canonical interrupt callback form
+/// (see `TExprKind::FnValue`).
 pub enum TFnValueKind {
     /// A bare function name used as a value. `wrapper` is the already-rendered
     /// `Box::new(move |…| user_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
@@ -3693,8 +3835,10 @@ pub enum TFnValueKind {
     NamedFn {
         wrapper: String,
         /// Jet function key for native backends. `None` is a rendered closure
-        /// coercion used only by the Rust emitter.
+        /// coercion. `lambda` carries that closure's target-neutral executable
+        /// body so Web and the TIR evaluator do not depend on the Rust wrapper.
         name: Option<String>,
+        lambda: Option<Box<TLambda>>,
     },
     /// A call through a fn-value `(f)(args)`. `callee` lowers to its place (a local
     /// of `Type::Fn`, or another fn-value form); args are lowered plainly.
@@ -3702,6 +3846,12 @@ pub enum TFnValueKind {
         callee: Box<TExpr>,
         args: Vec<TCallArg>,
     },
+    /// D-OSINTERRUPT1: one Send-safe callback representation. `value` is the
+    /// already-lowered inline, named, or indirect callable. AOT emits its
+    /// `Arc<dyn Fn() + Send + Sync + 'static>` value; resident JIT marshals it
+    /// to one `(function, environment)` record; the interpreter keeps its
+    /// callable index. The engines do not infer callback policy here.
+    Interrupt { value: Box<TExpr> },
 }
 
 /// c109 Phase 12: a resolved numeric method form, one per numeric arm. The width
@@ -3881,6 +4031,8 @@ pub struct TLambda {
 pub enum TLambdaBody {
     Expr(Box<TExpr>),
     Block(Vec<TStmt>),
+    /// A deferred body shared by the AOT closure representation and JIT lambda.
+    SharedBlock(std::sync::Arc<[TStmt]>),
 }
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`
@@ -4598,19 +4750,15 @@ pub enum THandleOp {
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s `Value` handle — plain
     /// inherent-method passthrough, same shape as `ArgsSpecHelp`.
     ReflectValueTypeName,
+    ReflectValuePath,
     ReflectValueDisplay,
     ReflectValueFields,
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x).fields()`'s `Field` handle.
     ReflectFieldName,
     ReflectFieldValue,
-    /// c109 Phase 21: Task `join()` → `(recv).join()` (the no-arg `join` arm of
-    /// built-in method `join` arm — shared with list no-arg join, but here it's the
-    /// JetTask method. Returns the task's value `T`.
+    /// D-CONC-FAIL1=A: Task `join()` → `(recv).join()`; sema types it as
+    /// `T ? TaskFailure`.
     TaskJoin,
-    /// Compiler-generated task-group scope join. It consumes the task and
-    /// unwraps `TaskFailure` instead of exposing the explicit `.join()` Result
-    /// rail to a discarded cleanup expression.
-    TaskScopeJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.
     TaskDetach,
@@ -4620,17 +4768,6 @@ pub enum THandleOp {
     TaskResume,
     /// D-COROUTINE1=A: Task control-plane cancel request (thread-runtime v1: metadata only).
     TaskCancel,
-    /// D-COROUTINE1=A: Task control-plane trace string.
-    TaskTrace,
-    /// Failure query → `(recv).exception()` → `Option<String>`.
-    TaskException,
-    // D-VERDICT-1323-1: the list twins. Each calls the same Prelude symbol its
-    // single-handle counterpart does, applied over the whole group in order.
-    TaskDetachAll,
-    TaskCancelAll,
-    TaskPauseAll,
-    TaskResumeAll,
-    TaskTraceAll,
     /// c109 Phase 21 / D-TUPLE-DESTRUCT1: Receiver `receive()` → `(recv).receive()` →
     /// `Result<T, Closed>`.
     ChannelReceive,

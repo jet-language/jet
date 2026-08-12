@@ -854,20 +854,60 @@ impl<'a> Checker<'a> {
                 self.record_edge(call.name.clone(), call.name_span);
             }
     
+            // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
+            // must take responsibility inside their own `#Unsafe` block.
+            if sig.is_unsafe && !self.in_unsafe {
+                self.diags.push(Diagnostic::error(
+                    "E3103",
+                    format!("`{}` is an `#Unsafe` function", call.name),
+                    "its contract can't be checked by the compiler, so the caller must vouch for it"
+                        .to_string(),
+                    format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
+                    Some(call.name_span),
+                ));
+            }
+    
+            // D-APILABEL1=A: one binder resolves labels, zones, reordering, and
+            // skipped defaults. It rewrites `call.args` into declaration order
+            // and marks each argument with where the caller wrote it, so
+            // lowering can keep the source evaluation order.
+            let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+            let bound = crate::Sema::CallBinder::bind_call_args(
+                &call.name,
+                &params,
+                &mut call.args,
+                call.name_span,
+                &mut self.diags,
+            );
+            self.register_binder_refs(&call.args);
+            if bound.is_none() {
+                // The call's arguments never resolved to parameters, so
+                // arity and per-position type errors below would all be
+                // about slots that do not exist. Report the argument
+                // expressions' own problems and stop.
+                for arg in call.args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(sig.return_type.clone());
+            }
+
             // E3211 (card #436): a `String` literal with a known interior NUL
             // byte can't cross into a C-boundary function — `CString::new`
             // would fail (C strings are NUL-terminated, not length-prefixed).
-            // Only checked for a literal (fully known at compile time); a
-            // runtime-built String is caught by a codegen panic instead (see
+            // Run this after the shared binder so a reordered labelled call is
+            // checked against the declaration slot it actually reaches. A
+            // runtime-built String is caught by the codegen panic instead (see
             // `Codegen/CModule.rs`'s `NUL_PANIC`).
-            // E3211 (card #436): same check for a directly-called (same-file,
-            // no import alias) C-boundary function — see
-            // `CheckerCoreLib/imports.rs::infer_import_call` for the more
-            // common cross-module-alias path (`use c.<lib> as x; x.f(...)`).
             if sig.is_c_abi {
-                for (i, arg) in call.args.iter().enumerate() {
-                    let is_string_param =
-                        matches!(sig.params.get(i), Some((_, Type::String)));
+                for (index, arg) in call.args.iter().enumerate() {
+                    // The binder has already rewritten `call.args` into
+                    // declaration order. `source_index` is only the caller's
+                    // original position for evaluation-order lowering.
+                    let declaration_index = index;
+                    let is_string_param = matches!(
+                        sig.params.get(declaration_index),
+                        Some((_, Type::String))
+                    );
                     if !is_string_param {
                         continue;
                     }
@@ -888,43 +928,6 @@ impl<'a> Checker<'a> {
                 }
             }
 
-            // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
-            // must take responsibility inside their own `#Unsafe` block.
-            if sig.is_unsafe && !self.in_unsafe {
-                self.diags.push(Diagnostic::error(
-                    "E3103",
-                    format!("`{}` is an `#Unsafe` function", call.name),
-                    "its contract can't be checked by the compiler, so the caller must vouch for it"
-                        .to_string(),
-                    format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
-                    Some(call.name_span),
-                ));
-            }
-    
-            // D-APILABEL1=A: one binder resolves labels, zones, reordering, and
-            // skipped defaults. It rewrites `call.args` into declaration order
-            // and marks each argument with where the caller wrote it, so
-            // lowering can keep the source evaluation order.
-            if !sig.param_info.is_empty() {
-                let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
-                let bound = crate::Sema::CallBinder::bind_call_args(
-                    &call.name,
-                    &params,
-                    &mut call.args,
-                    call.name_span,
-                    &mut self.diags,
-                );
-                if bound.is_none() {
-                    // The call's arguments never resolved to parameters, so
-                    // arity and per-position type errors below would all be
-                    // about slots that do not exist. Report the argument
-                    // expressions' own problems and stop.
-                    for arg in call.args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return Some(sig.return_type.clone());
-                }
-            }
             let variadic = sig.param_variadic.last().copied().unwrap_or(false);
             // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
             // (`...Trait` / `...[A, B]`) can't be packed into one `[T]` list —

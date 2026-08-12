@@ -3,7 +3,7 @@ pub mod jet_email {
     // The one outcome carrier: from the flat Prelude under AOT, from the host
     // module when another tier includes this file.
     #[allow(unused_imports)]
-    use super::*;
+    use super::{JetAbsent, JetOutcome};
     pub const MAX_RECIPIENTS: usize = 100;
     pub const MAX_ATTACHMENTS: usize = 64;
     pub const MAX_HEADER_BYTES: usize = 998;
@@ -25,6 +25,73 @@ pub mod jet_email {
         TimedOut { operation: String, server: Option<String>, code: Option<i64>, reason: String },
         Cancelled { operation: String, server: Option<String>, code: Option<i64>, reason: String },
         DeliveryUnknown { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+    }
+
+    /// The one error projection used by AOT, JIT, and interpreter adapters.
+    /// Adapters marshal these fields; they do not own variant meaning.
+    pub fn error_parts(
+        error: Error,
+    ) -> (&'static str, i64, String, Option<String>, Option<i64>, String) {
+        match error {
+            Error::Configuration { operation, server, code, reason } => {
+                ("Configuration", 0, operation, server, code, reason)
+            }
+            Error::DNS { operation, server, code, reason } => {
+                ("DNS", 1, operation, server, code, reason)
+            }
+            Error::Connect { operation, server, code, reason } => {
+                ("Connect", 2, operation, server, code, reason)
+            }
+            Error::TLS { operation, server, code, reason } => {
+                ("TLS", 3, operation, server, code, reason)
+            }
+            Error::Auth { operation, server, code, reason } => {
+                ("Auth", 4, operation, server, code, reason)
+            }
+            Error::Protocol { operation, server, code, reason } => {
+                ("Protocol", 5, operation, server, code, reason)
+            }
+            Error::Rejected { operation, server, code, reason } => {
+                ("Rejected", 6, operation, server, code, reason)
+            }
+            Error::Transient { operation, server, code, reason } => {
+                ("Transient", 7, operation, server, code, reason)
+            }
+            Error::TimedOut { operation, server, code, reason } => {
+                ("TimedOut", 8, operation, server, code, reason)
+            }
+            Error::Cancelled { operation, server, code, reason } => {
+                ("Cancelled", 9, operation, server, code, reason)
+            }
+            Error::DeliveryUnknown { operation, server, code, reason } => {
+                ("DeliveryUnknown", 10, operation, server, code, reason)
+            }
+        }
+    }
+
+    pub fn error_reason(error: &Error) -> &str {
+        match error {
+            Error::Configuration { reason, .. }
+            | Error::DNS { reason, .. }
+            | Error::Connect { reason, .. }
+            | Error::TLS { reason, .. }
+            | Error::Auth { reason, .. }
+            | Error::Protocol { reason, .. }
+            | Error::Rejected { reason, .. }
+            | Error::Transient { reason, .. }
+            | Error::TimedOut { reason, .. }
+            | Error::Cancelled { reason, .. }
+            | Error::DeliveryUnknown { reason, .. } => reason,
+        }
+    }
+
+    pub fn configuration_error(operation: &str, reason: impl Into<String>) -> Error {
+        Error::Configuration {
+            operation: operation.to_string(),
+            server: None,
+            code: None,
+            reason: reason.into(),
+        }
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -106,13 +173,15 @@ pub mod jet_email {
         }
     }
 
-    // Hidden Rust generic preserves Jet's single canonical Secret type.
-    pub enum SMTPAuth<S> {
+    // Hidden Rust generic preserves Jet's single canonical Secret type. The
+    // byte default keeps direct Prelude consumers well-typed when no secret
+    // value is present; runtime entry points still name Vec<u8> explicitly.
+    pub enum SMTPAuth<S = Vec<u8>> {
         None,
         Password { username: String, password: S },
     }
 
-    pub struct DkimConfig<S> {
+    pub struct DkimConfig<S = Vec<u8>> {
         pub domain: String,
         pub selector: String,
         pub private_key: S,
@@ -125,7 +194,7 @@ pub mod jet_email {
         SystemPlusCa { pem: Vec<u8> },
     }
 
-    pub struct SMTPConfig<S> {
+    pub struct SMTPConfig<S = Vec<u8>> {
         pub host: String,
         pub port: i64,
         pub security: SMTPSecurity,
@@ -180,19 +249,19 @@ pub mod jet_email {
         runtime: RuntimeFns,
     ) -> Result<Mailer, Error> {
         let auth = match &config.auth {
-            SMTPAuth::None => SMTPAuth::None,
-            SMTPAuth::Password { username, password } => SMTPAuth::Password {
+            SMTPAuth::None => SMTPAuth::<Vec<u8>>::None,
+            SMTPAuth::Password { username, password } => SMTPAuth::<Vec<u8>>::Password {
                 username: username.clone(),
                 password: extract(password),
             },
         };
-        let dkim = config.dkim.as_ref().map(|dkim| DkimConfig {
+        let dkim = config.dkim.as_ref().map(|dkim| DkimConfig::<Vec<u8>> {
             domain: dkim.domain.clone(),
             selector: dkim.selector.clone(),
             private_key: extract(&dkim.private_key),
             signed_headers: dkim.signed_headers.clone(),
-        }).map_err(|JetAbsent| JetAbsent);
-        smtp_bytes(SMTPConfig {
+        }).map_err(|_| JetAbsent);
+        smtp_bytes(SMTPConfig::<Vec<u8>> {
             host: config.host.clone(), port: config.port, security: config.security.clone(), auth,
             recipient_policy: config.recipient_policy.clone(), trust: config.trust.clone(),
             limits: config.limits.clone(), dkim,
@@ -217,7 +286,7 @@ pub mod jet_email {
         Ok(Mailer { config, runtime })
     }
 
-    fn wipe_config_secrets(config: &mut SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
+    pub fn wipe_config_secrets(config: &mut SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
         if let SMTPAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
         if let Ok(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }
@@ -249,10 +318,10 @@ pub mod jet_email {
         let username = std::env::var("SMTP_USERNAME").ok();
         let password = std::env::var("SMTP_PASSWORD").ok();
         let mut auth = match (username, password) {
-            (None, None) => SMTPAuth::None,
+            (None, None) => SMTPAuth::<Vec<u8>>::None,
             (Some(username), Some(mut password)) => {
                 let bytes = std::mem::take(&mut password).into_bytes();
-                SMTPAuth::Password { username, password: bytes }
+                SMTPAuth::<Vec<u8>>::Password { username, password: bytes }
             }
             (None, Some(mut password)) => {
                 let mut bytes = std::mem::take(&mut password).into_bytes();
@@ -279,7 +348,7 @@ pub mod jet_email {
                     Some(value) => value.split(',').map(|name| name.trim().to_string()).collect(),
                     None => default_dkim_headers(),
                 };
-                Ok(DkimConfig { domain, selector, private_key, signed_headers })
+                Ok(DkimConfig::<Vec<u8>> { domain, selector, private_key, signed_headers })
             }
             (_, _, Some(private_key)) => {
                 let mut encoded = private_key.into_bytes();
@@ -292,7 +361,7 @@ pub mod jet_email {
                 return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
             }
         };
-        smtp_bytes(SMTPConfig { host, port, security, auth, recipient_policy, trust,
+        smtp_bytes(SMTPConfig::<Vec<u8>> { host, port, security, auth, recipient_policy, trust,
             limits: Limits::safe(), dkim }, runtime)
     }
 
@@ -1350,17 +1419,6 @@ pub mod jet_email {
 
     fn reply_text(reply: &SMTPReply) -> String { reply.lines.join("\n") }
 
-    fn error_reason(error: &Error) -> &str {
-        match error {
-            Error::Configuration { reason, .. } | Error::DNS { reason, .. }
-            | Error::Connect { reason, .. } | Error::TLS { reason, .. }
-            | Error::Auth { reason, .. } | Error::Protocol { reason, .. }
-            | Error::Rejected { reason, .. } | Error::Transient { reason, .. }
-            | Error::TimedOut { reason, .. } | Error::Cancelled { reason, .. }
-            | Error::DeliveryUnknown { reason, .. } => reason,
-        }
-    }
-
     fn with_server(error: Error, server: &str) -> Error {
         with_operation_server(error, "smtp", server)
     }
@@ -1423,9 +1481,7 @@ pub mod jet_email {
     }
 
     fn error(operation: &'static str, reason: impl Into<String>) -> Error {
-        Error::Configuration {
-            operation: operation.to_string(), server: None, code: None, reason: reason.into(),
-        }
+        configuration_error(operation, reason)
     }
 
     fn reject_controls(value: &str, what: &str) -> Result<(), Error> {

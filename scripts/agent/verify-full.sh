@@ -142,6 +142,25 @@ fi
 
 "$repo/scripts/agent/verify-nix-eval-stopline.sh"
 
+# Compile every selected workspace test target before running tests.
+# A non-compiling target must fail this gate loudly.
+if [ -n "${JET_TEST_SHARD:-}" ]; then
+  shard_count="${JET_TEST_SHARD_COUNT:?JET_TEST_SHARD requires JET_TEST_SHARD_COUNT}"
+  test_targets="$("$repo/tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
+else
+  test_targets="$("$repo/tools/ci/test-shards.sh" 0 1)"
+fi
+if [ -z "$test_targets" ]; then
+  echo "error: test-target inventory selected no targets; refusing a false-green verify-full run" >&2
+  exit 1
+fi
+while IFS= read -r test_target; do
+  [ -n "$test_target" ] || continue
+  echo "verify-full: compiling test target: cargo test $test_target --no-run" >&2
+  # shellcheck disable=SC2086
+  cargo test $test_target --no-run
+done <<<"$test_targets"
+
 # #211 (D-CI1=A): default run covers the complete workspace test-target
 # inventory (`--workspace` — not just the `.`/jet-driver/jetpack-bin/jetos
 # default-members plain `cargo test` silently limited itself to). CI sets
@@ -149,12 +168,11 @@ fi
 # inventory per job instead (see tools/ci/test-shards.sh); local/nightly runs
 # leave them unset and get everything in one pass.
 if [ -n "${JET_TEST_SHARD:-}" ]; then
-  shard_count="${JET_TEST_SHARD_COUNT:?JET_TEST_SHARD requires JET_TEST_SHARD_COUNT}"
   # Plain assignment (not `< <(...)` process substitution, whose failure a
   # downstream `while read` loop would silently ignore under 0 iterations):
   # `set -e` aborts this script immediately if test-shards.sh itself fails,
   # instead of reporting a false-green empty shard.
-  shard_targets="$("$repo/tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
+  shard_targets="$test_targets"
   status=0
   while IFS= read -r shard_args; do
     # shellcheck disable=SC2086

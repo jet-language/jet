@@ -119,6 +119,9 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// Canonical typeable paths for reflectable nominal types. This is a
+    /// projection cache seeded only from the sema name ledger.
+    pub(crate) reflect_paths: HashMap<String, String>,
     /// Generic parameters that occur in non-skipped serialized fields.
     pub(crate) serde_wire_params: HashMap<String, HashSet<String>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
@@ -165,7 +168,9 @@ pub(crate) struct Cx {
     pub(crate) coverage: bool,
     /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
-    /// Cross-module pub type name -> Rust module path (e.g. `Note` -> `__jet_note`).
+    /// Canonical cross-module nominal identity -> Rust module path. The key
+    /// includes package and source-module identity; import aliases are only
+    /// source lookup projections and never semantic type identities.
     pub(crate) foreign_types: HashMap<String, String>,
     /// D-MOD4: `(alias, item)` -> `(real Rust module, real fn)` for `pub use`
     /// re-exports, so `text.wrap` lowers to the module that actually defines it.
@@ -204,6 +209,23 @@ pub(crate) struct Cx {
     /// D-NAME-WALK1=A: per-inline-function Core import scopes. The key is the
     /// emitted mangled function name (`module__function`).
     pub(crate) inline_core_imports: HashMap<String, HashMap<String, String>>,
+    /// D-NAME-WALK1=A / D-VERDICT-1867-1: per-inline-function foreign
+    /// namespace scopes. The value is the mounted Rust module name.
+    pub(crate) inline_foreign_imports: HashMap<String, HashMap<String, String>>,
+    /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign call signatures scoped to
+    /// the emitted inline function that declared the import. Keeping this
+    /// fact local prevents two inline bodies with the same alias and method
+    /// name from overwriting one another.
+    pub(crate) inline_foreign_sigs:
+        HashMap<String, HashMap<(String, String), Vec<(AccessConvention, Type)>>>,
+    pub(crate) inline_foreign_rets:
+        HashMap<String, HashMap<(String, String), Option<Type>>>,
+    /// Signature facts for foreign namespaces re-exported by an inline
+    /// module, keyed by `(inline module, exported alias, method)`.
+    pub(crate) inline_foreign_reexport_sigs:
+        HashMap<(String, String, String), Vec<(AccessConvention, Type)>>,
+    pub(crate) inline_foreign_reexport_rets:
+        HashMap<(String, String, String), Option<Type>>,
     /// Names from inline scopes used by the conservative TIR coverage gate.
     /// Lowering still reads the exact per-function map.
     pub(crate) inline_import_names: HashSet<String>,
@@ -211,6 +233,9 @@ pub(crate) struct Cx {
     pub(crate) inline_reexport_inline: HashMap<(String, String), String>,
     /// D-NAME-WALK1=A: inline-module pub re-exports of Core items.
     pub(crate) inline_reexport_core: HashMap<(String, String), (String, String)>,
+    /// D-VERDICT-1867-1: inline-module pub re-exports of foreign namespaces.
+    /// The key is `(inline module, exported namespace alias)`.
+    pub(crate) inline_reexport_foreign: HashMap<(String, String), String>,
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
@@ -243,6 +268,7 @@ pub(crate) struct Cx {
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
+    pub(crate) jit_spawn_sites: std::cell::RefCell<HashMap<(String, usize, usize), usize>>,
     /// Global offset for spawn sites lowered from an imported module.
     pub(crate) jit_spawn_site_base: usize,
     /// Concrete generic owner methods reached while lowering executable TIR.
@@ -395,6 +421,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Decimal" => Some("JetDecimal"),
         "Fraction" => Some("JetFraction"),
         "Closed" => Some("Closed"),
+        n if n == Syntax::TYPE_TASK_FAILURE => Some("JetTaskFailure"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
@@ -689,14 +716,34 @@ pub(crate) use crate::Syntax::args_handle_rust_type;
 pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
+/// Return the leaf of a canonical nominal name. Dotted names remain accepted
+/// only at source lookup boundaries for older Core spellings; foreign nominal
+/// maps themselves contain `::` identities exclusively.
+pub(crate) fn nominal_leaf(name: &str) -> &str {
+    name.rsplit_once("::")
+        .or_else(|| name.rsplit_once('.'))
+        .map_or(name, |(_, leaf)| leaf)
+}
+
 impl Cx {
+    pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
+        let rust_mod = if alias.is_empty() {
+            None
+        } else {
+            Some(self.import_mods.get(alias)?)
+        };
+        let mut matches = self
+            .foreign_types
+            .iter()
+            .filter(|(name, _)| nominal_leaf(name) == leaf)
+            .filter(|(_, module)| rust_mod.is_none_or(|expected| *module == expected))
+            .map(|(name, _)| name.clone());
+        let identity = matches.next()?;
+        matches.next().is_none().then_some(identity)
+    }
+
     fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
-        let (qualifier, leaf) = name.split_once('.')?;
-        let module = self
-            .import_mods
-            .get(qualifier)?
-            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)?;
-        Some(format!("{module}.{leaf}"))
+        name.contains("::").then(|| name.to_string())
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -801,6 +848,44 @@ impl Cx {
             .map(String::as_str)
     }
 
+    pub(crate) fn import_module_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+    ) -> Option<&str> {
+        self.inline_foreign_imports
+            .get(fn_name)
+            .and_then(|scope| scope.get(alias))
+            .or_else(|| self.import_mods.get(alias))
+            .map(String::as_str)
+    }
+
+    pub(crate) fn import_signature_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+        method: &str,
+    ) -> Option<Vec<(AccessConvention, Type)>> {
+        self.inline_foreign_sigs
+            .get(fn_name)
+            .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
+            .cloned()
+            .or_else(|| self.import_sigs.get(&(alias.to_string(), method.to_string())).cloned())
+    }
+
+    pub(crate) fn import_return_for_function(
+        &self,
+        fn_name: &str,
+        alias: &str,
+        method: &str,
+    ) -> Option<Option<Type>> {
+        self.inline_foreign_rets
+            .get(fn_name)
+            .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
+            .cloned()
+            .or_else(|| self.import_rets.get(&(alias.to_string(), method.to_string())).cloned())
+    }
+
     /// Resolve a Core alias without a function-specific scope. TIR coverage
     /// predicates have only structural AST facts, so they use the enclosing
     /// map first and then any inline body map as a conservative reachability
@@ -810,6 +895,17 @@ impl Cx {
             .get(alias)
             .or_else(|| {
                 self.inline_core_imports
+                    .values()
+                    .find_map(|scope| scope.get(alias))
+            })
+            .map(String::as_str)
+    }
+
+    pub(crate) fn any_foreign_import_module(&self, alias: &str) -> Option<&str> {
+        self.import_mods
+            .get(alias)
+            .or_else(|| {
+                self.inline_foreign_imports
                     .values()
                     .find_map(|scope| scope.get(alias))
             })
@@ -944,10 +1040,12 @@ impl Cx {
                 // so it needs the same hidden Rust lifetime everywhere it is
                 // stored or returned. It is always a write window.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN)
                         && args.len() == 1 =>
                 {
-                    !mutable_only || name == "ViewMut" || name == Syntax::TYPE_PIN
+                    !mutable_only
+                        || matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                        || name == Syntax::TYPE_PIN
                 }
                 Type::Named(name) => named_contains(cx, name, seen, mutable_only),
                 Type::Apply { name, args } => {
@@ -1072,6 +1170,8 @@ impl Cx {
                 format!("&'__jet_view mut {rest}")
             } else if let Some(rest) = rust.strip_prefix('&') {
                 format!("&'__jet_view {rest}")
+            } else if let Some(prefix) = rust.strip_suffix("JetComputeViewMut<'_>") {
+                format!("{prefix}JetComputeViewMut<'__jet_view>")
             } else {
                 rust
             }
@@ -1103,7 +1203,7 @@ impl Cx {
         fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
             match ty {
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN)
                         && args.len() == 1 =>
                 {
                     add_reference_lifetime(base(ty))
@@ -1230,7 +1330,7 @@ impl Cx {
     pub(crate) fn columnar_list_type(&self, inner: &Type) -> Option<String> {
         if let Type::Named(name) = inner {
             if self.is_columnar_struct(name) {
-                let columns = crate::Syntax::generated_path(&format!("{name}_columns"));
+                let columns = jet_foundation::Names::mangle_path(&format!("{name}_columns"));
                 return Some(if self.foreign_types.contains_key(name.as_str()) {
                     let rust_mod = &self.foreign_types[name.as_str()];
                     format!("{}{}::{columns}", self.root_prefix, rust_mod)
@@ -1279,12 +1379,14 @@ impl Cx {
                 ret,
                 param_contract,
                 effect_bound,
+                call_metadata,
                 return_view_provenance,
             } => Type::Fn {
                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(
@@ -1816,12 +1918,12 @@ impl Cx {
                 )
             }
             Type::Named(name) if self.trait_names.contains(name) => {
-                format!("Box<dyn {}>", Generics::user_trait_rust(name))
+                format!("Box<dyn {}>", crate::Codegen::mangle(name))
             }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
                 let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
-                format!("{}{}::{}", self.root_prefix, rust_mod, user_type_rust(leaf))
+                format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
             }
             Type::Named(name) if name.contains('.') => {
                 let (alias, leaf) = name.split_once('.').unwrap();
@@ -1830,13 +1932,13 @@ impl Cx {
                         "{}{}::{}",
                         self.root_prefix,
                         rust_mod,
-                        user_type_rust(leaf)
+                        mangle_path(leaf)
                     ),
-                    None => user_type_rust(name),
+                    None => mangle_path(name),
                 }
             }
             Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
-            Type::Named(name) => user_type_rust(name),
+            Type::Named(name) => mangle_path(name),
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetTask<{}>",
@@ -2112,6 +2214,9 @@ impl Cx {
                     format!("&[{}]", self.rust_type(&args[0]))
                 }
             }
+            Type::Apply { name, args } if name == "ComputeViewMut" && args.len() == 1 => {
+                format!("{}JetComputeViewMut<'_>", self.root_prefix)
+            }
             Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                 format!("&mut [{}]", self.rust_type(&args[0]))
             }
@@ -2177,18 +2282,18 @@ impl Cx {
             Type::Apply { name, args } => {
                 let head = if let Some((alias, leaf)) = name.split_once('.') {
                     self.import_mods.get(alias).map_or_else(
-                        || user_type_rust(name),
+                        || mangle_path(name),
                         |rust_mod| {
                             format!(
                                 "{}{}::{}",
                                 self.root_prefix,
                                 rust_mod,
-                                user_type_rust(leaf)
+                                mangle_path(leaf)
                             )
                         },
                     )
                 } else {
-                    user_type_rust(name)
+                    mangle_path(name)
                 };
                 if args.is_empty() {
                     head
@@ -2210,7 +2315,7 @@ impl Cx {
             Type::TraitObject(t) => format!(
                 "Box<dyn {}>",
                 t.iter()
-                    .map(|n| Generics::user_trait_rust(n))
+                    .map(|n| crate::Codegen::mangle(n))
                     .collect::<Vec<_>>()
                     .join(" + ")
             ),
@@ -2233,7 +2338,7 @@ impl Cx {
             Type::Tagged { inner, .. } => self.rust_type(inner),
             // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
             Type::Union(members) => {
-                crate::Syntax::generated_name(&crate::AST::union_enum_name(members))
+                jet_foundation::Names::mangle(&crate::AST::union_enum_name(members))
             }
             // Erased by the `quantity_parts()` guard above `rust_type` returns
             // through; a runtime quantity value IS its base numeric type.
@@ -2356,7 +2461,29 @@ impl Cx {
     }
 
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
-        user_type_rust(type_name)
+        if let Some(rust_mod) = self.foreign_types.get(type_name) {
+            let leaf = type_name
+                .rsplit_once('.')
+                .map_or(type_name, |(_, leaf)| leaf);
+            return format!(
+                "{}{}::{}",
+                self.root_prefix,
+                rust_mod,
+                mangle_path(leaf)
+            );
+        }
+        mangle_path(type_name)
+    }
+
+    pub(crate) fn reflect_path(&self, ty: &Type) -> String {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => self
+                .reflect_paths
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
+            _ => ty.name(),
+        }
     }
 }
 
@@ -2486,7 +2613,7 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
 }
 
 pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
-    crate::Syntax::generated_path(&format!("foreign_method__{owner}__{method}"))
+    jet_foundation::Names::mangle_path(&format!("foreign_method__{owner}__{method}"))
 }
 
 /// Add local and imported unit-family facts under the names used by this module.
@@ -2495,24 +2622,82 @@ pub(crate) fn register_bundle_unit_metadata(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) {
-    let imported = bundle.modules[module_idx]
+    let mut imported = Vec::new();
+    for import in &bundle.modules[module_idx].imports {
+        if bundle
+            .name_ledger
+            .effective_alias(module_idx, &import.import_alias())
+            .is_none()
+        {
+            continue;
+        }
+        let Some(target) = bundle.name_ledger.import_target(module_idx, import.span) else {
+            continue;
+        };
+        let qualifier = bundle
+            .name_ledger
+            .module_identity(target)
+            .expect("name ledger must contain every loaded module");
+        imported.push((target, Some(qualifier)));
+    }
+    for (target, _) in crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx) {
+        if imported.iter().all(|(existing, _)| *existing != target) {
+            let qualifier = bundle
+                .name_ledger
+                .module_identity(target)
+                .expect("name ledger must contain every loaded module");
+            imported.push((target, Some(qualifier)));
+        }
+    }
+    for (_, target) in bundle.modules[module_idx]
         .imports
         .iter()
-        .filter_map(|import| {
-            bundle
+        .flat_map(|import| super::Imports::foreign_list_targets(bundle, module_idx, import))
+    {
+        if imported.iter().all(|(existing, _)| *existing != target) {
+            let qualifier = bundle
                 .name_ledger
-                .effective_alias(module_idx, &import.import_alias())?;
-            bundle
-                .name_ledger
-                .import_target(module_idx, import.span)
-                .map(|target| {
-                    let qualifier = bundle.modules[target].alias.clone();
-                    (target, Some(qualifier))
-                })
-        });
+                .module_identity(target)
+                .expect("name ledger must contain every loaded module");
+            imported.push((target, Some(qualifier)));
+        }
+    }
     for (target, qualifier) in std::iter::once((module_idx, None)).chain(imported) {
         let module = &bundle.modules[target];
         for item in &module.items {
+            if let Item::Distinct(definition) = item {
+                if qualifier.is_some()
+                    && !bundle
+                        .name_ledger
+                        .visible(module_idx, target, &definition.name)
+                {
+                    continue;
+                }
+                let name = qualifier.as_ref().map_or_else(
+                    || definition.name.clone(),
+                    |qualifier| format!("{qualifier}::{}", definition.name),
+                );
+                let base = qualifier.as_ref().map_or_else(
+                    || definition.base.clone(),
+                    |_| super::Imports::qualify_imported_call_type(
+                        bundle,
+                        target,
+                        "",
+                        &definition.base,
+                    ),
+                );
+                cx.type_names.insert(name.clone());
+                cx.distinct_types.insert(
+                    name,
+                    (
+                        base,
+                        definition.derives.iter().any(|(derive, _)| {
+                            derive == crate::Syntax::MARKER_NUMERIC
+                        }),
+                    ),
+                );
+                continue;
+            }
             if let Item::UnitFamily(family) = item {
                 let dimension = family.resolved_dimension.clone();
                 for member in family.distinct_defs() {
@@ -2523,14 +2708,22 @@ pub(crate) fn register_bundle_unit_metadata(
                     }
                     let name = qualifier.as_ref().map_or_else(
                         || member.name.clone(),
-                        |qualifier| format!("{qualifier}.{}", member.name),
+                        |qualifier| format!("{qualifier}::{}", member.name),
                     );
                     cx.type_names.insert(name.clone());
                     cx.distinct_types
                         .insert(
                             name.clone(),
                             (
-                                member.base.clone(),
+                                qualifier.as_ref().map_or_else(
+                                    || member.base.clone(),
+                                    |_| super::Imports::qualify_imported_call_type(
+                                        bundle,
+                                        target,
+                                        "",
+                                        &member.base,
+                                    ),
+                                ),
                                 member.derives.iter().any(|(derive, _)| {
                                     derive == crate::Syntax::MARKER_NUMERIC
                                 }),
@@ -2559,7 +2752,7 @@ pub(crate) fn register_bundle_unit_metadata(
                 let Item::Impl(implementation) = item else {
                     continue;
                 };
-                let qualified = format!("{qualifier}.{}", implementation.type_name);
+                let qualified = format!("{qualifier}::{}", implementation.type_name);
                 if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
                     && cx.unit_labels.contains_key(&qualified)
                 {
@@ -2572,11 +2765,15 @@ pub(crate) fn register_bundle_unit_metadata(
 
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
-/// lowering mis-gates `use core.tasks as tasks` spawn/channel calls.
+/// lowering mis-gates `use core.tasks as tasks` channel calls.
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
-        inline_core_import_maps, inline_import_maps, reexport_call_map, unqualified_import_maps,
+        inline_core_import_maps, inline_foreign_import_maps,
+        inline_foreign_import_signature_maps, inline_foreign_reexport_maps,
+        inline_foreign_reexport_signature_maps, inline_import_maps,
+        register_foreign_enum_variants, reexport_call_map, unqualified_import_maps,
+        update_cloneability_with_foreign_types,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
@@ -2585,10 +2782,14 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         .iter()
         .any(|module| module.alias == "core_archive");
     cx.foreign_types = foreign_type_map(bundle, module_idx);
+    crate::Codegen::TIR::register_imported_struct_shapes(cx, bundle, module_idx);
+    update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
+    register_foreign_enum_variants(cx, bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     cx.import_sigs = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);
     cx.core_imports = core_import_map(bundle, module_idx);
+    register_bundle_reflect_paths(cx, bundle, module_idx);
     register_core_close_types(cx);
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
@@ -2606,11 +2807,27 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     let (inline_core, reexport_core) = inline_core_import_maps(bundle, module_idx);
     cx.inline_core_imports = inline_core;
     cx.inline_reexport_core = reexport_core;
+    cx.inline_foreign_imports = inline_foreign_import_maps(bundle, module_idx);
+    let (inline_foreign_sigs, inline_foreign_rets) =
+        inline_foreign_import_signature_maps(bundle, module_idx);
+    cx.inline_foreign_sigs = inline_foreign_sigs;
+    cx.inline_foreign_rets = inline_foreign_rets;
+    cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, module_idx);
+    let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
+        inline_foreign_reexport_signature_maps(bundle, module_idx);
+    cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
+    cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     cx.package_edition = bundle.edition.clone();
 }
 
+pub(crate) fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    for (name, path) in bundle.name_ledger.canonical_paths(module_idx) {
+        cx.reflect_paths.insert(name, path);
+    }
+}
+
 fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-    let imported = bundle.modules[module_idx]
+    let mut imported: Vec<usize> = bundle.modules[module_idx]
         .imports
         .iter()
         .filter_map(|import| {
@@ -2618,7 +2835,27 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 .name_ledger
                 .effective_alias(module_idx, &import.import_alias())?;
             bundle.name_ledger.import_target(module_idx, import.span)
-        });
+        })
+        .collect();
+    imported.extend(
+        crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx)
+            .into_iter()
+            .map(|(target, _)| target),
+    );
+    imported.sort_unstable();
+    imported.dedup();
+    imported.extend(
+        bundle.modules[module_idx]
+            .imports
+            .iter()
+            .flat_map(|import| {
+                super::Imports::foreign_list_targets(bundle, module_idx, import)
+                    .into_iter()
+                    .map(|(_, target)| target)
+            }),
+    );
+    imported.sort_unstable();
+    imported.dedup();
     for target in imported {
         for item in &bundle.modules[target].items {
             let (owner, methods) = match item {
@@ -2627,6 +2864,10 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 Item::Impl(def) => (&def.type_name, &def.methods),
                 _ => continue,
             };
+            let owner_identity = bundle
+                .name_ledger
+                .nominal_identity(target, owner)
+                .expect("name ledger must contain every loaded module");
             for method in methods.iter().filter(|method| {
                 bundle.name_ledger.visible(
                     module_idx,
@@ -2634,19 +2875,37 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                     &format!("{}.{}", owner, method.name),
                 )
             }) {
-                let key = (owner.clone(), method.name.clone());
+                let key = (owner_identity.clone(), method.name.clone());
                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
                 {
                     cx.method_self_convs
                         .entry(key.clone())
                         .or_insert(self_param.convention);
                 }
-                cx.method_sigs
-                    .entry(key.clone())
-                    .or_insert_with(|| method_sig_params(method));
+                cx.method_sigs.entry(key.clone()).or_insert_with(|| {
+                    method_sig_params(method)
+                        .into_iter()
+                        .map(|(convention, ty)| {
+                            (
+                                convention,
+                                super::Imports::qualify_imported_call_type(
+                                    bundle,
+                                    target,
+                                    "",
+                                    &ty,
+                                ),
+                            )
+                        })
+                        .collect()
+                });
                 cx.method_rets
                     .entry(key)
-                    .or_insert_with(|| method.return_type.clone());
+                    .or_insert_with(|| {
+                        method
+                            .return_type
+                            .as_ref()
+                            .map(|ty| super::Imports::qualify_imported_call_type(bundle, target, "", ty))
+                    });
             }
         }
     }
@@ -2770,6 +3029,9 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
                 field("actual", Type::Option(Box::new(Type::String))),
             ]),
         ));
+        // Keep the existing discriminants stable; append the new unit
+        // variant to the canonical AuthError surface.
+        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
         for (variant, _) in &variants {
             cx.variant_owner.insert(variant.clone(), "AuthError".to_string());
         }
@@ -2903,6 +3165,7 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
+        reflect_paths: HashMap::new(),
         serde_wire_params: HashMap::new(),
         enum_variants: HashMap::new(),
         variant_owner: HashMap::new(),
@@ -2940,9 +3203,15 @@ pub(crate) fn build_cx_items(
         inline_unqualified: HashMap::new(),
         inline_unqualified_file: HashMap::new(),
         inline_core_imports: HashMap::new(),
+        inline_foreign_imports: HashMap::new(),
+        inline_foreign_sigs: HashMap::new(),
+        inline_foreign_rets: HashMap::new(),
+        inline_foreign_reexport_sigs: HashMap::new(),
+        inline_foreign_reexport_rets: HashMap::new(),
         inline_import_names: HashSet::new(),
         inline_reexport_inline: HashMap::new(),
         inline_reexport_core: HashMap::new(),
+        inline_reexport_foreign: HashMap::new(),
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),
@@ -2954,6 +3223,7 @@ pub(crate) fn build_cx_items(
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+        jit_spawn_sites: std::cell::RefCell::new(HashMap::new()),
         jit_spawn_site_base: 0,
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
@@ -3250,7 +3520,22 @@ pub(crate) fn build_cx_items(
                             .collect(),
                         ret: f.return_type.clone().map(Box::new),
                         effect_bound: None,
-                        param_contract: None,
+                        param_contract: (!f.params.is_empty()).then(|| {
+                            f.params
+                                .iter()
+                                .map(|p| (p.call_label().to_string(), p.zone))
+                                .collect()
+                        }),
+                        call_metadata: Some(crate::AST::FunctionCallMetadata {
+                            names: f.params.iter().map(|p| p.name.clone()).collect(),
+                            defaults: f
+                                .params
+                                .iter()
+                                .map(|p| p.default.as_deref().cloned())
+                                .collect(),
+                            variadic: f.params.iter().map(|p| p.variadic).collect(),
+                            conventions: f.params.iter().map(|p| p.convention).collect(),
+                        }),
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
@@ -3364,7 +3649,14 @@ pub(crate) fn build_cx_items(
                         ef.name.clone(),
                         ef.params
                             .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, ty)
+                            })
                             .collect(),
                     );
                     // JIT print/use sites need the real return type (AOT emits the
@@ -3373,10 +3665,33 @@ pub(crate) fn build_cx_items(
                     cx.fn_types.insert(
                         ef.name.clone(),
                         Type::Fn {
-                            params: ef.params.iter().map(|p| p.ty.clone()).collect(),
+                            params: ef
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    if p.variadic {
+                                        Type::List(Box::new(p.ty.clone()))
+                                    } else {
+                                        p.ty.clone()
+                                    }
+                                })
+                                .collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
-                            param_contract: None,
+                            param_contract: (!ef.params.is_empty()).then(|| {
+                                ef.params
+                                    .iter()
+                                    .map(|p| (p.call_label().to_string(), p.zone))
+                                    .collect()
+                            }),
+                            call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                names: ef.params.iter().map(|p| p.name.clone()).collect(),
+                                // `extern_to_sig` owns the foreign contract and
+                                // deliberately has no Jet default bodies.
+                                defaults: ef.params.iter().map(|_| None).collect(),
+                                variadic: ef.params.iter().map(|p| p.variadic).collect(),
+                                conventions: ef.params.iter().map(|p| p.convention).collect(),
+                            }),
                         },
                     );
                 }
@@ -3389,16 +3704,44 @@ pub(crate) fn build_cx_items(
                         ef.name.clone(),
                         ef.params
                             .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, ty)
+                            })
                             .collect(),
                     );
                     cx.fn_types.insert(
                         ef.name.clone(),
                         Type::Fn {
-                            params: ef.params.iter().map(|p| p.ty.clone()).collect(),
+                            params: ef
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    if p.variadic {
+                                        Type::List(Box::new(p.ty.clone()))
+                                    } else {
+                                        p.ty.clone()
+                                    }
+                                })
+                                .collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
-                            param_contract: None,
+                            param_contract: (!ef.params.is_empty()).then(|| {
+                                ef.params
+                                    .iter()
+                                    .map(|p| (p.call_label().to_string(), p.zone))
+                                    .collect()
+                            }),
+                            call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                names: ef.params.iter().map(|p| p.name.clone()).collect(),
+                                defaults: ef.params.iter().map(|_| None).collect(),
+                                variadic: ef.params.iter().map(|p| p.variadic).collect(),
+                                conventions: ef.params.iter().map(|p| p.convention).collect(),
+                            }),
                         },
                     );
                 }
@@ -3415,7 +3758,14 @@ pub(crate) fn build_cx_items(
                         m.params
                             .iter()
                             .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, ty)
+                            })
                             .collect(),
                     );
                     cx.method_rets
@@ -3539,15 +3889,51 @@ pub(crate) fn build_cx_items(
                             );
                             cx.sigs.insert(
                                 mangled.clone(),
-                                f.params.iter().map(|p| (p.convention, p.ty.clone())).collect(),
+                                f.params
+                                    .iter()
+                                    .map(|p| {
+                                        let ty = if p.variadic {
+                                            Type::List(Box::new(p.ty.clone()))
+                                        } else {
+                                            p.ty.clone()
+                                        };
+                                        (p.convention, ty)
+                                    })
+                                    .collect(),
                             );
                             cx.fn_types.insert(
                                 mangled.clone(),
                                 Type::Fn {
-                                    params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                                    params: f
+                                        .params
+                                        .iter()
+                                        .map(|p| {
+                                            if p.variadic {
+                                                Type::List(Box::new(p.ty.clone()))
+                                            } else {
+                                                p.ty.clone()
+                                            }
+                                        })
+                                        .collect(),
                                     ret: f.return_type.clone().map(Box::new),
-                                    effect_bound: None, return_view_provenance: None,
-                                    param_contract: None,
+                                    effect_bound: None,
+                                    return_view_provenance: f.return_view_provenance.clone(),
+                                    param_contract: (!f.params.is_empty()).then(|| {
+                                        f.params
+                                            .iter()
+                                            .map(|p| (p.call_label().to_string(), p.zone))
+                                            .collect()
+                                    }),
+                                    call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                        names: f.params.iter().map(|p| p.name.clone()).collect(),
+                                        defaults: f
+                                            .params
+                                            .iter()
+                                            .map(|p| p.default.as_deref().cloned())
+                                            .collect(),
+                                        variadic: f.params.iter().map(|p| p.variadic).collect(),
+                                        conventions: f.params.iter().map(|p| p.convention).collect(),
+                                    }),
                                 },
                             );
                             cx.fn_param_names.insert(
@@ -3801,6 +4187,22 @@ fn register_core_event_enums(cx: &mut Cx) {
                 .or_insert_with(|| (*enum_name).to_string());
         }
     }
+    let task_failure = vec![
+        ("Cancelled".to_string(), VariantPayload::Unit),
+        ("DeadlineBlown".to_string(), VariantPayload::Unit),
+        (
+            "Panicked".to_string(),
+            VariantPayload::Single(Type::String, Span::new(0, 0)),
+        ),
+    ];
+    cx.enum_variants
+        .entry(Syntax::TYPE_TASK_FAILURE.to_string())
+        .or_insert(task_failure);
+    for variant in ["Cancelled", "DeadlineBlown", "Panicked"] {
+        cx.variant_owner
+            .entry(variant.to_string())
+            .or_insert_with(|| Syntax::TYPE_TASK_FAILURE.to_string());
+    }
 }
 
 fn assoc_type_impl<'a>(assoc: &'a [(String, Span, Type)], name: &str) -> Option<&'a Type> {
@@ -3948,7 +4350,14 @@ fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
     f.params
         .iter()
         .filter(|p| p.name != Syntax::KW_SELF)
-        .map(|p| (p.convention, p.ty.clone()))
+        .map(|p| {
+            let ty = if p.variadic {
+                Type::List(Box::new(p.ty.clone()))
+            } else {
+                p.ty.clone()
+            };
+            (p.convention, ty)
+        })
         .collect()
 }
 
@@ -3994,12 +4403,16 @@ pub(crate) fn field_type_cloneable(
         }
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
+        // D-SERDE: the dynamic data surface is the Clone-backed DataTree in
+        // every canonical spelling, so records containing it can satisfy the
+        // generated decoder's existing result-retention path.
+        Type::Named(n) if is_json_type_name(n) => true,
         Type::Named(n) => types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
         // than `ViewMut` — duplicating it would hand out a second no-move claim.
         Type::Apply { name, .. }
-            if matches!(name.as_str(), "ViewMut" | "Task" | Syntax::TYPE_PIN)
+            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut" | "Task" | Syntax::TYPE_PIN)
                 || name == Syntax::TYPE_SHARED_GUARD =>
         {
             false

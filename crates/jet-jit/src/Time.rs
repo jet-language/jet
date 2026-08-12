@@ -1,6 +1,7 @@
 //! `core.time` / civil-time marshalling hosts for the shared Prelude kernel.
 
 use super::Concurrency;
+use jet_codegen::AST::CtValue;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -21,14 +22,62 @@ pub(crate) enum TimeValue {
     LocalTime(time_rt::JetLocalTime),
 }
 
-fn push(value: TimeValue) -> i64 {
+pub(crate) fn ambient_date_today_value() -> CtValue {
+    let date = time_rt::JetDate::today_utc();
+    CtValue::Struct {
+        type_name: "LocalDate".to_string(),
+        fields: vec![
+            ("year".to_string(), CtValue::Int(date.year())),
+            ("month".to_string(), CtValue::Int(date.month())),
+            ("day".to_string(), CtValue::Int(date.day())),
+        ],
+    }
+}
+
+pub(crate) fn ambient_datetime_now_value() -> CtValue {
+    let datetime = time_rt::JetDateTime::now();
+    CtValue::Struct {
+        type_name: "DateTime".to_string(),
+        fields: vec![
+            ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
+            (
+                "nanos".to_string(),
+                CtValue::Int(datetime.nanosecond()),
+            ),
+        ],
+    }
+}
+
+pub(crate) fn ambient_monotonic_now_ms() -> i64 {
+    jet_foundation::Monotonic::jet_time_monotonic_now_ns() / 1_000_000
+}
+
+pub(crate) fn ambient_instant_value() -> CtValue {
+    CtValue::Struct {
+        type_name: "Instant".to_string(),
+        fields: vec![(
+            "start_ns".to_string(),
+            CtValue::Int(jet_foundation::Monotonic::jet_time_monotonic_now_ns()),
+        )],
+    }
+}
+
+extern "C" fn jet_jit_time_start() -> i64 {
+    ambient_monotonic_now_ms()
+}
+
+extern "C" fn jet_jit_stopwatch_elapsed_millis(start_ms: i64) -> i64 {
+    ambient_monotonic_now_ms().saturating_sub(start_ms)
+}
+
+pub(crate) fn push(value: TimeValue) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.time_values.push(Some(value));
         rt.time_values.len() as i64
     })
 }
 
-fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
+pub(crate) fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
     Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
         match rt.time_values.get(idx).and_then(|s| s.as_ref()) {
@@ -36,6 +85,20 @@ fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
             None => R::default(),
         }
     })
+}
+
+pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
+    let index = handle.saturating_sub(1) as usize;
+    match rt.time_values.get(index).and_then(|slot| slot.as_ref()) {
+        Some(TimeValue::Date(value)) => value.to_string_fmt(),
+        Some(TimeValue::DateTime(value)) => value.to_string_fmt(),
+        Some(TimeValue::Period(value)) => value.to_string_fmt(),
+        Some(TimeValue::Instant(value)) => value.to_string_fmt(),
+        Some(TimeValue::Zone(value)) => value.to_string_fmt(),
+        Some(TimeValue::Zoned(value)) => value.to_string_fmt(),
+        Some(TimeValue::LocalTime(value)) => value.to_string_fmt(),
+        None => String::new(),
+    }
 }
 
 fn result_err(msg: String) -> i64 {
@@ -82,6 +145,59 @@ extern "C" fn jet_jit_time_utc() -> i64 {
 
 extern "C" fn jet_jit_time_period_months(months: i64) -> i64 {
     push(TimeValue::Period(time_rt::JetPeriod::months(months)))
+}
+
+extern "C" fn jet_jit_time_period(years: i64, months: i64, days: i64) -> i64 {
+    push(TimeValue::Period(time_rt::JetPeriod::new(years, months, days)))
+}
+
+extern "C" fn jet_jit_time_period_days(days: i64) -> i64 {
+    push(TimeValue::Period(time_rt::JetPeriod::days(days)))
+}
+
+extern "C" fn jet_jit_time_period_years(years: i64) -> i64 {
+    push(TimeValue::Period(time_rt::JetPeriod::years(years)))
+}
+
+extern "C" fn jet_jit_time_zone(name: i64) -> i64 {
+    match time_rt::JetZone::named(&clone_string(name)) {
+        Ok(zone) => result_ok(push(TimeValue::Zone(zone)) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+extern "C" fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
+    let date = with_time(date, |value| match value {
+        TimeValue::Date(date) => Some(date.clone()),
+        _ => None,
+    });
+    let time = with_time(time, |value| match value {
+        TimeValue::LocalTime(time) => Some(time.clone()),
+        _ => None,
+    });
+    let zone = with_time(zone, |value| match value {
+        TimeValue::Zone(zone) => Some(zone.clone()),
+        _ => None,
+    });
+    match (date, time, zone) {
+        (Some(date), Some(time), Some(zone)) => {
+            push(TimeValue::Zoned(time_rt::JetZonedDateTime::from_local(
+                &date, &time, &zone,
+            )))
+        }
+        _ => 0,
+    }
+}
+
+extern "C" fn jet_jit_time_parse_time(value: i64) -> i64 {
+    fn parse_local_time(value: &str) -> Result<time_rt::JetLocalTime, String> {
+        time_rt::JetLocalTime::parse(value)
+    }
+
+    match parse_local_time(&clone_string(value)) {
+        Ok(time) => result_ok(push(TimeValue::LocalTime(time)) as u64),
+        Err(error) => result_err(error),
+    }
 }
 
 extern "C" fn jet_jit_time_instant() -> i64 {
@@ -252,6 +368,10 @@ extern "C" fn jet_jit_civil_time_method(
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
+        (TimeValue::Period(period), "to_string") => alloc_string(period.to_string_fmt()),
+        (TimeValue::Instant(instant), "to_string") => alloc_string(instant.to_string_fmt()),
+        (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
+        (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
         (TimeValue::Zoned(z), "format") => {
             alloc_string(z.format_pattern(&clone_string(arg0)))
@@ -310,13 +430,21 @@ host_fns! {
     }
     date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
     date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
+    start: "jet_jit_time_start" => jet_jit_time_start: nullary;
+    stopwatch_elapsed: "jet_jit_stopwatch_elapsed_millis" => jet_jit_stopwatch_elapsed_millis: unary;
     date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;
     datetime_from_timestamp: "jet_jit_datetime_from_timestamp" => jet_jit_datetime_from_timestamp: unary;
     datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;
     parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
     from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
     utc: "jet_jit_time_utc" => jet_jit_time_utc: nullary;
+    period: "jet_jit_time_period" => jet_jit_time_period: ternary;
+    period_days: "jet_jit_time_period_days" => jet_jit_time_period_days: unary;
     period_months: "jet_jit_time_period_months" => jet_jit_time_period_months: unary;
+    period_years: "jet_jit_time_period_years" => jet_jit_time_period_years: unary;
+    zone: "jet_jit_time_zone" => jet_jit_time_zone: unary;
+    zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: ternary;
+    parse_time: "jet_jit_time_parse_time" => jet_jit_time_parse_time: unary;
     instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
     zoned: "jet_jit_time_zoned" => jet_jit_time_zoned: binary;
     days_in_month: "jet_jit_time_days_in_month" => jet_jit_time_days_in_month: binary;
@@ -326,5 +454,3 @@ host_fns! {
     duration_unit: "jet_jit_time_duration_unit" => jet_jit_time_duration_unit: binary;
     civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
 }
-
-

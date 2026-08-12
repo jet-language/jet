@@ -18,6 +18,15 @@
         pub rows: i64,
     }
 
+    impl Default for TerminalSize {
+        fn default() -> Self {
+            Self {
+                cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+                rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+            }
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum TerminalMode {
         Raw,
@@ -33,12 +42,7 @@
     impl Default for TerminalPolicy {
         fn default() -> Self {
             Self {
-                // Card #1751: one 80x24 fact, shared with ProcessPty.rs's
-                // PtyConfig::default via Prelude/TerminalDefault.rs.
-                size: TerminalSize {
-                    cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
-                    rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
-                },
+                size: TerminalSize::default(),
                 mode: TerminalMode::Cooked,
             }
         }
@@ -237,7 +241,12 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) eof: bool,
         pub(crate) record_mode: bool,
-        pub(crate) allocation_budget: Option<super::JetJSONAllocationBudget>,
+        pub(crate) allocation_budget: Option<super::JetEncodingAllocationBudget>,
+        // A string event owns its decoded backing until `next_event` hands the
+        // event to the caller.  Keeping that charge live through object-key
+        // cloning makes the transient peak observable and releases it exactly
+        // once on both success and terminal error.
+        pub(crate) output_heap: usize,
     }
     pub struct JSONWriter {
         pub(crate) output: super::JetFileWriter,
@@ -295,7 +304,7 @@
         pub(crate) total: i64,
         pub(crate) eof: bool,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling for retained events.
-        pub(crate) allocation: super::JetJSONAllocationBudget,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
     pub struct XMLWriter {
         pub(crate) output: super::JetFileWriter,
@@ -305,6 +314,7 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
         pub(crate) finished: bool,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
     pub struct CBORReader {
         pub(crate) input: super::JetFileReader,
@@ -318,7 +328,7 @@
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
-        pub(crate) allocation: super::JetJSONAllocationBudget,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
     pub struct CBORWriter {
         pub(crate) output: super::JetFileWriter,
@@ -333,7 +343,7 @@
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
-        pub(crate) allocation: super::JetJSONAllocationBudget,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -361,6 +371,7 @@
     #[derive(Clone, Debug)]
     pub struct ProcessChild {
         pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
+        pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessResult>>>,
         pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
         pub stdout:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
@@ -1322,6 +1333,7 @@
         Null,
         Boolean(bool),
         Number(f64),
+        Integer(i64),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),
@@ -1542,6 +1554,11 @@
             format!("{}ns", self.ns)
         }
     }
+    impl super::JetDebug for Duration {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for JSONError {
         fn jet_show(&self) -> String {
             format!("line {}: {}", self.line, self.message)
@@ -1588,6 +1605,7 @@
         }
         pub fn int(&self) -> Result<i64, String> {
             match self {
+                JSON::Integer(n) => Ok(*n),
                 JSON::Number(f) => {
                     let n = *f as i64;
                     if (n as f64 - f).abs() < 0.5 {
@@ -1622,6 +1640,7 @@
         }
         pub fn float(&self) -> Result<f64, String> {
             match self {
+                JSON::Integer(n) => Ok(*n as f64),
                 JSON::Number(f) => Ok(*f),
                 _ => Err(format!(
                     "expected number, got {}",

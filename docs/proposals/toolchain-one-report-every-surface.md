@@ -56,7 +56,7 @@ One product, many imitations. Each row is a mechanism doing the report's job wit
 | 8 | Three live JSON shapes | `Diagnostics.rs:539` (envelope), `:444` (`jet.diagnostic/v1`, one variant, `relatedSpans` hardcoded `[]`), Canvas (`graph_helpers.rs:596`) | plus 10 hand-rolled envelope sites; `CmdImport.rs:783` says `"what"` where the schema says `"message"` |
 | 9 | Dead JSON module | `Source/DiagnosticsJSON.rs` (144 lines, never `mod`-declared) | the spec's "Machine-readable diagnostics" section documents a schema only this dead file implements, while naming the live serializer as its source |
 | 10 | Editor gets What only | `Source/LSP/Server.rs:786` | Why and Fix never reach the editor; no related info, no explain link |
-| 11 | Fix by prose scraping | `Diagnostics.rs:154` (`attach_teaching_edit`) | the quick-fix edit is parsed out of the Fix sentence with a pattern match; prose is load-bearing protocol |
+| 11 | Typed fix metadata | `crates/jet-foundation/src/Registry.rs:256` (`StructuredFix`) | row-owned structured-fix metadata supplies edits; the deleted prose scraper is no longer load-bearing |
 | 12 | Explain pointer missing | 2 of ~85 coded eprintln sites print "run `jet explain …`" | a code with no path to its essay |
 | 13 | Degraded explain | `tests/cli/explain_E0102.txt` | 328 codes explain as a one-line meaning and a stage — no What/Why/Fix |
 | 14 | Severity split brain | `Diagnostics.rs:57` (`Severity::{Error,Lint}`), `Source/Compiler.rs:855` (a second copy), three code prefixes (E/L/frozen W0410) | no ratified severity law; the enum, the prefixes, and the LSP mapping each freelance — ballot D-REPORT-SEV1 ratifies the law |
@@ -241,7 +241,7 @@ Today 2 of ~85 coded tool errors tell you `jet explain` exists. Proposed: the te
 - The markdown-as-registry: `docs/spec/diagnostics.md`'s tables become generated output of the row registry; the manual sync checklist dies.
 - `Source/DiagnosticsJSON.rs` (dead), the `jet.diagnostic/v1` one-variant shape, the Canvas private shape, the 10 hand-rolled JSON envelope sites, and the orphan goldens that encode text no longer in the source.
 - The six house styles: jetpack's private frame, the `what:/why:/fix:` outlier in `jet-rt`, the 184 uncoded `error:` prints, and the second `DiagnosticSeverity` enum in `Source/Compiler.rs:854`.
-- `attach_teaching_edit` prose scraping — retired row-by-row as structured fixes are authored; it runs on every diagnostic today, so it is deleted only when the last scraped pattern has a structured replacement. The authoring count (codes whose Fix matches the scraped patterns) is measured in Phase A and carded.
+- Legacy prose scraping for teaching edits — deleted. `Registry::StructuredFix` is the one source for authored replacement/removal edits; remaining emitters migrate to named row holes as their rows become detailed.
 - Raw exit ints in jetpack — `ExitCodes` becomes the one producer, per the ratified exit law (D-FAIL-EXIT1). (The `JETTEST2` record stays — it is `jet prove` evidence, not a report surface; JSON test reports are additive.)
 - The Canvas private shape's consumer migrates with it: `crates/jet-canvas/src/js/diagnostics-query.js` (including the `window.__jetCanvasProblems` export) reads `jet.report/v1` in the same Phase C change that deletes the shape.
 

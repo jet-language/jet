@@ -19,7 +19,7 @@ fn script_top_level_recovery_always_consumes_a_token() {
 
 #[test]
 fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
-    let source = "message :: \"script entry\"\nprint(message)\nfn helper() => Int { return 42 }\n";
+    let source = "message :: \"script entry\"\nprint(message)\nprint(helper())\nfn helper() => Int { return 42 }\n";
     let output = jet::compile(source)
         .expect("script statements should lower through the normal entry path");
     assert!(
@@ -37,6 +37,27 @@ fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
         "ordinary declarations must remain legal in a script:\n{}",
         output.rust
     );
+}
+
+#[test]
+fn script_entry_uses_the_same_front_end_for_check_and_build() {
+    let dir = common::unique_tmp("jet_script_check_build");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(&file, "print(\"script entry\")\n").unwrap();
+    let path = file.to_str().unwrap();
+
+    let diagnostics = jet::check_with_path(path);
+    assert!(diagnostics.is_empty(), "check rejected the script: {diagnostics:?}");
+    let output = jet::compile_programmable_build(path, &[])
+        .expect("build should use the same implicit run entry");
+    assert!(
+        output.rust.contains("script entry"),
+        "build dropped the script body:\n{}",
+        output.rust
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use crate::AST::{ParamZone, ProgramBundle};
+use crate::AST::ProgramBundle;
 use jet_driver::QueryService::CompilerQueries;
 #[cfg(test)]
 use jet_queries::{FileKey, QueryKey};
@@ -1104,11 +1104,16 @@ fn signature_help_response(
         SymKind::Function {
             params,
             param_contract,
+            param_variadic,
             ret,
             effects,
             effect_via,
         } => {
-            let parts = jet_semindex::function_parameter_parts(params, param_contract);
+            let parts = jet_semindex::function_parameter_parts(
+                params,
+                param_contract,
+                param_variadic,
+            );
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
             if let Some((param, _)) = effect_via {
                 label.push_str(" =[via ");
@@ -1133,7 +1138,13 @@ fn signature_help_response(
                 .map(|part| format!(r#"{{"label":"{}"}}"#, json_escape(part.as_str())))
                 .collect::<Vec<_>>()
                 .join(",");
-            let active = signature_active_parameter(&call, param_contract, parameter_parts.len());
+            let active = jet_semindex::binder_active_parameter(
+                call.active_label.as_deref(),
+                call.active_param,
+                &call.consumed_labels,
+                param_contract,
+                parameter_parts.len(),
+            );
             (label, params_json, active)
         }
         _ => return Some(response(id, "null")),
@@ -2025,6 +2036,7 @@ struct ActiveCall {
     name: String,
     active_param: usize,
     active_label: Option<String>,
+    consumed_labels: Vec<String>,
 }
 
 fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
@@ -2043,17 +2055,22 @@ fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
                     active_start = i + 1;
                 }
                 let active_label = call_argument_label(&src[active_start..offset.min(src.len())]);
+                let prior_end = active_start.saturating_sub(1);
+                let consumed_labels = if prior_end > i + 1 {
+                    call_argument_labels(&src[i + 1..prior_end])
+                } else {
+                    Vec::new()
+                };
                 return Some(ActiveCall {
                     name,
                     active_param,
                     active_label,
+                    consumed_labels,
                 });
             }
             b'(' | b'[' | b'{' => nested = nested.saturating_sub(1),
             b',' if nested == 0 => {
-                if active_param == 0 {
-                    active_start = i + 1;
-                }
+                active_start = i + 1;
                 active_param += 1;
             }
             _ => {}
@@ -2079,28 +2096,28 @@ fn call_argument_label(argument: &str) -> Option<String> {
     Some(argument[..label_len].to_string())
 }
 
-fn signature_active_parameter(
-    call: &ActiveCall,
-    contract: &[(String, String, ParamZone)],
-    param_count: usize,
-) -> usize {
-    if param_count == 0 {
-        return 0;
-    }
-    if let Some(label) = &call.active_label {
-        if let Some(index) = contract.iter().position(|(_, public, zone)| {
-            *zone != ParamZone::PositionalOnly && public == label
-        }) {
-            return index.min(param_count - 1);
+fn call_argument_labels(arguments: &str) -> Vec<String> {
+    let bytes = arguments.as_bytes();
+    let mut labels = Vec::new();
+    let mut start = 0usize;
+    let mut nested = 0usize;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        match byte {
+            b'(' | b'[' | b'{' => nested += 1,
+            b')' | b']' | b'}' => nested = nested.saturating_sub(1),
+            b',' if nested == 0 => {
+                if let Some(label) = call_argument_label(&arguments[start..index]) {
+                    labels.push(label);
+                }
+                start = index + 1;
+            }
+            _ => {}
         }
     }
-    contract
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, _, zone))| *zone != ParamZone::LabelOnly)
-        .nth(call.active_param)
-        .map(|(index, _)| index.min(param_count - 1))
-        .unwrap_or_else(|| call.active_param.min(param_count - 1))
+    if let Some(label) = call_argument_label(&arguments[start..]) {
+        labels.push(label);
+    }
+    labels
 }
 
 fn callee_name_before_paren(bytes: &[u8], paren: usize) -> Option<String> {

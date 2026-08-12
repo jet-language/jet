@@ -78,6 +78,7 @@ impl<'a> Checker<'a> {
                 ret: None, // sema refines R from the closure's actual return
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
+                call_metadata: None,
             };
             let saved_esc = self.lambda_escapes;
             self.lambda_escapes = false;
@@ -87,7 +88,26 @@ impl<'a> Checker<'a> {
             self.expected_type = saved_exp;
             self.lambda_escapes = saved_esc;
             match f_ty {
-                Some(Type::Fn { ret: Some(r), .. }) => {
+                Some(Type::Fn { params, ret: Some(r), .. })
+                    if params.len() == 2
+                        && Type::obligations_satisfy(
+                            &Type::Fn {
+                                params: vec![(*a_inner).clone(), (*b_inner).clone()],
+                                ret: None,
+                                effect_bound: None,
+                                param_contract: None,
+                                call_metadata: None,
+                                return_view_provenance: None,
+                            },
+                            &Type::Fn {
+                                params: params.clone(),
+                                ret: None,
+                                effect_bound: None,
+                                param_contract: None,
+                                call_metadata: None,
+                                return_view_provenance: None,
+                            },
+                        ) => {
                     let ret = Type::Option(r);
                     *resolved_ret_out = Some(ret.clone());
                     Some(ret)

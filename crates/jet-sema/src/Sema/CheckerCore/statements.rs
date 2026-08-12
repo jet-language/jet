@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
-use crate::Sema::CheckerTaskGroup::TaskGroupCtx;
+use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
     computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
@@ -46,6 +46,20 @@ fn encoding_reader_item_type(name: &str) -> Option<Type> {
 
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
+
+fn exits_current_block(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Return(..)
+            | Stmt::Break(..)
+            | Stmt::BreakValue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::BreakLabelValue(..)
+            | Stmt::Continue(..)
+            | Stmt::ContinueLabel(..)
+    )
+}
+
 impl<'a> Checker<'a> {
         fn push_loop_value_frame(&mut self, label: Option<&(String, crate::Diagnostics::Span)>) {
             let (kind, pending_label) = self
@@ -278,7 +292,15 @@ impl<'a> Checker<'a> {
             if !self.enter_source_nesting(stmt.span()) {
                 return;
             }
+            let before = self.flow.clone();
             self.check_stmt_inner(stmt);
+            if !before.reachable {
+                // Unreachable source is still checked for diagnostics, but it
+                // is not a path that may contribute facts to a later join.
+                self.flow = before;
+            } else if exits_current_block(stmt) {
+                self.flow.reachable = false;
+            }
             self.leave_source_nesting();
         }
 
@@ -389,14 +411,9 @@ impl<'a> Checker<'a> {
             {
                 if let Some((place, bin_op, compound)) = prefer_compound_assign(target, value) {
                     if !self.compound_assign_rejected(target, bin_op) {
-                        self.diags.push(Diagnostic::lint(
+                        self.diags.push(Diagnostic::from_row(
                             "L0503",
-                            format!(
-                                "prefer `{place} {compound} …` instead of repeating the left side"
-                            ),
-                            "compound assignment updates a place in one step without restating it"
-                                .to_string(),
-                            format!("write `{place} {compound} …`"),
+                            &[("place", place.as_str()), ("op", compound)],
                             Some(*op_span),
                         ));
                     }
@@ -628,6 +645,14 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                             self.clear_moved_binding(name);
+                            if matches!(&info.ty, Type::Fn { .. }) {
+                                let sendable = !is_compound
+                                    && vt.as_ref().is_some_and(|value_ty| {
+                                        self.interrupt_callback_expr_sendable(value, value_ty)
+                                    })
+                                    && info.param_conv.is_none();
+                                self.set_interrupt_sendable(name, sendable);
+                            }
                             if let (Some(vt), false) =
                                 (vt.clone(), info.ty == Type::Named(String::new()))
                             {
@@ -1330,11 +1355,14 @@ impl<'a> Checker<'a> {
                             // window. At a named `View<T>` return boundary, make
                             // that local acquisition explicit in the AST before
                             // inference; E2305 then checks today's provenance gate.
-                            if matches!(&rt, Type::Apply { name, .. } if name == "View")
-                                && !string_view_return
-                                && !matches!(e, Expr::Copy(..) | Expr::Place(..))
-                                && self.place_from_expr(e).is_some()
-                            {
+                            let bare_place_return = {
+                                let transparent = e.without_parens();
+                                matches!(&rt, Type::Apply { name, .. } if name == "View")
+                                    && !string_view_return
+                                    && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
+                                    && self.place_from_expr(transparent).is_some()
+                            };
+                            if bare_place_return {
                                 let span = e.span();
                                 let inner = std::mem::replace(e, Expr::Absent(span));
                                 *e = Expr::Place(
@@ -1520,26 +1548,12 @@ impl<'a> Checker<'a> {
                                     &rt,
                                     Type::Union(members) if members.iter().any(|m| m == &et)
                                 );
-                                // D-APILABEL1=A: a function returned through a
-                                // bare `fn` type may keep a more-specific source
-                                // contract, but the reverse direction is a mismatch.
-                                let reported = if matches!(
-                                    (&rt, &et),
-                                    (Type::Fn { .. }, Type::Fn { .. })
-                                ) {
-                                    self.check_type_assignable(&rt, &et, e.span())
-                                } else {
-                                    false
-                                };
-                                // `note.Note` and bare `Note` are one nominal
-                                // type when both resolve to the same imported
-                                // module. Keep the return diagnostic on the
-                                // canonical identity rule; raw enum inequality
-                                // would otherwise reintroduce E0113.
-                                let nominal_type_compatible =
-                                    self.nominal_type_identity(&rt, &et);
+                                // D-APILABEL1=A: every return contract uses
+                                // shared assignability, including qualified
+                                // nominal types.
+                                let reported =
+                                    self.check_type_assignable(&rt, &et, e.span());
                                 if et != rt
-                                    && !nominal_type_compatible
                                     && !reported
                                     && !http_handler_lambda
                                     && !string_view_compatible
@@ -2371,11 +2385,7 @@ impl<'a> Checker<'a> {
                     self.taskgroup_stack
                         .push(TaskGroupCtx::new(name.clone(), *name_span));
                     self.check_block(body, false);
-                    let join_start = body.len();
-                    self.append_taskgroup_auto_joins(body);
-                    for s in &mut body[join_start..] {
-                        self.check_stmt(s);
-                    }
+                    self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Lexical);
                     self.taskgroup_stack.pop();
                     self.pop_scope();
                 }
@@ -3082,7 +3092,7 @@ fn prefer_compound_assign(
     if matches!(target, LValue::Index { .. }) {
         return None;
     }
-    let Expr::Binary(op, left, _right, _) = peel_parens(value) else {
+    let Expr::Binary(op, left, _right, _) = value.without_parens() else {
         return None;
     };
     let compound = op.compound_spell()?;
@@ -3092,15 +3102,8 @@ fn prefer_compound_assign(
     Some((lvalue_spell(target)?, *op, compound))
 }
 
-fn peel_parens(expr: &Expr) -> &Expr {
-    match expr {
-        Expr::Paren(inner, _) => peel_parens(inner),
-        other => other,
-    }
-}
-
 fn lvalue_same_place(lv: &LValue, expr: &Expr) -> bool {
-    match (lv, peel_parens(expr)) {
+    match (lv, expr.without_parens()) {
         (LValue::Local { name, .. }, Expr::Ident(n, _)) => name == n,
         (LValue::Field { base, field, .. }, Expr::Field(b, f, _)) => {
             field == f && expr_same_place(base, b)
@@ -3110,7 +3113,7 @@ fn lvalue_same_place(lv: &LValue, expr: &Expr) -> bool {
 }
 
 fn expr_same_place(a: &Expr, b: &Expr) -> bool {
-    match (peel_parens(a), peel_parens(b)) {
+    match (a.without_parens(), b.without_parens()) {
         (Expr::Ident(n1, _), Expr::Ident(n2, _)) => n1 == n2,
         (Expr::Field(b1, f1, _), Expr::Field(b2, f2, _)) => f1 == f2 && expr_same_place(b1, b2),
         (
@@ -3138,7 +3141,7 @@ fn lvalue_spell(lv: &LValue) -> Option<String> {
 }
 
 fn expr_place_spell(expr: &Expr) -> Option<String> {
-    match peel_parens(expr) {
+    match expr.without_parens() {
         Expr::Ident(name, _) => Some(name.clone()),
         Expr::Field(base, field, _) => Some(format!("{}.{}", expr_place_spell(base)?, field)),
         Expr::Index { base, index, .. } => Some(format!(

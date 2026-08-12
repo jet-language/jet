@@ -346,20 +346,21 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
 
 fn task_flow_facts(src: &str) -> Vec<String> {
     let mut facts = Vec::new();
-    // D-CONC-SPAWN1=D: `taskgroup g { … }` / `g.task => …` / `g.all([…])`
-    // respelled as `task.group g { … }` / bare `task …` / `task.all { … }`.
+    // D-CONC-SPAWN1=D: `task.group g { … }` / bare `task …` /
+    // `task.all|race|any { … }` are the canonical task surface.
     // "task " (trailing space) catches the bare spawn keyword without
     // matching the qualified `task.group`/`task.all`/`task.race`/`task.any`
     // forms, which are always `task` immediately followed by `.`.
     for (needle, kind) in [
         ("task.group", "structured_task_scope"),
-        ("tasks.spawn", "spawn_task"),
-        ("task ", "taskgroup_spawn"),
+        ("task ", "task_spawn"),
+        ("task.all", "task_all"),
+        ("task.race", "task_race"),
+        ("task.any", "task_any"),
         (".join(", "join_task"),
         ("tasks.channel", "channel_create"),
         (".send(", "channel_send"),
         (".receive(", "channel_receive"),
-        ("task.all", "taskgroup_join_all"),
         ("#Context", "deadline_context"),
     ] {
         for span in text_matches(src, needle) {
@@ -982,7 +983,7 @@ fn project_stmt(
         Stmt::TaskGroup {
             name, body, span, ..
         } => {
-            add_region(g, ordinal, "taskgroup", name, *span);
+            add_region(g, ordinal, "task.group", name, *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 140, x + 230, y + 70);
         }
         Stmt::Layout {

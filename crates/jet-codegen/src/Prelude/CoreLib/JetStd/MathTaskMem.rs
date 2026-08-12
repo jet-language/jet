@@ -234,11 +234,15 @@
     struct JetTaskState<T: Send + 'static> {
         handle: std::sync::Mutex<Option<super::JetSchedulerJoin<T>>>,
         control: std::sync::Arc<super::JetTaskControl>,
+        // Typed operations such as AsyncEvent convert their inherited deadline
+        // into their own result value. Re-checking the caller deadline after
+        // join would replace that value with E3003 and violate the typed API.
+        skip_join_deadline: bool,
     }
 
     trait JetTaskGroupChild: Send + Sync {
         fn cancel(&self);
-        fn join(&self) -> Result<(), super::JetTaskFailure>;
+        fn join(&self);
     }
 
     impl<T: Send + 'static> JetTaskGroupChild for JetTaskState<T> {
@@ -248,102 +252,68 @@
             }
         }
 
-        fn join(&self) -> Result<(), super::JetTaskFailure> {
+        fn join(&self) {
             if let Some(handle) = self.handle.lock().unwrap().take() {
-                handle.join_for_cleanup().map(|_| ())
-            } else {
-                Ok(())
+                // Group cleanup is not a parent wait point. The shared drain
+                // consumes the child completion even while the parent is
+                // unwinding from cancellation.
+                handle.drain();
             }
-        }
-    }
-
-    struct JetTaskGroupSlots {
-        limit: usize,
-        active: std::sync::Mutex<usize>,
-        wake: std::sync::Condvar,
-    }
-
-    struct JetTaskGroupPermit {
-        slots: std::sync::Arc<JetTaskGroupSlots>,
-    }
-
-    impl Drop for JetTaskGroupPermit {
-        fn drop(&mut self) {
-            let mut active = self.slots.active.lock().unwrap();
-            *active = active.saturating_sub(1);
-            self.slots.wake.notify_one();
         }
     }
 
     /// D-CONC-SPAWN1=D: the internal runtime identity shared by a lexical
     /// `task.group` and every named helper that receives it.
     pub struct JetTaskGroup {
-        children: JetTaskGroupRuntime<std::sync::Arc<dyn JetTaskGroupChild>>,
-        slots: Option<std::sync::Arc<JetTaskGroupSlots>>,
+        children: std::sync::Arc<JetTaskGroupRuntime<std::sync::Arc<dyn JetTaskGroupChild>>>,
+        owner: bool,
+    }
+
+    impl Clone for JetTaskGroup {
+        fn clone(&self) -> Self {
+            Self {
+                children: self.children.clone(),
+                owner: false,
+            }
+        }
     }
 
     impl JetTaskGroup {
         pub fn new() -> Self {
             Self {
-                children: JetTaskGroupRuntime::new(),
-                slots: None,
+                children: std::sync::Arc::new(JetTaskGroupRuntime::new_defaulted(None)),
+                owner: true,
             }
         }
 
         pub fn with_limit(limit: i64) -> Self {
-            assert!(limit > 0, "task-group limit must be positive");
             Self {
-                children: JetTaskGroupRuntime::new(),
-                slots: Some(std::sync::Arc::new(JetTaskGroupSlots {
-                    limit: limit as usize,
-                    active: std::sync::Mutex::new(0),
-                    wake: std::sync::Condvar::new(),
-                })),
+                children: std::sync::Arc::new(JetTaskGroupRuntime::new_defaulted(Some(limit))),
+                owner: true,
             }
         }
 
-        fn acquire_slot(&self) -> Option<JetTaskGroupPermit> {
-            let slots = self.slots.as_ref()?.clone();
-            let mut active = slots.active.lock().unwrap();
-            while *active >= slots.limit {
-                active = slots.wake.wait(active).unwrap();
-            }
-            *active += 1;
-            drop(active);
-            Some(JetTaskGroupPermit { slots })
-        }
-
-        pub fn spawn<F, T>(&self, f: F) -> JetTask<T>
-        where
-            F: FnOnce() -> T + Send + 'static,
-            T: Send + 'static,
-        {
-            let permit = self.acquire_slot();
-            let task = JetTask::spawn(move || {
-                let _permit = permit;
-                f()
-            });
-            self.children.register(task.state.clone());
-            task
-        }
-
-        /// D-TASKBORROW1=A: spawn a child that borrows places its owner still
-        /// holds. Sema proves every borrowed place disjoint before this is
-        /// emitted; the loan is closed by `Drop for JetTaskGroup`, which
-        /// cancels and joins every child before the group's scope ends. That
-        /// join is what makes the lifetime erasure below sound — the same
-        /// contract `std::thread::scope` relies on.
-        pub fn spawn_scoped<'env, F, T>(&self, f: F) -> JetTask<T>
+        /// D-TASKBORROW1=A: one canonical group spawn path covers both owned
+        /// and sema-proven borrowed captures. The lexical group closes the
+        /// loan by joining every registered child before it drops.
+        pub fn spawn<'env, F, T>(&self, f: F) -> JetTask<T>
         where
             F: FnOnce() -> T + Send + 'env,
             T: Send + 'static,
         {
             let boxed: Box<dyn FnOnce() -> T + Send + 'env> = Box::new(f);
-            // JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_scoped
+            // JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_borrowed_spawn
             let erased: Box<dyn FnOnce() -> T + Send + 'static> =
                 unsafe { std::mem::transmute(boxed) };
-            // JET_VETTED_UNSAFE_END: jet_taskgroup_scoped
-            let permit = self.acquire_slot();
+            // JET_VETTED_UNSAFE_END: jet_taskgroup_borrowed_spawn
+            let waiter = super::ParkSlot::new();
+            let permit = self
+                .children
+                .acquire_with(waiter, |waiter| {
+                    super::jet_scheduler_task_group_wait(waiter);
+                    Ok::<(), ()>(())
+                })
+                .expect("task-group admission wait cannot fail");
             let task = JetTask::spawn(move || {
                 let _permit = permit;
                 erased()
@@ -353,18 +323,20 @@
         }
 
         pub fn close(&self) {
-            if let Err(failure) = self
-                .children
-                .close_with(|child| child.cancel(), |child| child.join())
-            {
-                jet_task_outcome_unwrap::<()>(Err(failure));
+            if jet_task_deadline_pending() {
+                self.children
+                    .close_with_cancel(|child| child.cancel(), |child| child.join());
+            } else {
+                self.children.close_with(|child| child.join());
             }
         }
     }
 
     impl Drop for JetTaskGroup {
         fn drop(&mut self) {
-            self.close();
+            if self.owner {
+                self.close();
+            }
         }
     }
 
@@ -378,6 +350,7 @@
                 state: std::sync::Arc::new(JetTaskState {
                     handle: std::sync::Mutex::new(None),
                     control: super::JetTaskControl::new(),
+                    skip_join_deadline: false,
                 }),
             }
         }
@@ -399,6 +372,7 @@
                         ),
                     )),
                     control,
+                    skip_join_deadline: false,
                 }),
             }
         }
@@ -422,6 +396,7 @@
                         ),
                     )),
                     control,
+                    skip_join_deadline: true,
                 }),
             }
         }
@@ -440,15 +415,28 @@
         pub fn cancel(&self) {
             self.state.control.cancel();
         }
-        pub fn join(self) -> super::JetOutcome<T, super::JetTaskFailure> {
-            self
-                .state
-                .handle
-                .lock()
-                .unwrap()
-                .take()
-                .expect("task already joined")
-                .join()
+        /// D-CONC-FAIL1=A: child cancellation, deadline, and panic are values
+        /// in the one TaskFailure rail; the scheduler owns only the wait-point
+        /// adapter for cancellation of the joining parent.
+        pub fn join(self) -> Result<T, JetTaskFailure> {
+            let state = self.state;
+            let skip_join_deadline = state.skip_join_deadline;
+            if !skip_join_deadline {
+                super::jet_task_join_deadline_check();
+            }
+            let result = {
+                let mut handle = state.handle.lock().unwrap();
+                let result = handle
+                    .as_mut()
+                    .expect("task already joined")
+                    .join();
+                let _ = handle.take();
+                result
+            };
+            if !skip_join_deadline {
+                super::jet_task_join_deadline_check();
+            }
+            result
         }
         pub fn detach(self) {
             let _ = self.state.handle.lock().unwrap().take();
@@ -475,95 +463,25 @@
             .collect()
     }
 
-    /// D-CONC-FAIL1=A: join every handle on the shared failure rail; fail fast
-    /// and cancel siblings on error.
+    /// D-CONC-SPAWN1=D: `task.all` joins every child; fail fast and cancel siblings on error.
     pub fn jet_task_all<T: Send + 'static>(
         tasks: Vec<JetTask<T>>,
-    ) -> super::JetOutcome<Vec<T>, super::JetTaskFailure> {
+    ) -> Result<Vec<T>, JetTaskFailure> {
         super::jet_scheduler_all(jet_task_entries(tasks, "all"))
     }
 
-    /// Wait for every task and return the results in list order (consumes).
-    pub fn jet_task_wait_all<T: Send + 'static>(
-        tasks: Vec<JetTask<T>>,
-    ) -> super::JetOutcome<Vec<T>, super::JetTaskFailure> {
-        jet_task_all(tasks)
-    }
-
-    /// Detach every task (consumes).
-    pub fn jet_task_detach_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) {
-        for task in tasks {
-            task.detach();
-        }
-    }
-
-    /// Request cancellation for every task (borrows).
-    pub fn jet_task_cancel_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
-        for task in tasks {
-            task.cancel();
-        }
-    }
-
-    /// Mark every task paused (borrows).
-    pub fn jet_task_pause_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
-        jet_task_pause_all_mode(tasks, 0);
-    }
-
-    /// D-TASK-PAUSE-TIER1=E: list twin of `pause_with_mode`.
-    pub fn jet_task_pause_all_mode<T: Send + 'static>(tasks: &[JetTask<T>], mode: i64) {
-        for task in tasks {
-            task.pause_with_mode(mode);
-        }
-    }
-
-    /// Clear the paused marker on every task (borrows).
-    pub fn jet_task_resume_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
-        for task in tasks {
-            task.resume();
-        }
-    }
-
-    /// D-CONC-FAIL1=A: first successful result; cancel losers via the shared
-    /// scheduler failure rail.
+    /// D-CONC-SPAWN1=D: `task.race` returns the first successful result and cancels siblings.
     pub fn jet_task_race<T: Send + 'static>(
         tasks: Vec<JetTask<T>>,
-    ) -> super::JetOutcome<T, super::JetTaskFailure> {
+    ) -> Result<T, JetTaskFailure> {
         super::jet_scheduler_race(jet_task_entries(tasks, "race"))
     }
 
-    /// D-CONC-FAIL1=A: first completed result (success or failure) on the
-    /// shared typed rail.
+    /// D-CONC-SPAWN1=D: `task.any` returns the first completed result.
     pub fn jet_task_any<T: Send + 'static>(
         tasks: Vec<JetTask<T>>,
-    ) -> super::JetOutcome<T, super::JetTaskFailure> {
+    ) -> Result<T, JetTaskFailure> {
         super::jet_scheduler_any(jet_task_entries(tasks, "any"))
-    }
-
-    /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: `task.all`/`task.race`/`task.any` never
-    /// expose a `Result` to Jet source (unlike `.join()`, which returns
-    /// `T ? TaskFailure` on the explicit fallible rail) — success unwraps to the
-    /// plain value, a losing failure panics the process fail-fast, matching
-    /// `JetTaskGroupRuntime::close_with`'s scope-exit panic propagation and the
-    /// interpreter's `jet_task_select` policy (I9: one meaning, AOT just marshals).
-    ///
-    /// Mirrors `jet_scheduler_fatal`'s exit policy exactly (Prelude/Scheduler.rs):
-    /// a bare `panic!` here would escape `jet_runtime_boundary`'s `JetRuntimeExit`
-    /// catch (it only recognizes that one marker payload) and fall through to
-    /// Rust's default hook — wrong stderr shape and exit code 101, not 70. Inside
-    /// a task, a real unwind is still correct (the enclosing catch expects one);
-    /// otherwise route through the same controlled-exit path every other runtime
-    /// failure uses.
-    pub fn jet_task_outcome_unwrap<T>(
-        outcome: super::JetOutcome<T, super::JetTaskFailure>,
-    ) -> T {
-        let reason = match outcome {
-            Ok(value) => return value,
-            Err(failure) => failure.message(),
-        };
-        if super::jet_scheduler_panic_should_unwind() {
-            panic!("{reason}");
-        }
-        super::jet_runtime_diagnostic(format!("panic: {reason}"));
     }
 
     /// Cooperative yield — park at a wait point with a zero timeout.
@@ -622,7 +540,7 @@
         let inners: Vec<_> = recvs.iter().map(|c| c.inner.select_inner()).collect();
         let timers = after_values
             .into_iter()
-            .map(|(ms, value)| (ms.max(0) as u64, Some(value)))
+            .map(|(ms, value)| (super::jet_task_delay_ms_defaulted(ms), Some(value)))
             .collect();
         super::jet_scheduler_select_values(inners, timers)
     }
@@ -638,7 +556,7 @@
 
     /// D-TASKRUNTIME1=A: bounded channel; `capacity` is a real memory/backpressure bound.
     pub fn channel_bounded<T: Send>(capacity: i64) -> (JetSender<T>, JetReceiver<T>) {
-        let inner = super::JetSchedulerChannel::bounded(capacity.max(1) as usize);
+        let inner = super::JetSchedulerChannel::bounded(capacity);
         let tx = inner.sender();
         (JetSender { tx }, JetReceiver { inner })
     }
@@ -651,7 +569,7 @@
     /// D-TASKRUNTIME1=A: one-shot timer channel; wakes through the scheduler timer wheel.
     pub fn after(ms: i64) -> JetReceiver<()> {
         let (tx, rx) = channel::<()>();
-        let delay = ms.max(0) as u64;
+        let delay = super::jet_task_delay_ms_defaulted(ms);
         let _ = super::jet_scheduler_spawn(move || {
             super::jet_scheduler_sleep_ms(delay);
             tx.send(());
@@ -662,7 +580,7 @@
     /// D-TASKRUNTIME1=A: one-shot typed timer channel for select timeout values.
     pub fn after_value<T: Send + 'static>(ms: i64, value: T) -> JetReceiver<T> {
         let (tx, rx) = channel::<T>();
-        let delay = ms.max(0) as u64;
+        let delay = super::jet_task_delay_ms_defaulted(ms);
         let _ = super::jet_scheduler_spawn(move || {
             super::jet_scheduler_sleep_ms(delay);
             tx.send(value);
@@ -673,7 +591,7 @@
     /// D-TASKRUNTIME1=A: interval timer channel; sends 1, 2, ... until process exit.
     pub fn interval(ms: i64) -> JetReceiver<i64> {
         let (tx, rx) = channel::<i64>();
-        let delay = ms.max(1) as u64;
+        let delay = super::jet_task_interval_ms_defaulted(ms);
         let _ = std::thread::spawn(move || {
             let mut tick = 1i64;
             loop {
@@ -793,10 +711,7 @@
         where
             F: FnOnce(&T) -> R,
         {
-            let _permit = self
-                .0
-                .protocol
-                .acquire(false, || false)
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, false, || false)
                 .expect("uncancelled Shared read acquires");
             // jet:shared-guard-internal-begin
             // SAFETY: the read permit is held through the callback.
@@ -807,10 +722,7 @@
         where
             F: FnOnce(&mut T) -> R,
         {
-            let _permit = self
-                .0
-                .protocol
-                .acquire(true, || false)
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
                 .expect("uncancelled Shared edit acquires");
             // jet:shared-guard-internal-begin
             // SAFETY: the exclusive permit is held through the callback.
@@ -825,16 +737,13 @@
         }
         // D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of
         // `#Transact`. Inside a transaction block, `handle.edit(f)` lowers to
-        // `edit_txn` — the mutation is DEFERRED, not applied now. Every deferred
-        // edit across every touched handle is buffered on the explicit guard,
-        // then applied together at the block's commit under all the
-        // handles' write locks held at once, in a canonical (pointer) order that
-        // cannot deadlock. Either every handle's change lands or none does, and no
-        // task ever observes an intermediate state. `f` runs against a fresh
-        // `&mut T` at commit time (not a snapshot), so a delta like `b.balance -=
-        // 100` composes correctly with a concurrent transfer. The result is void
-        // by construction — the write hasn't happened yet — which sema enforces
-        // (E0750). Codegen is dumb (I3): the whole strategy is this runtime.
+        // `edit_txn` — the mutation is deferred onto the Shared Prelude
+        // transaction. That protocol owns participant identity, canonical lock
+        // ordering, commit, and rollback; this adapter supplies only the
+        // type-erased payload closure. `f` runs against a fresh `&mut T` while
+        // the Prelude holds the participant permit. The result is void by
+        // construction — the write has not happened yet — which sema enforces
+        // (E0750).
         pub fn edit_txn<F>(&self, stm: &mut super::jet_stm::Guard, f: F)
         where
             F: FnOnce(&mut T) + 'static,
@@ -909,25 +818,21 @@
     }
 
     trait JetSharedLease {
-        fn permit(&self) -> std::sync::Arc<crate::JetSharedPermit>;
-        fn editable(&self) -> bool;
+        fn state(&self) -> std::sync::Arc<crate::JetSharedGuardState>;
         fn root_ptr(&self) -> *mut ();
     }
 
     struct JetSharedRootLease<T: 'static> {
-        permit: std::sync::Arc<crate::JetSharedPermit>,
+        state: std::sync::Arc<crate::JetSharedGuardState>,
         cell: std::sync::Arc<JetSharedCell<T>>,
     }
 
     impl<T: 'static> JetSharedLease for JetSharedRootLease<T> {
-        fn permit(&self) -> std::sync::Arc<crate::JetSharedPermit> {
-            self.permit.clone()
-        }
-        fn editable(&self) -> bool {
-            self.permit.editable()
+        fn state(&self) -> std::sync::Arc<crate::JetSharedGuardState> {
+            self.state.clone()
         }
         fn root_ptr(&self) -> *mut () {
-            assert!(self.permit.held(), "SharedGuard lease is released");
+            assert!(self.state.held(), "SharedGuard lease is released");
             self.cell.value.get().cast::<()>()
         }
     }
@@ -942,13 +847,11 @@
 
     impl<T: 'static> JetSharedGuard<T> {
         fn read(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
-            let permit = cell
-                .protocol
-                .acquire(false, || false)
+            let state = crate::jet_shared_guard_acquire(&cell.protocol, false, || false)
                 .expect("uncancelled Shared guard acquires");
             Self {
                 lease: std::rc::Rc::new(JetSharedRootLease {
-                    permit,
+                    state,
                     cell,
                 }),
                 project: std::rc::Rc::new(|root| root.cast::<T>()),
@@ -957,13 +860,11 @@
         }
 
         fn edit(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
-            let permit = cell
-                .protocol
-                .acquire(true, || false)
+            let state = crate::jet_shared_guard_acquire(&cell.protocol, true, || false)
                 .expect("uncancelled Shared guard acquires");
             Self {
                 lease: std::rc::Rc::new(JetSharedRootLease {
-                    permit,
+                    state,
                     cell,
                 }),
                 project: std::rc::Rc::new(|root| root.cast::<T>()),
@@ -1069,26 +970,27 @@
         where
             F: Fn(&T) -> bool,
         {
-            if !self.editable {
-                return Err("a condition wait needs an edit guard".to_string());
+            let state = self.lease.state();
+            if !state.held() {
+                return Err(crate::JET_SHARED_GUARD_INVALID.to_string());
             }
-            let permit = self.lease.permit();
-            match crate::jet_shared_condition_wait(
-                &permit,
-                &condition.inner,
-                || Ok::<bool, ()>(ready(self)),
-                || {
+            crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
+                .map_err(|message| message.to_string())?;
+            loop {
+                if ready(self) {
+                    return Ok(());
+                }
+                let waiter: std::sync::Arc<dyn crate::JetConditionWaiter> =
                     std::sync::Arc::new(JetSchedulerConditionWaiter {
                         slot: super::ParkSlot::new(),
-                    })
-                },
-            ) {
-                Ok(()) => Ok(()),
-                Err(crate::JetConditionWaitError::Cancelled) => {
-                    Err("condition wait cancelled".to_string())
-                }
-                Err(crate::JetConditionWaitError::Predicate(())) => {
-                    unreachable!("native predicate is infallible")
+                    });
+                match crate::jet_shared_guard_wait_once(
+                    Some(state.as_ref()),
+                    Some(&condition.inner),
+                    waiter,
+                ) {
+                    Ok(()) => {}
+                    Err(error) => return Err(error.message().to_string()),
                 }
             }
         }
@@ -1130,6 +1032,10 @@
         fn wake(&self) {
             super::jet_scheduler_wake(&self.slot);
         }
+
+        fn interrupted(&self) -> bool {
+            super::jet_scheduler_wait_point_interrupted()
+        }
     }
 
     #[derive(Clone)]
@@ -1145,11 +1051,11 @@
         }
 
         pub fn notify_one(&self) {
-            self.inner.notify_one();
+            crate::jet_shared_condition_notify_one(&self.inner);
         }
 
         pub fn notify_all(&self) {
-            self.inner.notify_all();
+            crate::jet_shared_condition_notify_all(&self.inner);
         }
     }
 

@@ -34,7 +34,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/continue_teaches_next.jet",
     "tests/ui/control_body_needs_braces.jet",
     "tests/ui/copy_keyword_retired_e0991.jet",
-    "tests/ui/core_selective_import.jet",
     "tests/ui/debug_unknown_selector.jet",
     "tests/ui/defer_only_close.jet",
     "tests/ui/deref_forbidden.jet",
@@ -157,6 +156,9 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/take_pattern_bad_hole.jet",
     "tests/ui/take_pattern_computed_arg.jet",
     "tests/ui/take_pattern_string_typed_bad_hole.jet",
+    "tests/ui/task_group_parameter_label.jet",
+    "tests/ui/task_group_value.jet",
+    "tests/ui/task_unknown_selector.jet",
     "tests/ui/test_block_nested.jet",
     "tests/ui/trailing_block_double.jet",
     "tests/ui/trailing_block_not_function.jet",
@@ -166,6 +168,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/two_capability_markers.jet",
     "tests/ui/two_parse_errors.jet",
     "tests/ui/typed_binding_retired.jet",
+    "tests/ui/typed_head_path_invalid.jet",
     "tests/ui/uninit_annotated_retired.jet",
     "tests/ui/uninit_marker_retired.jet",
     "tests/ui/uninit_no_type.jet",
@@ -217,7 +220,7 @@ fn collect_matching_jet_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
 
 // The loss oracle is ordered and exact after these parser-equivalent rewrites:
 // top-level formatter ordering; marker-list grouping; `Type<T>.method()`;
-// external-method and task-block sugar; canonical anonymous-union member order;
+// external-method sugar; canonical anonymous-union member order;
 // optional declaration/trailing commas; redundant default file aliases. The
 // comparator itself permits only formatter-added arm blocks, bare-lambda parens,
 // leading-dot variant patterns, struct shorthand labels/separators, and a
@@ -232,8 +235,8 @@ fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
         path.display(),
         jet::render_diagnostics(&path.display().to_string(), src, &diagnostics)
     );
-    let tokens = canonicalize_task_blocks(canonicalize_external_methods(
-        canonicalize_static_generic_calls(expand_marker_groups(canonicalize_file_prefix(tokens))),
+    let tokens = canonicalize_external_methods(canonicalize_static_generic_calls(
+        expand_marker_groups(canonicalize_file_prefix(tokens)),
     ));
     let enum_group_commas = enum_group_commas(&tokens);
     let declaration_field_commas = declaration_field_commas(&tokens);
@@ -602,46 +605,6 @@ fn matching_brace(tokens: &[Token], open: usize) -> Option<usize> {
         }
     }
     None
-}
-
-fn canonicalize_task_blocks(tokens: Vec<Token>) -> Vec<Token> {
-    let mut out = Vec::with_capacity(tokens.len());
-    let mut index = 0;
-    while index < tokens.len() {
-        if matches!(tokens[index].kind, TokKind::Ident(_))
-            && matches!(tokens.get(index + 1).map(|t| &t.kind), Some(TokKind::Dot))
-            && matches!(
-                tokens.get(index + 2).map(|t| &t.kind),
-                Some(TokKind::Ident(name)) if name == jet::Syntax::TASKGROUP_SPAWN_METHOD
-            )
-            && matches!(tokens.get(index + 3).map(|t| &t.kind), Some(TokKind::LBrace))
-        {
-            if let Some(close) = matching_brace(&tokens, index + 3) {
-                out.extend(tokens[index..index + 3].iter().cloned());
-                for kind in [
-                    TokKind::LParen,
-                    TokKind::LParen,
-                    TokKind::RParen,
-                    TokKind::LambdaArrow,
-                ] {
-                    out.push(Token {
-                        kind,
-                        span: tokens[index + 3].span,
-                    });
-                }
-                out.extend(tokens[index + 3..=close].iter().cloned());
-                out.push(Token {
-                    kind: TokKind::RParen,
-                    span: tokens[close].span,
-                });
-                index = close + 1;
-                continue;
-            }
-        }
-        out.push(tokens[index].clone());
-        index += 1;
-    }
-    out
 }
 
 fn enum_group_commas(tokens: &[Token]) -> Vec<bool> {

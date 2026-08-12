@@ -734,7 +734,7 @@ fn run() {
     assert_eq!(stdout, "working\ncleanup\n");
 }
 
-/// c109 Phase 13: `tasks.spawn(() => …)` — the distinct `emit_spawn_lambda` form
+/// c109 Phase 13: `task …` — the canonical child form
 /// (`move |…|`, never `Box::new`). The spawned task computes a value joined back.
 /// Routes through the TIR with `JetTask::spawn(move || …)`.
 #[test]
@@ -743,13 +743,12 @@ fn tasks_spawn_closure_core_call() {
         return;
     }
     let src = "\
-use core.tasks as tasks
 fn compute() => Int {
     return 21
 }
 fn launch() => Int {
-    t :: tasks.spawn(() => compute())
-    return t.join()
+    t :: task compute()
+    return t.join() ?? 0
 }
 fn run() {
     print(launch())

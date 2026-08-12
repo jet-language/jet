@@ -31,13 +31,7 @@ impl<'a> Checker<'a> {
                 convention: AccessConvention::Read,
                 expr: Expr::Str(vec![StrPart::Lit(value)], span),
                 span,
-                flags: crate::AST::CallArgFlags {
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    is_trailing_block: false,
-                    c_callback_symbol: false,
-                    source_index: None,
-                },
+                flags: Default::default(),
                 label: None,
                 spread: false,
             }
@@ -66,7 +60,7 @@ impl<'a> Checker<'a> {
         pub(crate) fn infer_call_value(
             &mut self,
             callee: &mut Box<Expr>,
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
             span: Span,
         ) -> Option<Type> {
             if is_inline_compute_transform(self, callee) {
@@ -105,6 +99,7 @@ impl<'a> Checker<'a> {
                 ret,
                 effect_bound,
                 param_contract,
+                call_metadata,
                 ..
             } = callee_ty.clone()
             else {
@@ -145,35 +140,123 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // D-APILABEL1=A: a function type may declare a call contract; a call
-            // through such a value honours its labels and zones.
-            if let Some(contract) = &param_contract {
-                let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
-                    .iter()
-                    
-                    .map(|(label, zone)| crate::Sema::CallBinder::BindParam {
+            // D-APILABEL1=A: every function value call goes through the one
+            // binder. An absent contract is an unlabelled function type, so
+            // the empty contract still rejects a written label as E0764 while
+            // leaving bare arguments in their ordinary positional shape.
+            let metadata = call_metadata.as_ref();
+            let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..params.len())
+                .map(|index| {
+                    let (label, zone) = param_contract
+                        .as_deref()
+                        .and_then(|contract| contract.get(index))
+                        .map(|(label, zone)| (label.as_str(), *zone))
+                        .unwrap_or(("", crate::AST::ParamZone::Either));
+                    crate::Sema::CallBinder::BindParam {
                         label,
-                        name: label,
-                        zone: *zone,
-                        default: None,
-                        convention: AccessConvention::Read,
-                        variadic: false,
+                        name: metadata
+                            .and_then(|meta| meta.names.get(index))
+                            .map(String::as_str)
+                            .unwrap_or(label),
+                        zone,
+                        default: metadata
+                            .and_then(|meta| meta.defaults.get(index))
+                            .and_then(|default| default.as_ref()),
+                        convention: metadata
+                            .and_then(|meta| meta.conventions.get(index))
+                            .copied()
+                            .unwrap_or(AccessConvention::Read),
+                        ty: params.get(index),
+                        variadic: metadata
+                            .and_then(|meta| meta.variadic.get(index))
+                            .copied()
+                            .unwrap_or(false),
                         core_default: None,
-                    })
-                    .collect();
-                let mut owned: Vec<crate::AST::CallArg> = args.to_vec();
-                let callee_name = match callee.as_ref() {
-                    Expr::Ident(name, _) => name.clone(),
-                    _ => "this function value".to_string(),
-                };
-                if crate::Sema::CallBinder::bind_call_args(
-                    &callee_name, &bind, &mut owned, span, &mut self.diags,
-                )
-                .is_some()
-                    && owned.len() == args.len()
-                {
-                    args.clone_from_slice(&owned);
+                    }
+                })
+                .collect();
+            let callee_name = match callee.as_ref() {
+                Expr::Ident(name, _) => name.clone(),
+                _ => "this function value".to_string(),
+            };
+            let bound = crate::Sema::CallBinder::bind_call_args(
+                &callee_name, &bind, args, span, &mut self.diags,
+            );
+            self.register_binder_refs(args);
+            if bound.is_none() {
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
                 }
+                return ret.map(|r| *r);
+            }
+            if metadata.is_some_and(|meta| meta.variadic.last().copied().unwrap_or(false)) {
+                let fake_sig = crate::AST::FuncSig {
+                    params: params
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(index, ty)| {
+                            (
+                                metadata
+                                    .and_then(|meta| meta.conventions.get(index))
+                                    .copied()
+                                    .unwrap_or(AccessConvention::Read),
+                                ty,
+                            )
+                        })
+                        .collect(),
+                    root_param: false,
+                    return_type: ret.as_deref().cloned(),
+                    return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+                    is_extern: false,
+                    is_unsafe: false,
+                    is_pure: false,
+                    is_foreign_thread_safe: false,
+                    is_sanitizer: false,
+                    is_must_use: false,
+                    is_c_abi: false,
+                    c_abi_name: None,
+                    foreign_effect_root: None,
+                    param_info: (0..params.len())
+                        .map(|index| {
+                            (
+                                metadata
+                                    .and_then(|meta| meta.names.get(index))
+                                    .cloned()
+                                    .or_else(|| {
+                                        param_contract
+                                            .as_deref()
+                                            .and_then(|contract| contract.get(index))
+                                            .map(|(label, _)| label.clone())
+                                    })
+                                    .unwrap_or_default(),
+                                metadata
+                                    .and_then(|meta| meta.defaults.get(index))
+                                    .is_some_and(|default| default.is_some()),
+                            )
+                        })
+                        .collect(),
+                    param_call: param_contract.clone().unwrap_or_default(),
+                    defaults: metadata
+                        .map(|meta| meta.defaults.clone())
+                        .unwrap_or_else(|| vec![None; params.len()]),
+                    param_variadic: metadata
+                        .map(|meta| meta.variadic.clone())
+                        .unwrap_or_else(|| vec![false; params.len()]),
+                    variadic_bounds: None,
+                    param_view_from_names: Vec::new(),
+                };
+                let mut packed = crate::AST::Call {
+                    name: callee_name.clone(),
+                    name_span: span,
+                    type_args: Vec::new(),
+                    args: std::mem::take(args),
+                    resolved_ret: None,
+                    range_checked: false,
+                    widen_approx: false,
+                };
+                self.normalize_variadic_call(&mut packed, &fake_sig);
+                *args = packed.args;
             }
             if args.len() != params.len() {
                 self.diags.push(Diagnostic::error(
@@ -191,14 +274,19 @@ impl<'a> Checker<'a> {
             }
             for (i, arg) in args.iter_mut().enumerate() {
                 if let Some(param_ty) = params.get(i) {
+                    let param_convention = metadata
+                        .and_then(|meta| meta.conventions.get(i))
+                        .copied()
+                        .unwrap_or(AccessConvention::Read);
                     let saved = self.expected_type.clone();
                     let saved_borrow = self.borrow_ctx;
                     self.expected_type = Some(param_ty.clone());
-                    self.borrow_ctx = !param_ty.is_scalar();
+                    self.borrow_ctx = param_convention == AccessConvention::Read
+                        && !param_ty.is_scalar();
                     let got = self.with_call_access(&mut call_access, |checker| {
                         checker.check_call_argument_access(
                             arg,
-                            AccessConvention::Read,
+                            param_convention,
                             param_ty,
                             true,
                         );
@@ -213,7 +301,7 @@ impl<'a> Checker<'a> {
                             &mut arg.expr,
                             got,
                             param_ty,
-                            AccessConvention::Read,
+                            param_convention,
                         );
                         if got != *param_ty {
                             self.diags.push(Diagnostic::error(
@@ -230,43 +318,13 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                    if arg.convention == AccessConvention::Move {
-                        self.diags.push(Diagnostic::error(
-                            "E0203",
-                            "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
-                            "function-value parameters have plain read access; they do not take ownership"
-                                .to_string(),
-                            "remove the move-capability marker `^`".to_string(),
-                            Some(arg.span),
-                        ));
-                    }
-                    if arg.convention == AccessConvention::Write
-                        && !matches!(arg.expr, Expr::Ident(_, _))
-                    {
-                        self.diags.push(Diagnostic::error(
-                            "E0202",
-                            "the write-capability marker `&` needs a plain named binding after it".to_string(),
-                            "write access from the write-capability marker `&` can only be granted to a named binding, not an expression"
-                                .to_string(),
-                            self.non_name_write_argument_fix(&arg.expr),
-                            Some(arg.span),
-                        ));
-                    }
-                    if let Expr::Ident(name, _) = &arg.expr {
-                        if arg.convention == AccessConvention::Write {
-                            if let Some(info) = self.lookup(name) {
-                                if !info.mutable {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0111",
-                                        format!("`{name}` cannot be changed"),
-                                        "write access requires a mutable binding".to_string(),
-                                        format!("declare `{name}` with `:=`"),
-                                        Some(arg.span),
-                                    ));
-                                }
-                            }
-                        }
-                    }
+                    self.check_callable_argument_ownership(
+                        &callee_name,
+                        i,
+                        param_convention,
+                        param_ty,
+                        arg,
+                    );
                 } else {
                     self.infer(&mut arg.expr);
                 }

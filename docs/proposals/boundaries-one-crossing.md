@@ -10,9 +10,9 @@ The one idea: **a value crossing a trust or format boundary is always the same a
 
 The law: **nothing foreign becomes Jet silently — every crossing names its schema, and every crossing leaves its fact.** Every ratified boundary rule is already a theorem of this law. E0119 rejects an effect name the compiler cannot name. D-UNIFYLIT1 makes a typed head the one spelling for checked literal text. D-VALIDATE-DECODE1 gives every refused decode one error shape. D-MIGRATE1 makes schemas evolve by named steps. E1204 refuses dependency bytes that do not match their locked hash. The law is not new — it is the sentence these rules were always spelling.
 
-What the ballots ask, in one breath: finish the typed-head row (URL, Path, DateTime — D-BOUND-HEAD1), let heads own their escapes so `Regex.{"\d+"}` works (D-BOUND-RAW1), let users declare heads so a sink is just a parameter type (D-BOUND-SINK1), let `jet bind` eat data schemas the way it already eats C++ headers (D-BOUND-BIND1), make a successful decode the act that clears origin taint (D-BOUND-TAINT1), make `#Transact` refuse a foreign call with no undo contract (D-BOUND-UNDO1), give `#PublishedSchema` types protobuf-grade unknown-field preservation (D-BOUND-EVOLVE1), and give provenance a readable surface with a sane default (D-BOUND-PROV1). D-BOUND-LAW1 adopts the law itself, so every future boundary feature must land in a named cell instead of minting a sixth world.
+What the ballots ask, in one breath: finish the typed-head row (URL, Path, DateTime — D-BOUND-HEAD1), let heads own their escapes so `Regex.{"\d+"}` works (D-BOUND-RAW1), let users declare heads so a sink is just a parameter type (D-BOUND-SINK1), let `jet inspect bind` eat data schemas the way it already eats C++ headers (D-BOUND-BIND1), make a successful decode the act that clears origin taint (D-BOUND-TAINT1), make `#Transact` refuse a foreign call with no undo contract (D-BOUND-UNDO1), give `#PublishedSchema` types protobuf-grade unknown-field preservation (D-BOUND-EVOLVE1), and give provenance a readable surface with a sane default (D-BOUND-PROV1). D-BOUND-LAW1 adopts the law itself, so every future boundary feature must land in a named cell instead of minting a sixth world.
 
-What does not change: `DataTree` stays the one dynamic tree (D-SERDE-ACCESS=B). `Type.{"…"}` stays the one literal spelling (D-UNIFYLIT1=A). The fact ledger stays the one ledger (D-FACT-LAW1=B). The declined String surface stays declined (D-STR-DECLINE1=C). No invisible imports return (D-NAME-FILES1=C — `jet bind` writes a file you can read). **Zero new mechanisms.** Every element is an instance of a rail the owner already ratified; the score is mechanisms deleted (sink registration as a concept, the FFI/data-schema divide, six hand-rolled JSON escapers, a duplicate JSON parser) and capabilities gained.
+What does not change: `DataTree` stays the one dynamic tree (D-SERDE-ACCESS=B). `Type.{"…"}` stays the one literal spelling (D-UNIFYLIT1=A). The fact ledger stays the one ledger (D-FACT-LAW1=B). The declined String surface stays declined (D-STR-DECLINE1=C). No invisible imports return (D-NAME-FILES1=C — `jet inspect bind` writes a file you can read). **Zero new mechanisms.** Every element is an instance of a rail the owner already ratified; the score is mechanisms deleted (sink registration as a concept, the FFI/data-schema divide, six hand-rolled JSON escapers, a duplicate JSON parser) and capabilities gained.
 
 Below the surface, the audit also found the compiler not eating its own law: at least eight hand-written JSON escapers (two produce invalid or mangled JSON), a second full JSON parser in `jet-pkg-model`, the streaming format enum hand-copied into the JIT instead of `include!`d, and the Codable derive built by `format!`-ing source text. Those are defect cards, not ballots — they fall out of the law for free.
 
@@ -134,18 +134,18 @@ fn style(s: Selector) { … }     // user sinks fall out for free, zero new mach
 
 Rungs: beginner uses stdlib heads and never declares one. Library author declares a head with one marker. Expert audits every `.raw()` escape hatch in the gate ledger. Kill-check passed: this deletes a planned mechanism (sink registry) rather than adding one.
 
-### 5. `jet bind` eats schemas, not just languages — D-BOUND-BIND1 *(new; generalizes the shipped binder pattern; respects D-NAME-FILES1=C)*
+### 5. `jet inspect bind` eats schemas, not just languages — D-BOUND-BIND1 *(new; generalizes the shipped binder pattern; respects D-NAME-FILES1=C)*
 
-Jet already answers "how does a foreign schema become Jet types" — for languages. `jet inspect bind cpp` reads a clang AST and writes a Jet module with content-addressed provenance. A JSON sample is a smaller foreign schema than a C++ header. Same act, same tool — the short `jet bind` verb shown here is a proposed promotion of the shipped `jet inspect bind` spelling, part of this ballot:
+Jet already answers "how does a foreign schema become Jet types" — for languages. `jet inspect bind cpp` reads a clang AST and writes a Jet module with content-addressed provenance. A JSON sample is a smaller foreign schema than a C++ header. The same inspect surface handles both kinds of schema:
 
 ```sh
-jet bind json fixtures/repo.sample.json --type Repo
+jet inspect bind json fixtures/repo.sample.json --type Repo
 ```
 
 writes `bindings/repo.jet` — a file you read, commit, and own:
 
 ```jet
-// generated by: jet bind json fixtures/repo.sample.json  (sha256:9f2a…)
+// generated by: jet inspect bind json fixtures/repo.sample.json  (sha256:9f2a…)
 #Codable
 struct Repo {
     name: String
@@ -260,7 +260,7 @@ One table, whole model, every rung opt-in, and no upper rung changes what the ru
 | nothing | `json.decode<Config>(body)?` | shape check, one error list, migration chain, origin taint cleared — all invisible |
 | a literal | `URL.{"https://…"}` | compile-time check, safe holes, no Result ceremony |
 | a marker | `#[PublishedSchema, Codable]` | evolution: migration steps + unknown-field preservation |
-| a command | `jet bind json sample.json` | a visible, ownable Jet module from a foreign schema |
+| a command | `jet inspect bind json sample.json` | a visible, ownable Jet module from a foreign schema |
 | a declaration | `marker Selector on [.Text] { … }` | your own head, your own hole law; sinks by parameter type |
 | a contract | `#Undo(refund_card)` on an FFI fn | foreign calls legal inside `#Transact` |
 | a gate | `#Scrub(origin)` / `.raw("…")` | hand-audited laundering, every site in `jet inspect gates` |
@@ -297,7 +297,7 @@ fn sync(base: String, db: DB) =[Net, Java, IO]=> Result<(), Error> {
 // ============ PROPOSED ============
 use core.encoding.json as json
 use core.net as net
-use bindings.repo                     // from: jet bind json fixtures/repo.sample.json  [BIND1]
+use bindings.repo                     // from: jet inspect bind json fixtures/repo.sample.json  [BIND1]
 
 fn sync(db: DB) =[Net, FFI.Java, IO]=> Result<(), Error> {      // one FFI root [ROOTS1, ratified]
     endpoint :: URL.{"https://api.example.com/v2"}              // compile-checked      [HEAD1]
@@ -327,8 +327,8 @@ one crossing law: name the schema, leave the fact
 │    └─ provenance       jet inspect provenance · trust: { require: }  [PROV1]
 │
 ├─ link time — the foreign schema crosses
-│    ├─ language binders jet bind cpp / java / …                       (shipped, unifying)
-│    ├─ format binders   jet bind json / csv / sql / proto             [BIND1]
+│    ├─ language binders jet inspect bind cpp / java / …                (shipped, unifying)
+│    ├─ format binders   jet inspect bind json / csv / sql / xml / proto [BIND1]
 │    └─ undo contracts   #Undo(inverse) => legal in #Transact          [UNDO1]
 │
 └─ run time — the wire data crosses
@@ -342,7 +342,7 @@ one crossing law: name the schema, leave the fact
 ## What this unlocks
 
 - **Web services**: injection-safe by default — net input is origin-tainted, decode launders, heads encode holes; the beginner path is the safe path with zero annotations.
-- **Data work**: `jet bind csv data.csv` and you have typed rows in one command; exact decimals survive JSON (#1395); rolling deploys stop eating fields (EVOLVE1).
+- **Data work**: `jet inspect bind csv data.csv` and you have typed rows in one command; exact decimals survive JSON (#1395); rolling deploys stop eating fields (EVOLVE1).
 - **Enterprise integration**: the `=[FFI.Java]=>` story becomes tellable — typed binders, undo contracts in transactions, and a provenance chain an auditor can read. This is the scalability story the owner named.
 - **Critical systems**: `trust: { require: attested }` plus the gate ledger gives a full audit surface: every dependency's chain, every scrub, every raw escape, one `jet inspect` away.
 - **One-liners**: nothing changed — `json.decode<Config>(text)?` was already one line; now it also clears taint.
@@ -366,7 +366,7 @@ Each ballot stands alone; any subset can be adopted. Full profiles and options a
 | D-BOUND-HEAD1 | URL/Path/DateTime typed heads with the shared hole law | rides D-UNIFYLIT1, D-DOTCTOR3, D-CORE-PATH1 — no amendment |
 | D-BOUND-RAW1 | Head bodies own their escapes (backslash literal) | **amends** D-UNIFYLIT1's body lexing; hole policy per head unchanged (D-REGEX-LIT1 stays); plain strings untouched |
 | D-BOUND-SINK1 | User-declared heads on the marker rail; sinks = parameter types | extends D-META-DSL1 from `[.Block]` to `[.Text]`; diverges openly from the F9 audit note ("types, not markers") — both shapes on the ballot |
-| D-BOUND-BIND1 | `jet bind` accepts data schemas (json/csv/sql/proto) | rides the shipped binder pattern; respects D-NAME-FILES1=C |
+| D-BOUND-BIND1 | `jet inspect bind` accepts data schemas (json/csv/sql/xml/proto) | rides the shipped binder pattern; respects D-NAME-FILES1=C |
 | D-BOUND-TAINT1 | Boundary fns seed `$origin.*`; typed decode clears it; `.raw()` gates it | connects D-FACT-FLOW1/HOME1 with D-VALIDATE-DECODE1 — no amendment |
 | D-BOUND-UNDO1 | FFI joins E0746; `#Undo(inverse)` legalizes it in `#Transact` | **amends** the D-TXN2-era irreversible set; rides D-ROLLBACK-TRAIT |
 | D-BOUND-EVOLVE1 | `#PublishedSchema` preserves unknown fields by default | extends D-MIGRATE1-4 |
@@ -378,6 +378,6 @@ Each ballot stands alone; any subset can be adopted. Full profiles and options a
 
 **Phase B — land ratified-but-unbuilt work on the substrate, built once.** ROOTS1's one `FFI` root (#1567, + the missing Py/Octave roots), the fact-plane flow store (#1621-#1624), exact JSON numbers (#1395, blocked on #1436; the #1394 edition split already shipped), D-META-DSL1 block markers (#1508). These are the rails the ballots above stand on.
 
-**Phase C — the balloted surface, each a coherent greenfield migration.** HEAD1+RAW1 together (one lexer/sema change, examples + goldens migrate in the same change). SINK1 after #1508. BIND1 as a `jet bind` extension. TAINT1 after #1621. UNDO1 after #1567. EVOLVE1 and PROV1 independent.
+**Phase C — the balloted surface, each a coherent greenfield migration.** HEAD1+RAW1 together (one lexer/sema change, examples + goldens migrate in the same change). SINK1 after #1508. BIND1 as a `jet inspect bind` extension. TAINT1 after #1621. UNDO1 after #1567. EVOLVE1 and PROV1 independent.
 
 **Epoch-3 reconciliation (after ratification).** The audit card carries this as exit criteria: mint one implementation card per adopted ballot; re-home or close the overlapped cards (#1567, #1570, #1577, #1628, #1618, #1395); add the Phase-A defect cards (JSON writer, duplicate parser, JIT enum); check no e3 card still plans against the pre-law shape. One board, one plan.

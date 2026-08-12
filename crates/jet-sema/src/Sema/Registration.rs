@@ -3,6 +3,7 @@ use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Syntax;
+use crate::Sema::CheckerTaskGroup::TaskGroupOrigin;
 use crate::AST::{
     AccessConvention, DistinctDef, EnumDef, Expr, Func, Item, Stmt, StructDef, Type,
 };
@@ -423,6 +424,7 @@ impl<'a> Checker<'a> {
         // per call site's arity. Reject anything else here (E1314) so codegen
         // never has to guess.
         self.check_variadic_bound_body_shape(f);
+        self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Parameter);
         self.lint_unjoined_tasks_in_current_scope();
         self.taskgroup_stack.truncate(taskgroup_floor);
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
@@ -648,7 +650,7 @@ fn scan_stmt_for_variadic_uses(
             }
         }
         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `taskgroup`, `#Transact`, `$ { }`, …) is out of scope
+        // `region`, `task.group`, `#Transact`, `$ { }`, …) is out of scope
         // for v1 — a trait-bounded variadic used inside one of these isn't
         // caught here; codegen's own "internal compiler error" guard
         // (`VariadicBound.rs`) is the backstop.
@@ -1035,7 +1037,7 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
 pub fn error_conv_fn_name(from: &str, to: &str) -> String {
     let f = from.replace('.', "_");
     let t = to.replace('.', "_");
-    Syntax::generated_name(&format!("errconv_{f}_to_{t}"))
+    jet_foundation::Names::mangle(&format!("errconv_{f}_to_{t}"))
 }
 
 pub(crate) fn already_defined(name: &str, span: Span) -> Diagnostic {

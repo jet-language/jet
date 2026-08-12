@@ -1,9 +1,10 @@
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
-use crate::Codegen::user_type_rust;
+use crate::Codegen::mangle_path;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_let_ty_clause;
 use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
+use crate::Codegen::TIR::emit::expressions::{is_compute_view_mut, is_float_view, is_view};
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_pattern;
 use crate::Codegen::TIR::emit_tir_place;
@@ -11,6 +12,7 @@ use crate::Codegen::TIR::tir_range_guard;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::AST::BinOp;
@@ -50,7 +52,7 @@ fn prelude_compound_call(
 }
 
 #[derive(Clone)]
-enum ActiveCleanup {
+pub(super) enum ActiveCleanup {
     Deferred(usize),
     Resource(String),
 }
@@ -185,7 +187,7 @@ fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[
 
 /// Mutable list place for `SplitViews` owners. Nested `grid[i]` must use
 /// `jet_index_vec_mut` so the window is the live inner list, not a clone.
-fn emit_mut_list_place(
+pub(super) fn emit_mut_list_place(
     e: &crate::Codegen::TIR::TExpr,
     cx: &Cx,
     cleanups: &[ActiveCleanup],
@@ -208,6 +210,21 @@ fn emit_mut_list_place(
         }
         TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
             emit_mut_list_place(place, cx, cleanups)
+        }
+        TExprKind::Field {
+            recv,
+            field,
+            boxed,
+        } => {
+            let recv_ty = &recv.ty;
+            let recv = emit_mut_list_place(recv, cx, cleanups);
+            let field = emit_field_rust(cx, recv_ty, field);
+            let place = format!("({recv}).{field}");
+            if *boxed {
+                format!("(*{place})")
+            } else {
+                place
+            }
         }
         _ => emit_expr_with_cleanups(e, cx, cleanups),
     }
@@ -1064,9 +1081,9 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
         }
-        // c109 Phase 5: indexed assignment `coll[i] = v`. Mirrors the AST
-        // `LValue::Index` form byte-for-byte: a map insert clones the key; a vec
-        // assign casts the index to `usize`. Both wrap the value in a block.
+        // c109 Phase 5: indexed assignment `coll[i] = v`. Maps and ordinary
+        // vectors keep their established forms; borrowed float views route
+        // through the shared compute setter so Tensor and ambient access agree.
         TStmt::IndexAssign {
             uninit,
             base,
@@ -1093,6 +1110,24 @@ fn emit_tir_stmt(
             } else if *uninit {
                 out.push_str(&format!(
                     "{pad}{{ let __jet_v = {v}; ({b}).write({i} as usize, __jet_v); }}\n",
+                ));
+            } else if is_compute_view_mut(&base.ty) {
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; {}jet_compute_window_set_view(&mut ({}), ({}), __jet_v).unwrap_or_else(|__jet_error| jet_panic({:?}, {}, &__jet_error)); }}\n",
+                    cx.root_prefix, b, i, cx.file, 0
+                ));
+            } else if is_float_view(&base.ty) {
+                // Never duplicate Tensor/view validation in the emitter. The
+                // shared Prelude setter owns finite-value and bounds policy for
+                // both AOT and resident/ambient execution.
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; jet_compute_set(&mut *({b}), &[({i})], __jet_v).unwrap_or_else(|__jet_error| jet_panic({:?}, {}, &__jet_error.jet_show())); }}\n",
+                    cx.file, 0
+                ));
+            } else if is_view(&base.ty) {
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; jet_view_set(&mut *({b}), {i}, __jet_v, {:?}, {}); }}\n",
+                    cx.file, 0
                 ));
             } else {
                 out.push_str(&format!(
@@ -1163,7 +1198,7 @@ fn emit_tir_stmt(
             index,
             value,
         } => {
-            let ty = user_type_rust(type_name);
+            let ty = mangle_path(type_name);
             let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
@@ -1325,8 +1360,8 @@ fn emit_tir_stmt(
                     coll_type,
                     iter_type,
                 }) => {
-                    let coll_rust = user_type_rust(coll_type);
-                    let iter_rust = user_type_rust(iter_type);
+                    let coll_rust = mangle_path(coll_type);
+                    let iter_rust = mangle_path(iter_type);
                     out.push_str(&format!(
                         "{}{{ let mut __jet_it = <{coll_rust} as __jet_Iterable>::iter(({collection_str}));\n",
                         pad,
@@ -1348,7 +1383,8 @@ fn emit_tir_stmt(
                             || matches!(
                                 &collection.ty,
                                 Type::Apply { name, args }
-                                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1
+                                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                                        && args.len() == 1
                             )
                         {
                             // D-RANGE-EXCL1=C: sequence two-binding → index then item.
@@ -1364,7 +1400,8 @@ fn emit_tir_stmt(
                                 Type::List(inner) | Type::FixedList { elem: inner, .. }
                                     if matches!(
                                         inner.as_ref(),
-                                        Type::Apply { name, .. } if name == "ViewMut"
+                                        Type::Apply { name, .. }
+                                            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                                     )
                             ) {
                                 format!(
@@ -1445,7 +1482,8 @@ fn emit_tir_stmt(
                             Type::List(inner) | Type::FixedList { elem: inner, .. }
                                 if matches!(
                                     inner.as_ref(),
-                                    Type::Apply { name, .. } if name == "ViewMut"
+                                    Type::Apply { name, .. }
+                                        if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                                 )
                         ) {
                             format!(
@@ -1646,7 +1684,7 @@ fn emit_tir_stmt(
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. NOT wrapped in a
         // nested Rust block — `name` must stay a live Rust local for
         // statements AFTER this one (`NAME.value(v)`, `NAME.suggest(…)`),
-        // unlike `Region`/taskgroup, which are genuinely lexical.
+        // unlike `Region`/`task.group`, which are genuinely lexical.
         TStmt::Layout {
             handle,
             label,
@@ -1667,7 +1705,7 @@ fn emit_tir_stmt(
         TStmt::Transact {
             handle,
             snapshots,
-            uses_stm,
+            stm,
             body,
         } => {
             let inner = indent + 1;
@@ -1678,19 +1716,17 @@ fn emit_tir_stmt(
             // (emitted after the body, before any `<handle>.commit()`) applies every
             // deferred edit atomically under all the handles' locks at once. A `?`/early
             // return skips the commit, so the guard's Drop discards the deferred edits.
-            if *uses_stm {
-                // `edit_txn(&mut __jet_stm, …)` (emit/expressions.rs) always
-                // takes the STM handle by `&mut` — this compiler-internal
-                // local's mut requirement isn't derived from any user-visible
-                // type, so it must be forced here directly (same rustc-reject
-                // family as card #1859's Mailer fix, a different mechanism:
-                // that one is TIR::Let's `is_file_handle` allowlist, this one
-                // is a hand-emitted `let` with no TIR::Let node at all).
+            if let Some(stm) = stm {
+                let keyword = if stm.mutable { "let mut" } else { "let" };
                 out.push_str(&format!(
-                    "{}let mut __jet_stm = {}jet_stm::begin();\n",
-                    inner_pad, cx.root_prefix
+                    "{}{} {} = {}jet_stm::begin();\n",
+                    inner_pad,
+                    keyword,
+                    stm.rust_place(),
+                    cx.root_prefix,
                 ));
             }
+            let stm_place = stm.as_ref().map(TLocal::rust_place);
             // A named handle uses its mangled name; a bare block with auto-snapshots
             // needs a synthesized handle to register the snapshot restores on. A bare
             // block with neither handle nor snapshots erases to a plain block (its only
@@ -1720,21 +1756,21 @@ fn emit_tir_stmt(
                             Some(ty) => {
                                 out.push_str(&format!(
                                     "{}{{ let __snap = ({}).snapshot(); {}jet_txn::snapshot_custom(&mut {}, &mut {}, __snap, {}::restore); }}\n",
-                                    inner_pad, place, cx.root_prefix, handle, place, user_type_rust(&ty.name())
+                                    inner_pad, place, cx.root_prefix, handle, place, mangle_path(&ty.name())
                                 ));
                             }
                         }
                     }
                     emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
-                    if *uses_stm {
-                        out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
+                    if let Some(stm) = &stm_place {
+                        out.push_str(&format!("{}{}.commit();\n", inner_pad, stm));
                     }
                     out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));
                 }
                 None => {
                     emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
-                    if *uses_stm {
-                        out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
+                    if let Some(stm) = &stm_place {
+                        out.push_str(&format!("{}{}.commit();\n", inner_pad, stm));
                     }
                 }
             }

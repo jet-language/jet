@@ -10,8 +10,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Cell as LocalCell, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt,
-    JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text, Time,
+    Archive, Cell as LocalCell, Collections, Compress, Compute, Concurrency, CoreHost, Crypto,
+    Encoding, Fmt, JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text, Time,
     TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
@@ -76,8 +76,20 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
 #[derive(Clone)]
 pub(crate) struct ReflectSlot {
     pub type_name: String,
+    pub path: String,
     pub display: String,
     pub fields: Vec<(String, String)>,
+}
+
+/// Canonical resident representation for a runtime function value.
+/// `fn_ptr` points at a Cranelift function whose ABI is either the plain
+/// function signature or that signature with `env` prepended. The handle is
+/// deliberately opaque to Prelude code; only the callable adapters inspect it.
+#[derive(Clone, Copy)]
+pub(crate) struct JitCallableSlot {
+    pub fn_ptr: i64,
+    pub env: i64,
+    pub has_env: bool,
 }
 
 pub(crate) struct JitRuntime {
@@ -85,6 +97,7 @@ pub(crate) struct JitRuntime {
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
+    pub(crate) compute: Compute::ComputeState,
     /// Compile-time string handles baked into Cranelift as `iconst` ids.
     /// `reset_run_heap` and the run-cache artifact must preserve these — clearing
     /// them leaves warm `jet run` hits with empty panic/require text (I9).
@@ -101,10 +114,16 @@ pub(crate) struct JitRuntime {
         std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
     pub(crate) next_stream_channel: i64,
     pub(crate) next_stream_sender: i64,
+    /// Unique names for JIT-local OptionLift2 factory/adapter functions.
+    /// These functions are only ABI thunks; the operation they serve lives in
+    /// the shared Option Prelude.
+    pub(crate) next_option_lift2_thunk: u64,
+    /// Runtime function values. Negative words are explicit callable handles;
+    /// raw Cranelift addresses are normalized at the boundary before a call.
+    pub(crate) jit_callables: Vec<JitCallableSlot>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
-    pub(crate) task_groups:
-        Vec<Option<jet_codegen::task_group::JetTaskGroupRuntime<i64>>>,
+    pub(crate) task_groups: Vec<Option<super::Concurrency::JitTaskGroup>>,
     /// D-LOCALCELL1=A: one-thread canonical Cell values and guards.
     pub(crate) cells: LocalCell::CellState,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
@@ -160,8 +179,10 @@ pub(crate) struct JitRuntime {
     pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
     pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
     pub(crate) conditions: Vec<std::sync::Arc<Memory::ConditionState>>,
-    pub(crate) shared_guard_permits:
-        std::collections::HashMap<i64, std::sync::Arc<Memory::shared_protocol::JetSharedPermit>>,
+    pub(crate) shared_guard_states: std::collections::HashMap<
+        i64,
+        std::sync::Arc<Memory::shared_protocol::JetSharedGuardState>,
+    >,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
@@ -309,7 +330,11 @@ extern "C" fn jet_jit_is_trapped() -> i64 {
     if Concurrency::in_scheduler_task() {
         return i64::from(Concurrency::task_trap_pending());
     }
-    Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
+    if Concurrency::local_rich_panic_pending() {
+        1
+    } else {
+        Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
+    }
 }
 
 extern "C" fn jet_jit_add_i64(a: i64, b: i64, _line: u32) -> i64 {
@@ -1001,29 +1026,38 @@ extern "C" fn jet_jit_rich_panic(
     msg: i64,
     locals: i64,
 ) -> i64 {
+    let in_task = Concurrency::in_jit_task();
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
         let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let locals = rt.heap.clone_string(locals).unwrap_or_default();
-        let line_s = line.to_string();
-        let margin = line_s.len();
-        let pad = " ".repeat(margin);
-        let col_offset = (col as u64).saturating_sub(1) as usize;
-        let caret = "^".repeat((caret as usize).max(1));
-        let mut out = String::new();
-        out.push_str(&format!("panic: {msg}\n"));
-        out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
-        out.push_str(&format!("   {pad}|\n"));
-        out.push_str(&format!("{line_s} | {src_line}\n"));
-        out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
-        if !locals.is_empty() {
-            out.push_str(&format!("locals: {locals}\n"));
+        Concurrency::set_rich_panic_reason(msg.clone());
+        if in_task {
+            // A child failure is a typed TaskFailure. Its trap must remain
+            // thread-local: the resident runtime is shared with the parent,
+            // and a shared trap would make the parent skip unrelated joins.
+            Concurrency::set_local_rich_panic();
+        } else {
+            let line_s = line.to_string();
+            let margin = line_s.len();
+            let pad = " ".repeat(margin);
+            let col_offset = (col as u64).saturating_sub(1) as usize;
+            let caret = "^".repeat((caret as usize).max(1));
+            let mut out = String::new();
+            out.push_str(&format!("panic: {msg}\n"));
+            out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
+            out.push_str(&format!("   {pad}|\n"));
+            out.push_str(&format!("{line_s} | {src_line}\n"));
+            out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
+            if !locals.is_empty() {
+                out.push_str(&format!("locals: {locals}\n"));
+            }
+            rt.stderr.push_str(&out);
+            rt.exit_code = Some(70);
+            rt.set_trap("__jet_rich_panic__");
         }
-        rt.stderr.push_str(&out);
-        rt.exit_code = Some(70);
-        rt.set_trap("__jet_rich_panic__");
         0
     })
 }
@@ -1517,6 +1551,106 @@ extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
 
+fn jit_callable_index(handle: i64) -> Option<usize> {
+    handle
+        .checked_neg()?
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+}
+
+fn jit_callable_slot(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {
+    jit_callable_index(handle).and_then(|index| rt.jit_callables.get(index).copied())
+}
+
+fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) -> i64 {
+    let index = rt.jit_callables.len();
+    if index >= i64::MAX as usize - 1 {
+        rt.set_trap("too many resident callable values");
+        return 0;
+    }
+    rt.jit_callables.push(JitCallableSlot {
+        fn_ptr,
+        env,
+        has_env,
+    });
+    -(index as i64) - 1
+}
+
+extern "C" fn jet_jit_callable_bind(fn_ptr: i64, env: i64, has_env: i8) -> i64 {
+    with_runtime_result(0, |rt| bind_jit_callable(rt, fn_ptr, env, has_env != 0))
+}
+
+extern "C" fn jet_jit_callable_normalize(value: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        if jit_callable_slot(rt, value).is_some() {
+            value
+        } else {
+            bind_jit_callable(rt, value, 0, false)
+        }
+    })
+}
+
+fn jit_callable_or_trap(rt: &mut JitRuntime, handle: i64) -> Option<JitCallableSlot> {
+    let slot = jit_callable_slot(rt, handle);
+    if slot.is_none() {
+        rt.set_trap("invalid resident callable value");
+    }
+    slot
+}
+
+extern "C" fn jet_jit_callable_fn(handle: i64) -> i64 {
+    with_runtime_result(0, |rt| jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.fn_ptr))
+}
+
+extern "C" fn jet_jit_callable_env(handle: i64) -> i64 {
+    with_runtime_result(0, |rt| jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.env))
+}
+
+extern "C" fn jet_jit_callable_has_env(handle: i64) -> i8 {
+    with_runtime_result(0, |rt| {
+        jit_callable_or_trap(rt, handle).map_or(0, |slot| i8::from(slot.has_env))
+    })
+}
+
+/// The JIT-side callable ABI is deliberately opaque to the Prelude. The
+/// factory evaluates the function-value expression, and the adapter invokes
+/// that callable with two packed payload words. The `JetOptionPacked` values
+/// are only the JIT ABI carrier; the shared `jet_option_lift2` operation owns
+/// presence, lazy factory creation, invocation, and result selection.
+type OptionLift2Factory = unsafe extern "C" fn(i64) -> i64;
+type OptionLift2Adapter = unsafe extern "C" fn(i64, i64, i64) -> i64;
+
+extern "C" fn jet_jit_option_lift2(
+    a_present: i8,
+    a_value: i64,
+    b_present: i8,
+    b_value: i64,
+    factory: i64,
+    env: i64,
+    adapter: i64,
+) -> i64 {
+    jet_codegen::option_lift2::jet_option_lift2(
+        jet_codegen::option_lift2::JetOptionPacked {
+            present: a_present != 0,
+            value: a_value,
+        },
+        jet_codegen::option_lift2::JetOptionPacked {
+            present: b_present != 0,
+            value: b_value,
+        },
+        || jet_codegen::option_lift2::jet_option_pack_i64(false, 0),
+        |value| jet_codegen::option_lift2::jet_option_pack_i64(true, value),
+        || {
+            let factory: OptionLift2Factory =
+                unsafe { std::mem::transmute(factory as usize) };
+            let adapter: OptionLift2Adapter =
+                unsafe { std::mem::transmute(adapter as usize) };
+            let callable = unsafe { factory(env) };
+            move |left, right| unsafe { adapter(callable, left, right) }
+        },
+    )
+}
+
 extern "C" fn jet_jit_unit_convert_exact(
     value: f64,
     scale_num: i64,
@@ -1685,6 +1819,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
     register_host_symbols(&mut builder);
     Collections::register_collections_symbols(&mut builder);
+    Compute::register_compute_symbols(&mut builder);
     Memory::register_memory_symbols(&mut builder);
     LocalCell::register_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
@@ -1722,6 +1857,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Ffi::register_ffi_host_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
+    let compute = Compute::declare_compute_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
     let cell = LocalCell::declare_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
@@ -1759,6 +1895,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let host = declare_host_fns(
         &mut module,
         coll,
+        compute,
         memory,
         cell,
         conc,
@@ -1800,11 +1937,13 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
 
 extern "C" fn jet_jit_reflect_of_finish(
     type_name: i64,
+    path: i64,
     display: i64,
     fields: i64,
 ) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let type_name = rt.heap.clone_string(type_name).unwrap_or_default();
+        let path = rt.heap.clone_string(path).unwrap_or_default();
         let display = rt.heap.clone_string(display).unwrap_or_default();
         let field_len = rt.heap.list_len(fields).unwrap_or(0);
         let mut out = Vec::new();
@@ -1819,6 +1958,7 @@ extern "C" fn jet_jit_reflect_of_finish(
         }
         rt.reflect_values.push(ReflectSlot {
             type_name,
+            path,
             display,
             fields: out,
         });
@@ -1832,6 +1972,7 @@ extern "C" fn jet_jit_reflect_field_new(name: i64, value: i64) -> i64 {
         let value = rt.heap.clone_string(value).unwrap_or_default();
         rt.reflect_values.push(ReflectSlot {
             type_name: name,
+            path: String::new(),
             display: value,
             fields: Vec::new(),
         });
@@ -1863,6 +2004,18 @@ extern "C" fn jet_jit_reflect_display(handle: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_reflect_path(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        let text = rt
+            .reflect_values
+            .get(idx)
+            .map(|s| s.path.clone())
+            .unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
 extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (handle as usize).wrapping_sub(1);
@@ -1875,6 +2028,7 @@ extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
         for (name, value) in fields {
             rt.reflect_values.push(ReflectSlot {
                 type_name: name,
+                path: String::new(),
                 display: value,
                 fields: Vec::new(),
             });
@@ -1948,7 +2102,7 @@ host_fns! {
         let mut sig_i64 = Signature::new(cc);
         sig_i64.params.push(AbiParam::new(types::I64));
         let mut sig_reflect_finish = Signature::new(cc);
-        for _ in 0..3 {
+        for _ in 0..4 {
             sig_reflect_finish.params.push(AbiParam::new(types::I64));
         }
         sig_reflect_finish.returns.push(AbiParam::new(types::I64));
@@ -2091,6 +2245,26 @@ host_fns! {
         sig_result_new_f64.params.push(AbiParam::new(types::I8));
         sig_result_new_f64.params.push(AbiParam::new(types::F64));
         sig_result_new_f64.returns.push(AbiParam::new(types::I64));
+        let mut sig_option_lift2 = Signature::new(cc);
+        sig_option_lift2.params.push(AbiParam::new(types::I8));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I8));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.returns.push(AbiParam::new(types::I64));
+        let mut sig_callable_bind = Signature::new(cc);
+        sig_callable_bind.params.push(AbiParam::new(types::I64));
+        sig_callable_bind.params.push(AbiParam::new(types::I64));
+        sig_callable_bind.params.push(AbiParam::new(types::I8));
+        sig_callable_bind.returns.push(AbiParam::new(types::I64));
+        let mut sig_callable_word = Signature::new(cc);
+        sig_callable_word.params.push(AbiParam::new(types::I64));
+        sig_callable_word.returns.push(AbiParam::new(types::I64));
+        let mut sig_callable_flag = Signature::new(cc);
+        sig_callable_flag.params.push(AbiParam::new(types::I64));
+        sig_callable_flag.returns.push(AbiParam::new(types::I8));
         let mut sig_result_new_i8 = Signature::new(cc);
         sig_result_new_i8.params.push(AbiParam::new(types::I8));
         sig_result_new_i8.params.push(AbiParam::new(types::I8));
@@ -2146,6 +2320,7 @@ host_fns! {
     }
     #extra {
         coll: Collections::CollectionsHostFns,
+        compute: Compute::ComputeHostFns,
         memory: Memory::MemoryHostFns,
         cell: LocalCell::CellHostFns,
         conc: Concurrency::ConcurrencyHostFns,
@@ -2269,6 +2444,12 @@ host_fns! {
     result_new_f64: "jet_jit_result_new_f64" => jet_jit_result_new_f64: sig_result_new_f64;
     result_new_i8: "jet_jit_result_new_i8" => jet_jit_result_new_i8: sig_result_new_i8;
     result_new_i32: "jet_jit_result_new_i32" => jet_jit_result_new_i32: sig_result_new_i32;
+    option_lift2: "jet_jit_option_lift2" => jet_jit_option_lift2: sig_option_lift2;
+    callable_bind: "jet_jit_callable_bind" => jet_jit_callable_bind: sig_callable_bind;
+    callable_normalize: "jet_jit_callable_normalize" => jet_jit_callable_normalize: sig_callable_word;
+    callable_fn: "jet_jit_callable_fn" => jet_jit_callable_fn: sig_callable_word;
+    callable_env: "jet_jit_callable_env" => jet_jit_callable_env: sig_callable_word;
+    callable_has_env: "jet_jit_callable_has_env" => jet_jit_callable_has_env: sig_callable_flag;
     unit_convert_exact: "jet_jit_unit_convert_exact" => jet_jit_unit_convert_exact: sig_unit_convert_exact;
     unit_convert_rounded: "jet_jit_unit_convert_rounded" => jet_jit_unit_convert_rounded: sig_unit_convert_rounded;
     unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
@@ -2297,6 +2478,7 @@ host_fns! {
     reflect_of_finish: "jet_jit_reflect_of_finish" => jet_jit_reflect_of_finish: sig_reflect_finish;
     reflect_field_new: "jet_jit_reflect_field_new" => jet_jit_reflect_field_new: sig_str_binary_i64;
     reflect_type_name: "jet_jit_reflect_type_name" => jet_jit_reflect_type_name: sig_str_unary_i64;
+    reflect_path: "jet_jit_reflect_path" => jet_jit_reflect_path: sig_str_unary_i64;
     reflect_display: "jet_jit_reflect_display" => jet_jit_reflect_display: sig_str_unary_i64;
     reflect_fields: "jet_jit_reflect_fields" => jet_jit_reflect_fields: sig_str_unary_i64;
     reflect_field_name: "jet_jit_reflect_field_name" => jet_jit_reflect_field_name: sig_str_unary_i64;

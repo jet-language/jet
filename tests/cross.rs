@@ -64,14 +64,14 @@ fn e3301_tasks_in_freestanding() {
     let src = r#"use core.tasks as tasks
 
 fn run() {
-    t :: tasks.spawn(() => 42)
-    t.join()
+    t :: task 42
+    t.join() ?? panic("task failed")
 }
 "#;
     let out = check_freestanding_src(src, "tasks");
     assert!(
         out.contains("E3301"),
-        "expected E3301 for tasks.spawn in freestanding mode; got:\n{}",
+        "expected E3301 for task in freestanding mode; got:\n{}",
         out
     );
 }

@@ -254,7 +254,7 @@ fn run() {}
     let plan = jetpack::WorkspaceFile::load(&root)
         .expect("workspace manifest should be found")
         .expect("workspace manifest should parse");
-    let ordered = jetpack::MemberSelect::dependency_order(&root, &plan.members);
+    let ordered = jetpack::MemberSelect::dependency_order(&root, &plan.members).unwrap();
     let names: Vec<_> = ordered.iter().map(|member| member.name.as_str()).collect();
     assert_eq!(names, ["a", "b"]);
 

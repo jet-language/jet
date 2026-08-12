@@ -3195,12 +3195,11 @@ fn run() {
 #[test]
 fn write_window_cannot_cross_task_boundary() {
     let src = r#"
-use core.tasks
 fn run() {
     xs := [1, 2, 3]
     edit :: &xs[0..1]
-    task :: tasks.spawn(() => edit.len())
-    print(task.join())
+    handle :: task edit.len()
+    print(handle.join() ?? 0)
 }
 "#;
     let diags = jet::compile(src).expect_err("write view task capture must be rejected");
@@ -4171,29 +4170,35 @@ fn run() {
         jet_jit::try_compile_bundle(&bundle).expect("mutable view bounds must lower to JIT");
         let mut backend = jet_jit::CraneliftBackend::new();
         match backend.run(&bundle, false) {
-            RunOutcome::Ran { exit_code, .. } => {
-                assert_ne!(exit_code, 0, "resident JIT accepted an invalid mutable view");
+            RunOutcome::Ran {
+                stderr, exit_code, ..
+            } => {
+                assert_eq!(exit_code, 70, "resident JIT exit drift: {stderr}");
+                assert_eq!(
+                    stderr,
+                    "panic: can't view 1 items from 2 to 2 (inclusive)\n",
+                    "resident JIT reported the wrong runtime failure"
+                );
             }
-            RunOutcome::Problems(diags) => assert!(
-                diags
-                    .iter()
-                    .any(|diag| diag.code == "E0953"
-                        && diag.why.contains("can't view 1 items from 2 to 2 (inclusive)")),
-                "resident JIT reported the wrong runtime failure: {diags:?}"
+            RunOutcome::Problems(diags) => panic!(
+                "resident JIT returned diagnostics instead of running: {diags:?}"
             ),
         }
     }
 
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
-        RunOutcome::Ran { exit_code, .. } => {
-            assert_ne!(exit_code, 0, "forced interpreter accepted an invalid mutable view");
+        RunOutcome::Ran {
+            stderr, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 70, "forced interpreter exit drift: {stderr}");
+            assert_eq!(
+                stderr,
+                "panic: can't view 1 items from 2 to 2 (inclusive)\n",
+                "forced interpreter reported the wrong runtime failure"
+            );
         }
-        RunOutcome::Problems(diags) => assert!(
-            diags
-                .iter()
-                .any(|diag| diag.code == "E0953"
-                    && diag.why.contains("can't view 1 items from 2 to 2 (inclusive)")),
-            "forced interpreter reported the wrong runtime failure: {diags:?}"
+        RunOutcome::Problems(diags) => panic!(
+            "forced interpreter returned diagnostics instead of running: {diags:?}"
         ),
     }
 
@@ -4844,7 +4849,6 @@ fn run() {
 #[test]
 fn returned_view_aggregate_cannot_cross_task_boundary() {
     let src = r#"
-use core.tasks
 struct Window { values: View<Int> }
 
 fn window(values: [Int]) => Window {
@@ -4853,8 +4857,8 @@ fn window(values: [Int]) => Window {
 }
 
 fn run() {
-    task :: tasks.spawn(() => window([7, 8]))
-    print(task.join().values[0])
+    handle :: task window([7, 8])
+    print((handle.join() ?? Window.{ values: [] }).values[0])
 }
 "#;
     let diags = jet::compile(src).expect_err("view aggregates are not task-sendable");
@@ -5419,11 +5423,10 @@ fn run() { store("read") }
 #[test]
 fn borrowed_parameter_can_feed_task_after_explicit_copy() {
     let src = r#"
-use core.tasks
 fn launch(text: String) {
     owned :: ~text
-    task :: tasks.spawn(() => owned.len())
-    print(task.join())
+    handle :: task owned.len()
+    print(handle.join() ?? 0)
 }
 fn run() { launch("read") }
 "#;
@@ -5433,11 +5436,10 @@ fn run() { launch("read") }
 #[test]
 fn two_binding_loop_over_owned_task_list_compiles() {
     let src = r#"
-use core.tasks as tasks
 fn run() {
-    handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
+    handles :: [task 1, task 2]
     total := 0
-    loop (i, h), handles { total += h.wait() + i }
+    loop (i, h), handles { total += (h.join() ?? 0) + i }
     print(total)
 }
 "#;
@@ -5447,9 +5449,8 @@ fn run() {
 #[test]
 fn nested_task_list_loop_compiles() {
     let src = r#"
-use core.tasks as tasks
 fn run() {
-    groups :: [[tasks.spawn(() => 1)], [tasks.spawn(() => 2)]]
+    groups :: [[task 1], [task 2]]
     n := 0
     loop g, groups { n += g.len() }
     print(n)
@@ -5461,14 +5462,13 @@ fn run() {
 #[test]
 fn moved_task_list_parameter_loop_compiles() {
     let src = r#"
-use core.tasks as tasks
 fn drain(hs: ^[Task<Int>]) => Int {
     total := 0
-    loop h, hs { total += h.wait() }
+    loop h, hs { total += h.join() ?? 0 }
     total
 }
 fn run() {
-    handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
+    handles :: [task 1, task 2]
     print(drain(^handles))
 }
 "#;
@@ -5478,14 +5478,13 @@ fn run() {
 #[test]
 fn two_binding_borrowed_task_list_reports_e0120() {
     let src = r#"
-use core.tasks as tasks
 fn drain(hs: [Task<Int>]) => Int {
     total := 0
-    loop (i, h), hs { total += h.wait() + i }
+    loop (i, h), hs { total += (h.join() ?? 0) + i }
     total
 }
 fn run() {
-    handles :: [tasks.spawn(() => 1)]
+    handles :: [task 1]
     print(drain(handles))
 }
 "#;
@@ -5496,11 +5495,10 @@ fn run() {
 #[test]
 fn task_list_index_loop_reports_e0120() {
     let src = r#"
-use core.tasks as tasks
 fn run() {
-    groups :: [[tasks.spawn(() => 1)]]
+    groups :: [[task 1]]
     total := 0
-    loop h, groups[0] { total += h.wait() }
+    loop h, groups[0] { total += h.join() ?? 0 }
     print(total)
 }
 "#;

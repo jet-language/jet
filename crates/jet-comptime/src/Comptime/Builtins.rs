@@ -466,6 +466,16 @@ pub fn apply_mutating(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    apply_mutating_with_type(recv, method, args, span, None)
+}
+
+pub fn apply_mutating_with_type(
+    recv: &mut CtValue,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    resolved_ret: Option<&Type>,
+) -> Result<CtValue, Diagnostic> {
     if let Some(result) = super::CollectionEval::apply_mutating(recv, method, args.clone(), span) {
         return result;
     }
@@ -542,7 +552,13 @@ pub fn apply_mutating(
     };
     if let Some(mut state) = rng_state {
         let mut argv = args.clone();
-        let value = super::Methods::apply_seeded_rng_method(&mut state, method, &mut argv, span)?;
+        let value = super::Methods::apply_seeded_rng_method_with_type(
+            &mut state,
+            method,
+            &mut argv,
+            span,
+            resolved_ret,
+        )?;
         *recv = CtValue::Struct {
             type_name: crate::Syntax::RNG_TYPE.to_string(),
             fields: vec![("state".to_string(), CtValue::Int(state as i64))],

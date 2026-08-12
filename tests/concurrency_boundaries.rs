@@ -52,12 +52,11 @@ fn assert_rejected(source: &str, code: &str) {
 fn shared_guard_cannot_cross_a_task_boundary() {
     assert_rejected(
         r#"
-use core.tasks as tasks
 fn run() {
     shared := Shared.new(1)
     guard :: shared.guard_read()
-    worker :: tasks.spawn(() => print(guard.value))
-    worker.join()
+    worker :: task print(guard.value)
+    worker.join() ?? panic("task failed")
 }
 "#,
         "E1102",
@@ -68,12 +67,11 @@ fn run() {
 fn local_cell_rejects_task_channel_shared_and_parallel_crossings() {
     assert_rejected(
         r#"
-use core.tasks as tasks
 fn cross(cell: Cell<Int>) {
-    worker :: tasks.spawn(() => {
+    worker :: task {
         _ :: cell
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
 }
 fn run() {}
 "#,
@@ -153,13 +151,12 @@ fn run() {}
 #[test]
 fn task_capture_rejects_cell_nested_in_a_struct() {
     let source = r#"
-use core.tasks as tasks
 struct Cache { value: Cell<Int> }
 fn cross(cache: Cache) {
-    worker :: tasks.spawn(() => {
+    worker :: task {
         _ :: cache
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
 }
 fn run() {}
 "#;
@@ -171,12 +168,11 @@ fn local_cell_guard_types_are_not_sendable() {
     for guard in ["CellReadGuard<Int>", "CellEditGuard<Int>"] {
         let source = format!(
             r#"
-use core.tasks as tasks
 fn cross(guard: {guard}) {{
-    worker :: tasks.spawn(() => {{
+    worker :: task {{
         _ :: guard
-    }})
-    worker.join()
+    }}
+    worker.join() ?? panic("task failed")
 }}
 fn run() {{}}
 "#
@@ -197,13 +193,12 @@ fn run() {{}}
 fn signal_crosses_task_and_channel_without_rustc_send_ice() {
     let task_source = r#"
 use core.reactive as reactive
-use core.tasks as tasks
 fn run() {
     pending := reactive.signal(0)
-    worker :: tasks.spawn(() => {
+    worker :: task {
         pending.set(1)
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
     print(pending.get())
 }
 "#;
@@ -268,14 +263,13 @@ fn run() {
 fn derived_and_computed_cross_task_without_rustc_send_ice() {
     let derived_source = r#"
 use core.reactive as reactive
-use core.tasks as tasks
 fn run() {
     base := reactive.signal(1)
     twice := reactive.derived(() => (base.get() * 2))
-    worker :: tasks.spawn(() => {
+    worker :: task {
         print(twice.get())
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
 }
 "#;
     let out = jet::compile(derived_source).expect("Derived must cross tasks via lock-ordered Arc");
@@ -317,13 +311,12 @@ fn local_pin_rejects_reactive_task_crossing() {
     assert_rejected(
         r#"
 use core.reactive as reactive
-use core.tasks as tasks
 fn run() {
     #Local pending := reactive.signal(0)
-    worker :: tasks.spawn(() => {
+    worker :: task {
         pending.set(1)
-    })
-    worker.join()
+    }
+    worker.join() ?? panic("task failed")
 }
 "#,
         "E1102",
@@ -334,13 +327,12 @@ fn run() {
 fn mutable_state_cannot_cross_task_or_taskgroup_boundaries() {
     assert_rejected(
         r#"
-use core.tasks
 fn run() {
     count := 0
-    handle :: tasks.spawn(() => {
+    handle :: task {
         count += 1
-    })
-    handle.join()
+    }
+    handle.join() ?? panic("task failed")
 }
 "#,
         "E1101",
@@ -354,7 +346,7 @@ fn run() {
         handle :: task {
             count += 1
         }
-        handle.join()
+        handle.join() ?? panic("task failed")
     }
 }
 "#,
@@ -447,16 +439,15 @@ fn run() {
 #[test]
 fn shared_is_the_safe_mutation_control_case() {
     let source = r#"
-use core.tasks
 struct Counter { value: Int }
 fn run() {
     counter := Shared.new(Counter.{ value: 0 })
-    handle :: tasks.spawn(() => {
+    handle :: task {
         counter.edit((value) => {
             value.value += 1
         })
-    })
-    handle.join().drop("synchronizes with the read below; the edit already landed")
+    }
+    handle.join() ?? panic("task failed")
     print(counter.read((value) => value.value))
 }
 "#;
@@ -468,9 +459,9 @@ fn run() {
     );
 }
 
-// D-TASKBORROW1=A (card #1199): a `taskgroup` joins every child, so a child may
+// D-TASKBORROW1=A (card #1199): a `task.group` joins every child, so a child may
 // borrow places the owner still holds. Reads are free; writes are admitted only
-// when sema proves the places disjoint. `tasks.spawn`, channels, and detach keep
+// when sema proves the places disjoint. Detached `task` children, channels, and detach keep
 // the ownership-only rules.
 
 fn assert_accepted(source: &str) -> jet::CompileOutput {
@@ -496,10 +487,9 @@ fn taskgroup_child_reads_borrowed_stack_data() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         window :: particles[0..1]
         a :: task window[0].position
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -513,19 +503,25 @@ fn taskgroup_children_borrow_disjoint_write_places() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
-    task.group g {{
+        task.group g {{
         left :: &particles[0]
         right :: &particles[2]
-        result :: task.all {{ {{ left.position += left.velocity; left.position }}, {{ right.position += right.velocity; right.position }} }}
-        print(result)
+        a :: task {{
+            left.position += left.velocity
+            left.position
+        }}
+        b :: task {{
+            right.position += right.velocity
+            right.position
+        }}
     }}
 }}
 "#
     );
     let output = assert_accepted(&source);
     assert!(
-        output.rust.contains("spawn_scoped"),
-        "a borrowed taskgroup child must launch through the scoped path whose loan the group closes at join"
+        output.rust.contains(".spawn("),
+        "a borrowed task group child must use the canonical group spawn path whose loan the group closes at join"
     );
 }
 
@@ -535,7 +531,7 @@ fn taskgroup_children_writing_one_place_are_rejected() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         one :: &particles[0]
         two :: &particles[0]
         a :: task {{
@@ -559,7 +555,7 @@ fn taskgroup_read_and_write_of_one_place_are_rejected() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         writer :: &particles[0]
         reader :: particles[0..1]
         a :: task {{
@@ -577,13 +573,13 @@ fn run() {{
 #[test]
 fn detached_task_still_rejects_a_borrowed_capture() {
     let source = format!(
-        r#"use core.tasks as tasks
+        r#"
 {PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
     left :: &particles[0]
-    worker :: tasks.spawn(() => left.position)
-    print(worker.join())
+    worker :: task left.position
+    print(worker.join() ?? panic("task failed"))
 }}
 "#
     );
@@ -596,7 +592,7 @@ fn nested_taskgroups_track_their_own_borrows() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
-    task.group outer {{
+        task.group outer {{
         left :: &particles[0]
         a :: task {{
             left.position += 1
@@ -608,9 +604,7 @@ fn run() {{
                 right.position += 1
                 right.position
             }}
-            print(b.join() ?? 0)
         }}
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -624,14 +618,13 @@ fn a_group_cannot_lend_an_owner_declared_inside_its_own_block() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    task.group g {{
+        task.group g {{
         particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
         left :: &particles[0]
         a :: task {{
             left.position += 1
             left.position
         }}
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -649,7 +642,7 @@ fn a_lent_owner_cannot_be_moved_before_the_group_joins() {
 fn eat(ps: ^[Particle]) => Int = ps.len()
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         left :: &particles[0]
         a :: task {{
             left.position += left.velocity
@@ -657,7 +650,6 @@ fn run() {{
         }}
         n :: eat(^particles)
         print(n)
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -672,14 +664,13 @@ fn a_lent_place_cannot_be_written_by_the_parent_before_the_group_joins() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         left :: &particles[0]
         a :: task {{
             left.position += left.velocity
             left.position
         }}
         particles[0].position = 99
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -695,14 +686,13 @@ fn a_write_lent_place_cannot_be_read_by_the_parent_before_the_group_joins() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         left :: &particles[0]
         a :: task {{
             left.position += left.velocity
             left.position
         }}
         print(particles[0].position)
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -717,11 +707,10 @@ fn a_read_lent_place_stays_readable_by_the_parent() {
         r#"{PARTICLES}
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
-    task.group g {{
+        task.group g {{
         window :: particles[0..1]
         a :: task window[0].position
         print(particles[0].position)
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -744,7 +733,6 @@ fn run() {{
             left.position
         }}
         particles[1].position = 99
-        print(a.join() ?? 0)
     }}
 }}
 "#
@@ -759,7 +747,7 @@ fn a_taskgroup_parameter_cannot_lend_a_borrow() {
     let source = r#"
 fn spawn_view(group: TaskGroup, values: View<Int>) {
     handle :: task values[0]
-    print(handle.join() ?? 0)
+    print(handle.join() ?? panic("task failed"))
 }
 fn run() {}
 "#;
