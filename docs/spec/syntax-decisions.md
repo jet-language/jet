@@ -6693,3 +6693,54 @@ Owner-commissioned first-principles memory audit; proposal at `docs/proposals/me
 **Tooling element (no ballot; owner-designed; implementation #1895)**: `jet audit memory` + `jet fix memory` — every runtime-witness step-in (gc activity in `#Policy(gc)` scopes, sentry faults in gates) writes one ledger row; the fix command applies the static repair where exactly one exists and names the options where several do. This **composes with** the ratified D-OPTGC1 receipt (`jet run --gc-trace` + `jet gc report`, which already exists): `jet gc report` stays the per-run gc detail; `jet audit memory` is the cross-witness ledger above it. The ledger covers exercised runs only, and its output says so.
 
 Owner rulings recorded without ballots: the strategy-attachment unification was withdrawn on the owner's pushback (allocator, container, type, and scope-attribute are different things on purpose; `#Policy(gc)` keeps its one-line shape). The 2026-08-12 probed defect set stays ordinary repair cards under I9, outside this slate.
+
+**2026-08-07 — the one-tree name slate: D-NAME-TREE1=A,
+D-NAME-ALIAS1=A, D-NAME-FENCE1=A, D-NAME-WALK1=A, D-NAME-ROLEMOD1=A,
+D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625, proposal
+`docs/proposals/names-one-tree.md`)*. D-NAME-FILES1=C already records manual
+named imports above. This section records the other outcomes.
+
+- **D-NAME-TREE1=A** — a name is a member at one point in one tree. A
+  declaration attaches it, and an alias only points at it. Sema writes one name
+  ledger that every engine and tool reads.
+- **D-NAME-ALIAS1=A** — Core ships one short prelude module. It declares the
+  ambient basics and uses `pub use` aliases for the rest of the ratified Core
+  tree. The compiler opens it for every file, and `#NoPrelude` still opts out.
+- **D-NAME-FENCE1=A** — `pub` opens an edge, `pub(package)` fences at the
+  package, and `_name` means internal everywhere. `pub module` makes a
+  public-by-default subtree and replaces `#PubFile`; `priv` opts a member of
+  that subtree back to private.
+- **D-NAME-WALK1=A** — `use` and `pub use` work in module bodies with the same
+  meaning as at file top. `.[ ]` always means "these members of that prefix":
+  values in expression position and aliases after `use`.
+- **D-NAME-ROLEMOD1=A** — `module` means code. Ecosystem entries are typed
+  values in `package.jet`, and role declarations such as `module env.dev`
+  respell as those values.
+- **D-NAME-REFLECT1=A** — `T.reflect()` gains `.path`, while `.name` stays the
+  leaf; runtime `reflect.of` follows. Diagnostics use the path when the leaf is
+  ambiguous and the leaf otherwise. Hover, `jet project parts`, and JSON use
+  the same spelling.
+- **D-NAME-SIGIL1=A** — zero underscores is a name, one underscore is a
+  message to humans, and two underscores is the machine's space. Dunder and
+  sunder shapes have no meaning. Every generated symbol that a tool can show
+  starts with `__jet`.
+
+**2026-08-08 — the choosing slate: D-CHOOSE-PAT1=A, D-CHOOSE-TEST1=A,
+D-CHOOSE-HEADS1=A, D-CHOOSE-FNBODY1=A** *(card #1651, proposal
+`docs/proposals/choosing-one-table.md`)*. D-CHOOSE-FIND1=A already records the
+finite-source finding form above. This section records the other outcomes.
+
+- **D-CHOOSE-PAT1=A** — arm heads and `==` tests accept list and tuple shapes.
+  The rest capture is `...rest`; two dots stays discard-only. Binds, loop
+  heads, and the exact-length list bind do not change.
+- **D-CHOOSE-TEST1=A** — the statement gives the subject, its expected shape,
+  and the route for a miss. The route must leave the surrounding flow, so the
+  bound names are safe afterward. A test with no route binds nothing.
+- **D-CHOOSE-HEADS1=A** — the table proofs check multi-head coverage and
+  overlap: E0307 reports a hole, and the unreachable-arm lint reports a
+  shadowed head. The surface does not change. A named follow-up owns any later
+  table-sugar choice.
+- **D-CHOOSE-FNBODY1=A** — a one-line function body uses `::`. Defining a
+  named thing uses `::`; filling a slot inside a definition uses `=`.
+  Reassignment, parameter defaults, field defaults, and enum discriminants
+  keep `=`.

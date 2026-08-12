@@ -124,3 +124,34 @@ Resolved disposition, #1691: `core.crypto.expert` now uses distinct
 `x25519_raw` / `hkdf_sha256_raw` names, and
 `examples/features/crypto/crypto_migration.jet` covers the audited raw path
 while the safe `core.crypto` APIs retain typed defaults.
+
+**2026-08-06 — the core-library slate: D-CORE-DOCTRINE1=A,
+D-CORE-EAGER1=A, D-CORE-PATH1=A, D-CORE-PRELUDE1=A, D-CORE-PRELUDE2=B,
+D-CORE-TREE1=A, D-CORE-USELIST1=A** *(card #1495, proposal
+`docs/proposals/corelib-overhaul.md`)*. The tree migration itself lands with
+card #1574. The reference doc restructure rides that cutover.
+
+- **D-CORE-DOCTRINE1=A** — all Part A rules become law. Every new or changed
+  Core API must pass them in review. Call sites are judged by reading them
+  aloud, options are enums, and one docs table lists each magic default and its
+  override.
+- **D-CORE-EAGER1=A** — helpers on a real list, map, or set run at once and
+  return a plain collection. `.lazy` gives the same vocabulary as a deferred
+  view. Streams and file lines stay naturally lazy because they arrive over
+  time.
+- **D-CORE-PATH1=A** — `Path` is a real type with `join` and other methods.
+  Every Core function that takes a path accepts a plain `String` or a `Path`.
+  The methods replace the `core.path` free functions.
+- **D-CORE-PRELUDE1=A** — the seven criteria become law: measured frequency,
+  total and safe, names never semantics, no better home, first-hour coverage,
+  one fixed set, and collision-conscious names. User shadowing wins with a
+  compiler warning. New names land only at epoch boundaries with a migration
+  lint, and the five safe additions ship.
+- **D-CORE-PRELUDE2=B** — `read_file`, `write_file`, and `file_exists` join the
+  prelude. Random stays in `core.math.random`.
+- **D-CORE-TREE1=A** — Core uses a consistent nested tree. It keeps
+  `core.files`, nests random under math and `fmt` under text, merges env and os
+  into sys, and splits `core.io`. It does not add `core.json`.
+- **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as`
+  gives a shorter local name; without `as`, the local name is the last part
+  after the final dot. Existing brace item imports move to the same list.
