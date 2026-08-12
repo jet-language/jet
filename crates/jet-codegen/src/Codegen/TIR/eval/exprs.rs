@@ -2441,16 +2441,7 @@ impl<'a> EvalCtx<'a> {
                     } else {
                         let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
                         let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
-                        if start < 0 || end < start || end as usize >= xs.len() {
-                            return Err(super::view_bounds_diagnostic(
-                                xs.len(),
-                                start,
-                                end,
-                                false,
-                                self.span(),
-                            ));
-                        }
-                        (start, end + 1)
+                        super::checked_view_window(start, end, false, xs.len(), self.span())?
                     };
                     let end = end_exclusive - 1;
                     return Ok(CtValue::Struct {

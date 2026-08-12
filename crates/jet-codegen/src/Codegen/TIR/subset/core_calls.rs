@@ -341,7 +341,8 @@ pub(super) fn core_call_args_in_subset(
         .all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
-/// c109 Phase 13: is a closure-taking core call (`http.serve`/`scope.guard`)
+/// c109 Phase 13: is a closure-taking core call (`tasks.spawn`, `http.serve`, or
+/// `scope.guard`)
 /// inside the subset? These are NOT in `core_fixed_sig` — each has a
 /// bespoke emit shape. We cover only
 /// the cleanest, byte-reproducible case for each, where the closure arg is a LITERAL
@@ -351,6 +352,7 @@ pub(super) fn core_call_args_in_subset(
 ///     router-handler branch needs an HTTPRouter value, which can only come from
 ///     `http.router()` (not in `core_fixed_sig`) — so it can't arise in a covered fn.
 ///   - `scope.guard(<lambda>)` — 1 arg, a literal zero-param lambda.
+///   - `tasks.spawn(<lambda>)` — 1 arg, a literal zero-param lambda.
 pub(crate) fn core_closure_call_in_subset(
     module: &str,
     method: &str,
@@ -361,6 +363,7 @@ pub(crate) fn core_closure_call_in_subset(
     let lambda_arg = |i: usize| matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals));
     let no_labels = args.iter().all(|a| a.label.is_none());
     match (module, method) {
+        ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
         ("core.http", "serve") => {
             args.len() == 2
                 && no_labels

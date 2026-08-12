@@ -415,8 +415,8 @@ pub(crate) fn method_call_in_subset(
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
                 if let Some(module) = cx.any_core_import_module(alias) {
-                    // c109 Phase 13: the two closure-taking core calls (`http.serve`/
-                    // `scope.guard`) — NOT in `core_fixed_sig`, each a
+                    // c109 Phase 13: closure-taking core calls (`tasks.spawn`,
+                    // `http.serve`, `scope.guard`) — NOT in `core_fixed_sig`, each a
                     // bespoke emit shape with a literal-lambda closure arg.
                     if core_closure_call_in_subset(module, method, args, cx, locals) {
                         return true;
