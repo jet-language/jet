@@ -1069,6 +1069,7 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
             children
         }
         TExprKind::Clone(arg)
+        | TExprKind::ExplicitCopy(arg)
         | TExprKind::Borrow { place: arg, .. }
         | TExprKind::MaterializeView(arg) => vec![arg.as_ref()],
         TExprKind::MethodCall { recv, args, .. } => std::iter::once(recv.as_ref())
@@ -1198,12 +1199,10 @@ enum EvalExprWork<'a> {
         right: &'a TIfCond,
     },
     IfAfterAndRight {
-        state: EvalIfWork<'a>,
         parent: &'a TIfCond,
         right: &'a TIfCond,
     },
     IfAfterLeaf {
-        state: EvalIfWork<'a>,
         cond: &'a TIfCond,
         expr: &'a TExpr,
     },
@@ -1544,7 +1543,7 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
-    fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
+    pub(super) fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
         fn visit(ctx: &EvalCtx<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
             if ty.is_compute_tensor_family() {
                 return true;
@@ -1639,12 +1638,13 @@ impl<'a> EvalCtx<'a> {
         let fields = fields
             .into_iter()
             .map(|(name, value)| {
-                let cloned = field_types
+                let field_type = field_types
                     .and_then(|types| types.iter().find(|(field, _)| field == &name))
-                    .map_or_else(
-                        || self.clone_structural_untyped(value),
-                        |(_, ty)| self.clone_structural_value(value, ty),
-                    )?;
+                    .map(|(_, ty)| ty);
+                let cloned = match field_type {
+                    Some(ty) => self.clone_structural_value(value, ty),
+                    None => self.clone_structural_untyped(value),
+                }?;
                 Ok((name, cloned))
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -3005,7 +3005,6 @@ impl<'a> EvalCtx<'a> {
                         | TIfCond::IfLet { subj: expr, .. }
                         | TIfCond::Matches { subj: expr, .. } => {
                             work.push(EvalExprWork::IfAfterLeaf {
-                                state,
                                 cond,
                                 expr,
                             });
@@ -3023,7 +3022,6 @@ impl<'a> EvalCtx<'a> {
                         })?;
                         if value {
                             work.push(EvalExprWork::IfAfterAndRight {
-                                state,
                                 parent,
                                 right,
                             });
@@ -6416,7 +6414,6 @@ impl<'a> EvalCtx<'a> {
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
             TExprKind::RequireStop { .. } => {
                 unreachable!("require/panic stop bypassed its evaluator continuation")
-            }
             }
             TExprKind::LayoutCompare { .. } => Err(unsupported("expr `LayoutCompare`", self.span())),
             TExprKind::LayoutLit { .. } => Err(unsupported("expr `LayoutLit`", self.span())),

@@ -854,6 +854,7 @@ impl PackageFacts {
         Ok(result.and_then(|path| files.into_iter().find(|file| file.path == path)))
     }
 
+    #[cfg(test)]
     fn source_files(
         &self,
         root: &std::path::Path,

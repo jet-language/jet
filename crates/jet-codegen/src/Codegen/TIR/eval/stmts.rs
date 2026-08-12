@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 use crate::AST::Type;
 use crate::Codegen::mangle;
-use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
+use crate::Codegen::TIR::{TForInMethod, TIfCond, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};

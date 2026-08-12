@@ -1249,7 +1249,6 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             channels: Vec::new(),
             task_groups: Vec::new(),
-            task_group_limits: Vec::new(),
             tasks: Vec::new(),
             web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
@@ -1518,21 +1517,21 @@ impl<'a> EvalCtx<'a> {
             },
             TJitSpawnBody::SharedBlock { body, tail } => {
                 if *tail {
-                    let (last, prefix) = body[..].split_last().ok_or_else(|| {
-                        unsupported("empty shared spawn body", ctx.span())
-                    })?;
-                    match ctx.exec_stmts(prefix, &mut scope) {
-                        Ok(Flow::Return(value)) => Ok(value),
-                        Ok(Flow::Normal) => match last {
-                            TStmt::ExprStmt(expr) => ctx.eval_expr(expr, &mut scope),
-                            TStmt::Return(Some(expr)) => ctx.eval_expr(expr, &mut scope),
-                            _ => Ok(CtValue::Unit),
+                    match body[..].split_last() {
+                        Some((last, prefix)) => match ctx.exec_stmts(prefix, &mut scope) {
+                            Ok(Flow::Return(value)) => Ok(value),
+                            Ok(Flow::Normal) => match last {
+                                TStmt::ExprStmt(expr) => ctx.eval_expr(expr, &mut scope),
+                                TStmt::Return(Some(expr)) => ctx.eval_expr(expr, &mut scope),
+                                _ => Ok(CtValue::Unit),
+                            },
+                            Ok(other) => Err(unsupported(
+                                &format!("control flow {other:?} escaping shared spawn"),
+                                ctx.span(),
+                            )),
+                            Err(error) => Err(error),
                         },
-                        Ok(other) => Err(unsupported(
-                            &format!("control flow {other:?} escaping shared spawn"),
-                            ctx.span(),
-                        )),
-                        Err(error) => Err(error),
+                        None => Err(unsupported("empty shared spawn body", ctx.span())),
                     }
                 } else {
                     match ctx.exec_stmts(&body[..], &mut scope) {
@@ -2091,13 +2090,15 @@ impl<'a> EvalCtx<'a> {
             .ok_or_else(|| unsupported("task group handle", span))?;
         let join_runtime = self.runtime.clone();
         let drain = move |child| {
-            let task = join_runtime
+            let task: Option<EvalTask> = join_runtime
                 .lock()
                 .expect("evaluator runtime poisoned")
                 .tasks
                 .get_mut(child)
-                .and_then(Option::take);
-            let _ = task.and_then(|task| task.completion.recv().ok());
+                .and_then(|slot: &mut Option<EvalTask>| slot.take());
+            if let Some(task) = task {
+                let _ = task.completion.recv();
+            }
         };
         if let Err(interruption) = self.task_wait_cancel_check() {
             let cancel_runtime = self.runtime.clone();
@@ -2107,7 +2108,7 @@ impl<'a> EvalCtx<'a> {
                         .lock()
                         .expect("evaluator runtime poisoned")
                         .tasks
-                        .get(child)
+                        .get(*child)
                         .and_then(Option::as_ref)
                     {
                         task.control.cancel();

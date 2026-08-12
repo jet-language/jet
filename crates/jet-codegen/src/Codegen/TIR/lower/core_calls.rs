@@ -149,7 +149,6 @@ pub(crate) fn lower_core_closure_call(
                     group: None,
                     site,
                     spawn_closure,
-                    scoped: lam.meta.scoped_task_borrow,
                 },
             },
         });

@@ -691,6 +691,9 @@ fn web_wasm_expr_supported(
                 TIR::TLambdaBody::Block(body) => {
                     web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
                 }
+                TIR::TLambdaBody::SharedBlock(body) => {
+                    web_wasm_stmts_supported(&body[..], bundle, file_prefix, reconstructions)
+                }
             },
             TIR::TFnValueKind::NamedFn {
                 name: None,
@@ -713,6 +716,9 @@ fn web_wasm_expr_supported(
             }
             TIR::TLambdaBody::Block(body) => {
                 web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+            }
+            TIR::TLambdaBody::SharedBlock(body) => {
+                web_wasm_stmts_supported(&body[..], bundle, file_prefix, reconstructions)
             }
         },
         TIR::TExprKind::NumericMethod {
@@ -2492,8 +2498,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
                 .collect::<Option<Vec<_>>>()?;
             let ret = ret
                 .as_deref()
-                .map(|ret| wasm_internal_ty(ret, bundle))
-                .transpose()?
+                .and_then(|ret| wasm_internal_ty(ret, bundle))
                 .map(|ret| format!(" -> {ret}"))
                 .unwrap_or_default();
             format!("fn({}){ret}", params.join(", "))
@@ -3774,6 +3779,18 @@ fn wasm_tir_lambda(
             let mut rendered = String::new();
             emit_wasm_body(
                 body,
+                &mut rendered,
+                1,
+                funcs,
+                file_prefix,
+                reconstructions,
+            )?;
+            Ok(format!("{move_kw}|{params}| {{\n{rendered}}}"))
+        }
+        TIR::TLambdaBody::SharedBlock(body) => {
+            let mut rendered = String::new();
+            emit_wasm_body(
+                &body[..],
                 &mut rendered,
                 1,
                 funcs,

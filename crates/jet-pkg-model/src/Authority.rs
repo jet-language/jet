@@ -620,7 +620,7 @@ impl AuthorityResolver {
                 operation: "inspect",
                 detail: error.to_string(),
             })?;
-            let relative = scan.relative.join(name);
+            let relative = scan.relative.join(&name);
             if file_type.is_symlink() {
                 return Err(AuthorityError::Symlink(self.root.join(relative)));
             }

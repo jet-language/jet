@@ -1614,7 +1614,6 @@ fn lower_method_call_impl(
                             group: None,
                             site,
                             spawn_closure,
-                            scoped: lam.meta.scoped_task_borrow,
                         },
                     },
                 };
@@ -1673,7 +1672,6 @@ fn lower_method_call_impl(
                         group: Some(Box::new(group)),
                         site,
                         spawn_closure,
-                        scoped: lam.meta.scoped_task_borrow,
                     },
                 },
             };
@@ -3672,7 +3670,7 @@ fn lower_method_call_impl(
         };
         let elem = elem.unwrap_or_else(unit_type);
         let (op, ty) = match method {
-            "join" | Syntax::METHOD_TASK_WAIT => (
+            "join" => (
                 THandleOp::TaskJoin,
                 resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                     ok: Box::new(elem),
@@ -3683,7 +3681,6 @@ fn lower_method_call_impl(
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
-            "trace" => (THandleOp::TaskTrace, Type::String),
             "receive" => (
                 THandleOp::ChannelReceive,
                 Type::Result {

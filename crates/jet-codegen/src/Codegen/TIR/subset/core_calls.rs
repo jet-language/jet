@@ -38,7 +38,6 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return row.has_direct_symbol();
     }
     if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
-    if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
     {
         return true;
     }

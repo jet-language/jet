@@ -3759,9 +3759,6 @@ pub enum TCoreClosureKind {
         group: Option<Box<TExpr>>,
         site: usize,
         spawn_closure: String,
-        /// D-TASKBORROW1=A: sema proved this child's borrowed places disjoint,
-        /// so it launches through the group's scoped path (loan closed at join).
-        scoped: bool,
     },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },

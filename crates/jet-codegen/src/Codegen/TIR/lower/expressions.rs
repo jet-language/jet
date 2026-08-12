@@ -751,15 +751,7 @@ fn expr_children<'a>(expr: &'a Expr, cx: &Cx, env: &LowerEnv) -> Vec<ExprWorkChi
         Expr::MethodCall { .. } => {
             let mut calls = Vec::new();
             let mut cursor = expr;
-            while let Expr::MethodCall {
-                receiver,
-                method,
-                owner_type_args,
-                type_args,
-                args,
-                recv_type,
-                ..
-            } = cursor
+            while let Expr::MethodCall { receiver, .. } = cursor
             {
                 calls.push(cursor);
                 cursor = receiver;
@@ -1660,14 +1652,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             postfix,
             ..
         } => {
-            let (place, ty) = lower_incdec(operand, cx, env);
+            let read = lower_expr(operand, cx, env);
+            let place = lower_incdec_place(operand, cx, env);
             TExpr {
-                ty: ty.clone(),
+                ty: read.ty.clone(),
                 kind: TExprKind::IncDec {
                     op: *op,
                     place,
                     postfix: *postfix,
-                    ty,
+                    ty: read.ty,
                 },
             }
         }

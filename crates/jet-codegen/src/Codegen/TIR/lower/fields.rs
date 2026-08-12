@@ -125,6 +125,7 @@ fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
             effect_bound,
             param_contract,
             return_view_provenance,
+            call_metadata,
         } => Type::Fn {
             params: params
                 .iter()
@@ -136,6 +137,7 @@ fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
             effect_bound: effect_bound.clone(),
             param_contract: param_contract.clone(),
             return_view_provenance: return_view_provenance.clone(),
+            call_metadata: call_metadata.clone(),
         },
         Type::Tuple(fields) => Type::Tuple(
             fields

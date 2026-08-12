@@ -374,7 +374,7 @@ impl<'a> EvalCtx<'a> {
             .ok_or_else(|| unsupported("closure method arg", self.span()))?;
         let callback_value = self.eval_expr(callback, scope)?;
         let scope_ptr = scope as *mut HashMap<String, CtValue>;
-        let mut calln = |this: &mut Self, argv: Vec<CtValue>| {
+        let calln = |this: &mut Self, argv: Vec<CtValue>| {
             // SAFETY: the collection operation invokes this closure
             // synchronously; no other scope access overlaps the call.
             unsafe { this.call_callable_in_scope(&callback_value, argv, &mut *scope_ptr) }
