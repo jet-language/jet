@@ -8,6 +8,39 @@ use std::collections::{HashMap, HashSet};
 
 pub(crate) const WRITE_CAPABILITY_MARKER: &str = Syntax::WRITE_CAPABILITY_LABEL;
 
+/// Shared registered-diagnostic renderer for execution adapters. Codegen and
+/// the interpreter may supply source-derived values, but row lookup and
+/// report construction stay in sema's diagnostic seam.
+pub fn render_registered(
+    code: impl Into<String>,
+    what: String,
+    why: String,
+    fix: String,
+    span: Option<Span>,
+) -> Diagnostic {
+    Diagnostic::error(code, what, why, fix, span)
+}
+
+/// Internal evaluator control-flow sentinel. It is not a user diagnostic row.
+pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Diagnostic {
+    Diagnostic::soft_exit(what, why, span)
+}
+
+/// Internal evaluator cancellation sentinel. It is not a user diagnostic row.
+pub fn task_cancelled(span: Option<Span>) -> Diagnostic {
+    Diagnostic::task_cancelled(span)
+}
+
+/// E0956 for an execution adapter that cannot support the requested operation.
+pub fn e0956_unsupported(what: &str, span: Span) -> Diagnostic {
+    Diagnostic::e0956_unsupported(what, span)
+}
+
+/// E1403 when an evaluator crosses the shared source-nesting limit.
+pub fn source_nesting_exceeded(depth: usize, span: Span) -> Diagnostic {
+    Diagnostic::source_nesting_exceeded(depth, span)
+}
+
 /// E0956 for the tier-0 Browser adapter. The host supplies only the dynamic
 /// value fact; the registered row owns the user-facing wording and fix.
 pub fn browser_tier0_unsupported(what: &str, span: Span) -> Diagnostic {

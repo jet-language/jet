@@ -1825,7 +1825,7 @@ impl<'a> EvalCtx<'a> {
                 module.rsplit('.').next().unwrap_or(module),
                 method
             );
-            return Some(Diagnostic::e3403(&api, Some(span)));
+            return Some(crate::Sema::e3403(&api, Some(span)));
         }
         if self.should_decline_ambient_fold(module, method) {
             return Some(unsupported(
@@ -1834,7 +1834,7 @@ impl<'a> EvalCtx<'a> {
             ));
         }
         if core_effect(module, method).is_some() && self.impure_depth == 0 {
-            return Some(Diagnostic::error(
+            return Some(crate::Sema::Diagnostics::render_registered(
                 "E3410",
                 format!(
                     "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
@@ -3447,7 +3447,7 @@ impl<'a> EvalCtx<'a> {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
             sink.stderr.push_str(&rendered);
             sink.exit_code = Some(70);
-            return Err(Diagnostic::soft_exit(
+            return Err(crate::Sema::Diagnostics::soft_exit(
                 "70".to_string(),
                 "or-fallback panic stop".to_string(),
                 Some(self.span()),
@@ -3481,7 +3481,7 @@ impl<'a> EvalCtx<'a> {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
             sink.stderr.push_str(&rendered);
             sink.exit_code = Some(70);
-            return Err(Diagnostic::soft_exit(
+            return Err(crate::Sema::Diagnostics::soft_exit(
                 "70".to_string(),
                 "require/panic stop".to_string(),
                 Some(self.span()),
@@ -3877,7 +3877,7 @@ impl<'a> EvalCtx<'a> {
                 Some(&expr.ty),
             )
         } else if self.impure_depth == 0 {
-            return Err(Diagnostic::error(
+            return Err(crate::Sema::Diagnostics::render_registered(
                 "E3410",
                 format!(
                     "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
@@ -3889,7 +3889,7 @@ impl<'a> EvalCtx<'a> {
                 Some(source_span),
             ));
         } else {
-            return Err(Diagnostic::error(
+            return Err(crate::Sema::Diagnostics::render_registered(
                 "E3411",
                 format!(
                     "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
@@ -5094,7 +5094,7 @@ impl<'a> EvalCtx<'a> {
                 // remains the full-reflection projection.
                 if let Some(projected) = crate::Syntax::compiler_fact_member(field) {
                     let CtValue::Struct { type_name, fields } = r else {
-                        return Err(Diagnostic::error(
+                        return Err(crate::Sema::Diagnostics::render_registered(
                             "E0302",
                             format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
@@ -5104,7 +5104,7 @@ impl<'a> EvalCtx<'a> {
                         ));
                     };
                     if type_name != crate::Syntax::TYPE_TYPE_INFO {
-                        return Err(Diagnostic::error(
+                        return Err(crate::Sema::Diagnostics::render_registered(
                             "E0302",
                             format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
@@ -5118,7 +5118,7 @@ impl<'a> EvalCtx<'a> {
                         .find(|(name, _)| name == projected)
                         .map(|(_, value)| value)
                         .ok_or_else(|| {
-                            Diagnostic::error(
+                            crate::Sema::Diagnostics::render_registered(
                                 "E0302",
                                 format!("the reflected type has no `{field}` fact"),
                                 "the compiler fact projection is fixed by D-LAYOUT-FACTS1"
@@ -5136,7 +5136,7 @@ impl<'a> EvalCtx<'a> {
                     .strip_prefix(crate::Syntax::LAYOUT_FIELD_PROJECTION_PREFIX)
                 {
                     let CtValue::Struct { type_name, fields } = r else {
-                        return Err(Diagnostic::error(
+                        return Err(crate::Sema::Diagnostics::render_registered(
                             "E0302",
                             "layout field selector needs a `LayoutInfo` value".to_string(),
                             "typed field selection is only defined on compiler layout facts"
@@ -5146,7 +5146,7 @@ impl<'a> EvalCtx<'a> {
                         ));
                     };
                     if type_name != crate::Syntax::TYPE_LAYOUT_INFO {
-                        return Err(Diagnostic::error(
+                        return Err(crate::Sema::Diagnostics::render_registered(
                             "E0302",
                             "layout field selector needs a `LayoutInfo` value".to_string(),
                             "typed field selection is only defined on compiler layout facts"
@@ -5160,7 +5160,7 @@ impl<'a> EvalCtx<'a> {
                         .find(|(name, _)| name == "fields")
                         .map(|(_, value)| value)
                     else {
-                        return Err(Diagnostic::error(
+                        return Err(crate::Sema::Diagnostics::render_registered(
                             "E0302",
                             "the reflected layout has no field facts".to_string(),
                             "typed selectors read the canonical `LayoutInfo.fields` list"
@@ -5184,7 +5184,7 @@ impl<'a> EvalCtx<'a> {
                             )
                         })
                         .ok_or_else(|| {
-                            Diagnostic::error(
+                            crate::Sema::Diagnostics::render_registered(
                                 "E0302",
                                 format!("the reflected layout has no field `{selected}`"),
                                 "typed selectors must name a field declared by the reflected type"
@@ -6182,7 +6182,9 @@ impl<'a> EvalCtx<'a> {
                                 .ok_or_else(|| unsupported("shared handle", self.span()))?;
                             let state = shared
                                 .acquire_guard(editable, self.task_cancel.as_ref())
-                                .ok_or_else(|| Diagnostic::task_cancelled(Some(self.span())))?;
+                                .ok_or_else(|| {
+                                    crate::Sema::Diagnostics::task_cancelled(Some(self.span()))
+                                })?;
                             let mut runtime =
                                 self.runtime.lock().expect("evaluator runtime poisoned");
                             let lease_index = runtime.shared_guards.len();
@@ -6236,7 +6238,9 @@ impl<'a> EvalCtx<'a> {
                         let editable = method != "read";
                         let _lease = shared
                             .acquire(editable, self.task_cancel.as_ref())
-                            .ok_or_else(|| Diagnostic::task_cancelled(Some(self.span())))?;
+                            .ok_or_else(|| {
+                                crate::Sema::Diagnostics::task_cancelled(Some(self.span()))
+                            })?;
                         let shared_value = shared
                             .value
                             .lock()
@@ -7655,7 +7659,7 @@ impl<'a> EvalCtx<'a> {
                             .push_str(crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
                         sink.stderr.push('\n');
                         sink.exit_code = Some(70);
-                        return Err(Diagnostic::soft_exit(
+                        return Err(crate::Sema::Diagnostics::soft_exit(
                             "70".to_string(),
                             crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP.to_string(),
                             Some(self.span()),
@@ -8290,7 +8294,7 @@ fn pool_id_parts(value: &CtValue) -> Option<(usize, i64)> {
 }
 
 fn pool_stale_diagnostic() -> Diagnostic {
-    Diagnostic::error(
+    crate::Sema::Diagnostics::render_registered(
         "E0953",
         "your comptime code stopped the build".to_string(),
         "while computing this value at compile time, the program panicked: this Id no longer refers to a live value — its pool slot was removed".to_string(),

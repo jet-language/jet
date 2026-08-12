@@ -149,7 +149,7 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
 pub use exprs::{stable_place_address, tir_place_address_key};
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::e0956_unsupported(what, span)
+    crate::Sema::Diagnostics::e0956_unsupported(what, span)
 }
 
 /// D-CONC-FAIL1=A: the evaluator turns a child diagnostic into the same
@@ -174,7 +174,7 @@ fn task_failure_value(error: &Diagnostic) -> CtValue {
 }
 
 fn task_child_panic(message: String, span: Span) -> Diagnostic {
-    Diagnostic::error(
+    crate::Sema::Diagnostics::render_registered(
         "E0953",
         message,
         "a child task panicked".to_string(),
@@ -321,7 +321,7 @@ pub(super) fn view_bounds_diagnostic(
 ) -> Diagnostic {
     // Same E0953 voice as the JIT trap / comptime panic path so every tier
     // reports one code for an out-of-bounds view (I9).
-    Diagnostic::error(
+    crate::Sema::Diagnostics::render_registered(
         "E0953",
         "your comptime code stopped the build".to_string(),
         format!("while computing this value at compile time, the program panicked: {message}"),
@@ -338,7 +338,7 @@ fn enter_source_nesting(depth: &mut usize, span: Span) -> Result<(), Diagnostic>
     }
     let exceeded = *depth;
     *depth -= 1;
-    Err(Diagnostic::source_nesting_exceeded(exceeded, span))
+    Err(crate::Sema::Diagnostics::source_nesting_exceeded(exceeded, span))
 }
 
 pub(super) fn range_contains(
@@ -1317,7 +1317,7 @@ impl<'a> EvalCtx<'a> {
             crate::scheduler::JetSchedulerWait::Ready(value) => Ok(value),
             crate::scheduler::JetSchedulerWait::Cancelled => {
                 let cancelled = crate::task_group::jet_task_cancellation();
-                Err(Diagnostic::error(
+                Err(crate::Sema::Diagnostics::render_registered(
                     cancelled.code,
                     cancelled.what.to_string(),
                     cancelled.why.to_string(),
@@ -1327,7 +1327,7 @@ impl<'a> EvalCtx<'a> {
             }
             crate::scheduler::JetSchedulerWait::Deadline(_) => {
                 let deadline = crate::task_group::jet_task_deadline(wait_kind);
-                Err(Diagnostic::error(
+                Err(crate::Sema::Diagnostics::render_registered(
                     "E3003",
                     deadline.what,
                     deadline.why,
@@ -1357,7 +1357,7 @@ impl<'a> EvalCtx<'a> {
         match crate::task_group::jet_task_wait_policy(deadline, cancelled, self.shield_depth > 0) {
             Ok(()) => Ok(()),
             Err(crate::task_group::JetTaskWaitInterrupt::Deadline(deadline)) => {
-                Err(Diagnostic::error(
+                Err(crate::Sema::Diagnostics::render_registered(
                     "E3003",
                     deadline.what,
                     deadline.why,
@@ -1366,7 +1366,7 @@ impl<'a> EvalCtx<'a> {
                 ))
             }
             Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => {
-                Err(Diagnostic::task_cancelled(Some(self.span())))
+                Err(crate::Sema::Diagnostics::task_cancelled(Some(self.span())))
             }
         }
     }
@@ -2112,7 +2112,7 @@ impl<'a> EvalCtx<'a> {
                 crate::task_group::JetTaskSelectMode::Race => "`task.race`",
                 crate::task_group::JetTaskSelectMode::Any => "`task.any`",
             };
-            return Err(Diagnostic::error(
+            return Err(crate::Sema::Diagnostics::render_registered(
                 "E1112",
                 format!("{method_label} needs at least one task branch"),
                 "a task combinator must have a child to join or select".to_string(),
@@ -2223,13 +2223,13 @@ impl<'a> EvalCtx<'a> {
                     keyword, message, contract.file, contract.line
                 ));
                 sink.exit_code = Some(70);
-                return Err(Diagnostic::soft_exit(
+                return Err(crate::Sema::Diagnostics::soft_exit(
                     "70".to_string(),
                     "runtime contract failed".to_string(),
                     Some(contract.span),
                 ));
             }
-            return Err(Diagnostic::error(
+            return Err(crate::Sema::Diagnostics::render_registered(
                 "E3005",
                 format!("#{keyword} contract failed: {message}"),
                 "a runtime contract condition evaluated false".to_string(),
@@ -2261,7 +2261,13 @@ impl<'a> EvalCtx<'a> {
                     "simplify the expression, or move the work to runtime".to_string(),
                 )
             };
-            return Err(Diagnostic::error(code, what, why, fix, Some(self.span())));
+            return Err(crate::Sema::Diagnostics::render_registered(
+                code,
+                what,
+                why,
+                fix,
+                Some(self.span()),
+            ));
         }
         self.fuel -= 1;
         Ok(())
@@ -3062,7 +3068,7 @@ fn validate_kernel_proofs(program: &JitProgram) -> Result<(), Diagnostic> {
         .iter()
         .find(|func| func.kernel_proof.is_some_and(|proof| !proof.is_complete()))
     {
-        return Err(Diagnostic::error(
+        return Err(crate::Sema::Diagnostics::render_registered(
             "E0956",
             format!("kernel proof for `{}` is incomplete", func.name),
             "the interpreter consumes sema's complete kernel proof before execution"
@@ -3158,7 +3164,7 @@ fn run_program_with_structs_on_stack(
     }
     let funcs = program_funcs(program);
     let entry = funcs.get(&program.entry).copied().ok_or_else(|| {
-        Diagnostic::error(
+        crate::Sema::Diagnostics::render_registered(
             "E2201",
             format!("entry `{}` missing from lowered TIR", program.entry),
             "the interpreter needs the selected entry function in the TIR program".to_string(),
@@ -3237,7 +3243,7 @@ pub fn run_named_func(
     let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let func = funcs.get(name).copied().ok_or_else(|| {
-        Diagnostic::error(
+        crate::Sema::Diagnostics::render_registered(
             "E2201",
             format!("function `{name}` missing from lowered TIR"),
             "the deopt tier needs the named function in the TIR program".to_string(),
@@ -3331,7 +3337,7 @@ fn run_bundle_at_stage(
     stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
     let program = lower_interp_program(bundle).ok_or_else(|| {
-        Diagnostic::error(
+        crate::Sema::Diagnostics::render_registered(
             "E2201",
             "`jet dev` needs a `run` function to run".to_string(),
             "`jet dev` runs a program; a library with no `run` has nothing to execute".to_string(),

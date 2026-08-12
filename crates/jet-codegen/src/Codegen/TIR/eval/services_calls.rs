@@ -32,7 +32,7 @@ impl<'a> EvalCtx<'a> {
             }
             let store = match argv.first() {
                 Some(CtValue::Str(store)) => store.clone(),
-                _ => return Err(Diagnostic::error(
+                _ => return Err(crate::Sema::Diagnostics::render_registered(
                     "E0956",
                     "core.services.runtime expects a store path".to_string(),
                     "pass a text path and a Duration retention window".to_string(),
@@ -49,14 +49,14 @@ impl<'a> EvalCtx<'a> {
                         ("ns", CtValue::Int(ns)) => Some(*ns / 1_000_000),
                         _ => None,
                     })
-                    .ok_or_else(|| Diagnostic::error(
+                    .ok_or_else(|| crate::Sema::Diagnostics::render_registered(
                         "E0956",
                         "core.services.runtime received an invalid Duration".to_string(),
                         "pass a checked Duration value".to_string(),
                         "construct the retention window with core.time".to_string(),
                         Some(source_span),
                     ))?,
-                _ => return Err(Diagnostic::error(
+                _ => return Err(crate::Sema::Diagnostics::render_registered(
                     "E0956",
                     "core.services.runtime expects a Duration".to_string(),
                     "pass a checked Duration retention window".to_string(),

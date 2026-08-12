@@ -966,10 +966,9 @@ fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — emission
-// code must not construct a user diagnostic. The TIR evaluator is the
-// semantic execution adapter and intentionally carries registered diagnostics
-// as its result value; it is not the Rust emitter checked by this pin.
+// Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — it must not
+// construct a user diagnostic. All checking lives in sema, and evaluator error
+// values use the shared registered diagnostic seam.
 // ---------------------------------------------------------------------------
 #[test]
 fn codegen_never_constructs_diagnostics() {
@@ -978,10 +977,6 @@ fn codegen_never_constructs_diagnostics() {
     let mut offenders = Vec::new();
     for path in rs_files(&dir) {
         let text = fs::read_to_string(&path).unwrap_or_default();
-        let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
-        if relative.starts_with("crates/jet-codegen/src/Codegen/TIR/eval/") {
-            continue;
-        }
         for line in diagnostic_constructor_lines(&text) {
             offenders.push(format!(
                 "{}:{line}: {}",
@@ -1004,12 +999,14 @@ fn codegen_diagnostic_scanner_rejects_constructors_without_matching_prose() {
                      type D = Diagnostic;\n\
                      let d = Diagnostic { code: code };\n\
                      let d = jet::Diagnostic::error(code);\n";
-    assert_eq!(diagnostic_constructor_lines(forbidden), vec![4]);
+    assert_eq!(diagnostic_constructor_lines(forbidden), vec![3, 4]);
 
     let allowed = r###"// Diagnostic is forbidden in codegen.
 let word = "Diagnostic";
 let raw = r#"Diagnostic"#;
 let DiagnosticFactory = factory;
+fn typed() -> Diagnostic {}
+JetParaRuntimeFailure::Diagnostic { rendered }
 "###;
     assert!(diagnostic_constructor_lines(allowed).is_empty());
 }
@@ -1095,7 +1092,13 @@ fn diagnostic_constructor_lines(source: &str) -> Vec<usize> {
                 while next < bytes.len() && bytes[next].is_ascii_whitespace() {
                     next += 1;
                 }
-                if bytes[next..].starts_with(b"::") {
+                let prefix = source[..start].trim_end();
+                let line_prefix = source[..start].rsplit('\n').next().unwrap_or("").trim();
+                let struct_literal = bytes[next..].starts_with(b"{")
+                    && !line_prefix.is_empty()
+                    && !prefix.ends_with("->")
+                    && !prefix.ends_with("::");
+                if bytes[next..].starts_with(b"::") || struct_literal {
                     lines.push(line);
                 }
             }
