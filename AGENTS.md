@@ -211,9 +211,8 @@ diagnostics, ballots, and commits use normal prose.
 Default to one active delivery stream. Expand concurrency only when each stream
 has disjoint write paths and tests, a clean integration target, and one named
 close owner. Contract when streams share compiler seams, contend for build
-resources, or produce an integration backlog. Never start new work while a
-reviewed or completed patch is waiting to integrate. This is an adaptive rule,
-not a fixed worker cap.
+resources, or produce an integration backlog. Integrate ready worker patches
+promptly. This is an adaptive rule, not a fixed worker cap.
 
 Shared-tree safety is absolute:
 
@@ -252,55 +251,52 @@ Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, o
 
 ## Review and verification constraints
 
-Review is risk-tiered (owner decision, 2026-08-08):
+Card closure and milestone closeout are separate gates:
 
-- **Mechanical tier — no fresh-context reviewer.** Test-fixture migrations,
-  ledger/baseline row deletions, golden and snapshot blesses, and comment or
-  doc rewording close on met exit criteria plus one orchestrator spot-check
-  of the diff and targeted proof.
-- **Semantics tier — full review, always.** Compiler-semantics changes,
-  invariant-adjacent work, and any change to a guard, ratchet, or test that
-  enforces policy get one fresh-context reviewer. One reviewer may cover the
-  composed stack of 2–3 batches instead of one reviewer per batch.
+- A card closes immediately when all robust observable exit criteria have concrete
+  implementation evidence, the patch is integrated, and no known blocker contradicts
+  that evidence.
+- No per-card reviewer, duplicate proof, or repeated fresh-context audit is required
+  before closure.
+- Workers implement assigned cards and return concrete evidence and blockers. The
+  orchestrator integrates patches, records criteria evidence, closes cards, and owns
+  milestone closeout and any reopen/fix control. Workers do not set `--phase done`.
+- At milestone end, the orchestrator runs one composed targeted test sweep and one
+  fresh-context review of the integrated milestone diff. The sweep covers every
+  applicable execution tier required by I9.
+- Every closeout finding reopens its owning card and affected criteria. Apply the fix,
+  integrate it, review the delta, and verify the affected criteria before the card and
+  milestone close again.
+- A known blocker that contradicts the evidence prevents or reopens closure. Owner
+  visual acceptance remains required when a criterion names it.
 
-For the semantics tier, every completed change has one implementer and one
-fresh-context reviewer:
+The fresh-context review checks missing paths, semantic and safety bugs, false-green
+evidence, stale decisions, accidental scope, duplicate mechanisms, orphaned work,
+and **I9 drift**: new Core behavior implemented only in AOT emit, re-encoded
+policy/defaults/error behavior inside Cranelift hosts or interpreter ambient (instead
+of calling the same Prelude `jet_*` symbol), new or retained `tests/jit_gaps.txt`
+parking for the change, or closing with “JIT/interpreter later.” A green sweep never
+waives an open finding.
 
-1. **Reviewer:** inspect the diff, acceptance criteria, invariants, and test
-   evidence; assume the patch is wrong; report only concrete findings.
-2. The implementer fixes findings; the reviewer rechecks material fixes.
-
-The reviewer does not implement. They check missing paths, semantic and safety bugs,
-false-green tests, stale decisions, accidental scope, duplicate mechanisms,
-orphaned work, and **I9 drift**: new Core behavior implemented only in AOT emit,
-re-encoded policy/defaults/error behavior inside Cranelift hosts or interpreter
-ambient (instead of calling the same Prelude `jet_*` symbol), new or retained
-`tests/jit_gaps.txt` parking for the change, or closing with “JIT/interpreter
-later.” A green build never waives review.
-
-Technical verification is agent-owned: the implementer runs every machine-verifiable
-requirement, however many there are, and the independent reviewer validates the
-evidence. Agents meet criteria, independently verify, and close with `--phase done`.
-Never park a technical card in `verify` for the owner, and never mint owner
-verification for tests, builds, diffs, or other machine proof.
+Technical verification is agent-owned. Workers return evidence; the orchestrator
+validates and records it after integration. No technical card waits in `verify` for
+the owner, and no owner verification covers tests, builds, diffs, or other
+machine-verifiable claims.
 
 Owner verification (`needsAcceptance` / Now “visual check”) is **only** for
 look-and-feel with human eyes: UI/UX/DX taste, visual presentation, copy polish,
 or a real environment the harness cannot replace. Tell the owner only what to
 look at and what “good” looks like; omit machine-verification details.
 
-Use targeted tests during implementation and review. Close each bounded card
-from scoped proof and independent review. Run
-`scripts/agent/jet-env full scripts/agent/verify-full.sh` once after a batch of
-3–5 integrated card closures, at a major-push boundary, or when targeted
-evidence identifies a repository-wide interaction. CI runs it again. An
-unrelated full-suite failure becomes its own card and does not reopen a scoped,
-proved closure. Keep normal parallelism unless reproducing a race.
+Use the evidence named by each exit criterion. Do not repeat proof only for
+reassurance. The milestone sweep is the composed machine proof; include broader
+targets only when the milestone criteria or a known interaction requires them.
 
-Done means: integrated code matches current authority; targeted tests pass;
-docs/examples/snapshots match behavior; the Sol review closes; Tower/task state is
-accurate; no owned worktree or temporary branch remains; and the final report
-names tests, commits, open gates, and any retained handoff branch.
+Done means: each card has robust criteria evidence, its patch is integrated, no
+contradictory blocker remains, and its Tower state is accurate. A milestone also
+needs its composed targeted sweep and fresh-context review, with every finding fixed,
+reviewed, and re-verified. No owned worktree or temporary branch remains, and the
+final report names tests, commits, open gates, and any retained handoff branch.
 
 ## Style
 
@@ -326,7 +322,7 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 ### Orchestration
 
 Dispatching other agents (burndowns, sweeps, multi-card waves): `docs/agents/orchestration.md`.
-Results-not-activity, role boundaries, worker briefs, batch rhythm, board hygiene, recovery.
+Results-not-activity, role boundaries, worker briefs, milestone stream, board hygiene, recovery.
 
 ### Agent memory
 

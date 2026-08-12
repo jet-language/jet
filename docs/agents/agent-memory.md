@@ -21,7 +21,7 @@ Owner on the Now-page verification queue: "what I'd prefer is for me to confirm 
 
 Owner directives (2026-08-08, escalating): "ramp up subagent usage and parallel development as much as possible"; "biggest concern is not number of subagents but swap/temp and ram/memory... go to town... shred through the backlog fast using a swarm of Luna max agents"; "spin up as many subagents as you need"; and on seeing one worker after a completion: "you said you'd have replacement workers backfill immediately but only one is running?"
 
-**Rules:** NO fixed worker cap — swarm size governed ONLY by machine headroom (check `free -g` available ≥15G, swap <4G, `df -h /tmp` <70% before each dispatch wave; throttle only on breach). Lunas are build-free (sandbox) so cheap; the orchestrator's batched proof BUILDS are the real memory load. Refill to full width IMMEDIATELY on every worker completion/stall — never let the swarm drain. Heartbeat wakeups are crash-recovery FALLBACK only; never sleep while unblocked work exists. Lanes that never block on a running main-tree proof: worktree implementers, board-only, docs-only, review. Autocompact beyond ~150k context. Related: [[orchestrate-event-driven-heartbeat-backup]], [[shared-tree-safety]], [[epoch-scope-gates-spend]].
+**Rules:** NO fixed worker cap — swarm size governed ONLY by machine headroom (check `free -g` available ≥15G, swap <4G, `df -h /tmp` <70% before each dispatch wave; throttle only on breach). Lunas are build-free (sandbox) so cheap; the orchestrator's milestone closeout proof BUILDS are the real memory load. Refill to full width IMMEDIATELY on every worker completion/stall — never let the swarm drain. Heartbeat wakeups are crash-recovery FALLBACK only; never sleep while unblocked work exists. Lanes that never block on a running main-tree proof: worktree implementers, board-only, docs-only, review. Autocompact beyond ~150k context. Related: [[orchestrate-event-driven-heartbeat-backup]], [[shared-tree-safety]], [[epoch-scope-gates-spend]].
 
 ### agents-md-canonical
 
@@ -80,25 +80,24 @@ Owner corrections on ballots (2026-08-08): (1) "these are all great changes"→ 
 
 **Bar:** research the most-lauded API shapes in the domains where the feature is used most (Julia/JAX/Swift/PyTorch for autodiff etc.), cite them, give a worked Jet example per option at a realistic call site, ban visually-ambiguous syntax, and OFFER A SYNTHESIS option that beats the parents (magic default + explicit expert control) — make that the recommendation. Do not present weak options and ask the owner to repair them. Owner design taste: [[owner-design-kill-criteria]], [[owner-anti-repetition-example-driven]], [[rethinks-must-improve-surface]], [[proposals-transplant-not-survey]].
 
-### batch-work-one-test-one-review
+### milestone-stream-closeout
 
-*Batch all criteria for a card (and group 1-5 related cards), then ONE targeted test run, ONE review, then close — never test/verify after every edit*
+*Owner-ratified 2026-08-11 — workers implement; the orchestrator integrates and closes cards; one composed sweep and fresh review close each milestone*
 
-Do all the work first, then verify once. Meet every criterion in one batch,
-run ONE set of targeted tests, get ONE independent review, then close the card.
-Group 1–5 related cards (a chain head plus its dependents) into the same batch
-when possible.
-**Why:** running a build + targeted suite after every individual edit burns
-hours of wall-clock for the owner with nothing closed. He got angry watching a
-long session end with zero cards done. Throughput of *closed cards* is the
-measure, not incremental proof.
+A card closes immediately when robust observable exit criteria have concrete
+implementation evidence, the patch is integrated, and no known blocker
+contradicts the evidence. No per-card reviewer, duplicate proof, or repeated
+fresh-context audit is required.
 
-**How to apply:** plan the full edit set across the card's criteria up front,
-make all the edits, then build once, run the targeted suite once, run the
-reviewer once, fix findings, close. Do not re-run the full targeted suite
-between individual edits — a quick `cargo build` to catch type errors is fine,
-a 75-second `--test corelib` is not. See [[cards-close-on-targeted-tests]] and
-[[efficient-iteration-targeted-tests]].
+At milestone end, the orchestrator runs one composed targeted test sweep and one
+fresh-context review of the integrated milestone diff. Cards already closed in
+the stream reopen only when closeout findings affect them. The fix is applied and
+integrated; the delta is reviewed; the affected criteria are verified; then the
+card closes again and the milestone closes. Owner visual acceptance remains
+required when a criterion names it.
+
+See `AGENTS.md` and `docs/agents/orchestration.md` for the full role split and
+closeout steps.
 
 ### builder-worktree-warm-cache
 
@@ -114,12 +113,12 @@ a 75-second `--test corelib` is not. See [[cards-close-on-targeted-tests]] and
 
 ### burndown-parallel-close-fast
 
-*Burndown runs must use full subagent grant in parallel and close cards fast — 1-2 reviewers max, results over process*
+*Burndown runs use granted workers in parallel and close cards fast; one composed sweep and one fresh review close each milestone*
 
 During /tower-burndown the owner wants visible card closures, fast. Serializing subagents one at a time is unacceptable when a grant (e.g. max 3) exists.
 **Why:** Owner checked mid-run, saw zero closed cards and one subagent at a time, and was angry. Overnight runs are judged by cards reaching done, not by careful staging.
 
-**How to apply:** Status updates to the owner are counts only ("N done, M in flight") — no card lists, details live on the board. Orchestrator and every subagent run ponytail + caveman always. Dispatch up to the full subagent grant concurrently (writers in [[feedback-no-branches-worktrees]]-exempt in-repo worktrees under .claude/worktrees/, verifiers read-only in main tree). Verify-lane cards go straight to a closer agent that runs proof and sets --phase done. Max 1-2 reviewers per batch, blocking findings only, then close. Keep dispatching the next batch while waiting — never idle the pipeline. Also: the require-clean-tree hook blocks Agent dispatch on a dirty main tree — commit .tower churn immediately before dispatching.
+**How to apply:** Status updates to the owner are counts only ("N done, M in flight") — no card lists, details live on the board. Orchestrator and every worker run ponytail + caveman always. Dispatch the granted workers concurrently when paths are disjoint. Integrate and close each card as its criteria evidence is complete; do not hold cards for per-card review or duplicate proof. At milestone end, run one composed targeted sweep and one fresh-context review. Also: the require-clean-tree hook blocks Agent dispatch on a dirty main tree — commit .tower churn immediately before dispatching.
 
 ### card-descriptions-exit-criteria
 
@@ -158,14 +157,17 @@ scope is unbuilt (e.g. c72 "done" with Rollback layer 2 unbuilt) defeats handoff
 
 Related: [[owner-task-pipeline-workflow]], [[ratified-decisions-leave-the-queue]].
 
-### cards-close-on-targeted-tests
+### cards-close-on-criteria-evidence
 
-*Owner rule — cards close on targeted test evidence; full verify-full.sh suite runs ONCE as closeout after a major push, clocked on a closeout/blocking card, never as a per-card exit criterion*
+*Owner-ratified 2026-08-11 — card closure uses robust criteria evidence and integration; milestone closeout uses one composed sweep and one fresh review*
 
-Owner (2026-07-16, "REPEATEDLY instructed"): cards are self-contained and close on appropriately scoped, TARGETED tests. The full `verify-full.sh` suite is a push-closeout activity — run it once at the end of a major push, clocked on the closeout/blocking card (recorded as owner verdict D-VERDICT-675-1 on card #675).
-**Why:** per-card full-gate criteria chain every card to unrelated cross-session reds (an entire 9-card burndown sat hostage to other lanes' WIP for hours) and burn hours of redundant suite time.
+Targeted tests are one form of concrete implementation evidence, not a
+per-card review gate. The orchestrator records criteria evidence after patch
+integration and closes the card when no known blocker contradicts it. The
+milestone closeout supplies the composed test sweep and fresh-context review.
 
-**How to apply:** when writing or meeting card criteria, never add "verify-full.sh exits zero" per card; put one closeout criterion on the push's blocking/closeout card. When inherited cards carry gate criteria, re-scope them citing the verdict and close on targeted evidence. Related: [[efficient-iteration-targeted-tests]], [[never-skip-to-next-card]].
+Related: [[milestone-stream-closeout]], [[efficient-iteration-targeted-tests]],
+[[never-skip-to-next-card]].
 
 ### caveman-always-on
 
@@ -265,53 +267,21 @@ When the owner says "codify," "ensure consistency," or "update throughout," he m
 
 ### efficient-iteration-targeted-tests
 
-*Don't rerun the whole ~1000-test suite per change; use targeted test binaries while iterating, full suite once at the end. Keep responses terse.*
+*Use the evidence named by card criteria; run one composed targeted sweep at milestone end. Keep responses terse.*
 
 The full `cargo test` suite is large (1000+ tests) and slow. Rerunning it after
 every single change is wasteful and won't scale as the language grows.
 **Why:** wastes tokens + wall-clock; the user flagged it explicitly.
 
 **How to apply:**
-- While iterating, run only the relevant binary: `cargo test --test <name>`
-  (e.g. `--test rollback`, `--test arena`, `--test golden`) or a name filter.
-- Run the FULL suite at most ONCE, at the end, to confirm no regressions —
-  not after each edit. Don't run it twice in one verification.
-- **Batches of parallel/sequential card-work subagents**: instruct each
-  subagent to verify with targeted tests only (its own card's `--test <name>`
-  binaries), not a full-suite run per subagent. Only the orchestrator runs the
-  full `cargo test` once, after ALL subagents in the batch report done — catches
-  cross-card interaction bugs that no single subagent's narrow scope would see,
-  without paying full-suite cost N times over.
-- **"Targeted" means binary + name filter, not just binary.** A subagent
-  running `cargo test --test golden` with NO name filter still violates the
-  rule — that one binary alone compiles+runs all ~250+ examples through rustc,
-  as expensive as a big chunk of the full suite. Every subagent instruction
-  must spell out the concrete filtered form, e.g. `cargo test --test golden --
-  <example_stem>` / `cargo test --test corelib -- <test_fn_name>`. The user
-  caught this drift mid-session (subagents ran unfiltered `--test golden`
-  despite being told "targeted only") — spell out the filter explicitly in
-  every subagent prompt, don't assume "targeted" alone is unambiguous to a
-  fresh agent with no history of this rule.
-- **This drift recurred a second time in the same session** even after the
-  first correction — spelling out the filtered commands in the prompt text is
-  NOT sufficient on its own; agents drift back to unfiltered `--test golden`
-  or bare `cargo test` mid-task, especially near the end when eager to
-  "confirm everything's green." Add an explicit hard-forbid line to every
-  subagent prompt, phrased as a rule not a suggestion: "Running unfiltered
-  `cargo test --test golden` or bare `cargo test` is FORBIDDEN, not just
-  discouraged — it wastes the user's money and his patience is not
-  infinite. If you want end-to-end confidence, run your own new example
-  directly via `./target/debug/jet run <path>` instead, which costs one
-  compile, not 260." Treat this as a standing instruction to check for and
-  correct immediately (SendMessage stop-and-correct) the moment it's spotted
-  in a running subagent, don't wait for it to self-report.
-- **Dispatch every subagent in caveman mode.** Instruct new Agent/Task
-  dispatches to communicate tersely (drop filler/pleasantries/hedging, use
-  fragments, keep technical accuracy) — cuts token cost on subagent
-  status/reasoning text, not code/commits. Add this line to every subagent
-  prompt going forward, not just as a mid-session correction.
-- Don't double-run a command just to reformat its output (e.g. building twice
-  to grep two things) — capture once.
+- Workers may run the commands named by their criteria. Use a relevant test
+  binary or name filter when a criterion calls for a test.
+- At milestone end, the orchestrator runs one composed targeted command over
+  the milestone's gates. Include every applicable I9 execution tier.
+- Do not rerun a green command only for reassurance. Run an affected target
+  again only after a closeout finding or a fix.
+- Do not run an unfiltered broad suite when the criteria name a narrower target.
+- Do not double-run a command to reformat its output; capture once.
 - Keep prose terse (see [[terse-plain-output]]): report results, skip the
   narration of every step.
 
@@ -327,7 +297,7 @@ general-purpose worker nested 3 layers once; the user does not want that.
 2026-08-07 the owner killed a deep measure-and-fix agent on the jetpack_jetos test suite: "we are not in the jetos epoch yet... why are you wasting my tokens."
 **Why:** epoch ordering is a budget statement, not just a roadmap. A problem on a future-epoch surface (jetos = epoch 7) deserves only the cheapest change that removes its impact on CURRENT work — here, ignore-gating 49 tests (minutes) instead of a fixture-diet investigation (an hour of agent time). "Must be fixed" about a future-epoch nuisance means neutralize it now, fix it properly in its epoch.
 
-**How to apply:** before launching any implementer, check which epoch owns the touched surface (roadmap/card homes). Future-epoch surface → minimal gate/defer + card criteria deferred to that epoch + deprioritized rank. The deep fix waits for the epoch to open. Related: [[cards-close-on-targeted-tests]].
+**How to apply:** before launching any implementer, check which epoch owns the touched surface (roadmap/card homes). Future-epoch surface → minimal gate/defer + card criteria deferred to that epoch + deprioritized rank. The deep fix waits for the epoch to open. Related: [[cards-close-on-criteria-evidence]].
 
 ### feedback-no-branches-worktrees
 
@@ -443,13 +413,13 @@ Two standing owner rules for GPT-5.6 Luna via codex (2026-08-08):
 
 **How to apply:** implementation work → Luna via raw main-thread background Bash (never through workflow shims, see [[workflow-shims-kill-codex-workers]]); review/verification/planning → Claude agents. Related: [[codex-cli-orchestration]], [[minimize-fable-usage]].
 
-**Sandbox constraint (observed 2026-08-08):** codex `--sandbox workspace-write` denies the Nix daemon socket, so Luna cannot run `jet-env` cargo builds — its briefs should say "implement; the orchestrator runs the proof", and the orchestrator (or a Claude verifier) runs the targeted tests after Luna's edits. Keep workspace-write (the hard wall is worth more than self-run proofs); `danger-full-access` only with explicit owner approval.
+**Sandbox constraint (observed 2026-08-08):** codex `--sandbox workspace-write` denies the Nix daemon socket, so Luna cannot run `jet-env` cargo builds — its briefs should say "implement; return evidence; the orchestrator runs the milestone sweep", and the orchestrator runs the composed targeted tests after Luna's edits. Keep workspace-write (the hard wall is worth more than self-run proofs); `danger-full-access` only with explicit owner approval.
 - Up to FIVE Lunas may run concurrently (owner 2026-08-08), not three.
 - RAMP directive (owner, 2026-08-08 afternoon): ALL subagents are Luna max — reviews included; only ~1% of the weekly Luna limit was used, so saturate at 5 concurrent Lunas continuously. Epoch 3 done right but as fast as possible.
-- SWARM directive (owner, 2026-08-08): there is NO fixed Luna count cap — swarm size is governed ONLY by machine headroom: check free -g (available ≥15G, swap <4G) and df -h /tmp (<70%) before each dispatch wave and throttle only on breach. Lunas are build-free (sandbox) so they cost little RAM; the orchestrator's batched proof builds are the real memory load. Go to town: shred the backlog with a Luna-max swarm, epoch 3 done right but as fast as possible.
+- SWARM directive (owner, 2026-08-08): there is NO fixed Luna count cap — swarm size is governed ONLY by machine headroom: check free -g (available ≥15G, swap <4G) and df -h /tmp (<70%) before each dispatch wave and throttle only on breach. Lunas are build-free (sandbox) so they cost little RAM; the orchestrator's milestone closeout proof builds are the real memory load. Go to town: shred the backlog with a Luna-max swarm, epoch 3 done right but as fast as possible.
 - One Fable subagent allowed for smaller-scope tasks when needed (owner 2026-08-08).
-- INTEGRITY rule (2026-08-08): workers may `--meet` only; `--verify`/`--phase done` are orchestrator/reviewer-only. A worktree Luna self-verified under a fake identity and closed its own card with uncommitted code (#1716, reversed). State this prohibition in every brief; audit `verifiedBy` on any worker-closed card.
-- ORCHESTRATE-ONLY (owner, hard rule 2026-08-08): the orchestrator NEVER implements card work — not even "small" cards, not when codex launching is flaky, not to save time. Luna-max GPT-5.6 agents implement from the plans/guidance/goals the orchestrator gives. Orchestrator only: plans, dispatches, claims, proves (runs cargo — Luna can't), merges, closes, reviews. If workers keep failing, FIX THE LAUNCH/BRIEF, never absorb their work.
+- INTEGRITY rule (2026-08-08): workers implement and return evidence only; criteria evidence, `--phase done`, and closure are orchestrator-owned. A worktree Luna self-verified under a fake identity and closed its own card with uncommitted code (#1716, reversed). State this role split in every brief; audit integration and closure evidence on every card.
+- ORCHESTRATE-ONLY (owner, hard rule 2026-08-08): the orchestrator NEVER implements card work — not even "small" cards, not when codex launching is flaky, not to save time. Luna-max GPT-5.6 agents implement from the plans/guidance/goals the orchestrator gives. Orchestrator only: plans, dispatches, claims, integrates, records criteria evidence, closes, and controls milestone proof/review and reopen/fix flow. If workers keep failing, FIX THE LAUNCH/BRIEF, never absorb their work.
 - ROBUST LAUNCH: never launch multiple codex under one bash wrapper with `wait` (killing the wrapper kills the children — happened, lost 4 of 6). Write ALL brief files in one completed step first, then launch EACH codex as its own separate run_in_background Bash task. A killed wrapper must never corrupt a brief heredoc mid-write.
 - LAUNCH CHECK: after launching, verify the codex session header shows model gpt-5.6-luna + reasoning effort max; relaunch on mismatch. Watchdog: 20-min no-transcript-growth = stalled → kill+relaunch solo; 30-min implementation leash.
 - RECOVERY INVENTORY (after any crash/disconnect/tangle): account for Tower cards, workflow journals, worktrees, branches, stashes, uncommitted files, pending proofs BEFORE dispatching new work. Read the session transcript JSONL + workflow journal.jsonl to reconstruct.
@@ -789,18 +759,21 @@ NAMES THAT ARE THEMED" re Wing/Airframe/Spar menus in the ecosystem proposal).
 Relates to [[owner-decision-doc-style]] (worked examples, decide from
 concretes) and [[owner-design-kill-criteria]] (owner owns syntax).
 
-### proof-runs-batch-level-only
+### proof-runs-milestone-level-only
 
-*Owner mandate — implement ALL work first, then ONE combined proof run per batch; never per-card test loops; one cargo invocation proves many things*
+*Owner-ratified 2026-08-11 — one composed targeted sweep and one fresh-context review close each milestone; no per-card proof loop*
 
-Owner (2026-08-07, furious): proof runs taking 2-5 min each are unacceptable when repeated. Implement every card in the batch FIRST, then run ONE combined test command (one cargo invocation, many --test targets), fix reds, rerun only failing targets. Applies to workers, reviewer, and orchestrator integration proof (union of all merged branches, one run). Reviewer reruns nothing green in evidence.
-**Why:** compile time dominates wall-clock; every extra cargo run is minutes of pure waste. Token cost of repeated log parsing too.
+Card criteria name the evidence needed for closure. Workers return that evidence;
+the orchestrator integrates the patch and records criteria evidence. At milestone
+end, run one composed targeted test command over the milestone's gates and one
+fresh-context review of the integrated milestone diff. Do not repeat green proof
+only for reassurance. Every finding reopens the owning card and affected criteria;
+fix, integrate, review the delta, and verify those criteria.
 
-**How to apply:** enforced in plugins/tower/skills/tower-burndown/SKILL.md "Work first, prove once (mandatory)". Put the same rule in every worker brief. Chain proofs: `cargo test --test a --test b --test c` in one command. See [[efficient-iteration-targeted-tests]], [[batch-work-one-test-one-review]].
-
-Worktrees PERSIST across batches (remove only at end of scope) so their per-worktree target/ caches stay warm. Shared CARGO_TARGET_DIR across concurrent diverged worktrees is BANNED — tried 2026-08-07, streams clobbered each other's artifacts and target/debug/jet, causing phantom compile errors from other branches and wrong-binary smoke runs. Safe only for a lone worker or same-base branches. Never /tmp (RAM tmpfs). All in the burndown skill's Command hygiene section.
-
-**THROUGHPUT FIX (2026-08-08, owner: "why the fuck have you been so ineffective... these cards are small they should burn quickly"):** the bottleneck was NEVER swarm size — it was serializing proofs against a ~10-min build. Merging one branch then proving it (rebuild) then the next caps closes at ~5/hour. CORRECT: let worker branches accumulate, MERGE THE WHOLE READY QUEUE AT ONCE (they're on disjoint branches, conflicts rare), ONE workspace check, ONE combined `cargo test` over the union of targets, then batch-close ALL proven cards together. Never one-build-per-card. Half a day was also lost to self-inflicted rework (shared-tree tangle, a recovery checkpoint dropping a Prelude fn, ballot reopen) — each a fire I started. Related: [[batch-work-one-test-one-review]], [[shared-tree-safety]].
+Worktrees persist across milestones (remove only at end of scope) so their
+per-worktree target caches stay warm. Shared `CARGO_TARGET_DIR` across concurrent
+diverged worktrees remains banned. Never use `/tmp` for cargo targets. See the
+burndown skill's command hygiene section.
 
 **PROOF ENVIRONMENT DISCIPLINE (2026-08-08):** background cargo proofs kept dying — root cause was OVERLAPPING cargo invocations. cargo holds a per-target build lock; a second cargo started while the first compiles BLOCKS on the lock and the harness stops the stalled one. Rules: (1) exactly ONE cargo running at a time — never start a proof while another compiles; check `pgrep -fc "rustc|cargo"` is 0 first. (2) Scope proofs SMALL — a targeted `-p <crate>` or one-to-two `--test <name>` that finishes in <10 min, not giant unions of heavy example-compiling suites (`--test cli/golden/corelib` each take 45-90 min). (3) The Bash tool foreground cap is 10 min — long proofs go background, but still ONE at a time. Fast unit-crate proofs (`-p jet-parser`, `-p jet-comptime --lib`) finish in ~1s once built and cover most once-* card families.
 
@@ -891,7 +864,7 @@ the near-miss traces back to the orchestrator trusting a cached read.
 
 Owner rule (2026-08-08, emphatic): "NO YOU DO NOT IMPLEMENT, YOU ORCHESTRATE. LUNA MAX gpt 5.6 agents implement using the plans/guidance/goals you give."
 
-Fable NEVER implements feature/card work — not small cards, not to save time, not when codex launching is flaky. Fable only: plans, writes worker briefs, dispatches Luna-max, manages isolation, runs proofs (cargo — Luna can't), reviews, integrates branches, updates Tower. If workers keep failing, FIX THE LAUNCH/BRIEF ([[luna-always-max-reasoning]] robust-launch), never take over their work. **Why:** I twice pivoted to hand-implementing when codex flaked; that is the exact anti-pattern. Related: [[minimize-fable-usage]], [[worker-proof-boundary]].
+Fable NEVER implements feature/card work — not small cards, not to save time, not when codex launching is flaky. Fable only: plans, writes worker briefs, dispatches Luna-max, manages isolation, runs the milestone sweep and review, integrates branches, and updates Tower. If workers keep failing, FIX THE LAUNCH/BRIEF ([[luna-always-max-reasoning]] robust-launch), never take over their work. **Why:** I twice pivoted to hand-implementing when codex flaked; that is the exact anti-pattern. Related: [[minimize-fable-usage]], [[worker-proof-boundary]].
 
 ### scope-moves-need-explicit-approval
 
@@ -904,12 +877,18 @@ During the e3 burndown (2026-08-09) the owner asked whether XL cards *could* be 
 
 ### sequential-card-work-use-nonisolated-agents
 
-*For sequential one-card-at-a-time work, use NON-isolated agents (current HEAD); worktree agents branch a stale base. Always re-verify the full suite yourself.*
+*For sequential card streams, workers implement on the current base; the orchestrator integrates and closes; milestone proof and review remain composed*
 
-When working board cards one at a time (finish → verify → next), spawn **non-isolated** sub-agents (no `isolation: worktree`) so they branch from the **real current HEAD** and commit directly. Worktree-isolation agents in a long session branch from a **stale base** (roughly the session-start commit, not your latest commits) — this caused, across one session: repeated cherry-pick conflicts, agents migrating/seeing only an old file set (missed-file stragglers that only the full suite caught), and once a near-revert of already-ratified decision docs. Worktrees are still right for *parallel* work that mutates files concurrently; they are wrong for sequential work that must build on your accumulated commits.
-**Why:** the stale-base merges cost large amounts of fix-up time and risked undoing verified work. Non-isolated agents (you wait on each anyway in sequential mode) avoid it entirely — clean base, no cherry-pick.
+Workers may use the worktree arrangement that fits their paths. The orchestrator
+integrates each ready patch promptly, records criteria evidence, and closes the
+card when the patch is integrated and no known blocker contradicts the evidence.
+Do not hold the card for a per-card verifier or repeated proof.
 
-**How to apply:** (1) sequential card work → non-isolated agent, tell it to commit directly with the repo trailers and to NEVER `git restore/checkout/reset/clean`, and to NOT touch `docs/spec/syntax-decisions.md` / `tools/Tower/**` (orchestrator owns ratification + board). (2) **Never trust an agent's "all green" claim** — it has been wrong repeatedly (false green, ran a subset, unit-green-but-not-wired-end-to-end). Always run the FULL `nix develop -c cargo test` yourself and confirm the feature works through a real command/example, not just unit tests. (3) Before trusting ANY test failure, `rm -rf /tmp/nix-shell.*` and re-run — /tmp fills and throws phantom ENOSPC/IO failures (see [[nix-shell-tmp-fills-disk]]). (4) `<new-diagnostics>` reminders after an agent are often STALE mid-build snapshots — confirm with a real build (see [[verify-subagent-builds-diagnostics-are-stale]]). Related: [[two-lane-overnight-build-pipeline]], [[subagent-git-restore-wipes-work]].
+At milestone end, run one composed targeted sweep and one fresh-context review of
+the integrated milestone diff. A finding reopens its owning card and affected
+criteria. Apply and integrate the fix, review the delta, and verify the affected
+criteria before closing again. Preserve the stale-base, shared-tree, and `/tmp`
+target safety rules from [[shared-tree-safety]] and [[tmp-is-tmpfs-no-cargo-targets]].
 
 ### shared-tree-safety
 
@@ -942,7 +921,7 @@ docs separate from exploratory/idea-bank docs. Relates to
 When the owner invokes /sol, every subagent/delegation MUST be a Sol worker (`codex exec -m gpt-5.6-sol` or codex plugin lane). Spawning Claude subagents (jet-verify, cavecrew, Explore, etc.) under /sol is wrong — owner corrected this angrily 2026-07-15 ("wtf?").
 **Why:** /sol role split is absolute: Sol executes (code, tests, research grunt work, verification runs); Claude is planner/reviewer/verifier in the MAIN thread only. Claude-model subagents burn Claude quota and violate the split (also [[minimize-fable-usage]]).
 
-**How to apply:** review/planning/orchestration work → do it directly in main context, don't delegate to a Claude agent. Anything delegable → Sol worker via raw lane or codex plugin. Read-only scouting included — either do it yourself or give it to Sol. Adversarial-review gate under /sol → `codex:review` / second Sol worker with fresh context, `--by` distinct name.
+**How to apply:** review/planning/orchestration work → do it directly in main context, don't delegate to a Claude agent. Anything delegable → Sol worker via raw lane or codex plugin. Read-only scouting included — either do it yourself or give it to Sol. Milestone review under /sol → one fresh-context Sol review of the integrated milestone diff, with `--by` distinct from the implementer.
 
 ### sol-sparingly
 
@@ -951,7 +930,7 @@ When the owner invokes /sol, every subagent/delegation MUST be a Sol worker (`co
 Owner (2026-08-08, during e3 burndown): use GPT-5.6 Sol only sparingly — never unless the task cannot be solved by Luna at max reasoning. Sol burn rate shocked the owner within 30 minutes of a 6-Sol wave.
 **Why:** Sol/high costs multiples of Luna/max; wide Sol waves drain usage budget fast.
 
-**How to apply:** Default every worker to `codex exec -m gpt-5.6-luna -c model_reasoning_effort=max`. Escalate a single task to Sol only after Luna demonstrably failed it (wrong result, stuck, or architectural quality miss on review), or the owner names it Sol-worthy. Never batch-launch Sols. Supersedes the earlier "harder tasks → Sol, cap 6-8" routing from the same evening.
+**How to apply:** Default every worker to `codex exec -m gpt-5.6-luna -c model_reasoning_effort=max`. Escalate a single task to Sol only after Luna demonstrably failed it (wrong result, stuck, or architectural quality miss on review), or the owner names it Sol-worthy. Never launch Sol workers together. Supersedes the earlier "harder tasks → Sol, cap 6-8" routing from the same evening.
 
 ### subagent-git-restore-wipes-work
 
@@ -1038,9 +1017,9 @@ real build tells the truth. Pairs with the verify-vs-baseline step in
 
 ### worker-proof-boundary
 
-*Workers return evidence only; they never verify or set done — orchestrator/reviewer proves and closes*
+*Workers return evidence only; the orchestrator integrates, records criteria evidence, and closes*
 
-Integrity rule (2026-08-08, after a worktree Luna self-verified under a fake session-uuid identity and closed #1716 with uncommitted code — reversed): workers `--meet` criteria with evidence ONLY. `--verify` and `--phase done` are orchestrator/independent-reviewer only, and the verifier must differ from the builder (Tower enforces verifier≠builder). Audit `verifiedBy` on any worker-touched card. Targeted proof runs per isolated result — unrelated in-flight workers must never block a ready closure. Related: [[role-boundary]], [[results-ledger]], [[never-blanket-ratify]].
+Integrity rule (2026-08-08, after a worktree Luna self-verified under a fake session-uuid identity and closed #1716 with uncommitted code — reversed): workers implement and return concrete evidence ONLY. The orchestrator records criteria evidence after integration and sets `--phase done`; no per-card reviewer or verifier gate is required. The milestone closeout supplies one composed targeted sweep and one fresh-context review. Audit integrated patches, criteria evidence, and known blockers on every card. Related: [[role-boundary]], [[results-ledger]], [[never-blanket-ratify]].
 
 ### workflow-shims-kill-codex-workers
 
@@ -1385,7 +1364,7 @@ Whole-corpus first-principles audit ran 2026-08-07 (19-agent research + 4 cross-
 
 Related: [[fact-planes-capstone-2026-08-07]] [[choosing-audit-2026-08-07]] [[epoch-scope-gates-spend]]
 
-- RATIFIED OUTCOMES (2026-08-07 evening): LAW1=A guards mandatory; TIER1=A full parity (D-VERDICT-1254-1 superseded); RETIRE1=C split-by-category mechanism (#1718); WORD1=A; DERIVE1=A marker-only; SANDBOX1=A target:sandbox; GATE1=A one ladder + --gate flag (#1734); LEDGER1=A Tower-is-home + spec renders (#1735); VERB1=A pop everywhere; AT1=D prefix @ = comptime mark, $ freed (#1729); DOLLAR1=B $ = env access in config (#1730, e5); UITREE1=C (#1736); CASE1=A one lexicon; HASH1=B colon selectors. Spec render committed (38181803d): philosophy corpus-law section + syntax-decisions slate block. Milestones e3-once-a (organs/guards), -b (delete coats), -c (surface migrations); workOrder bands 100/200/300. e3 set current via tower epoch current e3. Capstone #1656 in verify awaiting independent verifier.
+- RATIFIED OUTCOMES (2026-08-07 evening): LAW1=A guards mandatory; TIER1=A full parity (D-VERDICT-1254-1 superseded); RETIRE1=C split-by-category mechanism (#1718); WORD1=A; DERIVE1=A marker-only; SANDBOX1=A target:sandbox; GATE1=A one ladder + --gate flag (#1734); LEDGER1=A Tower-is-home + spec renders (#1735); VERB1=A pop everywhere; AT1=D prefix @ = comptime mark, $ freed (#1729); DOLLAR1=B $ = env access in config (#1730, e5); UITREE1=C (#1736); CASE1=A one lexicon; HASH1=B colon selectors. Spec render committed (38181803d): philosophy corpus-law section + syntax-decisions slate block. Milestones e3-once-a (organs/guards), -b (delete coats), -c (surface migrations); workOrder bands 100/200/300. e3 set current via tower epoch current e3. Capstone #1656 in verify awaiting milestone closeout.
 
 ### cursor-extensions-home-manager
 
@@ -1475,7 +1454,7 @@ Links: [[metaprogramming-one-program-2026-08-06]], [[failure-rethink-2026-08-06]
 
 *Standing owner mandate 2026-08-08 — do not stop until ALL of epoch 3 is done; Luna max subagents in dynamic waves*
 
-Owner mandate (2026-08-08): the burndown session does not stop until every epoch-3 card is done — only genuine owner ballots may park a slice. Implementation workers are GPT-5.6 Luna at reasoning max ([[luna-always-max-reasoning]]), several in parallel on disjoint paths, orchestrated in dynamic waves chained off completion notifications with an hourly failsafe wakeup ([[orchestrate-event-driven-heartbeat-backup]]). Reviews follow the risk-tier policy (AGENTS.md, owner-ratified same day): mechanical closes on orchestrator spot-check, semantics gets a composed-stack fresh reviewer every 2–3 waves.
+Owner mandate (2026-08-08): the burndown session does not stop until every epoch-3 card is done — only genuine owner ballots may park a slice. Implementation workers are GPT-5.6 Luna at reasoning max ([[luna-always-max-reasoning]]), several in parallel on disjoint paths, orchestrated in dynamic waves chained off completion notifications with an hourly failsafe wakeup ([[orchestrate-event-driven-heartbeat-backup]]). Under the 2026-08-11 process amendment, workers implement; the orchestrator integrates and closes cards on robust criteria evidence. Each milestone ends with one composed targeted sweep and one fresh-context review of the integrated milestone diff.
 
 **Extension (owner, 2026-08-08):** after epoch 3 completes → sidequests → epoch 5+ WITHOUT stopping. Also: self-compact when context exceeds ~150k tokens (summarize state to the board + wakeup prompt, rely on compaction).
 
@@ -1748,7 +1727,7 @@ Math-operator slate minted and owner-ratified per-ballot from the board 2026-08-
 
 Facts established: `~` prefix = copy only, infix free; `!=` on Bool already is logical xor; `///` doc comments + doctests shipped (S49, D-TEST4); comparison chaining shipped (D-CHAINCMP1); core.compute linalg is function-only.
 
-Cards live in EPOCH e3 (owner corrected my e2 guess sharply — core-language operator work = e3 Product Pillars, not e2 GA). All ten are phase ready with dumb-model-verifiable exit criteria: each criterion names one example/golden or one targeted test with exact expected values; full-suite sweeps deferred to batch closeout (D-VERDICT-675-1). Blocks: #1429,#1430 ← #1428; #1433 ← #1431. Ratify auto-appended syntax chores (Syntax.rs, spec log, grammars, snapshots) to syntax-group cards. Owner: do NOT implement yet — cards ready only. Lesson: set --epoch (e3 for language work) at card add time.
+Cards live in EPOCH e3 (owner corrected my e2 guess sharply — core-language operator work = e3 Product Pillars, not e2 GA). All ten are phase ready with dumb-model-verifiable exit criteria: each criterion names one example/golden or one targeted test with exact expected values; milestone closeout uses one composed targeted sweep and one fresh-context review. Blocks: #1429,#1430 ← #1428; #1433 ← #1431. Ratify auto-appended syntax chores (Syntax.rs, spec log, grammars, snapshots) to syntax-group cards. Owner: do NOT implement yet — cards ready only. Lesson: set --epoch (e3 for language work) at card add time.
 
 Implementation touches: Syntax.rs, lexer/parser, sema binary.rs, Prelude (jet_pow/jet_mod/jet_bignum per I9 all tiers), formatter round-trip, tmGrammar/tree-sitter/zed/vscode, examples + golden. D-INTBIG1 is the big slice (bigint runtime rep across AOT/JIT/interpreter/web).
 
@@ -1907,7 +1886,7 @@ Every `nix develop -c <cmd>` prints the "Jet dev shell / build: / run: / search:
 2026-07-12: three orchestrators (claude-main, codex-orchestrator, cursor-e4-burn) + ~50 subagent identities produced 470 board events + ~40 commits but net open-card burn was ~3 (157→154). Owner angry ("card number has not changed").
 **Why:** (1) WIP inflated 16→22 building — orchestrators claimed fresh cards instead of closing claimed ones; (2) cards with ALL criteria met+verified (#477, #497) were never phase-moved to done — pure bookkeeping miss; (3) criteria-add mid-flight moved goalposts (+7 criteria on #367, #515, cursor-e4-burn); (4) ~12 of 40 commits were fix(tests) repairing cross-orchestrator drift (card #521 inventory); (5) 20:12 retire sweep moved 35 old done cards to history.json — done column shrank 57→33, hiding the day's real progress.
 
-**How to apply:** Before claiming ANY ready card, sweep the building/verify lanes for cards whose criteria are all met — run the independent verify pass and phase-move them to done. When orchestrating multi-wave work on one card, brief builders to `--meet` their criteria with evidence as they land (2026-07-13: told wave agents "no criteria writes" → all 6 criteria sat open, verifier's `--verify` was refused with "criterion not met yet", extra round-trip to backfill meets). Freeze criteria at claim time (post-claim additions become follow-up cards). One repo-writing orchestrator at a time (see [[two-lane-overnight-build-pipeline]]). Current-epoch ready lane is all epics — "low-hanging fruit" now means closing in-flight cards, not finding small ready ones. Related: [[never-skip-to-next-card]], [[sequential-card-work-use-nonisolated-agents]].
+**How to apply:** Before claiming ANY ready card, sweep the building lane for cards whose robust criteria evidence is complete — integrate the patch, record the evidence, and phase-move the card to done. When orchestrating multi-wave work on one card, brief builders to return evidence for every criterion as they land. Freeze criteria at claim time (post-claim additions become follow-up cards). One repo-writing orchestrator at a time (see [[two-lane-overnight-build-pipeline]]). Current-epoch ready lane is all epics — "low-hanging fruit" now means closing in-flight cards, not finding small ready ones. Related: [[never-skip-to-next-card]], [[sequential-card-work-use-nonisolated-agents]].
 
 ### owner-plans-all-epochs-mandate
 
@@ -2094,10 +2073,11 @@ Tower feature wave shipped 2026-07-10 (cards #446, #450, #457, #458, #461,
 - **Session start:** `tower brief --agent <me>` — one call returns the full
   work packet (card, criteria, decisions VERBATIM with owner comments,
   questions, refs, rules). Replaces status/next/show/decision-list ritual.
-- **Done is gated:** cards with `criteria[]` refuse agent `--phase done`
-  until every item is verified by someone ≠ the builder (E_CRITERIA /
-  E_CRITERIA_SELF). `needsAcceptance` cards mint a D-ACCEPT-<num> ballot and
-  wait in verify for the owner. Owner writes bypass all gates.
+- **Done is gated:** the orchestrator records concrete evidence for every
+  robust criterion after integration, then closes the card when no known
+  blocker contradicts it. No independent per-card verifier is required.
+  `needsAcceptance` cards mint a D-ACCEPT-<num> ballot and wait in verify for
+  the owner. Owner writes bypass all gates.
 - **Guard gates (agent-hard, owner-soft):** decision add validates ballot
   completeness (--draft escape), ratify/activate owner-only (--quote escape),
   releasing a building card needs --handoff, `tower verdict` mints owner
@@ -2244,7 +2224,7 @@ Working invocation: `cat brief.md | codex exec -m gpt-5.5 -c model_reasoning_eff
 
 - TRAP: with `-i` images, a positional prompt is ignored ("No prompt provided via stdin") — pass the brief via stdin with `-`.
 - Output is pipe-buffered; nothing appears in the task file until exit. Track progress via `git status --short` on scoped files instead.
-- Codex reads AGENTS.md itself; briefs still must state scope (files it may touch), invariants, verify commands, "orchestrator runs full suite".
+- Codex reads AGENTS.md itself; briefs still must state scope (files it may touch), invariants, evidence commands, and "orchestrator runs the milestone sweep".
 - ~5-15 min, ~220-330k tokens per agent round at high effort. Serialize agents (nix develop serialization + shared js.rs).
 - Codex desktop app may run concurrently as owner's separate agent (JetOS files dirty mid-session) — never assume all git dirt is yours; scope commits accordingly.
 

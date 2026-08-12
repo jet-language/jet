@@ -17,22 +17,21 @@ function daysSince(dateStr) {
 
 const EVIDENCE_RE = /verif|green|tests?|evidence/i;
 const DISPUTED_EVIDENCE_RE = /\b(?:not\s+satisfied|blocked|could\s+not|unproven|not\s+run)\b/i;
-const PHASE_SEQ = { frozen: -1, deciding: 0, planning: 1, triage: 1, ready: 2, building: 3, verify: 4, done: 5 };
 
 // ---- rule: done-without-evidence -------------------------------------------
-// A card phase==='done' whose log never mentions verification AND whose
-// criteria are empty or not all verified — done with nothing to show for it.
+// A card phase==='done' whose log never mentions evidence AND whose criteria
+// are empty or not all met/verified — done with nothing to show for it.
 export function ruleDoneWithoutEvidence(s) {
   const findings = [];
   for (const c of s.cards) {
     if (c.phase !== 'done') continue;
     const items = c.criteria || [];
-    const criteriaVerified = items.length > 0 && items.every(i => i.status === 'verified');
-    if (criteriaVerified) continue;
+    const criteriaSettled = items.length > 0 && items.every(i => ['met', 'verified'].includes(i.status));
+    if (criteriaSettled) continue;
     const hasEvidence = (c.log || []).some(l => EVIDENCE_RE.test(l.text || ''));
     if (hasEvidence) continue;
     findings.push({ rule: 'done-without-evidence', ref: `#${c.num}`,
-      msg: `#${c.num} "${c.title}" is done with no verif/tests/green/evidence mention in its log and no fully-verified criteria` });
+      msg: `#${c.num} "${c.title}" is done with no verif/tests/green/evidence mention in its log and no fully-met criteria` });
   }
   return findings;
 }
@@ -148,24 +147,6 @@ export function ruleCriteriaEvidenceConflicts(s) {
   return findings;
 }
 
-// Criteria advance the work to verification. A card moved back to an earlier
-// phase must not keep rows that claim the work already passed verification.
-export function ruleCriteriaPhaseDrift(s) {
-  const findings = [];
-  for (const c of s?.cards || []) {
-    const items = c.criteria || [];
-    const phase = PHASE_SEQ[c.phase];
-    if (!items.length || phase == null || phase >= PHASE_SEQ.verify) continue;
-    const verified = items.filter(item => item.status === 'verified').map(item => '#' + item.n);
-    const allSettled = items.every(item => item.status !== 'open');
-    if (!verified.length && !allSettled) continue;
-    const rows = verified.length ? 'verified rows ' + verified.join(', ') : 'all criteria met or verified';
-    findings.push({ rule: 'criteria-phase-drift', ref: '#' + c.num,
-      msg: '#' + c.num + ' "' + c.title + '" is in ' + c.phase + ' but holds ' + rows });
-  }
-  return findings;
-}
-
 // ---- rule: duplicate-suspect -----------------------------------------------
 // Two or more open cards naming the same test, fixture, example, or spec
 // reference usually describe one work slice under different symptoms.
@@ -196,7 +177,7 @@ export function ruleDuplicateSuspects(s) {
   }));
 }
 
-const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleCriteriaPhaseDrift, ruleDuplicateSuspects];
+const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects];
 
 // ---- --docs mode: ratified decision id still listed in an open-ballot doc --
 // Precise on purpose: only docs/ballots/*.md (not docs/plans/**), since plans

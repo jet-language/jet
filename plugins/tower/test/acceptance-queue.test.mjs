@@ -3,7 +3,7 @@
 // DOM-only client with no test harness anywhere in this repo (importing it
 // under plain Node throws — it wires `document.addEventListener` at module
 // scope). Owner Now/beacon lists ONLY needsAcceptance cards (visual/UI/UX);
-// bare phase=verify is agent technical closeout and must not appear there.
+// Bare phase=verify is a legacy agent review state and must not appear there.
 // Client filter lives in board-state.js ownerVerifyQueue (unit-tested).
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -104,7 +104,9 @@ test('mintAcceptance stamps checkInstructions onto D-ACCEPT and re-mint refreshe
 test('laneOf: a verify-phase card with an open acceptance ballot stays lane verify, not decide', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
-  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg)); // no criteria — mints straight away
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built it', by: 'builder' }));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg));
   const s = st.load();
   const c = s.cards.find(x => x.num === 1);
   assert.equal(c.phase, 'verify');
@@ -116,6 +118,8 @@ test('laneOf: a verify-phase card with an open acceptance ballot stays lane veri
 test('laneOf: needsAcceptance + open D-ACCEPT is owner visual duty; bare verify stays agent', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Visual', needsAcceptance: true }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'thing works', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'built it', by: 'builder' }));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg));
   st.mutate((s, cfg) => db.addCard(s, { title: 'Technical' }, cfg));
   st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'verify', by: 'agent' }, cfg));
@@ -127,13 +131,13 @@ test('laneOf: needsAcceptance + open D-ACCEPT is owner visual duty; bare verify 
   assert.match(visual.label, /visual/i);
   assert.equal(bare.lane, 'verify');
   assert.equal(bare.who, 'agent');
-  assert.match(bare.label, /technical/i);
+  assert.match(bare.label, /exit criteria|close/i);
 });
 
-test('a verify-phase card with no needsAcceptance flag carries no D-ACCEPT ballot — agent technical closeout, not owner Now', () => {
+test('a verify-phase card with no needsAcceptance flag carries no D-ACCEPT ballot — legacy agent review, not owner Now', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Manually parked in verify' }, cfg));
-  // no criteria, no flag — agent technical verify lane; must NOT become an owner duty
+  // No flag: the legacy review lane must not become an owner duty.
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'verify', by: 'some-agent' }, cfg));
   const c = st.load().cards[0];
   assert.equal(c.phase, 'verify');
@@ -260,7 +264,9 @@ test('dedicated owner UI action accepts atomically with immutable provenance', a
 
 test('dedicated owner UI action bounces with the comment logged', async () => {
   await post('card/add', { title: 'Second flagged card', needsAcceptance: true, by: 'owner' });
-  await post('card/update', { id: '#2', phase: 'done', by: 'builder' }); // no criteria — mints straight away
+  await post('card/criteria-add', { id: '#2', text: 'does the thing', by: 'planner' });
+  await post('card/criteria-meet', { id: '#2', n: 1, evidence: 'built', by: 'builder' });
+  await post('card/update', { id: '#2', phase: 'done', by: 'builder' });
   const cookie = await ownerSession();
   const r = await ownerResolve(cookie, 'D-ACCEPT-2', 'bounce', 'missing the edge case');
   assert.equal(r.status, 200);
@@ -274,8 +280,12 @@ test('dedicated owner UI action bounces with the comment logged', async () => {
 
 test('owner provenance fails closed for missing session, replay, and wrong decision/outcome', async () => {
   await post('card/add', { title: 'Third flagged card', needsAcceptance: true, by: 'owner' });
+  await post('card/criteria-add', { id: '#3', text: 'does the thing', by: 'planner' });
+  await post('card/criteria-meet', { id: '#3', n: 1, evidence: 'built', by: 'builder' });
   await post('card/update', { id: '#3', phase: 'done', by: 'builder' });
   await post('card/add', { title: 'Fourth flagged card', needsAcceptance: true, by: 'owner' });
+  await post('card/criteria-add', { id: '#4', text: 'does the thing', by: 'planner' });
+  await post('card/criteria-meet', { id: '#4', n: 1, evidence: 'built', by: 'builder' });
   await post('card/update', { id: '#4', phase: 'done', by: 'builder' });
   let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
   assert.equal(r.status, 403);
@@ -342,6 +352,8 @@ test('remote device: accepted without any auth.token — restriction removed by 
   const rurl = (p) => `http://localhost:${rport}${p}`;
   try {
     await fetch(rurl('/api/card/add'), { method: 'POST', body: JSON.stringify({ title: 'Remote card', needsAcceptance: true, by: 'owner' }) });
+    await fetch(rurl('/api/card/criteria-add'), { method: 'POST', body: JSON.stringify({ id: '#1', text: 'does the thing', by: 'planner' }) });
+    await fetch(rurl('/api/card/criteria-meet'), { method: 'POST', body: JSON.stringify({ id: '#1', n: 1, evidence: 'built', by: 'builder' }) });
     await fetch(rurl('/api/card/update'), { method: 'POST', body: JSON.stringify({ id: '#1', phase: 'done', by: 'builder' }) });
 
     // simulated remote device (forwarded marker), no token anywhere: GET /
@@ -383,17 +395,16 @@ test('a card parked in verify without the flag has no D-ACCEPT and is agent work
 });
 
 // #923/#1078 regression: agents park a needsAcceptance card in verify and then
-// verify criteria one by one. The ballot used to mint only on a `--phase done`
-// attempt, so those cards sat in verify forever with the owner's Accept button
-// disabled. Last verified criterion mints it; so does entering verify already
-// fully verified.
-test('needsAcceptance in verify mints D-ACCEPT when the last criterion is verified', () => {
+// progress criteria one by one. A needsAcceptance card parked in review gets
+// its owner ballot as soon as the last criterion is met; later review can still
+// add milestone signoff without changing the owner action.
+test('needsAcceptance in verify mints D-ACCEPT when the last criterion is met', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Parked', needsAcceptance: true }, cfg));
   st.mutate((s) => db.addCriterion(s, '#1', 'it works', 'builder'));
   st.mutate((s) => db.updateCard(s, '#1', { phase: 'verify', by: 'builder' }, { kinds: [], tracks: [], priorities: [] }));
   st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'targeted proof', by: 'builder' }));
-  assert.equal(st.load().decisions.find(d => d.id === 'D-ACCEPT-1'), undefined, 'unverified criterion must not mint');
+  assert.equal(st.load().decisions.find(d => d.id === 'D-ACCEPT-1')?.status, 'open');
   st.mutate((s) => db.verifyCriterion(s, '#1', 1, { evidence: 'reviewed', by: 'reviewer' }));
   const ballot = st.load().decisions.find(d => d.id === 'D-ACCEPT-1');
   assert.equal(ballot?.status, 'open');

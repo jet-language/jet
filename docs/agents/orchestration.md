@@ -13,17 +13,16 @@ problems only.
 
 ## Roles
 
-- **Orchestrator:** plans, writes briefs, dispatches, isolates, runs every proof, reviews,
-  merges, writes the board. Never implements card work — not a one-liner, not to save time,
-  not when a worker launch flakes. Resolving your own merge/integration fallout is allowed;
-  that is not card implementation.
-- **Workers:** implement, and `--meet` criteria with evidence. `--verify` and `--phase done`
-  belong to the orchestrator or an independent reviewer; Tower enforces verifier ≠ builder.
-  Audit `verifiedBy` on any worker-touched card — a worker that self-verified is an
-  integrity violation; reverse it.
+- **Orchestrator:** plans, writes briefs, dispatches, isolates, integrates, records criteria
+  evidence, closes cards, runs milestone proof and review, and writes the board. Never
+  implements card work — not a one-liner, not to save time, not when a worker launch flakes.
+  Resolving your own merge or integration fallout is allowed; that is not card
+  implementation.
+- **Workers:** implement assigned cards and return concrete evidence for every robust
+  observable criterion, plus blockers. They do not write criteria evidence or close cards.
 - **Model routing:** default worker is GPT-5.6 Luna at `model_reasoning_effort=max`.
   Escalate a single task to Sol (`high`) only after Luna demonstrably failed it. Never
-  batch-launch Sol; its burn rate is multiples of Luna's.
+  launch Sol workers in a group; its burn rate is multiples of Luna's.
 
 ## Never stop while work is in flight
 
@@ -44,23 +43,26 @@ simple; the return shape (files+lines, per-criterion evidence, proof commands, b
 Codex workers cannot run cargo/jet (the sandbox blocks the Nix daemon) and cannot write the
 board — the orchestrator owns every proof and every board write.
 
-## Batch rhythm
+## Milestone stream
 
-1. Dispatch many workers in parallel, each in its own git worktree on its own branch.
-2. `cargo check --workspace --tests` before anything enters the merge queue, and again
-   after the batch merges. Integration fallout — visibility, unused imports, signature
-   drift, duplicate table rows — is constant and cheap to catch here, ruinous to catch in
-   a test run.
-3. Merge the ready queue sequentially, resolving conflicts as you go.
-4. ONE combined `cargo test -p jet --test <targets…>` over the union of the batch's gates.
-   Every test command is `timeout`-wrapped. No test binary may exceed the 15-minute suite
-   budget; the harness guard in `tests/common` aborts one that does, and a binary that
-   trips it is a defect to split or speed, never a limit to raise. Filter within the big
-   suites (`--test cli`, `--test golden`, `--test corelib`) while they remain over budget.
-   Confirm `pgrep -fc "rustc|cargo"` is 0 first — a second cargo blocks on the build lock.
-5. Batch-close on green. Per-card proof still gates each close.
-6. A regression keeps its own card open and gets a fixer. Never mint a new card to fix an
-   existing one; never revert-and-defer to keep master clean.
+1. Select one milestone and its unblocked cards. Dispatch workers in parallel only when
+   their paths and tests are disjoint.
+2. Give each worker the card's full criteria, exact writable paths, applicable invariants,
+   and the required evidence shape. Workers implement and return evidence; they do not
+   write the board.
+3. Inspect each return. Integrate a ready patch promptly. After integration, record
+   concrete evidence for every robust observable criterion and close the card when the
+   criteria are met and no known blocker contradicts the evidence.
+4. Keep a card open when evidence is missing or a known blocker contradicts it. Route the
+   fix to the owning worker and integrate the resulting patch.
+5. Do not hold a card for a per-card reviewer, duplicate proof, or repeated fresh-context
+   audit. Continue through the milestone as ready patches arrive.
+6. At milestone end, run one composed targeted test sweep over the milestone's gates and
+   one fresh-context review of the integrated milestone diff. Include every applicable I9
+   execution tier.
+7. Every finding reopens the owning card and affected criteria. Apply and integrate the
+   fix, review the delta, verify the affected criteria, and close the card again. Close
+   the milestone only after all findings are resolved and no known blocker remains.
 
 ## Board hygiene
 
@@ -76,10 +78,10 @@ Before minting anything:
 2. **Retarget, don't close-and-remint.** When a test stays red for a new reason, update
    that card's title, body, and log. One card per persistent problem, retargeted as causes
    peel off. Close-and-remint churns the count while hiding that nothing was fixed.
-3. **Group by work slice, not by symptom.** Defects one worker fixes in one pass with one
-   proof run are ONE card with a discrete exit criterion per defect. Splitting them costs a
-   dispatch, a build, a review, and a merge each. Log absorbed content on the surviving
-   card so nothing is hidden, then delete the folded cards.
+3. **Group by work slice, not by symptom.** Defects one worker fixes in one pass are ONE
+   card with a discrete exit criterion per defect. Splitting them costs a dispatch, a
+   build, and a merge each. Log absorbed content on the surviving card so nothing is
+   hidden, then delete the folded cards.
 4. **Mint only genuinely separate, uncovered work.** Then say so plainly.
 
 Front-load discovery instead of streaming it: one full-corpus census (every test binary,

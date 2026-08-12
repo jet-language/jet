@@ -89,8 +89,8 @@ Auth note: localhost is exempt. Remote access reads `auth.token` from the
 untracked `plugins/tower/.tower/secrets.json`; never put credentials in `config.json`.
 
 Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
-`building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).
-`tower next` sorts by verify > building > implement > plan, then by ascending
+`building`/`verify` (displayed as Review; agent), `blocked`/`frozen`/`done` (inert).
+`tower next` sorts by review > building > implement > plan, then by ascending
 `workOrder` inside each lane. **Epochs** group the work; **milestones** are
 goals inside an epoch — link cards with `--milestone <id>` and progress computes itself.
 
@@ -109,18 +109,21 @@ tower message done <id> --by owner
 tower papercut add --by me --text "jet-env swallowed stderr" [--card '#12']  # recurring tooling friction only (hit twice, or deterministic for everyone); never blocked by a card lane
 tower papercut resolve <id> --by owner        # owner clears a handled papercut
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
-tower card update '#12' --phase verify --log "claiming done: tests green" --by me
+tower card update '#12' --phase done --log "criteria met" --by orchestrator
 tower card release '#12' --by me              # if you stop without finishing
 tower card release '#12' --by me --handoff "parser done, sema left, watch X"  # required if the card is `building`
 ```
 
-Phase honesty: `verify → done` only after real **agent** verification, by a
-different session/agent than the one that claimed done when possible. Bare
-`verify` is never an owner duty. If the board and reality disagree, fix the board.
+Phase honesty: a builder marks exit criteria `met`; the orchestrator closes the
+card `done` when every row is `met` or `verified`. There is no independent
+verify step for a card. `verified` is milestone-review signoff, and its
+reviewer must differ from the builder. If the board and reality disagree, fix
+the board.
 
 ### Exit criteria gate `done`
 
-A card can carry a `criteria[]` checklist (each item `open` → `met` → `verified`).
+A card requires a nonempty `criteria[]` checklist for agent closure. Each item
+uses `open` → `met` → `verified`.
 Add and progress it:
 
 ```
@@ -130,17 +133,21 @@ tower card criteria '#12' --verify 1 --evidence "re-ran independently" --by veri
 tower card criteria '#12' --list
 ```
 
-`--phase done` on any `--by` other than `owner` is refused (`E_CRITERIA`) while
-a card has criteria and any item isn't `verified`. The verifier must differ
-from whoever met it (`E_CRITERIA_SELF`) — one agent cannot sign off its own
-work. Cards with no criteria are unaffected (legacy behavior). `--by owner`
-always bypasses both the checklist gate and the acceptance step below.
+`--phase done` by a non-owner is refused (`E_CRITERIA`) when the card has no
+criteria or any row is not `met` or `verified`. A builder may mark a row `met`.
+The orchestrator closes the card after the guard passes. A milestone reviewer
+may mark a row `verified`; that reviewer must differ from its builder
+(`E_CRITERIA_SELF`). Owner writes keep the legacy bypass and record
+`card.criteria-bypass`.
+
+Integration and no-known-blocker are orchestration evidence. They are not
+mandatory rows on every card.
 
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
 with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real
 environment the harness cannot replace. **Never** for technical correctness,
 tests, criteria, builds, diffs, or agent review — agents own all of that and
-close with `--phase done` themselves after criteria are verified.
+close with `--phase done` themselves after the criteria guard passes.
 
 A card that needs owner acceptance must name the exact surface the owner should
 look at (what to open, what “good” looks like). Do not dump machine evidence
@@ -150,7 +157,7 @@ into the owner checklist.
 tower card update '#12' --needs-acceptance true --by owner
 ```
 
-Once its criteria are all verified, an agent's `--phase done` attempt mints a
+Once its criteria are all met or verified, an agent's `--phase done` attempt mints a
 `D-ACCEPT-<num>` decision (accept / bounce) instead of closing — the card
 sits in `verify` until the owner ratifies. Accept closes the card; bounce
 reopens it to `building` with the owner's comment logged. A second done
@@ -166,6 +173,24 @@ The server binds each click to an HTTPOnly in-memory UI session and a
 short-lived, single-use challenge for that exact ballot and outcome. CLI
 ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
 `by: owner` are rejected and audited.
+
+### Milestone review
+
+All linked cards done makes a milestone `review-ready`. It does not make the
+milestone `met`. A milestone becomes `met` only through explicit review:
+
+```
+tower milestone criteria <id> --add "ship the user path" --by planner
+tower milestone criteria <id> --meet 1 --evidence "built" --by builder
+tower milestone criteria <id> --verify 1 --evidence "reviewed" --by reviewer
+tower milestone verify <id> --evidence "milestone review complete" --by reviewer
+```
+
+The verify command requires every linked card to be `done` and every milestone
+criterion to be `verified`. It stores the reviewer, evidence, and timestamp in
+the milestone verification record. Reopening a linked card or milestone
+criterion clears that record and returns the milestone to `open` or
+`review-ready`.
 
 Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a few
 plain sentences in one short paragraph that explain only the situation and
@@ -213,7 +238,7 @@ its own function, returning `{rule, ref, msg}` findings):
 
 | Rule | Flags |
 |---|---|
-| `done-without-evidence` | a `done` card whose log never mentions verif/green/tests/evidence AND whose criteria are empty or not all `verified` |
+| `done-without-evidence` | a `done` card whose log never mentions verif/green/tests/evidence AND whose criteria are empty or not all `met` or `verified` |
 | `claimed-idle` | internal lease metadata remains on `building`/`ready` work untouched for more than 3 days |
 | `missing-attribution` | an event (newest 500, live) with an empty/missing `by` |
 | `ballot-gaps` | an OPEN, non-draft, non-`acceptance` decision that would fail `addDecision`'s own ballot-ready gate today |
@@ -235,8 +260,9 @@ tower lint --docs-root DIR # override the docs root (default: <project>/docs)
 
 ## Guards (agent-hard, owner-soft)
 
-Every guard below binds writes where `--by` is not `owner`; `--by owner`
-always bypasses (bypass event-logged). D-TWRGUARD1=C.
+Card closure guards bind writes where `--by` is not `owner`; `--by owner`
+bypasses them and records the bypass. Milestone review still requires its
+explicit command and evidence. D-TWRGUARD1=C.
 
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
@@ -247,6 +273,8 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 | Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
+| Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |
+| Milestone review | milestone verify before all linked cards are done or all milestone criteria are verified | `E_MILESTONE` | finish the linked work and review every milestone criterion |
 
 `tower verdict '#N' --outcome "..." [--title "…"] --by owner` records an
 owner ruling as an already-ratified decision (never a mere log note) and is
@@ -282,7 +310,7 @@ GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
 GET  /api/events?limit=50           audit trail
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}
+POST /api/card/criteria-add|criteria-meet|criteria-verify|criteria-reopen
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, loopback or auth.token; session-bound, short TTL)
@@ -296,7 +324,7 @@ POST /api/papercut/resolve {id}                (owner-only)
 POST /api/done/clear                           (owner-only; clears completed cards, not messages)
 POST /api/idea/add|update|delete|promote
 POST /api/epoch/add|update|current
-POST /api/milestone/add|update|delete
+POST /api/milestone/add|update|criteria-add|criteria-meet|criteria-verify|criteria-reopen|verify|delete
 ```
 
 POST bodies are JSON; include `by`, optionally `expectRev`. Errors are

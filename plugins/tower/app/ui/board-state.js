@@ -1,7 +1,7 @@
 const DEFAULT_PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 const AGENT_LANE_RANK = { verify: 0, building: 1, implement: 2, plan: 3 };
 
-// Default board sort: verify, building, ready, plan, then blocked.
+// Default board sort: review, building, ready, plan, then blocked.
 export const workflowRank = (card) => {
   const lane = card.lane?.lane;
   if (lane === 'building' || lane === 'verify') return 0;
@@ -12,8 +12,8 @@ export const workflowRank = (card) => {
   return 5;
 };
 
-// Owner Now/beacon verification queue: ONLY needsAcceptance cards.
-// Bare phase=verify is agent technical closeout — never an owner duty.
+// Owner Now/beacon review queue: ONLY needsAcceptance cards.
+// Bare phase=verify is a legacy agent state, not an owner duty.
 export const openAcceptanceBallot = (card) =>
   (card.decisions || []).find(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified') || null;
 
@@ -76,7 +76,7 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
     if (!done) return [];
     const active = linked.filter(c => !['done', 'frozen'].includes(c.phase)).length;
     const epochMilestones = milestones.filter(m => m.epochId === epoch.id);
-    const milestonesMet = epochMilestones.filter(m => m.progress?.met ?? m.status === 'met').length;
+    const milestonesMet = epochMilestones.filter(m => m.progress?.met === true).length;
     const milestoneTotal = epochMilestones.length;
     return [{
       id: epoch.id,
@@ -92,7 +92,8 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
         ...m,
         done: m.progress?.done ?? 0,
         total: m.progress?.total ?? 0,
-        met: m.progress?.met ?? m.status === 'met',
+        met: m.progress?.met === true,
+        reviewReady: m.progress?.reviewReady === true,
         stalledDays: null,
       })),
     }];

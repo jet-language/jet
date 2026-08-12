@@ -49,7 +49,7 @@ const COMMAND_FLAGS = {
   state: [],
   card: ['title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
     'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag',
-    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'handoff', 'expectRev', 'force'],
+    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'handoff', 'expectRev', 'force', 'list'],
   decision: ['id', 'cardId', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild',
     'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy', 'draft', 'ready', 'outcome',
     'comment', 'quote', 'open', 'expectRev'],
@@ -58,7 +58,7 @@ const COMMAND_FLAGS = {
   papercut: ['card', 'text', 'open'],
   idea: ['title', 'body', 'text', 'kind', 'track', 'priority', 'tags', 'note', 'all'],
   epoch: ['name', 'goal', 'status'],
-  milestone: ['id', 'epoch', 'title', 'goal', 'criteria', 'status'],
+  milestone: ['id', 'epoch', 'title', 'goal', 'criteria', 'status', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'expectRev', 'list'],
   next: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'],
   brief: ['agent', 'noClaim'],
   lint: ['docs', 'docsRoot'],
@@ -116,8 +116,9 @@ function Theme(flags) {
   };
 }
 
+const displayLane = (lane) => lane === 'verify' ? 'review' : lane;
 const cardLine = (c, { epoch } = {}) =>
-  `#${String(c.num).padEnd(4)}${epoch ? ` ${(c.epoch || '—').padEnd(3)} ` : ' '}${(c.priority || '').padEnd(3)} ${c.lane.lane.padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
+  `#${String(c.num).padEnd(4)}${epoch ? ` ${(c.epoch || '—').padEnd(3)} ` : ' '}${(c.priority || '').padEnd(3)} ${displayLane(c.lane.lane).padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const zeroWidth = /[\p{Mark}\p{Default_Ignorable_Code_Point}\p{Control}]/u;
 const glyphWidth = (glyph) => {
@@ -199,7 +200,7 @@ function cmdStatus(store, { flags }) {
   const deltaText = trend.delta > 0 ? t.error(delta) : trend.delta < 0 ? t.success(delta) : t.dim(delta);
   console.log(`  ${t.accent('OPEN TREND')}        ${trend.openAtStart} → ${trend.openNow}  ${deltaText} ${t.dim(`over ${trend.windowDays}d`)}`);
   console.log(`\n  ${t.error('BLOCKED ON OWNER')}  ${t.warn(String(s.counts.decide))} decisions`);
-  console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(verify / build / implement / plan)')}`);
+  console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(review / build / implement / plan)')}`);
   console.log(`  ${t.dim('open questions')}    ${t.warn(String(s.counts.openQuestions))}   ${t.dim(`sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}`)}\n`);
   const show = (label, lane) => {
     const cs = s.cards.filter(c => c.lane.lane === lane);
@@ -209,15 +210,15 @@ function cmdStatus(store, { flags }) {
       const columns = process.stdout.columns || 80;
       const number = String(c.num).padEnd(4);
       const priority = (c.priority || '').padEnd(3);
-      const lanePadded = lane.padEnd(9);
+      const lanePadded = displayLane(lane).padEnd(9);
       const prefix = `   · #${number} ${priority} ${lanePadded} `;
       const title = clip(c.title, columns - displayWidth(prefix));
-      const laneText = (lane === 'decide' ? t.error : lane === 'verify' ? t.warn : t.success)(lane.padEnd(9));
+      const laneText = (lane === 'decide' ? t.error : lane === 'verify' ? t.warn : t.success)(displayLane(lane).padEnd(9));
       console.log(`   ${t.border('·')} #${number} ${c.priority ? t.warn(priority) : priority} ${laneText} ${title}`);
     }
   };
   show('OWNER — decide', 'decide');
-  show('AGENT — verify', 'verify'); show('AGENT — building', 'building');
+  show('AGENT — review', 'verify'); show('AGENT — building', 'building');
   show('AGENT — implement', 'implement'); show('AGENT — plan', 'plan');
   console.log('');
 }
@@ -286,10 +287,12 @@ function cmdCard(store, { pos, flags }) {
         track: flags.track ?? p.track, epoch: flags.epoch ?? p.epoch, milestoneId: flags.milestone ?? p.milestoneId,
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
+        criteria: p.criteria,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
         tags,
         parent: flags.parent ?? p.parentId ?? p.parent,
         workOrder: flags.workOrder ?? p.workOrder, by,
+        needsAcceptance: flags.needsAcceptance ?? p.needsAcceptance,
       }, cfg));
       return out(flags, `added card #${result.num}`, result);
     }
@@ -315,7 +318,7 @@ function cmdCard(store, { pos, flags }) {
         throw new TowerError('E_ACCEPTANCE_OWNER_UI', `card #${current.num} requires the dedicated owner verification UI`);
       }
       const { result, state } = store.mutate((s, cfg) => db.updateCard(s, ref, patch, cfg), { expectRev: flags.expectRev });
-      return out(flags, `updated card #${result.num} → ${db.laneOf(result, state.decisions, state.cards).lane}`, result);
+      return out(flags, `updated card #${result.num} → ${displayLane(db.laneOf(result, state.decisions, state.cards).lane)}`, result);
     }
     case 'criteria': {
       if (flags.reopen !== undefined) {
@@ -338,7 +341,7 @@ function cmdCard(store, { pos, flags }) {
       const found = db.findCard(s, ref) || (() => { throw new TowerError('E_NOT_FOUND', `no card ${ref}`); })();
       if (flags.json) return out(flags, null, found.criteria || []);
       for (const it of found.criteria || []) console.log(`#${it.n} [${it.status}] ${it.text}${it.metBy ? `  met:${it.metBy}` : ''}${it.verifiedBy ? `  verified:${it.verifiedBy}` : ''}${it.evidence ? `  — ${it.evidence}` : ''}`);
-      if (!(found.criteria || []).length) console.log('(no criteria)');
+      if (!(found.criteria || []).length) console.log('(no criteria — an agent cannot close this card)');
       return;
     }
     case 'claim': {
@@ -569,26 +572,55 @@ function cmdMilestone(store, { pos, flags }) {
       let ms = s.milestones;
       if (flags.epoch) ms = ms.filter(m => m.epochId === flags.epoch);
       if (flags.json) return out(flags, null, ms);
-      for (const m of ms) console.log(`${m.id.padEnd(12)} ${m.epochId.padEnd(6)} ${(m.status || 'open').padEnd(6)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 56)}`);
+      for (const m of ms) console.log(`${m.id.padEnd(12)} ${m.epochId.padEnd(6)} ${(m.status || 'open').padEnd(12)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}`);
       if (!ms.length) console.log('(no milestones)');
       return;
     }
     case 'add': {
-      const { result } = store.mutate((s) => db.addMilestone(s, { id: flags.id, epochId: flags.epoch, title: flags.title, goal: flags.goal, criteria: flags.criteria, by: flags.by }));
+      const p = readPayload(flags) || {};
+      const { result } = store.mutate((s) => db.addMilestone(s, { ...p, id: flags.id ?? p.id, epochId: flags.epoch ?? p.epochId, title: flags.title ?? p.title, goal: flags.goal ?? p.goal, criteria: flags.criteria ?? p.criteria, by: flags.by }));
       return out(flags, `added milestone ${result.id} in ${result.epochId} — ${result.title}`, result);
     }
+    case 'criteria': {
+      if (flags.reopen !== undefined) {
+        const { result } = store.mutate((s) => db.reopenMilestoneCriterion(s, id, flags.reopen, { reason: flags.reason, by: flags.by }));
+        return out(flags, `criterion #${result.n} reopened on milestone ${id}`, result);
+      }
+      if (flags.add !== undefined) {
+        const { result } = store.mutate((s) => db.addMilestoneCriterion(s, id, flags.add, flags.by));
+        return out(flags, `added criterion #${result.n} to milestone ${id}`, result);
+      }
+      if (flags.meet !== undefined) {
+        const { result } = store.mutate((s) => db.meetMilestoneCriterion(s, id, flags.meet, { evidence: flags.evidence, by: flags.by }));
+        return out(flags, `criterion #${result.n} met on milestone ${id}`, result);
+      }
+      if (flags.verify !== undefined) {
+        const { result } = store.mutate((s) => db.verifyMilestoneCriterion(s, id, flags.verify, { evidence: flags.evidence, by: flags.by }));
+        return out(flags, `criterion #${result.n} verified on milestone ${id}`, result);
+      }
+      const found = store.load().milestones.find(m => m.id === id) || (() => { throw new TowerError('E_NOT_FOUND', `no milestone ${id}`); })();
+      return out(flags, null, found.criteria || []);
+    }
+    case 'verify': {
+      const { result } = store.mutate((s, cfg, history) => db.verifyMilestone(s, id, { evidence: flags.evidence, by: flags.by }, history.cards), { expectRev: flags.expectRev });
+      return out(flags, `verified milestone ${result.id}`, result);
+    }
     case 'update': {
+      const p = readPayload(flags) || {};
       const patch = {};
       for (const [f, k] of [['title', 'title'], ['goal', 'goal'], ['criteria', 'criteria'], ['status', 'status'], ['epoch', 'epochId']])
         if (flags[f] !== undefined) patch[k] = flags[f];
+      Object.assign(patch, p);
+      if (flags.criteria !== undefined) patch.criteria = flags.criteria;
+      if (flags.epoch !== undefined) patch.epochId = flags.epoch;
       const { result } = store.mutate((s) => db.updateMilestone(s, id, patch, flags.by));
-      return out(flags, `updated milestone ${result.id}${result.status === 'met' ? ' — MET' : ''}`, result);
+      return out(flags, `updated milestone ${result.id} — ${result.status}`, result);
     }
     case 'delete': {
       const { result } = store.mutate((s) => db.deleteMilestone(s, id, flags.by));
       return out(flags, `deleted milestone ${id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown milestone verb "${verb}" — list/add/update/delete`);
+    default: throw new TowerError('E_USAGE', `unknown milestone verb "${verb}" — list/add/update/criteria/verify/delete`);
   }
 }
 
@@ -604,7 +636,7 @@ function cmdNext(store, { flags }) {
   if (!rich.length) return console.log('(nothing agent-workable — board is either empty, blocked on the owner, or done)');
   const header = scope === 'ready-across' ? 'ready across all epochs — every card with no unfinished blocker (the parallel-safe set):'
     : scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):'
-    : 'next up (verify > building > implement > plan → workOrder):';
+    : 'next up (review > building > implement > plan → workOrder):';
   console.log(header);
   for (const c of rich) console.log(` · ${cardLine(c, { epoch: scope === 'ready-across' })}`);
 }
@@ -726,7 +758,7 @@ function renderBrief(p, t) {
   L.push(`${t.invert(`#${c.num}`)} ${t.accent(c.title)}`);
   L.push(`  ${t.warn(c.phase)}${c.priority ? ` ${t.border('·')} ${t.warn(c.priority)}` : ''}${c.track ? ` ${t.border('·')} ${t.dim(c.track)}` : ''}${c.workOrder != null ? ` ${t.border('·')} ${t.dim(`workOrder ${c.workOrder}`)}` : ''}`);
   if (c.epoch) L.push(`  ${t.dim(`epoch ${c.epoch.id}${c.epoch.name ? ` — ${c.epoch.name}` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
-  if (c.milestone) L.push(`  ${t.dim(`milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''}${c.milestone.criteria ? `  criteria: ${c.milestone.criteria}` : ''}`)}`);
+  if (c.milestone) L.push(`  ${t.dim(`milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''} [${c.milestone.status || 'open'}]`)}`);
   if (c.body) { L.push('', heading('BODY'), c.body); }
   if (c.plan) { L.push('', heading('PLAN'), c.plan); }
   if (p.blockers.length) {
@@ -739,12 +771,13 @@ function renderBrief(p, t) {
   const items = p.criteria.items;
   if (items.length) {
     L.push('', heading(`CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner visual/UX ballot on close)' : ''}`));
+    L.push(`  ${t.dim('Builder marks rows met. The orchestrator closes when every row is met or verified.')}`);
     for (const it of items) {
       const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
       L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
     }
-  } else if (p.criteria.needsAcceptance) {
-    L.push('', heading('CRITERIA  (none — needsAcceptance: owner visual/UX ballot on close)'));
+  } else {
+    L.push('', heading(`CRITERIA  (none — an agent cannot close this card${p.criteria.needsAcceptance ? '; owner visual review still applies' : ''})`));
   }
   if (p.decisions.length) {
     L.push('', heading('DECISIONS'));
@@ -960,8 +993,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             ballot-gaps, stale-draft, orphan-
                                             blockers, blocker-unpopulated,
                                             duplicate-suspect,
-                                            criteria-evidence-conflict,
-                                            criteria-phase-drift);
+                                            criteria-evidence-conflict);
                                             --docs also flags a ratified
                                             decision id still listed in
                                             docs/ballots/*.md; exit 1 on any
@@ -991,8 +1023,8 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower card update <ref> --refs "docs/a.md,examples/b.jet"   explicit doc-path pointers
   tower card criteria <ref> --add "text" --by X           add an exit criterion
                             --meet n --evidence "…" --by X    builder: mark met
-                            --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
-                            --reopen n --reason "…" --by X     reopen met/verified criterion
+                            --verify n --evidence "…" --by Y  milestone-review signoff
+                            --reopen n --reason "…" --by X     reopen a criterion
                             --list                            show the checklist
   tower card release <ref> --by X [--handoff "…"]         --handoff required if the card is building
   tower decision list|show|add|update|ratify|reopen|delete
@@ -1014,7 +1046,14 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower papercut resolve <id> --by owner    owner clears a handled papercut
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
-  tower milestone list|add|update|delete
+  tower milestone list|add|update|criteria|verify|delete
+  tower milestone criteria <id> --add "text" --by X
+                                  --meet n|--verify n --evidence "…" --by X
+                                  --reopen n --reason "…" --by X
+  tower milestone verify <id> --evidence "…" --by X
+                                            review only when every linked
+                                            card is done and every milestone
+                                            criterion is verified
   tower events   [--limit 30]
   tower import <old-tower.json> [--name X] [--force]
 
@@ -1025,12 +1064,14 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   Complex payloads: --file payload.json or --file - (stdin).
   Writers should pass --by <agent-name>; owner ops use --by owner.
   Optimistic concurrency: --expect-rev N (exit 2 on conflict).
-  Phases: ${PHASE_IDS.join(' ')}
+  Phases: ${PHASE_IDS.map(id => id === 'verify' ? 'review (phase id verify)' : id).join(' ')}
 
-  Guards (agent-hard, owner-soft — --by owner bypasses; see plugin AGENTS.md):
+  Guards (agent-hard, owner-soft — --by owner bypasses card closure; see plugin AGENTS.md):
     ballot validation (full/short profile, simple prose, ordered reviews; E_BALLOT), owner-only ratify (E_OWNER_ONLY),
     frozen write guard (E_OWNER_LANE), ratified-decision delete guard
-    (E_HAS_RATIFIED), building-release handoff (E_HANDOFF).
+    (E_HAS_RATIFIED), building-release handoff (E_HANDOFF), nonempty card
+    exit criteria with every row met or verified (E_CRITERIA), and explicit
+    milestone review (E_MILESTONE).
 `;
 
 // ---- dispatch ----------------------------------------------------------------

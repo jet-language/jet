@@ -4,8 +4,9 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  addCard, addMessage, buildBrief, clearDoneQueue, deleteCard, doneMessage,
+  addCard, addCriterion, addMessage, buildBrief, clearDoneQueue, deleteCard, doneMessage,
   empty, normalize, openStore, project, setCompletionCursor, TowerError, updateCard,
+  meetCriterion,
 } from '../app/store.mjs';
 import { configFile, writeJSON } from '../app/paths.mjs';
 
@@ -60,6 +61,8 @@ test('legacy digest cursors migrate to the completion cursor', () => {
 test('an uncleared completion stays live past retirement age', () => {
   const { store } = fresh({ retireAfterDays: 0 });
   store.mutate((s, cfg) => addCard(s, { title: 'Ship it', by: 'agent' }, cfg));
+  store.mutate((s) => addCriterion(s, '#1', 'ship it', 'planner'));
+  store.mutate((s) => meetCriterion(s, '#1', 1, { evidence: 'built', by: 'agent' }));
   store.mutate((s) => setCompletionCursor(s, '2026-07-25T10:00:00.000Z'));
   store.mutate((s, cfg) => updateCard(s, '#1', { phase: 'done', by: 'agent' }, cfg));
   store.mutate((s) => {
@@ -74,6 +77,8 @@ test('an uncleared completion stays live past retirement age', () => {
 test('a pending completion keeps its ratified decisions live', () => {
   const { store } = fresh({ retireAfterDays: 0 });
   store.mutate((s, cfg) => addCard(s, { title: 'Ship it', by: 'agent' }, cfg));
+  store.mutate((s) => addCriterion(s, '#1', 'ship it', 'planner'));
+  store.mutate((s) => meetCriterion(s, '#1', 1, { evidence: 'built', by: 'agent' }));
   store.mutate((s) => setCompletionCursor(s, '2026-07-25T10:00:00.000Z'));
   store.mutate((s, cfg) => updateCard(s, '#1', { phase: 'done', by: 'agent' }, cfg));
   store.mutate((s) => {

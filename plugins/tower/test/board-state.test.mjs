@@ -58,7 +58,7 @@ test('show closed adds finished epochs that the active radar omits', () => {
   const radar = [{ id: 'e1', name: 'Active' }];
   const epochs = [{ id: 'e1', name: 'Active' }, { id: 'e2', name: 'Finished', goal: 'shipped' }];
   const cards = [card(20, 'done', 'done', { epoch: 'e2', track: 'epoch' })];
-  const milestones = [{ id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met', progress: { total: 1, done: 1, met: true } }];
+  const milestones = [{ id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met', progress: { total: 1, done: 1, reviewReady: true, met: true } }];
   assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, false), radar);
   assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true).map(e => e.id), ['e1', 'e2']);
   assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true)[1], {
@@ -66,8 +66,8 @@ test('show closed adds finished epochs that the active radar omits', () => {
     milestoneTotal: 1, milestonesMet: 1, pct: 100, burndown: [],
     milestones: [{
       id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met',
-      progress: { total: 1, done: 1, met: true },
-      total: 1, done: 1, met: true, stalledDays: null,
+      progress: { total: 1, done: 1, reviewReady: true, met: true },
+      total: 1, done: 1, reviewReady: true, met: true, stalledDays: null,
     }],
   });
 });

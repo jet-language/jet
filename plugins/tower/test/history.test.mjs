@@ -305,7 +305,7 @@ test('undo of a retiring write does not corrupt history: no duplicate archive en
   assert.equal(h.decisions.filter(d => d.id === 'D-1').length, 1, 'no duplicate decision in history');
 });
 
-test('archived cards still drive milestone completion', () => {
+test('archived cards still drive milestone review readiness', () => {
   const st = fresh();
   st.mutate((s) => db.updateEpoch(s, 'e1', { name: 'One' }));
   const milestone = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
@@ -321,6 +321,6 @@ test('archived cards still drive milestone completion', () => {
   assert.equal(st.load().milestones[0].status, 'open', 'live work keeps milestone open');
 
   st.mutate((s, cfg) => db.updateCard(s, '#2', { milestoneId: null, by: 'agent-1' }, cfg));
-  assert.equal(st.load().milestones[0].status, 'met', 'archived done work completes milestone');
-  assert.deepEqual(st.project().milestones[0].progress, { total: 1, done: 1, met: true });
+  assert.equal(st.load().milestones[0].status, 'review-ready', 'archived done work makes the milestone review-ready');
+  assert.deepEqual(st.project().milestones[0].progress, { total: 1, done: 1, reviewReady: true, met: false });
 });

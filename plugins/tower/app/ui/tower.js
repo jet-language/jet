@@ -218,8 +218,8 @@ const ageOf = (it) => ['done', 'message'].includes(it.type)
     ? it.decision.created
     : it.ballot ? it.ballot.created : it.card.updated;
 
-// Owner verification queue: ONLY needsAcceptance cards (visual/UI/UX/DX taste).
-// Bare phase=verify is agent technical closeout — never surfaces on Now/beacon.
+// Owner review queue: ONLY needsAcceptance cards (visual/UI/UX/DX taste).
+// Bare phase=verify is a legacy agent state — never surfaces on Now/beacon.
 const verifyQueue = () => ownerVerifyQueue(S.cards);
 const queueNotices = () => {
   const { done, messages } = buildDoneMessageQueue({
@@ -256,7 +256,7 @@ function renderBeacon() {
       ? `message: ${it.ref} ${it.title}`
       : it.type === 'done'
         ? `done: ${it.text}`
-        : it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
+        : it.type === 'decision' ? it.decision.title : 'review: ' + it.card.title;
     // Done cards are news, not a duty: blue segments so a glance at the beacon
     // separates "finished" from the red "blocked on you" ballots and checks.
     const tone = it.type === 'done' ? ' beacon__seg--done' : '';
@@ -503,7 +503,7 @@ function dutyVerify(card, ballot) {
     </div>`);
   const doAccept = () => ballot
     ? ownerAcceptance(ballot.id, 'accept')
-    : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed (no formal ballot).', by: 'owner' });
+    : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed after visual review.', by: 'owner' });
   $('[data-accept]', node).addEventListener('click', doAccept);
   node.__primary = waitingOnAgent ? () => showDetail(card.id) : doAccept;
   $('[data-open]', node).addEventListener('click', () => showDetail(card.id));
@@ -732,7 +732,7 @@ function setMilestoneFilter(id) {
 function milestoneFilterBar(m) {
   const done = m.progress?.done ?? 0;
   const total = m.progress?.total ?? 0;
-  const count = showRemaining() ? `${total - done} of ${total} cards left` : `${done}/${total} cards done`;
+  const count = m.progress?.met === true ? 'milestone met' : m.progress?.reviewReady === true ? 'ready for review' : showRemaining() ? `${total - done} of ${total} cards left` : `${done}/${total} cards done`;
   const bar = el(`<div class="milefilter">
       <span class="milefilter__tag">${esc(milestoneTag(m))}</span>
       <span class="milefilter__t">${esc(m.title)}</span>
@@ -749,8 +749,8 @@ const STAGE_HELP = [
   ['planning', 'Planning', 'Agent builds a plan + raises decisions'],
   ['ready', 'Ready', 'Plan vetted, decisions cleared — implement it'],
   ['building', 'Building', 'Implementation in progress'],
-  ['verify', 'Verify', 'Claimed done — verify 100%, then close'],
-  ['done', 'Done', 'Verified — hidden unless Show closed is on'],
+  ['verify', 'Review', 'Owner visual review for flagged cards; no separate agent verify step'],
+  ['done', 'Done', 'Closed when exit criteria are met; hidden unless Show closed is on'],
   ['frozen', 'Frozen', 'Owner-paused — untouched until you unfreeze it'],
 ];
 
@@ -780,7 +780,7 @@ function openLegend() {
       </div>
       <p class="prose" style="margin-top:8px">Only P0/P1 carry colour so the urgent ones pop; P2/P3 stay quiet on purpose.</p>
       <div class="modal__h">Action tag (bottom of a card)</div>
-      <p class="prose"><span class="card__lane lane-owner"><span class="pip"></span>needs you</span> · <span class="card__lane lane-agent"><span class="pip"></span>an agent's</span> · <span class="card__lane lane-none"><span class="pip"></span>waiting / blocked</span>. It names the exact next move (e.g. “Decide”, “Ready to implement”, “Verify”).</p>
+      <p class="prose"><span class="card__lane lane-owner"><span class="pip"></span>needs you</span> · <span class="card__lane lane-agent"><span class="pip"></span>an agent's</span> · <span class="card__lane lane-none"><span class="pip"></span>waiting / blocked</span>. It names the exact next move (e.g. “Decide”, “Ready to implement”, “Review”).</p>
     </div></div>`;
   $('.modal__x', m).addEventListener('click', closeDetail);
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
@@ -847,9 +847,9 @@ function radarMilestones(ms) {
   for (const m of ms) {
     const pct = m.total ? Math.round(m.done / m.total * 100) : 0;
     const stalled = m.stalledDays != null && m.stalledDays > 5;
-    const count = m.met ? 'met' : showRemaining() ? `${m.total - m.done} left` : `${m.done}/${m.total}`;
-    const row = el(`<button class="mile ${m.met ? 'mile--met' : ''}" type="button" title="${esc(m.goal || 'Show only this milestone')}">
-        <span class="mile__dot">${m.met ? '✓' : '◇'}</span>
+    const count = m.met ? 'met' : m.reviewReady ? 'ready for review' : showRemaining() ? `${m.total - m.done} left` : `${m.done}/${m.total}`;
+    const row = el(`<button class="mile ${m.met ? 'mile--met' : m.reviewReady ? 'mile--review' : ''}" type="button" title="${esc(m.goal || 'Show only this milestone')}">
+        <span class="mile__dot">${m.met ? '✓' : m.reviewReady ? '!' : '◇'}</span>
         <span class="mile__t">${esc(m.title)}</span>
         <span class="mile__bar"><i style="width:${m.met ? 100 : pct}%"></i></span>
         <span class="mile__n">${count}</span>
@@ -961,7 +961,7 @@ function showDetail(id) {
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
       <div class="prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
-      <div class="modal__h">Exit criteria <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
+      <div class="modal__h">Exit criteria <span class="prose">Builder marks each row met. The orchestrator closes the card when every row is met or verified.</span> <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
       <div id="m-criteria"></div>
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
       <div class="modal__h">Notes &amp; questions</div><div id="m-q"></div>
@@ -1031,7 +1031,7 @@ function showDetail(id) {
   $('#cta-unfreeze', m)?.addEventListener('click', () => api('card/update', { id, phase: 'planning', logEntry: 'Unfrozen.', by: 'owner' }));
   $('#cta-done', m)?.addEventListener('click', () => acceptanceBallot
     ? ownerAcceptance(acceptanceBallot.id, 'accept')
-    : api('card/update', { id, phase: 'done', logEntry: 'Verified — closed.', by: 'owner' }));
+    : api('card/update', { id, phase: 'done', logEntry: 'Accepted — closed after visual review.', by: 'owner' }));
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
   m.hidden = false; $('#scrim').hidden = false;
 }

@@ -20,7 +20,9 @@ Board data: `plugins/tower/.tower/`. UI: `tower serve --open`. Full board mechan
 - **Log tooling friction**: `tower papercut add --by <me> --text "..." [--card '#N']` — one line for a dead-end command, broken helper, misleading doc, or stale cache; never derail the task to fix it. Only log friction that recurs: it hit twice, or it is deterministic for anyone running the same command. One-offs, self-inflicted state, and session collisions are not papercuts; a bug in Jet itself is a card.
 - **Blockers**: `tower card update '#N' --blockedBy '#1,#2' --by <me>` (card refs or decision ids).
 - **Claim**: `tower brief '#N' --agent <me>` or `tower card claim '#N' --by <me>`.
-- **Close**: `tower card update '#N' --phase done --by <me>` after real verification (criteria gate may apply).
+- **Close**: the orchestrator runs `tower card update '#N' --phase done --by <me>` after
+  robust observable criteria have concrete evidence, the patch is integrated, and no
+  known blocker contradicts the evidence.
 - **Wontfix**: `tower card update '#N' --add-tag wontfix --phase frozen --by owner` (or delete an unpromoted idea).
 
 Intake that is not yet a card lives in **Ideas** (`tower idea list|add|promote`). Untagged open ideas count as unlabeled triage surface.
