@@ -70,7 +70,7 @@ fn eval_zip_family(
     if mode == crate::Codegen::TIR::TZipMode::Strict
         && columns.iter().any(|column| column.len() != columns[0].len())
     {
-        return Err(Diagnostic::error(
+        return Err(crate::Sema::Diagnostics::render_registered(
             "E0128",
             "zip inputs have different lengths".to_string(),
             "strict `zip` requires every input to end on the same row".to_string(),
