@@ -4296,7 +4296,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             };
-            let (_, dispatch_type_name) = Self::split_type_name(&type_name);
+            let (_, dispatch_type_name) = self.struct_type_name_parts(&type_name);
             let display_type_name = self.display_type_name(&type_name, None);
             if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
                 if let Some((_, _, field_ty)) =

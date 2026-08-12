@@ -9,6 +9,18 @@ pub(in super::super) fn expand_builtin_derive_items(
     diags: &mut Vec<Diagnostic>,
 ) {
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+    let invalid_distinct_names: std::collections::HashSet<String> = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Distinct(d) = item else { return None };
+            let crate::AST::Type::Named(base) = &d.base else {
+                return None;
+            };
+            items.iter().any(|item| {
+                matches!(item, Item::Distinct(other) if other.name == *base)
+            }).then(|| d.name.clone())
+        })
+        .collect();
     let mut requests = Vec::new();
 
     for item in items.iter() {
@@ -40,6 +52,9 @@ pub(in super::super) fn expand_builtin_derive_items(
                 }
             }
             Item::Distinct(d) => {
+                if invalid_distinct_names.contains(&d.name) {
+                    continue;
+                }
                 let comparable = has_derive(&d.derives, crate::Generics::COMPARABLE);
                 requests.push((
                     d.name.clone(),

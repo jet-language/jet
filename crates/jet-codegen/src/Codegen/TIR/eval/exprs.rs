@@ -5434,6 +5434,7 @@ impl<'a> EvalCtx<'a> {
                 method,
                 args,
                 source_first_string_literal,
+                operator_line,
                 ..
             } => {
                 let mut r = self.eval_expr_child(recv, scope)?;
@@ -5443,6 +5444,28 @@ impl<'a> EvalCtx<'a> {
                 }
                 if method.name == "clone" {
                     return self.clone_structural_value(r, &recv.ty);
+                }
+                let distinct_numeric_operator = matches!(
+                    &recv.ty,
+                    Type::Named(name)
+                        if self
+                            .distinct_bases
+                            .get(name)
+                            .is_some_and(Type::is_numeric)
+                );
+                if operator_line.is_some() && distinct_numeric_operator {
+                    let rhs = argv
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| unsupported("numeric operator argument", self.span()))?;
+                    let op = match method.name.as_str() {
+                        "add" => BinOp::Add,
+                        "sub" => BinOp::Sub,
+                        "mul" => BinOp::Mul,
+                        "div" => BinOp::Div,
+                        _ => return Err(unsupported("numeric operator", self.span())),
+                    };
+                    return eval_binop(op, r, rhs, self.span());
                 }
                 if method.name == "apply" {
                     if let (

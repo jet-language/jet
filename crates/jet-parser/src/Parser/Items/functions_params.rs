@@ -610,7 +610,7 @@ impl<'a> Parser<'a> {
                                 "E0029",
                                 format!("`{}` has two capability markers", name),
                                 format!(
-                                    "the {} before the parameter name conflicts with the {} on its type; a parameter can declare only one capability",
+                                    "{} before the parameter name conflicts with {} on its type; a parameter can declare only one capability",
                                     Syntax::capability_label(convention.sigil()),
                                     Syntax::capability_label(type_cap.sigil()),
                                 ),

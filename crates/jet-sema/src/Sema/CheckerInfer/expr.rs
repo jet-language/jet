@@ -1819,6 +1819,11 @@ impl<'a> Checker<'a> {
             }
             Expr::Place(inner, access, span) => {
                 if self.place_from_expr(inner).is_none() {
+                    // Even an invalid window must finish typing its nested
+                    // expression. Diagnostics compilation still lowers the
+                    // function, and skipping this walk leaves range/index
+                    // metadata at `Unknown`, which would become a TIR ICE.
+                    self.infer(inner);
                     self.diags.push(Diagnostic::error(
                         "E0213",
                         "a window must start from a place".to_string(),
@@ -2997,6 +3002,11 @@ impl<'a> Checker<'a> {
         span: &Span,
         kind: &mut IndexKind,
     ) -> Option<Type> {
+        // Keep the sema-to-TIR contract total even when an earlier expression
+        // error prevents either operand from producing a type. Diagnostics
+        // compilation still lowers the surrounding function, so an unknown
+        // index kind here would turn the user's real error into an ICE.
+        *kind = IndexKind::List;
         self.borrow_ctx = true;
         let base_ty = self.infer(base)?;
         if let Expr::Ident(name, selector_span) = index.as_ref() {

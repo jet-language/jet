@@ -149,6 +149,15 @@ fn file_import_target(
         .find_map(|imp| resolve_target(bundle, module_idx, imp))
 }
 
+fn inline_code_module_named(bundle: &ProgramBundle, module_idx: usize, name: &str) -> bool {
+    bundle.modules[module_idx].items.iter().any(|item| {
+        matches!(
+            item,
+            Item::CodeModule(cm) if cm.body.is_some() && cm.name == name
+        )
+    })
+}
+
 /// Resolve nominal declarations reached through `use module.Item`. The
 /// selective spelling has no module import edge of its own, so its canonical
 /// owner comes from the ledger alias recorded for the local item binding.
@@ -1283,6 +1292,7 @@ fn unqualified_file_function_entries(
         let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
             if is_foreign_member_list(imp)
                 || crate::AST::core_list_prefix(module_alias).is_some()
+                || inline_code_module_named(bundle, module_idx, module_alias)
             {
                 continue;
             }

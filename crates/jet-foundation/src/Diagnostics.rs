@@ -193,10 +193,7 @@ pub mod internal {
 impl Diagnostic {
     /// E3403: ambient randomness or wall-clock state in pure evaluation.
     pub fn e3403(what: &str, span: Option<Span>) -> Self {
-        let what = format!(
-            "`{what}` is non-deterministic and cannot appear in a pure evaluation"
-        );
-        Self::from_row("E3403", &[("what", &what)], span)
+        Self::from_row("E3403", &[("what", what)], span)
     }
 
     /// Build a report from a typed row and its named hole values. The row

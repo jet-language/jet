@@ -1,3 +1,19 @@
+Error [E0120]: `action` was not moved here, so it cannot be returned as-is
+  --> tests/ui/function_contract_laundering.jet:2:56
+    |
+  2 | fn erase(action: fn(Bool) => Int) => fn(Bool) => Int = action
+    |                                                        ^^^^^^
+ Why: this function has read access only and does not own the value
+ Fix: return a copy: `return ~action;` — or take ownership with the move-capability marker `^`: `action: ^fn(Bool) => Int`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership
+
+Error [E0120]: `action` was not moved here, so it cannot be returned as-is
+  --> tests/ui/function_contract_laundering.jet:3:79
+    |
+  3 | fn labelled(action: fn(*, force: Bool) => Int) => fn(*, force: Bool) => Int = action
+    |                                                                               ^^^^^^
+ Why: this function has read access only and does not own the value
+ Fix: return a copy: `return ~action;` — or take ownership with the move-capability marker `^`: `action: ^fn(*, force: Bool) => Int`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership
+
 Error [E0771]: this needs fn(*, force: Bool) => Int, but the function value is fn(Bool) => Int
   --> tests/ui/function_contract_laundering.jet:8:20
     |

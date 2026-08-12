@@ -677,6 +677,12 @@ impl<'a> Checker<'a> {
                 b.ty = Some(final_ty.clone());
             }
             self.report_lending_view_escape(&b.init, "be stored in a binding");
+            // A folded value cannot preserve the owner provenance carried by a
+            // view nested inside a task/result/aggregate. More importantly,
+            // implicit folding can evaluate a function before its body has
+            // completed sema, leaving its range metadata unresolved. Keep
+            // view-bearing runtime values on the ordinary typed path.
+            let skip_ct_view_bake = self.type_contains_view_boundary(&final_ty);
             // D-DECIMAL1: default-on float-money lint for money-like binding names.
             if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
                 self.diags.push(Diagnostic::lint(
@@ -723,7 +729,7 @@ impl<'a> Checker<'a> {
                     }
                     Err(d) => self.diags.push(d),
                 }
-            } else if !b.mutable {
+            } else if !b.mutable && !skip_ct_view_bake {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
                 // explicit `$` demands a compile-time answer.

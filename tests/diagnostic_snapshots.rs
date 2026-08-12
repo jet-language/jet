@@ -597,7 +597,7 @@ fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
 
     let stderr = String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8");
     let start = stderr
-        .find("\n  error[E1315]")
+        .find("Error [E1315]:")
         .expect("real hangar verify must emit E1315");
     stderr[start..].to_string()
 }
