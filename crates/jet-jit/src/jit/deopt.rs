@@ -290,7 +290,14 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
             Comptime::PurityStage::RunTime,
         ) {
             Ok(CtValue::Failed(CtReport::Told(error))) => {
-                if let Some(message) = error.crypto_error_message() {
+                let is_crypto_error = matches!(
+                    &*error,
+                    CtValue::Struct { type_name, .. } if type_name == "CryptoError"
+                );
+                if is_crypto_error {
+                    let message = error
+                        .crypto_error_message()
+                        .unwrap_or_else(|| error.jet_show());
                     // The AOT entry wrapper redacts the propagation chain at
                     // this boundary. The TIR evaluator has already recorded
                     // its dev-only `?` frames in the sink; discard only those
@@ -304,14 +311,15 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                     if !stderr.is_empty() {
                         stderr.push('\n');
                     }
-                    stderr.push_str("Error [E3001]: unhandled cryptographic error\n");
-                    stderr.push_str(" Why: ");
-                    stderr.push_str(&message);
-                    stderr.push_str("\n Fix: handle the CryptoError in fn run\n");
+                    let report = jet_foundation::Outcome::jet_render_e3001_crypto(
+                        &message,
+                        jet_foundation::Outcome::jet_crypto_error_is_internal(&message),
+                    );
+                    stderr.push_str(&report.rendered);
                     return RunOutcome::Ran {
                         stdout: sink.stdout,
                         stderr,
-                        exit_code: 70,
+                        exit_code: report.exit_code,
                     };
                 }
                 let rendered = error

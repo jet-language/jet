@@ -432,13 +432,7 @@ extern "C" fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
-    match runtime::jet_crypto_entropy_bytes(count) {
-        Ok(bytes) => alloc_bytes(&bytes),
-        Err(err) => {
-            eprintln!("Error [E3001]: panic: core.crypto.random.bytes: {err}");
-            std::process::exit(70);
-        }
-    }
+    alloc_bytes(&runtime::jet_std_crypto_random_bytes(count))
 }
 
 extern "C" fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> i64 {

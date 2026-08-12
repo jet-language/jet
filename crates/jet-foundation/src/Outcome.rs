@@ -289,3 +289,66 @@ pub fn jet_notes<T, E, N>(outcome: &JetOutcome<T, E>, told: impl FnOnce(&E) -> V
 pub fn jet_outcome_of<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
     value.ok_or(JetAbsent)
 }
+
+/// D-REPORT-RUNTIME1=A: the dependency-free runtime projection of one
+/// registered diagnostic. AOT, JIT, and the interpreter marshal into this
+/// value; none of those engines owns report text or exit policy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetRuntimeDiagnostic {
+    pub code: &'static str,
+    pub source: &'static str,
+    pub what: String,
+    pub why: String,
+    pub fix: String,
+    pub rendered: String,
+    pub exit_code: i32,
+}
+
+pub fn jet_render_registered_diagnostic(
+    code: &'static str,
+    source: &'static str,
+    what: String,
+    why: String,
+    fix: String,
+    exit_code: i32,
+) -> JetRuntimeDiagnostic {
+    JetRuntimeDiagnostic {
+        code,
+        source,
+        rendered: format!("Error [{code}]: {what}\n Why: {why}\n Fix: {fix}\n"),
+        what,
+        why,
+        fix,
+        exit_code,
+    }
+}
+
+/// E3001's registered runtime row. Keep this projection dependency-free: this
+/// file is embedded verbatim in AOT programs and re-exported by JIT hosts.
+const E3001_SOURCE: &str = "runtime";
+const E3001_WHY: &str = "The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled `CryptoError`. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).";
+const E3001_FIX: &str = "Fix the logic that led to the failure; handle `CryptoError` in `fn run`. Unhandled non-`Internal` crypto errors exit 70 after cleanup; unhandled `Internal` exits 101 after fail-closed cleanup.";
+
+/// Marshal an unhandled `CryptoError` into the one E3001 runtime report.
+pub fn jet_render_e3001_crypto(message: &str, internal: bool) -> JetRuntimeDiagnostic {
+    jet_render_registered_diagnostic(
+        "E3001",
+        E3001_SOURCE,
+        format!("unhandled cryptographic error: {message}"),
+        E3001_WHY.to_string(),
+        E3001_FIX.to_string(),
+        if internal { 101 } else { 70 },
+    )
+}
+
+/// The interpreter carries the stable redacted Display text rather than the
+/// Rust enum variant. Preserve the same E3001 exit rule at that boundary.
+pub fn jet_crypto_error_is_internal(message: &str) -> bool {
+    message.starts_with("Jet could not preserve a cryptographic invariant; incident ")
+}
+
+/// A native runtime adapter's only termination door for a rendered report.
+pub fn jet_abort_diagnostic(report: JetRuntimeDiagnostic) -> ! {
+    eprint!("{}", report.rendered);
+    std::process::exit(report.exit_code)
+}

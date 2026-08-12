@@ -732,27 +732,7 @@ extern "C" fn jet_jit_csv_tree_to_string(tree: i64) -> i64 {
     })
 }
 
-// ── UUID (mirrors jet_std_uuid_v4 / jet_std_uuid_v7) ─────────────────────────
-
-fn uuid_fill_random(out: &mut [u8]) {
-    use std::io::Read;
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if f.read_exact(out).is_ok() {
-            return;
-        }
-    }
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64;
-    let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
-    for b in out.iter_mut() {
-        state = state.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = (state ^ (state >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        *b = (z ^ (z >> 31)) as u8;
-    }
-}
+// ── UUID (marshals through the shared Prelude entropy seam) ─────────────────
 
 fn uuid_format(b: &[u8; 16]) -> String {
     format!(
@@ -865,34 +845,34 @@ extern "C" fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_uuid_v4() -> i64 {
-    let mut bytes = [0u8; 16];
-    uuid_fill_random(&mut bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let s = uuid_format(&bytes);
+    let s = crate::Crypto::runtime::jet_crypto_uuid_v4();
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 /// `clock` is a 1-based index into `JitRuntime::clocks` (manual ms).
 extern "C" fn jet_jit_uuid_v7(clock: i64) -> i64 {
-    let ts_ms = Concurrency::with_runtime_mut(|rt| {
-        if clock <= 0 {
-            return 0i64;
+    let timestamp = Concurrency::with_runtime_mut(|rt| {
+        Some(if clock <= 0 {
+            Err("invalid clock handle".to_string())
+        } else {
+            let idx = (clock as usize).saturating_sub(1);
+            rt.clocks
+                .get(idx)
+                .copied()
+                .ok_or_else(|| "invalid clock handle".to_string())
+        })
+    });
+    let ts_ms = match timestamp {
+        Some(Ok(timestamp)) => timestamp,
+        Some(Err(message)) => {
+            return Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap(&message);
+                rt.heap.alloc_string(String::new())
+            });
         }
-        let idx = (clock as usize).saturating_sub(1);
-        rt.clocks.get(idx).copied().unwrap_or(0)
-    }) as u64;
-    let mut bytes = [0u8; 16];
-    bytes[0] = (ts_ms >> 40) as u8;
-    bytes[1] = (ts_ms >> 32) as u8;
-    bytes[2] = (ts_ms >> 24) as u8;
-    bytes[3] = (ts_ms >> 16) as u8;
-    bytes[4] = (ts_ms >> 8) as u8;
-    bytes[5] = ts_ms as u8;
-    uuid_fill_random(&mut bytes[6..]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x70;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let s = uuid_format(&bytes);
+        None => return 0,
+    };
+    let s = crate::Crypto::runtime::jet_crypto_uuid_v7(ts_ms);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 

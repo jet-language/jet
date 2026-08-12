@@ -7,6 +7,7 @@ use super::Diagnostics::unsupported;
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");

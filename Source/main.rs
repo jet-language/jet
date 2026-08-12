@@ -162,8 +162,11 @@ pub(crate) fn emit_cli_report(
     fix: String,
     json: bool,
 ) {
-    let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None)
-        .at_moment(jet::Diagnostics::ReportMoment::Tool);
+    let diagnostic = jet::Diagnostics::Diagnostic::registered_with_problem(code, &what, None)
+        .unwrap_or_else(|| {
+            jet::Diagnostics::Diagnostic::error(code, what, why, fix, None)
+                .at_moment(jet::Diagnostics::ReportMoment::Tool)
+        });
     if json {
         print!("{}", jet::render_all_json("", "", &[diagnostic]));
     } else {

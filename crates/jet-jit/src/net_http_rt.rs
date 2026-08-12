@@ -60,6 +60,7 @@ struct JetFileWriter {
 fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
 }
+
 fn jet_scheduler_io_wait(
     _stream: &std::net::TcpStream,
     _read: bool,

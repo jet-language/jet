@@ -4656,6 +4656,18 @@ impl<'a> EvalCtx<'a> {
                         }
                         _ => return Err(unsupported("clock method", self.span())),
                     };
+                    let now = *clock;
+                    drop(runtime);
+                    if let CtValue::Struct { fields, .. } = &mut r {
+                        if let Some((_, value)) =
+                            fields.iter_mut().find(|(name, _)| name == "now")
+                        {
+                            *value = CtValue::Int(now);
+                        } else {
+                            fields.push(("now".to_string(), CtValue::Int(now)));
+                        }
+                    }
+                    self.write_back_place(recv, r, scope)?;
                     return Ok(result);
                 }
                 if let crate::Codegen::TIR::THandleOp::EventMethod { method } = op {
@@ -6124,7 +6136,10 @@ impl<'a> EvalCtx<'a> {
                         runtime.clocks.push(seed);
                         return Ok(CtValue::Struct {
                             type_name: "__JetTirClock".to_string(),
-                            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+                            fields: vec![
+                                ("index".to_string(), CtValue::Int(index as i64)),
+                                ("now".to_string(), CtValue::Int(seed)),
+                            ],
                         });
                     }
                     if leaf == "jet_std_clock_system" || leaf.ends_with("jet_std_clock_system") {

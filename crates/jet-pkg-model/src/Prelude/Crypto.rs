@@ -15,7 +15,10 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use hkdf::Hkdf;
 use sha2::{Digest, Sha256, Sha512};
 use subtle::ConstantTimeEq;
-use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+use jet_crypto_entropy::{
+    jet_crypto_entropy_fill as jet_crypto_entropy_fill_crypto,
+    JetCryptoEntropyError as CryptoEntropyError,
+};
 
 const JETV_MAGIC: &[u8; 4] = b"JETV";
 const JETW_MAGIC: &[u8; 4] = b"JETW";
@@ -142,7 +145,7 @@ pub fn jet_crypto_email_ed25519_sign_impl(key: &Vec<u8>, message: &[u8]) -> Resu
 }
 pub fn jet_crypto_x25519_generate_impl() -> Result<JetX25519SecretKey, JetCryptoError> {
     let mut bytes = vec![0; 32];
-    jet_crypto_entropy_fill(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;
+    jet_crypto_entropy_fill_crypto(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;
     Ok(JetX25519SecretKey(bytes))
 }
 pub fn jet_crypto_x25519_public_typed_impl(secret: &JetX25519SecretKey) -> JetX25519PublicKey {
@@ -183,7 +186,7 @@ pub fn jet_crypto_x25519_public_from_text_impl(text:String)->Result<JetX25519Pub
 }
 pub fn jet_crypto_signing_generate_impl() -> Result<JetSigningKey, JetCryptoError> {
     let mut bytes = vec![0; 32];
-    jet_crypto_entropy_fill(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;
+    jet_crypto_entropy_fill_crypto(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;
     Ok(JetSigningKey(bytes))
 }
 pub fn jet_crypto_signing_public_impl(key: &JetSigningKey) -> JetVerifyKey {
@@ -254,7 +257,7 @@ pub fn jet_crypto_seal_typed_impl(mut recipients: Vec<JetX25519PublicKey>, plain
     recipients.sort_by_key(|k| k.0);
     if recipients.windows(2).any(|pair| pair[0].0 == pair[1].0) { return Err(JetCryptoError::InvalidEncoding { operation: "seal", value_kind: "duplicate recipient" }); }
     let mut ephemeral_secret = [0; 32]; let mut salt = [0; 16]; let mut payload_nonce = [0; 24]; let mut file_key = [0; 32];
-    let fill = (|| { jet_crypto_entropy_fill(&mut ephemeral_secret)?; jet_crypto_entropy_fill(&mut salt)?; jet_crypto_entropy_fill(&mut payload_nonce)?; jet_crypto_entropy_fill(&mut file_key) })();
+    let fill = (|| { jet_crypto_entropy_fill_crypto(&mut ephemeral_secret)?; jet_crypto_entropy_fill_crypto(&mut salt)?; jet_crypto_entropy_fill_crypto(&mut payload_nonce)?; jet_crypto_entropy_fill_crypto(&mut file_key) })();
     if fill.is_err() { zeroize(&mut ephemeral_secret); zeroize(&mut salt); zeroize(&mut payload_nonce); zeroize(&mut file_key); return Err(JetCryptoError::EntropyUnavailable); }
     let ephemeral_public = x25519_dalek::x25519(ephemeral_secret, x25519_dalek::X25519_BASEPOINT_BYTES);
     let header = typed_header(JETV_MAGIC, recipients.len() as u16, &ephemeral_public, &salt, Some(&payload_nonce));
@@ -321,7 +324,7 @@ pub fn jet_crypto_open_typed_impl(recipient: &JetX25519SecretKey, envelope: JetS
 
 pub fn jet_crypto_wrap_typed_impl(secret: &Secret, recipient: JetX25519PublicKey) -> Result<JetWrappedKey, JetCryptoError> {
     if secret.0.len() > 1_048_576 { return Err(invalid_length("wrap", "secret", "at most 1048576", secret.0.len())); }
-    let mut ephemeral_secret = [0; 32]; let mut salt = [0; 16]; jet_crypto_entropy_fill(&mut ephemeral_secret).map_err(|_| JetCryptoError::EntropyUnavailable)?; jet_crypto_entropy_fill(&mut salt).map_err(|_| JetCryptoError::EntropyUnavailable)?;
+    let mut ephemeral_secret = [0; 32]; let mut salt = [0; 16]; jet_crypto_entropy_fill_crypto(&mut ephemeral_secret).map_err(|_| JetCryptoError::EntropyUnavailable)?; jet_crypto_entropy_fill_crypto(&mut salt).map_err(|_| JetCryptoError::EntropyUnavailable)?;
     let ephemeral = x25519_dalek::x25519(ephemeral_secret, x25519_dalek::X25519_BASEPOINT_BYTES); let mut shared = x25519_checked(ephemeral_secret, recipient.0)?;
     let mut key_info = b"JETW1 key".to_vec(); key_info.extend_from_slice(&ephemeral); key_info.extend_from_slice(&recipient.0); let mut nonce_info = b"JETW1 nonce".to_vec(); nonce_info.extend_from_slice(&ephemeral); nonce_info.extend_from_slice(&recipient.0);
     let mut kek = hkdf32(&shared, &salt, &key_info)?; let nonce = hkdf24(&shared, &salt, &nonce_info)?;
@@ -595,7 +598,7 @@ fn jet_pwhash_wait_noop() {}
 
 fn jet_crypto_password_hash_typed_with_cancel(password:&Secret, cancelled:fn()->bool, cancel_outcome:fn(),wait_enter:fn(),wait_leave:fn())->Result<JetPasswordHash,JetCryptoError>{
     if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}
-    let mut salt=[0;16];jet_crypto_entropy_fill(&mut salt).map_err(|_|JetCryptoError::EntropyUnavailable)?;
+    let mut salt=[0;16];jet_crypto_entropy_fill_crypto(&mut salt).map_err(|_|JetCryptoError::EntropyUnavailable)?;
     let params=argon2::Params::new(65_536,3,1,Some(32)).map_err(|_|JetCryptoError::Internal{incident_id:"password-params"})?;
     let output=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,&salt,params,cancelled,wait_enter,wait_leave),cancel_outcome)?;
     let encoded=argon2::password_hash::SaltString::encode_b64(&salt).map_err(|_|JetCryptoError::Internal{incident_id:"password-salt"})?;
@@ -751,8 +754,8 @@ pub fn jet_crypto_expert_open_v1_impl(
     }
 }
 
-fn jet_fill_random(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
-    jet_crypto_entropy_fill(out)
+fn jet_fill_random(out: &mut [u8]) -> Result<(), CryptoEntropyError> {
+    jet_crypto_entropy_fill_crypto(out)
 }
 
 /// Sign `message` with a 32-byte Ed25519 seed key.
@@ -1482,7 +1485,7 @@ fn seal_jetc_v2_from_snapshot(
     let mut nonce_prefix = Zeroizing([0u8; 16]);
     macro_rules! fill_envelope_random {
         ($target:expr) => {
-            if let Err(error) = jet_crypto_entropy_fill($target) {
+            if let Err(error) = jet_crypto_entropy_fill_crypto($target) {
                 return Err(JetFileCryptoError::SealFailed(error));
             }
         };
