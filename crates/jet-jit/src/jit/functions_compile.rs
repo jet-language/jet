@@ -1,5 +1,8 @@
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, AbiParam, Endianness, InstBuilder, MemFlags, Signature, Value};
+use cranelift_codegen::ir::{
+    types, AbiParam, Endianness, InstBuilder, MemFlags, Signature, StackSlotData,
+    StackSlotKind, Value,
+};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
@@ -542,6 +545,232 @@ pub(crate) fn lower_interrupt_named_callback(
     module
         .define_function(id, &mut ctx)
         .map_err(|error| error.to_string())?;
+    super::tier_cache::abort_capture();
+    module.clear_context(&mut ctx);
+    Ok(id)
+}
+
+/// Compile the callback retained by a transactional `Shared<T>.edit`.
+///
+/// The Prelude owns transaction participation, ordering, and commit.  This
+/// function only supplies the ABI adapter that turns the Prelude's current
+/// packed value into the lambda's real argument, runs the already-lowered
+/// lambda, and returns the updated packed value to the resident host.
+pub(crate) fn lower_shared_transaction_lambda(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    lam: &TLambda,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+    sequence: u64,
+) -> Result<FuncId, String> {
+    let name = jet_foundation::Syntax::generated_name(&format!(
+        "jit_shared_txn_lambda_{}",
+        sequence
+    ));
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    sig.params.push(AbiParam::new(types::I64));
+    sig.params.push(AbiParam::new(types::I64));
+    sig.returns.push(AbiParam::new(types::I64));
+    let id = module
+        .declare_function(&name, Linkage::Local, &sig)
+        .map_err(|error| error.to_string())?;
+    let mut ctx = module.make_context();
+    ctx.func.signature = sig;
+    let mut fbcx = FunctionBuilderContext::new();
+    let mut vars = HashMap::new();
+    let mut var_tys = HashMap::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let values = b.block_params(entry).to_vec();
+        let mut lctx = LowerCtx {
+            b: &mut b,
+            module,
+            host,
+            runtime,
+            meta,
+            vars: &mut vars,
+            var_tys: &mut var_tys,
+            result_option_vars: HashSet::new(),
+            raw_slots: HashMap::new(),
+            real_address_values: HashSet::new(),
+            func_ids,
+            spawn_site,
+            spawn_func_ids,
+            spawn_lambdas,
+            loop_stack: Vec::new(),
+            reachable_break_exits: HashSet::new(),
+            reachable_continue_blocks: HashSet::new(),
+            dead: false,
+            next_var: 0,
+            method_struct: None,
+            ret_clif: Some(types::I64),
+            ret_range: false,
+            ret_cell_layout: 0,
+            cell_frame: false,
+            shield_depth: 0,
+            deadline_depth: 0,
+            switch_subject: None,
+            yield_sender: None,
+            stream_consumers: Vec::new(),
+            in_shared_transaction: false,
+            shared_transaction_depth: 0,
+            unsafe_depth: 0,
+            scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
+            deferred_shared_guards: Vec::new(),
+            task_groups: Vec::new(),
+            in_lexical_exit: false,
+            txn_stack: Vec::new(),
+            compute_resources: Vec::new(),
+            compute_retrack_names: HashSet::new(),
+        };
+
+        let env = values[0];
+        let line = lctx.b.ins().iconst(types::I32, 0);
+        for (idx, (_outer, place, ty)) in lam.captures.iter().enumerate() {
+            let idx_v = lctx.b.ins().iconst(types::I64, idx as i64);
+            let get = lctx.module.declare_func_in_func(
+                if matches!(ty, Type::Float) {
+                    lctx.host.coll.list_get_f64
+                } else {
+                    lctx.host.coll.list_get
+                },
+                lctx.b.func,
+            );
+            let call = lctx.b.ins().call(get, &[env, idx_v, line]);
+            let raw = lctx.b.inst_results(call)[0];
+            let clif = meta.clif_ty(ty).unwrap_or(types::I64);
+            let value = match clif {
+                t if t == types::F64 => lctx.b.ins().bitcast(
+                    types::F64,
+                    MemFlags::new().with_endianness(Endianness::Little),
+                    raw,
+                ),
+                t if t == types::I8 => lctx.b.ins().ireduce(types::I8, raw),
+                t if t == types::I32 => lctx.b.ins().ireduce(types::I32, raw),
+                _ => raw,
+            };
+            let var = lctx.fresh_var(clif);
+            lctx.b.def_var(var, value);
+            lctx.vars.insert(place.clone(), var);
+            lctx.var_tys.insert(place.clone(), ty.clone());
+        }
+
+        let param_name = lam
+            .source_params
+            .first()
+            .ok_or("jit shared transaction callback missing parameter")?;
+        let param_ty = lam
+            .param_types
+            .first()
+            .cloned()
+            .ok_or("jit shared transaction callback missing parameter type")?;
+        if lam.source_params.len() != 1 || lam.param_types.len() != 1 {
+            return Err("jit shared transaction callback requires one parameter".to_string());
+        }
+        let expected = meta
+            .clif_ty(&param_ty)
+            .ok_or_else(|| format!("jit shared transaction parameter unsupported: {param_ty:?}"))?;
+        let payload = values[1];
+        let argument = match expected {
+            t if t == types::F64 => lctx.b.ins().bitcast(
+                types::F64,
+                MemFlags::new().with_endianness(Endianness::Little),
+                payload,
+            ),
+            t if t == types::I8 => lctx.b.ins().ireduce(types::I8, payload),
+            t if t == types::I32 => lctx.b.ins().ireduce(types::I32, payload),
+            t if t == types::I64 => payload,
+            _ => {
+                return Err(format!(
+                    "jit shared transaction parameter unsupported: {param_ty:?} ({expected:?})"
+                ));
+            }
+        };
+        let scalar_slot = matches!(
+            &param_ty,
+            Type::Int
+                | Type::IntN { .. }
+                | Type::Float
+                | Type::Float32
+                | Type::Bool
+                | Type::Char
+        )
+        .then(|| {
+            let slot = lctx.b.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                u32::from(expected.bytes()),
+                0,
+            ));
+            lctx.b.ins().stack_store(argument, slot, 0);
+            slot
+        });
+        let stored_ty = if scalar_slot.is_some() {
+            Type::Apply {
+                name: "__JetScalarMut".to_string(),
+                args: vec![param_ty.clone()],
+            }
+        } else {
+            param_ty.clone()
+        };
+        let bound = scalar_slot.map_or(argument, |slot| {
+            lctx.b
+                .ins()
+                .stack_addr(lctx.module.target_config().pointer_type(), slot, 0)
+        });
+        let var = lctx.fresh_var(lctx.b.func.dfg.value_type(bound));
+        lctx.b.def_var(var, bound);
+        let place = TIR::local_place(param_name);
+        lctx.vars.insert(place.clone(), var);
+        lctx.var_tys.insert(place, stored_ty);
+
+        match &lam.executable {
+            TLambdaBody::Expr(expr) => {
+                let _ = lctx.lower_expr(expr)?;
+            }
+            TLambdaBody::Block(body) => lctx.lower_stmts(body)?,
+            TLambdaBody::SharedBlock(body) => lctx.lower_stmts(&body[..])?,
+        }
+        if lctx.dead {
+            return Err("jit shared transaction callback cannot transfer control".to_string());
+        }
+        let updated = match scalar_slot {
+            Some(slot) => lctx.b.ins().stack_load(expected, slot, 0),
+            None => lctx.b.use_var(var),
+        };
+        let packed = match expected {
+            t if t == types::F64 => lctx.b.ins().bitcast(
+                types::I64,
+                MemFlags::new().with_endianness(Endianness::Little),
+                updated,
+            ),
+            t if t == types::I8 || t == types::I32 => lctx.b.ins().uextend(types::I64, updated),
+            t if t == types::I64 => updated,
+            _ => {
+                return Err(format!(
+                    "jit shared transaction result unsupported: {param_ty:?} ({expected:?})"
+                ));
+            }
+        };
+        lctx.emit_lexical_exit(Some(packed), false, lctx.shield_depth)?;
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{name}: verifier: {error:?}"))?;
+    module
+        .define_function(id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    // This callback is declared while its enclosing function is lowered and is
+    // therefore not replayable by the warm-function capture.
     super::tier_cache::abort_capture();
     module.clear_context(&mut ctx);
     Ok(id)

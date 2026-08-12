@@ -38,6 +38,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         next_stream_channel: -1,
         next_stream_sender: -1,
         next_option_lift2_thunk: 0,
+        next_shared_txn_thunk: 0,
         jit_callables: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
