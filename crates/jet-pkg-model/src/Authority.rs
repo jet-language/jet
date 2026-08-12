@@ -313,6 +313,7 @@ impl AuthorityResolver {
     /// discovery space, not authority objects: pinning them makes shared
     /// directories such as `/tmp` fail closed on harmless metadata changes.
     pub fn open_for_authority_walk(root: &Path) -> Result<Option<Self>, AuthorityError> {
+        let root = Self::effective_root(root);
         let metadata = Self::inspect_root(root)?;
         if is_shared_directory(&metadata) || !has_authority_candidate(root)? {
             return Ok(None);
@@ -323,6 +324,7 @@ impl AuthorityResolver {
     /// Validate and canonicalize a walk start without pinning it. The caller
     /// pins only a directory that proves it contains authority metadata.
     pub fn authority_walk_root(root: &Path) -> Result<PathBuf, AuthorityError> {
+        let root = Self::effective_root(root);
         Self::inspect_root(root)?;
         Self::canonicalize_root(root)
     }
@@ -343,6 +345,7 @@ impl AuthorityResolver {
 
     /// Open and pin a regular authority root directory.
     pub fn open(root: &Path) -> Result<Self, AuthorityError> {
+        let root = Self::effective_root(root);
         let metadata = Self::inspect_root(root)?;
         let expected_root_identity = FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
         let canonical = Self::canonicalize_root(root)?;
@@ -386,7 +389,16 @@ impl AuthorityResolver {
         })
     }
 
+    /// `Path::parent()` of a bare relative name yields `Some("")`, which the
+    /// OS rejects outright. Callers that walk up from an entry file mean the
+    /// current directory; normalize once here so every authority entry point
+    /// agrees.
+    fn effective_root(root: &Path) -> &Path {
+        if root.as_os_str().is_empty() { Path::new(".") } else { root }
+    }
+
     fn inspect_root(root: &Path) -> Result<Metadata, AuthorityError> {
+        let root = Self::effective_root(root);
         let metadata = fs::symlink_metadata(root).map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
                 AuthorityError::Missing(root.to_path_buf())
@@ -412,6 +424,7 @@ impl AuthorityResolver {
     }
 
     fn canonicalize_root(root: &Path) -> Result<PathBuf, AuthorityError> {
+        let root = Self::effective_root(root);
         fs::canonicalize(root).map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
                 AuthorityError::Missing(root.to_path_buf())
