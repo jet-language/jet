@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1938,
-    "rev": 35624,
+    "rev": 35626,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -125279,10 +125279,15 @@
       "milestoneId": "e3-m18-devloop-testing",
       "phase": "deciding",
       "priority": "P2",
-      "plan": "Owner ballot D-TESTFAULT1 (rev 3, 2026-08-12): recommendation B — keep #Test fn unchanged; a recovery test adds a per-effect question-mark suffix to its signature row, e.g. #Test fn save_survives_write_faults() =[Fs.Write?]=> { … }. The harness owns the SQLite loop (fail each reachable call site once, re-run until no new site); the body handles injected failures on the ordinary error rail; iteration passes when the body returns without panic and with cleanup intact (defer/sentry integration). The suffix is legal only on test signatures — elsewhere a teaching error (ordinary functions already state failure routing via T ? E). Common tests carry zero new ceremony; scratch space via the testing scratch API, never a fixture parameter (parameterized #Test fn stays a property test). The test-keyword rework is option A on the ballot, declined for now by the owner. Implementation after ratification: effect-row grammar suffix (Syntax.rs, I7), one Prelude harness part (engines marshal, I9), refusal diagnostic + UI snapshot (I4), golden example (I5).",
+      "plan": "Owner ballot D-TESTFAULT1 (rev 4, 2026-08-12): recommendation A — the #Test marker gains one typed argument: #Test(faults: [Fs.Write]) names the effect roots the harness must fail. Harness owns the SQLite loop (fail each reachable call site once, re-run until no new site); the body handles injected failures on the ordinary error rail; an iteration passes when the body returns without panic and with cleanup intact (defer/sentry integration). No new glyph, no grammar change: signature stays pure contract, marker stays harness configuration. Rejected on review: nested .faults member (rev 1), effect-row question-mark suffix (rev 3 — rows never carry failure information; owner found it unreadable), test keyword (parked as a future option). Implementation after ratification: faults parameter on the #Test registry row, unknown-root teaching diagnostic + UI snapshot (I4), one Prelude harness part with engine marshalling (I9), golden example (I5).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "Ballot rev 4 per owner question about the question-mark suffix: rec moved to the #Test(faults:) marker argument — no new glyph, config on the harness marker, contract stays in the signature."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -125360,7 +125365,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:17.969Z",
-      "updated": "2026-08-12T18:47:19.477Z",
+      "updated": "2026-08-12T19:02:46.732Z",
       "updatedBy": "fable-e3-audit"
     },
     {
@@ -168178,8 +168183,8 @@
       "cardId": "c0jr1xem",
       "group": "syntax",
       "title": "Test declarations and fault injection: one signature, one loop",
-      "gist": "How a test is declared, and how it says which effects the harness must make fail.",
-      "lesson": "A test is a function with a name and a claim, spelled #Test fn today. Fault injection is the missing half: SQLite fails allocation or I/O call N in a loop, checks recovery, and repeats until no new site appears. The first draft proposed a nested .faults member; the owner rejected it and asked for a shape that mirrors function signatures. One glyph matters: the deny row already owns the exclamation mark, and the question mark already means may fail, so the fault mark must not reuse deny.",
+      "gist": "How a test tells the harness which effects to make fail.",
+      "lesson": "A test is a function with a name and a claim, spelled #Test fn. Fault injection is the missing half: SQLite fails allocation or I/O call N in a loop, checks recovery, and repeats until no new site appears. Two drafts died on review. A nested .faults member hid the contract in the body. A row suffix put failure marks where rows never carry them. Deny is not reusable either: it proves the effect never happens, while injection fails a happening effect.",
       "explainer": "",
       "story": "Priya ports a config store to Jet. Her write path looks correct, but a full disk at the wrong moment once corrupted the store in production. She wants the harness to fail every Fs.Write her test reaches, one call at a time, and prove the store recovers after each one. She opens the testing chapter and wants to read the whole contract in the signature line.",
       "inWild": "// A config store that must survive a full disk.\nfn save(store: Store, path: Path) =[Fs.Write]=> () ? IoError {\n    tmp :: path.with_suffix(\".tmp\")\n    fs.write(tmp, store.encode())?      // may fail: injected\n    fs.rename(tmp, path)?               // may fail: injected\n}\n\n// The claim: whichever write fails, the old file survives intact.\n// Where does \"fail every Fs.Write, one call at a time\" get written?",
@@ -168187,31 +168192,31 @@
       "options": [
         {
           "key": "A",
-          "name": "test declarations plus fault marks (keyword change)",
-          "detail": "A test becomes a first-class declaration, test name() { body }, and the fault marks ride the effect row. The owner declined committing to the keyword change for now (2026-08-12), so this option stays on the menu as the larger future shape, not the current pick. Everything the recommendation gives works without it.",
-          "technical": "test and bench become declaration keywords (Syntax.rs rows, I7). The test plane keeps today's discovery, property generation, and #Test(\"name\") block form as test \"name\" { … }. Effect-row grammar gains a per-effect ? suffix legal only on test declarations; elsewhere it is a teaching error. The loop, injection points, and iteration verdict live in one Prelude harness part; engines marshal (I9). Denial rows =[!X]=> keep their D-PROP1 meaning unchanged. Cleanup-intact means: deferred closes ran and, when D-MEM-SENTRY1 sentries are on, no sentry fault.",
-          "code": "test save_survives_write_faults(tmp: TempDir) =[Fs.Write?]=> {\n    path :: tmp.path(\"config.jet\")\n    store :: Store.{ user: \"priya\" }\n    save(store, path) ?? {\n        // an injected failure lands here, like a real full disk\n        assert(Store.load(path)? == Store.default())  // old data intact\n        return\n    }\n    assert(Store.load(path)? == store)                // clean write landed\n}\n\n$ jet test\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)"
+          "name": "faults argument on the #Test marker",
+          "detail": "The marker the harness already owns gains one argument: #Test(faults: [Fs.Write]) names the effects the harness must fail. The loop is the harness's: fail each reachable call site once, re-run, stop when no new site appears. The body sees each injected failure as the ordinary error value and handles it like real code. Plain asserts after the fallible section are the recovery check. The common test stays exactly #Test fn with nothing added. Signature stays pure contract; marker stays harness configuration; no new glyph, no grammar change.",
+          "technical": "faults is a typed marker parameter (effect-root list) on the existing #Test registry row; unknown roots are a teaching error with a registered code and UI snapshot. The loop, injection points, and iteration verdict live in one Prelude harness part; engines marshal (I9). Iteration verdict: body returned (success or routed error), no panic, cleanup intact (deferred closes ran; sentry-clean when D-MEM-SENTRY1 is on). Parameterized #Test fn stays a property test; scratch space comes from the testing scratch API in the body.",
+          "code": "// common case: unchanged, zero ceremony\n#Test fn reverse_twice_is_identity(xs: [Int]) {\n    assert(xs.reverse().reverse() == xs)\n}\n\n// recovery test: harness config on the harness marker\n#Test(faults: [Fs.Write])\nfn save_survives_write_faults() {\n    dir :: testing.scratch_dir()\n    path :: dir.path(\"config.jet\")\n    store :: Store.{ user: \"priya\" }\n    save(store, path) ?? {\n        // an injected failure lands here, like a real full disk\n        assert(Store.load(path)? == Store.default())  // old data intact\n        return\n    }\n    assert(Store.load(path)? == store)                // clean write landed\n}\n\n$ jet test\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)"
         },
         {
           "key": "B",
-          "name": "Keep #Test fn; fault marks in the effect row",
-          "detail": "The declaration form does not change: #Test fn stays, with zero parameters and zero ceremony in the common case. A recovery test adds one fact to its signature row: a question-mark suffix per effect the harness must fail. The harness owns the loop: fail each reachable call site once, re-run, stop when no new site appears. The body sees each injected failure as the ordinary error value on the error rail and handles it like real code. Asserts after the fallible section are the recovery check; no closures, no nesting.",
-          "technical": "Effect-row grammar gains a per-effect question-mark suffix, legal only on #Test fn signatures; anywhere else it is a teaching error with a registered code and UI snapshot. On ordinary functions the idea is redundant: fallible return types (T ? E) already force failure routing. Deny rows keep their D-PROP1 meaning.\n\nThe loop, injection points, and iteration verdict live in one Prelude harness part; engines marshal (I9). Iteration verdict: body returned (success or routed error), no panic, cleanup intact (deferred closes ran; sentry-clean when D-MEM-SENTRY1 is on). A parameterized #Test fn stays a property test; scratch space comes from the testing scratch API in the body, not a parameter.",
-          "code": "// common case: unchanged, zero ceremony\n#Test fn reverse_twice_is_identity(xs: [Int]) {\n    assert(xs.reverse().reverse() == xs)\n}\n\n// recovery test: one fact in the signature row\n#Test fn save_survives_write_faults() =[Fs.Write?]=> {\n    dir :: testing.scratch_dir()\n    path :: dir.path(\"config.jet\")\n    store :: Store.{ user: \"priya\" }\n    save(store, path) ?? {\n        // an injected failure lands here, like a real full disk\n        assert(Store.load(path)? == Store.default())  // old data intact\n        return\n    }\n    assert(Store.load(path)? == store)                // clean write landed\n}\n\n$ jet test\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)"
+          "name": "Fault mark inside the effect row",
+          "detail": "A per-effect question-mark suffix in the signature row: the harness fails the marked effects. The owner reviewed this shape and found it confusing. The deeper defect stands alone. Effect rows never carry failure information anywhere else in Jet, so the mark teaches a false lesson about rows. It also sits postfix while the deny mark sits prefix.",
+          "technical": "Row grammar gains a test-only per-effect suffix; refused outside test signatures. Same Prelude harness loop as option A.",
+          "code": "#Test fn save_survives_write_faults() =[Fs.Write?]=> {\n    …same body as option A…\n}"
         },
         {
           "key": "C",
           "name": "Harness flag only: jet test --faults",
-          "detail": "Source stays exactly as today. The command line picks the roots: jet test --faults Fs.Write,Mem.Alloc runs every selected test under the loop. Good for a broad sweep over an existing suite without touching source. The loss is truth in the source: a test that exists to prove fault recovery does not say so, and CI must carry the flag out-of-band forever.",
-          "technical": "No syntax change. The loop lives in the same Prelude harness part; the flag selects roots globally. A per-test contract is impossible to state in source.",
+          "detail": "Source stays exactly as today. The command line picks the roots: jet test --faults Fs.Write runs every selected test under the loop. Good for a broad sweep over an existing suite. The loss is truth in the source: a test that exists to prove fault recovery does not say so, and CI must carry the flag out-of-band forever.",
+          "technical": "No syntax change. The same Prelude harness part; the flag selects roots globally.",
           "code": "$ jet test --faults Fs.Write\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)\n// source shows no trace of the fault contract"
         },
         {
           "key": "D",
           "name": "A testing.faults library API",
-          "detail": "A test calls testing.faults(.Fs.Write) { work } around the fallible section. Plans become ordinary values, reusable and composable, and no grammar changes. The loss is the shape the owner already rejected once: the contract hides inside the body behind a nested block, two indentation levels deep, instead of standing in the signature.",
-          "technical": "Library function over the same Prelude harness part. The closure re-runs per iteration; determinism rules identical to option A.",
-          "code": "#Test fn save_survives_write_faults(tmp: TempDir) {\n    testing.faults(.Fs.Write) {\n        …work and asserts, nested…\n    }\n}"
+          "detail": "A test calls testing.faults(.Fs.Write) { work } around the fallible section. Plans become ordinary values, reusable and composable. The loss is the shape the owner rejected first: the contract hides in a nested block inside the body, two levels deep, instead of standing at the declaration.",
+          "technical": "Library function over the same Prelude harness part; closure re-runs per iteration.",
+          "code": "#Test fn save_survives_write_faults() {\n    testing.faults(.Fs.Write) {\n        …work and asserts, nested…\n    }\n}"
         }
       ],
       "comparisons": [
@@ -168236,24 +168241,24 @@
           "code": "// simulation harness, not a per-test surface"
         }
       ],
-      "rec": "B",
+      "rec": "A",
       "recommendation": {
-        "why": "The whole contract sits in the signature row a reader already knows: the question-mark suffix names exactly which effects the harness fails, and the deny mark keeps its one job. The common test stays zero-ceremony. The body proves recovery on the same error rail production code uses, with plain asserts and no nesting.",
+        "why": "The fault plan is harness configuration, and the marker is the harness's one surface, so the contract lands where a reader already looks. The signature stays a pure contract, the body proves recovery on the ordinary error rail, and the common test gains nothing to learn. No new glyph enters the language.",
         "whyNot": [
           {
-            "key": "A",
-            "reason": "The keyword change is a larger commitment the owner has declined for now; the fault mark needs none of it."
+            "key": "B",
+            "reason": "Rows say what code touches; return types say what can fail. A failure mark inside the row teaches a false lesson, and the owner found it confusing on first read."
           },
           {
             "key": "C",
-            "reason": "The fault contract vanishes from the source. A reader cannot tell a recovery test from an ordinary one, and CI flags become load-bearing truth."
+            "reason": "The fault contract vanishes from the source, and CI flags become load-bearing truth."
           },
           {
             "key": "D",
-            "reason": "It is the rejected shape: the contract hides in a nested block instead of the signature, and a second closure vocabulary arrives for something the row can say."
+            "reason": "The contract hides in a nested block inside the body, and a second closure vocabulary arrives for something one marker argument can say."
           }
         ],
-        "tradeoff": "The effect-row grammar gains one suffix that is legal only on tests. That narrow scope is accepted because ordinary functions already state failure handling through fallible return types."
+        "tradeoff": "The marker line grows when faults are named, and marker arguments carry semantics rather than metadata alone. That is accepted because #Test already owns how the harness runs the body, and the argument only configures that run."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -168261,9 +168266,9 @@
       "reviewPasses": {
         "base": "The first draft compared marker arguments, a library API, a CLI flag, substitution declarations, and a scope member, and recommended the scope member.",
         "boilOcean": "The breadth pass added whole-process simulation (FoundationDB) and per-module fault manifests; both were folded away because the card's claim is per-test recovery, not a platform.",
-        "hybrid": "The hybrid pass merged the owner's function-mirror direction with the loop semantics: fault marks in the signature row. After the owner declined the keyword half, the marks were re-based onto the unchanged #Test fn form.",
-        "cooperative": "The cooperative pass strengthened the CLI flag as the zero-source-change sweep and the library API as the reusable-plan story, and kept both as honest options.",
-        "adversarial": "This pass attacked the question-mark suffix for glyph collision: it survives because the deny mark keeps its one job, the question mark already means may-fail, and the suffix is refused outside tests. It also confirmed the common test carries zero new ceremony and fixtures stay in the body, answering the owner's TempDir and frequency questions."
+        "hybrid": "The hybrid pass merged the loop semantics with the owner's readability bar across three drafts: scope member, then row suffix, then marker argument. The marker argument kept the declaration-site contract while dropping the new glyph.",
+        "cooperative": "The cooperative pass strengthened the CLI flag as the zero-source-change sweep and the library API as the reusable-plan story, and kept both as honest options. It also gave the row suffix its strongest reading before the owner review rejected it.",
+        "adversarial": "This pass killed the row suffix: rows carry no failure information anywhere else in Jet, the mark sat postfix against a prefix deny, and the owner could not read it. It confirmed deny is not reusable (deny proves absence; injection fails a present effect) and that the common test carries zero new ceremony."
       },
       "checkInstructions": null,
       "draft": false,
@@ -170011,6 +170016,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-12T19:02:46.732Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c0jr1xem",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-08-12T19:02:46.169Z",
+      "by": "fable-e3-audit",
+      "action": "decision.update",
+      "ref": "D-TESTFAULT1",
+      "note": ""
+    },
     {
       "at": "2026-08-12T18:59:26.494Z",
       "by": "fable-e3-audit",
@@ -173496,20 +173515,6 @@
       "action": "card.criteria-add",
       "ref": "c027050z",
       "note": "#1 The probe program (self.source += \"AAA\") runs under default "
-    },
-    {
-      "at": "2026-08-12T18:04:00.416Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c027050z",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:59.772Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0s3zt5q",
-      "note": "#3 tests/jit_gaps.txt:242 deleted; jit_coverage_audit green wit"
     }
   ],
   "nextNum": 368,
