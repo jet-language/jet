@@ -37,20 +37,6 @@ pub const TYPE_PLANE_CLASSIFICATION: &str = "Type.Classification";
 pub const TYPE_PLANE_EXACTNESS: &str = "Type.Exactness";
 pub const TYPE_PLANE_OBLIGATION: &str = "Type.Obligation";
 
-/// D-TYPE2-PLANE1=A: the type-plane vocabulary has one source in the one
-/// registry. Consumers enumerate this slice instead of keeping a second list
-/// of planes beside the rows.
-pub const TYPE_PLANE_ROWS: &[(&str, bool)] = &[
-    (TYPE_PLANE_NOMINAL, true),
-    (TYPE_PLANE_INTERVAL, true),
-    (TYPE_PLANE_LAYOUT, true),
-    (TYPE_PLANE_MEASURE, true),
-    (TYPE_PLANE_DIMENSION, true),
-    (TYPE_PLANE_CLASSIFICATION, false),
-    (TYPE_PLANE_EXACTNESS, true),
-    (TYPE_PLANE_OBLIGATION, false),
-];
-
 /// What a row attaches to. This is the whole difference between the six uses
 /// of the one table, so `RowKind` is read off the target rather than stated
 /// twice.
@@ -337,12 +323,18 @@ impl DiagnosticRow {
 /// type only holds their parsed form for the one registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FactDeclaration {
+    /// The identifier written after `fact`. A compiler namespace may publish a
+    /// dotted registry name through the `$name` column while keeping the
+    /// declaration ordinary Jet source.
+    pub source_name: &'static str,
     pub name: &'static str,
     pub target: RowTarget,
     pub safe_direction: SafeDirection,
     pub gates: &'static [&'static str],
     pub published_by: Option<&'static str>,
     pub decision: &'static str,
+    /// D-TYPE2-FOUND1=A: identity-bearing plane metadata.
+    pub identity_bearing: bool,
 }
 
 /// The one authority for the non-code registration rows.
@@ -603,12 +595,14 @@ fn fact_declaration(line: &str) -> FactDeclaration {
     let close = rest
         .rfind(')')
         .unwrap_or_else(|| panic!("fact declaration without a closing `)`: {line}"));
-    let name = leak(rest[..open].trim());
+    let source_name = leak(rest[..open].trim());
+    let mut name = source_name;
     let mut target = None;
     let mut safe_direction = None;
     let mut gates = None;
     let mut published_by = None;
     let mut decision = None;
+    let mut identity_bearing = false;
 
     for entry in split_top_level(&rest[open + 1..close]) {
         let (label, value) = entry
@@ -620,12 +614,15 @@ fn fact_declaration(line: &str) -> FactDeclaration {
             "$safe" => safe_direction = Some(fact_direction(value, line)),
             "$gates" => gates = Some(fact_gates(value, line)),
             "$proved_by" => published_by = Some(leak(value)),
+            "$name" => name = leak(&unquote(value, line)),
+            "$identity" => identity_bearing = fact_bool(value, line),
             "$decision" => decision = Some(leak(&unquote(value, line))),
             other => panic!("unknown fact column `{other}` in {line}"),
         }
     }
 
     FactDeclaration {
+        source_name,
         name,
         target: target.unwrap_or_else(|| panic!("fact declaration without `$holds`: {line}")),
         safe_direction: safe_direction
@@ -633,6 +630,7 @@ fn fact_declaration(line: &str) -> FactDeclaration {
         gates: gates.unwrap_or_else(|| panic!("fact declaration without `$gates`: {line}")),
         published_by,
         decision: decision.unwrap_or_else(|| panic!("fact declaration without `$decision`: {line}")),
+        identity_bearing,
     }
 }
 
@@ -652,6 +650,14 @@ fn fact_direction(value: &str, line: &str) -> SafeDirection {
         "Discharge" => SafeDirection::Discharge,
         "None" => SafeDirection::None,
         other => panic!("`{other}` is not a safe direction in {line}"),
+    }
+}
+
+fn fact_bool(value: &str, line: &str) -> bool {
+    match value {
+        "true" => true,
+        "false" => false,
+        other => panic!("`{other}` is not a fact boolean in {line}"),
     }
 }
 
@@ -739,10 +745,7 @@ fn fact_row(declaration: &FactDeclaration) -> RegistryRow {
     RegistryRow {
         name: declaration.name,
         target: declaration.target,
-        // Existing D-FACT rows are scope/value facts, not Type-v2 identity
-        // declarations. Type-v2 planes state their identity policy explicitly
-        // in `type_plane_row` below.
-        identity_bearing: false,
+        identity_bearing: declaration.identity_bearing,
         safe_direction: declaration.safe_direction,
         gates: declaration.gates,
         published_by: declaration.published_by,
@@ -801,23 +804,6 @@ fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
         guard: None,
         diagnostic: None,
         decision: "D-VERDICT-1455-1",
-    }
-}
-
-const fn type_plane_row(name: &'static str, identity_bearing: bool) -> RegistryRow {
-    RegistryRow {
-        name,
-        target: RowTarget::Value,
-        identity_bearing,
-        safe_direction: SafeDirection::Gain,
-        gates: &[],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        diagnostic: None,
-        decision: "D-TYPE2-FOUND1",
     }
 }
 
@@ -935,12 +921,6 @@ static REGISTRY: LazyLock<Vec<RegistryRow>> = LazyLock::new(|| {
         .iter()
         .map(marker_row)
         .chain(FACT_DECLARATIONS.iter().map(fact_row))
-        .chain(
-            TYPE_PLANE_ROWS
-                .iter()
-                .copied()
-                .map(|(name, identity_bearing)| type_plane_row(name, identity_bearing)),
-        )
         .chain(TRUTH_ROWS.iter().copied())
         .chain(DIAGNOSTIC_ROWS.iter().map(diagnostic_registry_row))
         .collect()
@@ -962,6 +942,14 @@ pub fn row(name: &str) -> Option<&'static RegistryRow> {
     rows().iter().find(|row| row.name == name)
 }
 
+/// Type-plane rows come from the readable Prelude declarations.
+pub fn type_plane_rows() -> impl Iterator<Item = &'static RegistryRow> {
+    fact_declarations()
+        .iter()
+        .filter(|declaration| declaration.name.starts_with("Type."))
+        .filter_map(|declaration| row(declaration.name))
+}
+
 /// The drift guard for the two law columns (D-FACT-LAW1=B), and for the one
 /// name space the table keeps. One implementation: the law-zero coverage guard
 /// calls this, and no kind gets a second one.
@@ -972,8 +960,12 @@ pub fn row(name: &str) -> Option<&'static RegistryRow> {
 /// word nothing spells, and a name registered twice.
 pub fn law_violations() -> Vec<String> {
     let mut violations = check(rows());
-    for (name, identity_bearing) in TYPE_PLANE_ROWS {
-        let matches: Vec<_> = rows().iter().filter(|row| row.name == *name).collect();
+    for declaration in fact_declarations()
+        .iter()
+        .filter(|declaration| declaration.name.starts_with("Type."))
+    {
+        let name = declaration.name;
+        let matches: Vec<_> = rows().iter().filter(|row| row.name == name).collect();
         if matches.len() != 1 {
             violations.push(format!(
                 "type plane `{name}` has {} registry rows; one plane needs one row",
@@ -988,7 +980,7 @@ pub fn law_violations() -> Vec<String> {
                 row.kind().name()
             ));
         }
-        if row.identity_bearing != *identity_bearing {
+        if row.identity_bearing != declaration.identity_bearing {
             violations.push(format!(
                 "type plane `{name}` identity policy drifted from the one table"
             ));
@@ -1103,9 +1095,10 @@ fn truth_violations(row: &RegistryRow) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        diagnostic, diagnostic_registry_rows, diagnostic_rows, law_violations, row, rows,
+        diagnostic, diagnostic_registry_rows, diagnostic_rows, fact_declarations, law_violations,
+        row, rows, type_plane_rows,
         RowKind, RowTarget, SafeDirection, TYPE_PLANE_INTERVAL, TYPE_PLANE_OBLIGATION,
-        TYPE_PLANE_ROWS, StructuredFix,
+        StructuredFix,
     };
 
     #[test]
@@ -1152,11 +1145,16 @@ mod tests {
 
     #[test]
     fn every_type_plane_has_one_row_from_the_shared_list() {
-        for (name, identity_bearing) in TYPE_PLANE_ROWS {
-            let matches: Vec<_> = rows().iter().filter(|row| row.name == *name).collect();
-            assert_eq!(matches.len(), 1, "type plane `{name}` must have one row");
-            assert_eq!(matches[0].kind(), RowKind::Plane);
-            assert_eq!(matches[0].identity_bearing, *identity_bearing);
+        let planes: Vec<_> = type_plane_rows().collect();
+        assert_eq!(planes.len(), 8);
+        for row in planes {
+            let declaration = fact_declarations()
+                .iter()
+                .find(|declaration| declaration.name == row.name)
+                .expect("type plane has a Prelude declaration");
+            assert_eq!(row.kind(), RowKind::Plane);
+            assert_eq!(row.identity_bearing, declaration.identity_bearing);
+            assert_eq!(row.decision, declaration.decision);
         }
     }
 

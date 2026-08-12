@@ -233,10 +233,14 @@ fn the_one_table_holds_every_kind() {
         assert_eq!(registered.safe_direction, SafeDirection::None);
     }
 
-    for (name, _) in Registry::TYPE_PLANE_ROWS {
-        let row = Registry::row(name)
-            .unwrap_or_else(|| panic!("type plane `{name}` is not in the one table"));
+    for row in Registry::type_plane_rows() {
         assert_eq!(row.kind(), RowKind::Plane);
+        let declaration = Registry::fact_declarations()
+            .iter()
+            .find(|declaration| declaration.name == row.name)
+            .unwrap_or_else(|| panic!("type plane `{}` has no Prelude declaration", row.name));
+        assert_eq!(row.identity_bearing, declaration.identity_bearing);
+        assert_eq!(row.decision, declaration.decision);
     }
 }
 
