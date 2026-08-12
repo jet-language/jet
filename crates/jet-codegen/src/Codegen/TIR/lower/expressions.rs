@@ -2993,15 +2993,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // I3: sema already proved this literal names a real struct. A local
+            // name passes through unchanged; only a foreign import needs its
+            // canonical identity. The `jet run` TIR path lowers before the AOT
+            // context registers local structs, so a missing map entry here is
+            // ordinary, not an error.
             let resolved_name = if cx.struct_fields.contains_key(type_name) {
                 type_name.clone()
+            } else if let Some(foreign) = cx.foreign_type_identity("", type_name) {
+                foreign
             } else {
-                cx.foreign_type_identity("", type_name).unwrap_or_else(|| {
-                    jet_foundation::ice!(
-                        None,
-                        "unqualified struct literal `{type_name}` has no canonical nominal identity (I3)"
-                    )
-                })
+                type_name.clone()
             };
             let resolved_ty = if type_args.is_empty() {
                 Type::Named(resolved_name.clone())
