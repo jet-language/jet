@@ -359,7 +359,6 @@ impl Diagnostic {
         fix: String,
         span: Option<Span>,
     ) -> Self {
-        let code = code.into();
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         let mut d = Diagnostic {
@@ -501,12 +500,12 @@ impl Diagnostic {
         span: Option<Span>,
     ) -> Self {
         let code = code.into();
-        let row = crate::Registry::diagnostic(&code)
-            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+        let row = crate::Registry::diagnostic(code.as_str())
+            .unwrap_or_else(|| panic!("diagnostic `{}` has no typed row", code.as_str()));
         Diagnostic {
             moment: row.moment,
             severity: row.severity,
-            code,
+            code: code.as_str().to_string(),
             what,
             why,
             fix,
