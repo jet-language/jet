@@ -19,13 +19,14 @@ use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
-use crate::Codegen::TIR::lower::lower_incdec_place;
+use crate::Codegen::TIR::lower::lower_incdec;
 use crate::Codegen::TIR::lower_method_call;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_stmts;
@@ -130,7 +131,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
 /// keeps long fluent APIs off the Rust call stack while preserving the normal
 /// method dispatcher for every link.
 fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    let mut calls = Vec::new();
+    let mut calls = TirWorklist::new();
     let mut cursor = e;
     while let Expr::MethodCall { receiver, .. } = cursor {
         calls.push(cursor);
@@ -178,35 +179,13 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     lowered_receiver.expect("method chain is non-empty")
 }
 
+#[inline(never)]
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let mut e = e;
     while let Expr::Paren(inner, _) = e {
         e = inner;
     }
-    thread_local! {
-        static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    }
-    let too_deep = DEPTH.with(|d| {
-        // Keep well under Linux default stack for large lower frames (ws/http).
-        if d.get() > 256 {
-            true
-        } else {
-            d.set(d.get() + 1);
-            false
-        }
-    });
-    if too_deep {
-        return TExpr {
-            ty: Type::Int,
-            kind: crate::Codegen::TIR::TExprKind::Todo {
-                line: 0,
-                expected_type: "lower depth".into(),
-            },
-        };
-    }
-    let out = lower_expr_inner(e, cx, env);
-    DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-    out
+    lower_expr_inner(e, cx, env)
 }
 
 /// D-BOUND-HEAD1=A: comptime can lower a typed head before sema has rewritten
@@ -436,6 +415,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     }
 }
 
+#[inline(never)]
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width, _) => TExpr {
@@ -697,15 +677,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             postfix,
             ..
         } => {
-            let read = lower_expr(operand, cx, env);
-            let place = lower_incdec_place(operand, cx, env);
+            let (place, ty) = lower_incdec(operand, cx, env);
             TExpr {
-                ty: read.ty.clone(),
+                ty: ty.clone(),
                 kind: TExprKind::IncDec {
                     op: *op,
                     place,
                     postfix: *postfix,
-                    ty: read.ty,
+                    ty,
                 },
             }
         }
@@ -3141,20 +3120,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// Nested float unary/binary operands inherit the same width so TirBridge
 /// doesn't mix F32/F64 in `F32.{ -0.0 }` / `F32.{ max + max }`.
 fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
-    expr.ty = head.clone();
-    if !matches!(head, Type::Float | Type::Float32) {
-        return;
-    }
-    match &mut expr.kind {
-        TExprKind::Unary { operand, .. } => retag_numeric_width(operand, head),
-        TExprKind::Binary { lhs, rhs, .. } => {
-            retag_numeric_width(lhs, head);
-            retag_numeric_width(rhs, head);
+    let mut work = TirWorklist::new();
+    work.push(expr);
+    while let Some(expr) = work.pop() {
+        expr.ty = head.clone();
+        if !matches!(head, Type::Float | Type::Float32) {
+            continue;
         }
-        TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => {
-            retag_numeric_width(inner, head)
+        match &mut expr.kind {
+            TExprKind::Unary { operand, .. } => work.push(operand),
+            TExprKind::Binary { lhs, rhs, .. } => {
+                work.push(rhs);
+                work.push(lhs);
+            }
+            TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => work.push(inner),
+            _ => {}
         }
-        _ => {}
     }
 }
 
@@ -3165,13 +3146,14 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
 /// materialize the owned value at this semantic boundary.
 pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     fn reads_borrowed_place(e: &Expr, env: &LowerEnv) -> bool {
-        match e {
-            Expr::Ident(name, _) => env.is_borrowed(name),
-            Expr::Field(base, _, _) | Expr::Index { base, .. } => {
-                reads_borrowed_place(base, env)
+        let mut current = e;
+        loop {
+            match current {
+                Expr::Ident(name, _) => return env.is_borrowed(name),
+                Expr::Field(base, _, _) | Expr::Index { base, .. } => current = base,
+                Expr::Paren(inner, _) => current = inner,
+                _ => return false,
             }
-            Expr::Paren(inner, _) => reads_borrowed_place(inner, env),
-            _ => false,
         }
     }
 

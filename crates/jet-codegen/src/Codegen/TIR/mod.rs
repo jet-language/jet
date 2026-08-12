@@ -66,6 +66,52 @@ pub struct JitSpawnCapture {
     pub clone_at_spawn: bool,
 }
 
+/// One bounded traversal primitive for TIR lowering consumers.
+///
+/// The stack is heap-owned and stores pending nodes, so deep source/TIR
+/// structure does not consume the host call stack. Consumers use the same
+/// push/pop order for AST scans, TIR statement lowering, and nested-lambda
+/// shape inspection.
+pub struct TirWorklist<T> {
+    pending: Vec<T>,
+}
+
+impl<T> TirWorklist<T> {
+    pub fn new() -> Self {
+        Self { pending: Vec::new() }
+    }
+
+    pub fn from_reversed<I>(items: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut pending = items.into_iter().collect::<Vec<_>>();
+        pending.reverse();
+        Self { pending }
+    }
+
+    pub fn push(&mut self, item: T) {
+        self.pending.push(item);
+    }
+
+    pub fn extend<I>(&mut self, items: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
+        self.pending.extend(items);
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        self.pending.pop()
+    }
+}
+
+impl<T> Default for TirWorklist<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub enum TJitSpawnBody {
     Expr(Box<TExpr>),
     Block {

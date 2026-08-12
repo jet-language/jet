@@ -36,6 +36,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TPatternPosition;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::BranchClass;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 use crate::Diagnostics::Span;
@@ -323,11 +324,15 @@ mod borrowed_pattern_tests {
 type IfBinding = (String, TLocal, Option<Type>);
 
 fn flatten_and<'a>(cond: &'a Expr, terms: &mut Vec<&'a Expr>) {
-    if let Expr::Binary(BinOp::And, left, right, _) = cond {
-        flatten_and(left, terms);
-        flatten_and(right, terms);
-    } else {
-        terms.push(cond);
+    let mut work = TirWorklist::new();
+    work.push(cond);
+    while let Some(current) = work.pop() {
+        if let Expr::Binary(BinOp::And, left, right, _) = current {
+            work.push(right);
+            work.push(left);
+        } else {
+            terms.push(current);
+        }
     }
 }
 

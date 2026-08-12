@@ -77,12 +77,7 @@ fn run() {
 
 #[test]
 fn named_args_example_runs_on_resident_jit_and_forced_interpreter() {
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(named_args_example_runs_on_resident_jit_and_forced_interpreter_inner)
-        .expect("named_args tier proof thread")
-        .join()
-        .expect("named_args tier proof thread panicked");
+    named_args_example_runs_on_resident_jit_and_forced_interpreter_inner();
 }
 
 fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
@@ -156,20 +151,7 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
 
 #[test]
 fn bounded_workers_example_has_total_tir() {
-    // Sema and TIR lowering recurse per source-nesting level with large debug
-    // frames (#1319). Direct calls to jet_jit's lowering helpers bypass the
-    // 32 MiB compiler worker thread that public entry points like
-    // `jet::compile` route through, so they still run on libtest's default
-    // 2 MiB thread. bounded_workers's four sequential `tasks.spawn` closures
-    // plus channel/generic inference push that over the edge. Same fix as
-    // #1614/#1615: give this test the same 16 MiB thread jit_coverage_audit
-    // uses, instead of overflowing.
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(bounded_workers_example_has_total_tir_inner)
-        .expect("bounded_workers TIR check thread")
-        .join()
-        .expect("bounded_workers TIR check thread panicked");
+    bounded_workers_example_has_total_tir_inner();
 }
 
 fn bounded_workers_example_has_total_tir_inner() {

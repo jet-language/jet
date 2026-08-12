@@ -13,7 +13,8 @@ use jet_codegen::Codegen::TIR::{
     ListSpreadPart,
     TFnValueKind, TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern,
     TPatternPosition, TPlace,
-    TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind, TZipFillMode,
+    TStaticOwner, TStmt, TStrPart, TirWorklist, TTypedTextForm, TTypedTextInterpKind,
+    TZipFillMode,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -74,6 +75,12 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) spawn_func_ids: &'a [FuncId],
     pub(crate) spawn_lambdas: &'a [TJitSpawnLambda],
     pub(crate) loop_stack: Vec<LoopTargets>,
+    /// Result-loop exits reached by a break while lowering the current function.
+    /// A value-loop body may break an outer named loop, leaving its own exit
+    /// block unreachable; keeping that fact prevents lowering a fake fallthrough
+    /// path after the non-local exit.
+    pub(crate) reachable_break_exits: HashSet<Block>,
+    pub(crate) reachable_continue_blocks: HashSet<Block>,
     pub(crate) dead: bool,
     pub(crate) next_var: u32,
     /// Owning struct for inherent methods (`Point::dist_sq` → `Point`).
@@ -2312,6 +2319,14 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    fn mark_break_exit(&mut self, targets: &LoopTargets) {
+        self.reachable_break_exits.insert(targets.break_block);
+    }
+
+    fn mark_continue_target(&mut self, targets: &LoopTargets) {
+        self.reachable_continue_blocks.insert(targets.continue_block);
+    }
+
     fn emit_loop_fallback(
         &mut self,
         label: Option<&str>,
@@ -2319,6 +2334,11 @@ impl LowerCtx<'_, '_> {
         is_continue: bool,
     ) -> Result<(), String> {
         let targets = self.loop_targets(label, kind)?;
+        if is_continue {
+            self.mark_continue_target(&targets);
+        } else {
+            self.mark_break_exit(&targets);
+        }
         let destination = if is_continue {
             targets.continue_block
         } else {
@@ -2354,7 +2374,8 @@ impl LowerCtx<'_, '_> {
     /// already-terminated Cranelift block (Cranelift rejects instructions
     /// after a block terminator).
     pub(crate) fn lower_stmts(&mut self, stmts: &[TStmt]) -> Result<(), String> {
-        for stmt in stmts {
+        let mut work = TirWorklist::from_reversed(stmts.iter());
+        while let Some(stmt) = work.pop() {
             self.lower_stmt(stmt)?;
         }
         Ok(())
@@ -2566,6 +2587,11 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(body_block);
         self.lower_stmts_scoped(body)?;
         self.loop_stack.pop();
+        // `break(outer, value)` can terminate this body without ever reaching
+        // this value loop's exit. Do not manufacture a fallthrough value for
+        // that unreachable block; keep the heap worklist focused on reachable
+        // lowering work after the non-local edge.
+        let reaches_exit = self.reachable_break_exits.contains(&exit);
         if !self.dead {
             self.b.ins().jump(header, &[]);
         }
@@ -2573,8 +2599,26 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(exit);
         self.b.seal_block(exit);
-        self.dead = false;
-        Ok(self.b.block_params(exit)[0])
+        if reaches_exit {
+            self.dead = false;
+            Ok(self.b.block_params(exit)[0])
+        } else {
+            self.dead = true;
+            Ok(self.dead_value(ty))
+        }
+    }
+
+    fn dead_value(&mut self, ty: &Type) -> Value {
+        let clif = self
+            .meta
+            .clif_ty(ty)
+            .or_else(|| matches!(ty, Type::Named(name) if name == "Unit").then_some(types::I8))
+            .unwrap_or(types::I64);
+        if clif == types::F64 {
+            self.b.ins().f64const(0.0)
+        } else {
+            self.b.ins().iconst(clif, 0)
+        }
     }
 
     fn lower_mixed_switch(
@@ -2751,6 +2795,9 @@ impl LowerCtx<'_, '_> {
                     }
                 }
                 let val = self.lower_expr(init)?;
+                if self.dead {
+                    return Ok(());
+                }
                 // TIR often stamps `Unit` on void calls and some handle results;
                 // prefer the Cranelift value's real ABI over guessing I8 vs I64.
                 let ty = if matches!(&init.ty, Type::Named(n) if n == "Unit") {
@@ -3219,6 +3266,9 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.lower_expr(value)?
                 };
+                if self.dead {
+                    return Ok(());
+                }
                 if let Some(slot) = self.raw_slots.get(&key).copied() {
                     self.b.ins().stack_store(val, slot, 0);
                 } else {
@@ -3468,6 +3518,9 @@ impl LowerCtx<'_, '_> {
                         )?
                     }
                 };
+                if self.dead {
+                    return Ok(());
+                }
                 let then_block = self.b.create_block();
                 let else_block = self.b.create_block();
                 let merge_block = self.b.create_block();
@@ -3528,6 +3581,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(body_block);
                 self.lower_stmts_scoped(body)?;
                 self.loop_stack.pop();
+                let reaches_exit = self.reachable_break_exits.contains(&exit);
                 if !self.dead {
                     self.b.ins().jump(header, &[]);
                 }
@@ -3535,7 +3589,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(exit);
                 self.b.seal_block(exit);
-                self.dead = false;
+                self.dead = !reaches_exit;
             }
             TStmt::While {
                 label, cond, body, ..
@@ -3580,6 +3634,9 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 self.lower_stmt(init)?;
+                if self.dead {
+                    return Ok(());
+                }
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let step_block = self.b.create_block();
@@ -3589,6 +3646,13 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(header);
                 self.emit_trap_check()?;
                 let cond_val = self.lower_expr(cond)?;
+                if self.dead {
+                    self.b.seal_block(header);
+                    self.b.seal_block(body_block);
+                    self.b.seal_block(step_block);
+                    self.b.seal_block(exit);
+                    return Ok(());
+                }
                 self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
@@ -3603,17 +3667,25 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(body_block);
                 self.lower_stmts_scoped(body)?;
                 self.loop_stack.pop();
-                if !self.dead {
+                let reaches_step = !self.dead
+                    || self.reachable_continue_blocks.contains(&step_block);
+                if reaches_step {
                     self.b.ins().jump(step_block, &[]);
                 }
 
                 self.b.switch_to_block(step_block);
                 self.b.seal_block(step_block);
-                self.dead = false;
-                if let Some(step) = step {
-                    self.lower_stmt(step)?;
+                if reaches_step {
+                    self.dead = false;
+                    if let Some(step) = step {
+                        self.lower_stmt(step)?;
+                    }
+                } else {
+                    self.dead = true;
                 }
-                if !self.dead { self.b.ins().jump(header, &[]); }
+                if reaches_step && !self.dead {
+                    self.b.ins().jump(header, &[]);
+                }
                 self.b.seal_block(header);
 
                 self.b.switch_to_block(exit);
@@ -3701,6 +3773,7 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Break(label) => {
                 let targets = self.loop_targets(label.as_deref(), "break")?;
+                self.mark_break_exit(&targets);
                 if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -3733,6 +3806,10 @@ impl LowerCtx<'_, '_> {
                     ));
                 }
                 let value = self.lower_expr(value)?;
+                if self.dead {
+                    return Ok(());
+                }
+                self.mark_break_exit(&targets);
                 if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -3754,6 +3831,7 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Continue(label) => {
                 let targets = self.loop_targets(label.as_deref(), "continue")?;
+                self.mark_continue_target(&targets);
                 if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -8724,6 +8802,9 @@ impl LowerCtx<'_, '_> {
     /// (`Source/JitBackend.rs`) retry through AOT compilation and then the
     /// tier-0 interpreter, so unsupported-here only costs `jet dev` JIT speed.
     pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
+        if self.dead {
+            return Ok(self.dead_value(&expr.ty));
+        }
         match &expr.kind {
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
             TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
@@ -8945,6 +9026,9 @@ impl LowerCtx<'_, '_> {
                         return Err("jit if-expression pattern match unsupported".to_string())
                     }
                 };
+                if self.dead {
+                    return Ok(self.dead_value(&expr.ty));
+                }
                 let ret_ty = clif_ty(&expr.ty).ok_or("jit if-expr result type unsupported")?;
                 let then_block = self.b.create_block();
                 let else_block = self.b.create_block();
