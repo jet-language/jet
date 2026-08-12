@@ -174,7 +174,7 @@ impl SymbolDB {
                 }
             }
         }
-        let defs = convert_defs(&self.defs, &self.view_provenance, bundle);
+        let defs = convert_defs(&self.defs, &self.view_provenance, &self.members, bundle);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
         let definition_facts = build_definition_facts(&defs, &self.nodes, bundle);

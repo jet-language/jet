@@ -2192,10 +2192,6 @@ fn start_one_with_recovery(
                 for (name, value) in &service_env {
                     command.arg(format!("--setenv={name}={value}"));
                 }
-                for name in &env.unset_vars {
-                    command.arg(format!("--unsetenv={name}"));
-                }
-                command.arg(format!("--unsetenv={SERVICE_SUPERVISOR_ENV}"));
                 command.arg("--");
                 command.arg(&resolved.run[0]);
                 command.args(&resolved.run[1..]);

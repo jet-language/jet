@@ -809,6 +809,7 @@ fn origin_text(origin: &MemberOrigin) -> String {
 pub(crate) fn convert_defs(
     defs: &[SymDef],
     view_provenance: &std::collections::HashMap<String, jet_foundation::AST::ViewProvenanceMap>,
+    members: &[MemberFact],
     bundle: &ProgramBundle,
 ) -> Vec<SymbolDef> {
     defs.iter()
@@ -817,6 +818,10 @@ pub(crate) fn convert_defs(
                 SymKind::EnumVariant { parent } | SymKind::Field { parent, .. } => {
                     Some(parent.as_str())
                 }
+                SymKind::Function { .. } => members
+                    .iter()
+                    .find(|member| member.identity == d.identity)
+                    .map(|member| member.owner.as_str()),
                 _ => None,
             };
             SymbolDef {

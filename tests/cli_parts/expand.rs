@@ -815,9 +815,8 @@ fn stale_workspace_lock_never_becomes_an_empty_member_index() {
 #[test]
 fn service_probe_unavailable_without_dev_reports_diagnostic() {
     let dir = isolated_cwd("service_probe_no_env");
-    fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
-    fs::write(dir.join("src/main.jet"), r#"module env.dev {
+    fs::write(dir.join("run.jet"), r#"module env.dev {
     services: { mydb: { run: ["echo", "mydb"], ready: "true" } }
 }
 

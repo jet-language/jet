@@ -929,7 +929,7 @@ impl AuthorityResolver {
             }
             let name_text = name.to_string_lossy();
             if name_text.starts_with('.')
-                || matches!(name_text.as_ref(), "target" | "build" | "node_modules")
+                || matches!(name_text.as_ref(), "target" | "build" | "node_modules" | "bin")
             {
                 continue;
             }
