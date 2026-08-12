@@ -70,5 +70,6 @@ pub use jet_pkg_model::{
     AdaBind, CBind, CFFI, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, LuaBind, Package, PascalBind, PerlBind, PhpBind, Policy, RBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, ScriptDeps,
     Store,
 };
+pub use jet_pkg_model::Authority;
 pub use jet_pkg_model::JetLib::{JetLibArtifact, JetLibStamp};
 pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};

@@ -288,7 +288,7 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
 
 fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
-    let Some(result) = WorkspaceFile::load(&dir) else {
+    let Some(source) = WorkspaceFile::resolve_workspace_source(&dir) else {
         theme.error_coded(
             "E1274",
             &format!("no overlay policy for `{query}`"),
@@ -296,6 +296,10 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
             "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.",
         );
         return 2;
+    };
+    let result = match source {
+        Ok(source) => WorkspaceFile::evaluate_source(&source.source, &dir, source.role),
+        Err(diagnostic) => Err(diagnostic),
     };
     let plan = match result {
         Ok(plan) => plan,
@@ -436,7 +440,21 @@ pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
         .unwrap_or(reference)
         .to_string();
     let workspace = workspace_root(&std::env::current_dir().unwrap_or_default());
-    let path = workspace.join(Syntax::WORKSPACE_FILE);
+    let path = match WorkspaceFile::resolve_workspace_source(&workspace) {
+        Some(Ok(source)) => source.path,
+        Some(Err(diagnostic)) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    &workspace.display().to_string(),
+                    "",
+                    std::slice::from_ref(&diagnostic),
+                )
+            );
+            return 2;
+        }
+        None => workspace.join(Syntax::WORKSPACE_FILE),
+    };
     let existing = std::fs::read_to_string(&path).ok();
     let next = Overlay::draft_overlay_source(
         existing.as_deref(),

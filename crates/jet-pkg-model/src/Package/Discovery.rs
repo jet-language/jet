@@ -2,7 +2,7 @@
 //! directory by finding the unique `.jet` file that declares `module <name>`.
 
 use super::strip_comments as strip_line_comments;
-use crate::Syntax;
+use crate::Authority::AuthorityResolver;
 use std::path::{Path, PathBuf};
 
 // ── package discovery (U10 Chunk 3) ─────────────────────────────────────────
@@ -20,23 +20,50 @@ pub enum DiscoveryError {
 /// file under `root` that declares `module <name> { … }` at the top level.
 ///
 /// Returns the **parent directory** of that file (the package's source tree).
-/// Skips `.jet/`, hidden paths (starting with `.`), and `target/`. Scans
-/// files in sorted order for determinism. Returns `DiscoveryError::NotFound`
-/// if no file declares the module, `DiscoveryError::Ambiguous` if more than
-/// one does.
+/// Skips `.jet/`, hidden paths (starting with `.`), build outputs, and
+/// `node_modules/`. Scans checked files in sorted order for determinism.
+/// Returns `DiscoveryError::NotFound` if no file declares the module,
+/// `DiscoveryError::Ambiguous` if more than one does.
 pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryError> {
     // This is an explicit named lookup, so D-SHAPE-MODULEINTERNAL1=A does not
     // filter `_name`; only callers enumerating modules automatically apply the
     // ModuleDecl discovery predicate.
-    let mut files = Vec::new();
-    walk_jet_files(root, &mut files);
+    let resolver = AuthorityResolver::open(root).map_err(|_| DiscoveryError::NotFound {
+        name: name.to_string(),
+    })?;
+    let files = resolver
+        .discover_source_files()
+        .map_err(|_| DiscoveryError::NotFound {
+            name: name.to_string(),
+    })?;
     let mut matches: Vec<PathBuf> = Vec::new();
     for file in &files {
-        if let Ok(text) = std::fs::read_to_string(file) {
-            if file_declares_module(&text, name) {
-                matches.push(file.clone());
-            }
+        if file
+            .relative
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name == crate::Syntax::PACKAGE_FILE || name == crate::Syntax::PAYLOAD_FILE
+            })
+        {
+            continue;
         }
+        let Ok(text) = file.text() else {
+            continue;
+        };
+        if file_declares_module(&text, name) {
+            if resolver.revalidate_file(file).is_err() {
+                return Err(DiscoveryError::NotFound {
+                    name: name.to_string(),
+                });
+            }
+            matches.push(file.path.clone());
+        }
+    }
+    if resolver.revalidate_root().is_err() {
+        return Err(DiscoveryError::NotFound {
+            name: name.to_string(),
+        });
     }
     match matches.len() {
         0 => Err(DiscoveryError::NotFound {
@@ -47,36 +74,9 @@ pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryE
             name: name.to_string(),
             paths: matches
                 .into_iter()
-                .map(|p| p.strip_prefix(root).unwrap_or(&p).to_path_buf())
+                .map(|p| p.strip_prefix(resolver.root()).unwrap_or(&p).to_path_buf())
                 .collect(),
         }),
-    }
-}
-
-/// Walk `dir` recursively, collecting sorted `.jet` file paths into `out`.
-/// Skips: paths whose name starts with `.` (hidden/`.jet/` managed folder)
-/// and `target/` directories.
-fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = rd.flatten().collect();
-    entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
-        let path = entry.path();
-        let fname = entry.file_name();
-        let fname_str = fname.to_string_lossy();
-        if fname_str.starts_with('.') || fname_str == "target" {
-            continue;
-        }
-        if path.is_dir() {
-            walk_jet_files(&path, out);
-        } else if path.extension().and_then(|x| x.to_str()) == Some(Syntax::FILE_EXT)
-            && fname_str != Syntax::PACKAGE_FILE
-            && fname_str != Syntax::PAYLOAD_FILE
-        {
-            out.push(path);
-        }
     }
 }
 
@@ -136,6 +136,7 @@ pub(super) fn file_declares_module(text: &str, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Syntax;
 
     fn tempdir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

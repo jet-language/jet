@@ -4,33 +4,60 @@
 //! `check_file` directly for document checking.
 
 use crate::Diagnostics::{Diagnostic, Severity};
+use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::Path;
 
-fn package_lints_deny(bundle: &crate::AST::ProgramBundle) -> Vec<String> {
+fn package_lints_deny(
+    bundle: &crate::AST::ProgramBundle,
+) -> Result<Vec<String>, Diagnostic> {
     let Some(entry) = bundle.modules.get(bundle.entry) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    // `compile_src`/eval bundles are intentionally filesystem-free. A package
-    // wall belongs only to a loaded project bundle, whose entry path is real.
-    if !entry.path.is_file() {
-        return Vec::new();
-    }
-    let path = bundle.project_root.join(crate::Syntax::PACKAGE_FILE);
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return Vec::new();
+    let resolver = match AuthorityResolver::open(&bundle.project_root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return Ok(Vec::new()),
+        Err(error) => return Err(error.diagnostic()),
     };
-    jet_foundation::LintPolicy::parse_package_source(&source)
-        .ok()
-        .flatten()
-        .unwrap_or_default()
+    let relative = entry
+        .path
+        .strip_prefix(resolver.root())
+        .or_else(|_| entry.path.strip_prefix(&bundle.project_root))
+        .map_err(|_| {
+            jet_pkg_model::Authority::AuthorityError::Escapes(entry.path.clone()).diagnostic()
+        })?;
+    let entry_file = match resolver.checked_file(relative) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return Ok(Vec::new()),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    resolver.revalidate_file(&entry_file).map_err(|error| error.diagnostic())?;
+    let manifest = match resolver.checked_manifest(std::path::Path::new(".")) {
+        Ok(manifest) => manifest,
+        Err(error) if error.is_missing() => return Ok(Vec::new()),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    let source = manifest.file.text().map_err(|error| error.diagnostic())?;
+    let deny = jet_foundation::LintPolicy::parse_package_source(&source).map_err(|detail| {
+        Diagnostic::error(
+            "E1206",
+            "invalid package manifest".to_string(),
+            detail,
+            "fix the fields in package.jet before loading the project".to_string(),
+            None,
+        )
+    })?.unwrap_or_default();
+    resolver
+        .revalidate_file(&manifest.file)
+        .map_err(|error| error.diagnostic())?;
+    Ok(deny)
 }
 
 fn apply_package_lint_policy(
     bundle: &crate::AST::ProgramBundle,
     diagnostics: Vec<Diagnostic>,
-) -> Vec<Diagnostic> {
-    let deny = package_lints_deny(bundle);
-    jet_foundation::LintPolicy::apply(&deny, diagnostics)
+) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+    let deny = package_lints_deny(bundle).map_err(|diagnostic| vec![diagnostic])?;
+    Ok(jet_foundation::LintPolicy::apply(&deny, diagnostics))
 }
 
 fn classify_diagnostics(
@@ -40,7 +67,7 @@ fn classify_diagnostics(
 ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for diagnostic in apply_package_lint_policy(bundle, diagnostics) {
+    for diagnostic in apply_package_lint_policy(bundle, diagnostics)? {
         match diagnostic.severity {
             // Generated declarations do not exist during the pre-build
             // reflection pass. Defer unknown-name errors to the fresh
@@ -1221,6 +1248,18 @@ pub fn compile_bundle_path_build(
     compile_bundle_path_build_inner(file, options, None, None)
 }
 
+/// Compile a build entry from the checked source snapshot selected by an
+/// authority resolver. The loader consumes `source` as its entry overlay, so
+/// it does not reopen the validated entry pathname.
+pub fn compile_bundle_path_build_with_overlay(
+    file: &str,
+    source_path: &std::path::Path,
+    source: &str,
+    options: BuildRunOptions,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), None)
+}
+
 /// Compile one workspace member as a dependency authority boundary. Its
 /// source declaration and local gate are checked normally, but a missing
 /// effective grant is reported as dependency denial (`E3504`), not as a root
@@ -1232,6 +1271,16 @@ pub fn compile_bundle_path_build_as_dependency(
     compile_bundle_path_build_inner(file, options, None, Some(file))
 }
 
+/// Dependency variant of `compile_bundle_path_build_with_overlay`.
+pub fn compile_bundle_path_build_as_dependency_with_overlay(
+    file: &str,
+    source_path: &std::path::Path,
+    source: &str,
+    options: BuildRunOptions,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file))
+}
+
 fn compile_bundle_path_build_inner(
     file: &str,
     options: BuildRunOptions,
@@ -1239,7 +1288,7 @@ fn compile_bundle_path_build_inner(
     dependency_boundary: Option<&str>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     let direct_package_overlay = if overlay.is_none() {
-        package_manifest_build_overlay(file)
+        package_manifest_build_overlay(file)?
     } else {
         None
     };
@@ -1250,7 +1299,7 @@ fn compile_bundle_path_build_inner(
         }
         (None, None) => crate::Loader::load_entry_with_overlay(file, None, false)?,
     };
-    // D-BUILDSCOPE1: a package owns one optional build entry in `pkg.jet`.
+    // D-BUILDSCOPE1: a package owns one optional build entry in `package.jet`.
     // Load that source through the same loader/sema/interpreter path as a
     // file-local entry, while retaining the ordinary runtime bundle for the
     // post-build compile.  Imported build functions remain inert: only this
@@ -1260,14 +1309,61 @@ fn compile_bundle_path_build_inner(
         .iter()
         .map(|module| module.path.clone())
         .collect::<Vec<_>>();
-    let package_entry = package_build_entry_source(file, &bundle.project_root);
-    let package_manifest_entry = package_manifest_has_build_entry(file, &bundle.project_root);
+    let package_entry = package_build_entry_source(file, &bundle.project_root)?;
+    // `package_manifest_build_overlay` already retained the manifest bytes
+    // when the selected entry itself is `package.jet`; for every other entry,
+    // `package_build_entry_source` is the retained manifest-backed build
+    // source. Do not probe the manifest a second time by path.
+    let package_manifest_entry = direct_package_overlay.is_some();
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
-    let is_workspace_entry = std::path::Path::new(file)
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some(crate::Syntax::WORKSPACE_FILE);
+    let entry_path = std::path::Path::new(file);
+    let entry_dir = entry_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let is_workspace_entry = match AuthorityResolver::open(entry_dir) {
+        Ok(resolver) => match resolver.resolve_workspace_source() {
+            Ok(Some(source)) => {
+                let entry_name = entry_path.file_name().ok_or_else(|| {
+                    vec![Diagnostic::error(
+                        "E1334",
+                        "workspace entry cannot be resolved".to_string(),
+                        "the workspace entry must name one regular file".to_string(),
+                        "use an existing regular run.jet entry".to_string(),
+                        None,
+                    )]
+                })?;
+                let checked_entry = resolver
+                    .checked_file(std::path::Path::new(entry_name))
+                    .map_err(|error| vec![error.diagnostic()])?;
+                resolver
+                    .revalidate_file(&checked_entry)
+                    .map_err(|error| vec![error.diagnostic()])?;
+                resolver
+                    .revalidate_source(&source)
+                    .map_err(|error| vec![error.diagnostic()])?;
+                if source.checked.path != checked_entry.path {
+                    false
+                } else if source.role
+                    != jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index
+                {
+                    return Err(vec![Diagnostic::error(
+                        "E1334",
+                        "workspace build entry is selected by an authority source".to_string(),
+                        "workspace build execution requires the matching source to have the Index role; an authority source cannot select a workspace entry".to_string(),
+                        "declare the workspace index in `workspace.jet`, or build the member entry directly".to_string(),
+                        None,
+                    )]);
+                } else {
+                    true
+                }
+            }
+            Ok(None) => false,
+            Err(error) => return Err(vec![error.workspace_diagnostic()]),
+        },
+        Err(error) if error.is_missing() => false,
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
     let compile_mode = if options.plugin_target || has_package_entry || is_workspace_entry {
         crate::Sema::CompileMode::Check
     } else {
@@ -1557,7 +1653,7 @@ fn compile_bundle_path_build_inner(
         // owning project root, which is also the root used by generated
         // output, action execution, and lock provenance.
         let base_dir = &bundle.project_root;
-        let package = build_package_name(file);
+        let package = build_package_name(file)?;
         let evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
             crate::BuildPluginHook::run_packaged_build_plugin,
             || crate::Comptime::run_build_entry_with_policy(
@@ -1577,12 +1673,13 @@ fn compile_bundle_path_build_inner(
             return Err(evaluated.diagnostics);
         }
 
+        let dependency_name = dependency_boundary.map(build_package_name).transpose()?;
         validate_build_authority(
             &evaluated.plan,
             &declared_build_effects,
             has_impure_gate,
             &options,
-            dependency_boundary.map(build_package_name),
+            dependency_name,
             build.name_span,
         )?;
         validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build.name_span)?;
@@ -2152,7 +2249,7 @@ fn check_action_generated_sources(
             })?;
             let generated_diags =
                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
-            let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags);
+            let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags)?;
             diags.retain(|diag| diag.severity == Severity::Error);
             if !diags.is_empty() {
                 for diag in &mut diags {
@@ -2279,10 +2376,10 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
     })
 }
 
-/// Generated-source ownership follows the nearest package definition. A
-/// manifest-less file keeps its historical stem-based package name so the
-/// single-file build surface remains stable.
-fn build_package_name(file: &str) -> String {
+/// Generated-source ownership follows the nearest package definition inside
+/// the active workspace boundary. A manifest-less workspace entry is anchored
+/// to canonical `run.jet`; only standalone files keep their historical stem.
+fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
     let entry = std::path::Path::new(file);
     let absolute = if entry.is_absolute() {
         entry.to_path_buf()
@@ -2291,31 +2388,73 @@ fn build_package_name(file: &str) -> String {
             .map(|directory| directory.join(entry))
             .unwrap_or_else(|_| entry.to_path_buf())
     };
-    if let Some(root) = crate::Loader::find_manifest_root(
-        absolute.parent().unwrap_or(std::path::Path::new(".")),
-    ) {
-        let path = crate::Loader::manifest_path(&root).expect("manifest root has a Package file");
-        if let Ok(source) = std::fs::read_to_string(&path) {
-            if let Ok(manifest) = crate::Package::PackageFacts::parse(&source, "package.jet") {
-                if !manifest.name.is_empty() {
-                    return manifest.name;
-                }
-            }
+    let parent = absolute.parent().unwrap_or(std::path::Path::new("."));
+    let workspace_root = crate::Loader::find_workspace_root_checked(parent)
+        .map_err(|diagnostic| vec![diagnostic])?;
+    let package_root = crate::Loader::find_manifest_root_checked(parent)
+        .map_err(|diagnostic| vec![diagnostic])?
+        .filter(|root| {
+            workspace_root
+                .as_ref()
+                .is_none_or(|workspace| crate::Loader::is_physically_within(workspace, root))
+        });
+    if let Some(root) = package_root {
+        let resolver = AuthorityResolver::open(&root)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let checked = resolver
+            .checked_manifest(std::path::Path::new("."))
+            .map_err(|error| vec![error.diagnostic()])?;
+        let source = checked
+            .file
+            .text()
+            .map_err(|error| vec![error.diagnostic()])?;
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
+        let manifest = crate::Package::PackageFacts::parse(
+            &source,
+            checked.file.path.display().to_string(),
+        )
+        .map_err(|error| {
+            vec![Diagnostic::error(
+                "E1206",
+                "invalid package manifest".to_string(),
+                error.to_string(),
+                "fix the fields in package.jet before loading the project".to_string(),
+                None,
+            )]
+        })?;
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
+        if !manifest.name.is_empty() {
+            return Ok(manifest.name);
         }
     }
-    absolute
+    if workspace_root.is_some() {
+        return crate::Loader::authority_name_for_entry(&absolute)
+            .map_err(|diagnostic| vec![diagnostic]);
+    }
+    Ok(absolute
         .file_stem()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .unwrap_or("app")
-        .to_string()
+        .to_string())
 }
 
 fn package_build_entry_source(
     file: &str,
     project_root: &std::path::Path,
-) -> Option<(std::path::PathBuf, String)> {
-    let package_path = crate::Manifest::manifest_path_in(project_root);
+) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
+    let resolver = AuthorityResolver::open(project_root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
+        Ok(checked) => checked,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
+    let package_path = checked.file.path.clone();
     let entry_path = std::path::Path::new(file);
     let entry_path = if entry_path.is_absolute() {
         entry_path.to_path_buf()
@@ -2327,49 +2466,76 @@ fn package_build_entry_source(
     if normalize_project_path(project_root, &entry_path)
         == normalize_project_path(project_root, &package_path)
     {
-        return None;
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
+        return Ok(None);
     }
-    let source = std::fs::read_to_string(&package_path).ok()?;
-    let build_source = crate::Package::build_entry_source(&source)?;
-    Some((package_path, build_source))
+    let source = checked
+        .file
+        .text()
+        .map_err(|error| vec![error.diagnostic()])?;
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let result = crate::Package::build_entry_source(&source)
+        .map(|source| (package_path, source));
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(result)
 }
 
-fn package_manifest_build_overlay(file: &str) -> Option<(std::path::PathBuf, String)> {
+fn package_manifest_build_overlay(
+    file: &str,
+) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
     let path = std::path::Path::new(file);
-    if !matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(crate::Syntax::PACKAGE_FILE) | Some(crate::Syntax::PAYLOAD_FILE)
-    ) {
-        return None;
+    if path.file_name().and_then(|name| name.to_str()) != Some(crate::Syntax::PACKAGE_FILE) {
+        return Ok(None);
     }
-    let path = if path.is_absolute() {
+    let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join(path)
+            .map(|directory| directory.join(path))
+            .map_err(|error| vec![Diagnostic::error(
+                "E1334",
+                "package manifest path cannot be resolved".to_string(),
+                error.to_string(),
+                "use an existing package.jet path".to_string(),
+                None,
+            )])?
     };
-    let source = std::fs::read_to_string(&path).ok()?;
-    let build_source = crate::Package::build_entry_source(&source)?;
-    Some((path, build_source))
-}
-
-fn package_manifest_has_build_entry(file: &str, project_root: &std::path::Path) -> bool {
-    let entry_path = std::path::Path::new(file);
-    let entry_path = if entry_path.is_absolute() {
-        entry_path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join(entry_path)
-    };
-    let package_path = crate::Manifest::manifest_path_in(project_root);
-    normalize_project_path(project_root, &entry_path)
-        == normalize_project_path(project_root, &package_path)
-        && std::fs::read_to_string(package_path)
-            .ok()
-            .and_then(|source| crate::Package::build_entry_source(&source))
-            .is_some()
+    let root = absolute.parent().unwrap_or(std::path::Path::new("."));
+    let resolver = AuthorityResolver::open(root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let checked = resolver
+        .checked_manifest(std::path::Path::new("."))
+        .map_err(|error| vec![error.diagnostic()])?;
+    if normalize_project_path(root, &absolute)
+        != normalize_project_path(root, &checked.file.path)
+    {
+        return Err(vec![Diagnostic::error(
+            "E1334",
+            "package manifest path changed during resolution".to_string(),
+            "the requested manifest path is not the checked package.jet object".to_string(),
+            "use the canonical package.jet path".to_string(),
+            None,
+        )]);
+    }
+    let source = checked
+        .file
+        .text()
+        .map_err(|error| vec![error.diagnostic()])?;
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let result = crate::Package::build_entry_source(&source)
+        .map(|source| (checked.file.path.clone(), source));
+    resolver
+        .revalidate_file(&checked.file)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(result)
 }
 
 fn validate_build_authority(
@@ -2703,7 +2869,7 @@ fn materialize_and_check_generated(
             })?;
             let generated_diags =
                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
-            let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags);
+            let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags)?;
             diags.retain(|diag| diag.severity == Severity::Error);
             if !diags.is_empty() {
                 for diag in &mut diags {
@@ -3191,12 +3357,33 @@ fn compile_bundle_path_opts_full(
         ffi.is_some() || bundle.cffi.links_c(),
     );
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-    if let Some(mf) = crate::Manifest::load(&bundle.project_root).and_then(|r| r.ok()) {
-        crate::Lock::record_inferred_layer(
-            &bundle.project_root,
-            &mf.package.name,
-            bundle.inferred_layer,
-        );
+    let resolver = match AuthorityResolver::open(&bundle.project_root) {
+        Ok(resolver) => Some(resolver),
+        Err(error) if error.is_missing() => None,
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
+    if let Some(resolver) = resolver {
+        let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
+            Ok(checked) => Some(checked),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(vec![error.diagnostic()]),
+        };
+        if let Some(checked) = checked {
+            let source = checked
+                .file
+                .text()
+                .map_err(|error| vec![error.diagnostic()])?;
+            let manifest = crate::Manifest::parse(&checked.file.path, &source)
+                .map_err(|diagnostic| vec![diagnostic])?;
+            resolver
+                .revalidate_file(&checked.file)
+                .map_err(|error| vec![error.diagnostic()])?;
+            crate::Lock::record_inferred_layer(
+                &bundle.project_root,
+                &manifest.package.name,
+                bundle.inferred_layer,
+            );
+        }
     }
     Ok(crate::CompileOutput {
         rust,
@@ -3488,8 +3675,10 @@ fn check_file_with_effect_facts_impl(
                 &diags,
             );
             diags.extend(extension_diags);
-            let diags = apply_package_lint_policy(&bundle, diags);
-            (diags, Some(bundle), facts, dependencies)
+            match apply_package_lint_policy(&bundle, diags) {
+                Ok(diags) => (diags, Some(bundle), facts, dependencies),
+                Err(diags) => (diags, None, facts, dependencies),
+            }
         }
         Err(diags) => (
             diags,
@@ -3541,8 +3730,10 @@ pub fn check_file_with_overlays_and_import_root(
                 &diags,
             );
             diags.extend(extension_diags);
-            let diags = apply_package_lint_policy(&bundle, diags);
-            (diags, Some(bundle), facts)
+            match apply_package_lint_policy(&bundle, diags) {
+                Ok(diags) => (diags, Some(bundle), facts),
+                Err(diags) => (diags, None, facts),
+            }
         }
         Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
     }

@@ -6,15 +6,12 @@
 //! convention file. Its `package.jet` uses a *dotted* entry —
 //! `outputs: .{ demo: .Executable.{ entry: service.run } }` — which follows
 //! `entry.jet`'s `use service` import into `service/module.jet`. That's
-//! deliberate: a single-segment `entry: run` resolves through the exact same
-//! "one root-level file with a top-level `fn run`" scan as the migration-era
-//! fallback (`PackageFacts::entry_path` and `legacy_run_entry` run the
-//! identical algorithm for that case), so it can never prove `outputs:` is
-//! doing anything. The fallback only ever scans root-level files — it cannot
-//! follow an import into `service/module.jet` — so this fixture can only
-//! resolve through `outputs:`. `entry_resolution_requires_the_outputs_block`
-//! below proves it: the same fixture with `outputs:` deleted fails to
-//! resolve at all.
+//! deliberate: a single-segment `entry: run` resolves through the existing
+//! root-level source lookup, so it can never prove `outputs:` is doing
+//! anything.
+//! This fixture has no canonical entry and can only resolve through
+//! `outputs:`. `entry_resolution_requires_the_outputs_block` below proves it:
+//! the same fixture with `outputs:` deleted fails to resolve at all.
 //!
 //! `golden.rs`'s directory scan (which requires a `main.<ext>`) never
 //! discovers this fixture and always compiles a single file directly,
@@ -121,12 +118,10 @@ fn outputs_block_drives_jet_build_aot() {
 }
 
 /// The negative half of the proof: copy the fixture but drop `outputs:` from
-/// `package.jet`, keeping the same `entry.jet` + `service/module.jet`
-/// layout. The migration-era fallback only scans root-level files for a
-/// top-level `fn run`; `entry.jet` has none (it's just a `use service`
-/// import) and `service/module.jet` isn't root-level, so entry resolution
-/// must fail. If this ever starts resolving without `outputs:`, the
-/// fixture above would stop proving anything.
+/// `package.jet`, keeping the same `entry.jet` + `service/module.jet` layout.
+/// There is no canonical `run.jet`, so entry resolution must fail. If this
+/// ever starts resolving without `outputs:`, the fixture above would stop
+/// proving anything.
 #[test]
 fn entry_resolution_requires_the_outputs_block() {
     let dir = std::env::temp_dir().join(format!(

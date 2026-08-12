@@ -4,8 +4,11 @@
 //! re-exported here for call sites that use `jetpack::WorkspaceLock::load`.
 //! The write path stays here because it needs `RuntimePolicy` for file locking.
 
-pub use jet_pkg_model::WorkspaceLock::{load, WORKSPACE_LOCK};
-use jet_pkg_model::WorkspacePlan::{WorkspacePlan};
+pub use jet_pkg_model::WorkspaceLock::{
+    load, load_checked_file, load_with_resolver, WORKSPACE_LOCK,
+};
+use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::WorkspacePlan::{WorkspacePlan, WorkspaceSourceRole};
 
 use crate::{
     Lock::{self, LockFile, LockedWorkspaceMember},
@@ -25,21 +28,82 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
     };
     super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
         std::fs::create_dir_all(&lock_dir)?;
-        let mut lock = match std::fs::read_to_string(&lock_path) {
-            Ok(raw) => jet_pkg_model::Lock::parse(&raw).map_err(|error| {
-                std::io::Error::new(
+        let resolver = AuthorityResolver::open(workspace_root).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("workspace authority cannot be opened: {error}"),
+            )
+        })?;
+        let existing_lock = match resolver.checked_file(Path::new(WORKSPACE_LOCK)) {
+            Ok(file) => Some(file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => {
+                return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("existing lock is malformed: {error}"),
-                )
-            })?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => empty_lock(),
-            Err(error) => return Err(error),
+                    format!("workspace lock cannot be opened: {error}"),
+                ))
+            }
+        };
+        let mut lock = match &existing_lock {
+            Some(file) => {
+                let raw = file.text().map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("existing lock is not valid text: {error}"),
+                    )
+                })?;
+                resolver.revalidate_file(file).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("existing lock changed during read: {error}"),
+                    )
+                })?;
+                jet_pkg_model::Lock::parse(&raw).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("existing lock is malformed: {error}"),
+                    )
+                })?
+            }
+            None => empty_lock(),
         };
         lock.version = Lock::LOCK_VERSION;
+        let source = resolver
+            .resolve_workspace_source()
+            .map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace authority cannot be resolved: {error}"),
+                )
+            })?;
+        if let Some(source) = &source {
+            if source.role != WorkspaceSourceRole::Index {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "workspace lock members require workspace.jet as the index",
+                ));
+            }
+            let digest = jet_pkg_model::SHA256::sha256_hex(source.source.as_bytes());
+            if !plan.source_digest.is_empty() && plan.source_digest != digest {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "workspace plan authority changed before lock write",
+                ));
+            }
+            resolver.revalidate_source(source).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace authority changed before lock write: {error}"),
+                )
+            })?;
+        } else if !plan.members.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "workspace lock members require a checked workspace.jet index",
+            ));
+        }
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
-        } else if let Ok(source) = std::fs::read(workspace_root.join(Syntax::WORKSPACE_FILE)) {
-            jet_pkg_model::SHA256::sha256_hex(&source)
         } else {
             "no-workspace-source".to_string()
         };
@@ -58,52 +122,27 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                         format!("workspace member {} has an unsafe relative path", m.name),
                     ));
                 }
-                let canonical_path = workspace_root.join(relative).canonicalize().map_err(|error| {
+                let checked = resolver.checked_package(relative).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("workspace member {} cannot be canonicalized: {error}", m.name),
+                        format!("workspace member `{}` is not a checked Package: {error}", m.name),
                     )
                 })?;
-                let root = workspace_root.canonicalize().map_err(|error| {
+                resolver.revalidate_member(&checked.member).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("workspace root cannot be canonicalized: {error}"),
+                        format!("workspace member `{}` changed before lock write: {error}", m.name),
                     )
                 })?;
-                if !canonical_path.starts_with(&root) {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("workspace member {} escapes the workspace root", m.name),
-                    ));
-                }
-                let canonical_relative = canonical_path
-                    .strip_prefix(&root)
+                let canonical_relative = resolver
+                    .relative_identity(&checked.member.directory)
                     .map_err(|error| {
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             format!("workspace member {} has no relative identity: {error}", m.name),
                         )
-                    })?
-                    .to_string_lossy()
-                    .into_owned();
-                let canonical_relative = if canonical_relative.is_empty() {
-                    ".".to_string()
-                } else {
-                    canonical_relative
-                };
-                let package = jet_pkg_model::Package::PackageFacts::load(&canonical_path)
-                    .ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("workspace member `{}` has no valid Package facts", m.name),
-                        )
-                    })?
-                    .map_err(|error| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("workspace member `{}` Package facts are invalid: {error}", m.name),
-                        )
                     })?;
+                let package = checked.facts;
                 Ok(LockedWorkspaceMember {
                     name: m.name.clone(),
                     path: m.path.clone(),
@@ -113,6 +152,14 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                 })
             })
             .collect::<std::io::Result<Vec<_>>>()?;
+        if let Some(source) = &source {
+            resolver.revalidate_source(source).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("workspace authority changed during lock write: {error}"),
+                )
+            })?;
+        }
         lock.workspace_source_digest = Some(source_digest);
         lock.workspace_overlay_policy = plan.overlay_policy.clone();
         // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
@@ -121,6 +168,30 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         for ci in &plan.comptime_inputs {
             if !lock.comptime_inputs.iter().any(|e| e.path == ci.path) {
                 lock.comptime_inputs.push(ci.clone());
+            }
+        }
+        if let Some(existing_lock) = &existing_lock {
+            resolver.revalidate_file(existing_lock).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("existing lock changed before write: {error}"),
+                )
+            })?;
+        } else {
+            match resolver.checked_file(Path::new(WORKSPACE_LOCK)) {
+                Ok(file) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace lock appeared during write: {}", file.path.display()),
+                    ));
+                }
+                Err(error) if error.is_missing() => {}
+                Err(error) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace lock changed during write: {error}"),
+                    ));
+                }
             }
         }
         std::fs::write(lock_path, Lock::write(&lock))

@@ -1636,7 +1636,7 @@ fn ul6_browser_watch_matrix_budget_reconnect_cleanup() {
     )
     .unwrap();
 
-    let mut session = jet_devserver::WatchSession::open(&src_path);
+    let mut session = jet_devserver::WatchSession::open(&src_path).unwrap();
     session.recover();
     assert!(session.graph().node_count() >= 1);
 
@@ -1655,7 +1655,7 @@ fn ul6_browser_watch_matrix_budget_reconnect_cleanup() {
         receipt.edit_to_visible_ms
     );
     assert!(!receipt.render().is_empty());
-    session.acknowledge(&receipt);
+    session.acknowledge(&receipt).unwrap();
 
     let _ = fs::remove_dir_all(&dir);
     assert!(!dir.exists() || fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) == 0);

@@ -59,23 +59,30 @@ pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemI
 /// ambiguous package sources are returned as errors instead of becoming an
 /// empty projection.
 pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, String> {
-    let mut dir = entry
-        .canonicalize()
-        .unwrap_or_else(|_| entry.to_path_buf());
-    if !dir.is_dir() {
-        let Some(parent) = dir.parent() else {
-            return Ok(None);
-        };
-        dir = parent.to_path_buf();
-    }
-    let Some(root) = jet_driver::Loader::find_manifest_root(&dir) else {
+    let dir = match jet_pkg_model::Authority::AuthorityResolver::open(entry) {
+        Ok(resolver) => resolver.root().to_path_buf(),
+        Err(jet_pkg_model::Authority::AuthorityError::WrongKind { .. }) => {
+            let parent = entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
+            jet_pkg_model::Authority::AuthorityResolver::open(parent)
+                .map_err(|error| error.to_string())?
+                .root()
+                .to_path_buf()
+        }
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let Some(root) = jet_driver::Loader::find_manifest_root_checked(&dir)
+        .map_err(|diagnostic| {
+            format!(
+                "{}: {} — {}",
+                diagnostic.code, diagnostic.what, diagnostic.why
+            )
+        })?
+    else {
         return Ok(None);
     };
-    match PackageFacts::load(&root) {
-        Some(Ok(facts)) => Ok(Some(facts)),
-        Some(Err(error)) => Err(error.to_string()),
-        None => Err(format!("Package facts are missing at `{}`", root.display())),
-    }
+    PackageFacts::load_checked(&root)
+        .map_err(|error| error.to_string())
 }
 
 /// Render the registered package-shape diagnostic shared by semantic-index
@@ -101,28 +108,59 @@ pub fn workspace_overlay_policy_for_entry(
     let Some(parent) = entry.parent() else {
         return Ok(None);
     };
-    let mut dir = parent.to_path_buf();
+    let mut dir = jet_pkg_model::Authority::AuthorityResolver::open(parent)
+        .map_err(|error| error.diagnostic())?
+        .root()
+        .to_path_buf();
     loop {
-        if let Some(plan) = jet_pkg_model::WorkspaceLock::load(&dir) {
-            return Ok((!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy));
-        }
-        let lock_path = dir.join(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE);
-        if let Ok(raw) = std::fs::read_to_string(&lock_path) {
-            if jet_pkg_model::Lock::looks_like_workspace_lock(&raw) {
-                return Err(jet_pkg_model::Lock::e1202_workspace(
-                    &lock_path.display().to_string(),
-                ));
+        let resolver = jet_pkg_model::Authority::AuthorityResolver::open(&dir)
+            .map_err(|error| error.diagnostic())?;
+        match resolver.resolve_workspace_source() {
+            Err(error) => return Err(error.workspace_diagnostic()),
+            Ok(Some(_)) => {
+                return Ok(workspace_lock_at(&resolver)?
+                    .and_then(|plan| (!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy)))
+            }
+            Ok(None) => {
+                if let Some(plan) = workspace_lock_at(&resolver)? {
+                    return Ok((!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy));
+                }
             }
         }
-        let Some(parent) = dir.parent() else {
-            break;
+        let Some(next) = dir.parent() else {
+            return Ok(None);
         };
-        if parent == dir {
-            break;
+        if next == dir {
+            return Ok(None);
         }
-        dir = parent.to_path_buf();
+        dir = next.to_path_buf();
     }
-    Ok(None)
+}
+
+/// Read one lock candidate and preserve the existing E1202 stale/invalid
+/// workspace-lock diagnostic. `Some(plan)` is also a boundary marker when the
+/// policy itself is empty, so callers do not continue into an outer authority.
+fn workspace_lock_at(
+    resolver: &jet_pkg_model::Authority::AuthorityResolver,
+) -> Result<Option<jet_pkg_model::WorkspacePlan::WorkspacePlan>, Diagnostic> {
+    let lock_file = match resolver
+        .checked_file(Path::new(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE))
+    {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    let lock_path = lock_file.path.clone();
+    let raw = lock_file.text().map_err(|error| error.diagnostic())?;
+    if !jet_pkg_model::Lock::looks_like_workspace_lock(&raw) {
+        return Ok(None);
+    }
+    match jet_pkg_model::WorkspaceLock::load_checked_file(resolver, lock_file) {
+        Some(plan) => Ok(Some(plan)),
+        None => Err(jet_pkg_model::Lock::e1202_workspace(
+            &lock_path.display().to_string(),
+        )),
+    }
 }
 
 fn attach_package_facts(index: &mut SemIndex, entry: &Path) -> Result<(), SemIndexError> {
@@ -328,7 +366,7 @@ mod tests {
             "Config.{ outputs: .{ app: .Executable.{ entry: run } } }\n",
         )
         .unwrap();
-        let entry = root.join("main.jet");
+        let entry = root.join("run.jet");
         std::fs::write(&entry, "fn run() {}\n").unwrap();
 
         let index = open(&entry).expect("package entry should index");
@@ -376,7 +414,7 @@ mod tests {
             "name: \"legacy\"\nversion: \"0.1.0\"\n",
         )
         .unwrap();
-        let entry = root.join("main.jet");
+        let entry = root.join("run.jet");
         std::fs::write(&entry, "fn run() {}\n").unwrap();
 
         let error = package_facts_for_entry(&entry)
@@ -406,7 +444,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let entry = root.join("main.jet");
+        let entry = root.join("run.jet");
         std::fs::write(&entry, "fn run() {}\n").unwrap();
 
         let index = open(&entry).expect("workspace source should index");
@@ -437,12 +475,95 @@ mod tests {
             "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
         )
         .unwrap();
-        let entry = root.join("main.jet");
+        let entry = root.join("run.jet");
         std::fs::write(&entry, "fn run() {}\n").unwrap();
 
         let diagnostic = workspace_overlay_policy_for_entry(&entry)
             .expect_err("stale workspace authority must remain visible");
         assert_eq!(diagnostic.code, "E1202");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn outer_stale_workspace_lock_does_not_cross_inner_workspace_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_nested_stale_workspace_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let child = root.join("child");
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            root.join(".jet/lock"),
+            "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
+        )
+        .unwrap();
+        std::fs::write(child.join("inner-authority.jet"), "module workspace { members: [] }\n").unwrap();
+        let entry = child.join("run.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        assert!(workspace_overlay_policy_for_entry(&entry).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ancestor_lock_scan_uses_an_arbitrary_workspace_source() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_ancestor_workspace_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let child = root.join("packages/app");
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        let source = "module workspace { members: [] }\n";
+        std::fs::write(root.join("authority.jet"), source).unwrap();
+        let digest = jet_pkg_model::SHA256::sha256_hex(source.as_bytes());
+        std::fs::write(
+            root.join(".jet/lock"),
+            format!(
+                "version = 1\nworkspace_source_digest = \"{digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n"
+            ),
+        )
+        .unwrap();
+        let entry = child.join("run.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let policy = workspace_overlay_policy_for_entry(&entry)
+            .expect("ancestor workspace lock should load")
+            .expect("persisted policy should be attached");
+        assert_eq!(policy.allow_unfree, vec!["discord"]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_workspace_boundary_is_not_hidden_by_an_outer_lock() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_ambiguous_workspace_boundary_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let child = root.join("packages/app");
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        let source = "module workspace { members: [] }\n";
+        std::fs::write(root.join("authority.jet"), source).unwrap();
+        let digest = jet_pkg_model::SHA256::sha256_hex(source.as_bytes());
+        std::fs::write(
+            root.join(".jet/lock"),
+            format!("version = 1\nworkspace_source_digest = \"{digest}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(child.join("a.jet"), source).unwrap();
+        std::fs::write(child.join("b.jet"), source).unwrap();
+        let entry = child.join("run.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let diagnostic = workspace_overlay_policy_for_entry(&entry)
+            .expect_err("ambiguous boundary must remain visible");
+        assert_eq!(diagnostic.code, "E1239");
         let _ = std::fs::remove_dir_all(root);
     }
 

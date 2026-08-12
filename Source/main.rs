@@ -13,7 +13,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
-use jet::Diagnostics::ColorChoice;
+use jet::Diagnostics::{ColorChoice, Diagnostic};
 use jet::ExitCodes;
 use jet_foundation::BuildEffect;
 
@@ -2614,10 +2614,16 @@ fn has_web_app_entry_fn(file: &str) -> bool {
 /// `jet run`/`jet build` already use to resolve project-root mode).
 fn manifest_default_target(file: &str) -> Option<String> {
     let start = Path::new(file).parent().unwrap_or(Path::new("."));
-    let root = jet::Loader::find_manifest_root(start)?;
-    let pack_path = jet::Loader::manifest_path(&root)?;
-    let raw = fs::read_to_string(&pack_path).ok()?;
-    let manifest = jet::Package::PackageFacts::parse(&raw, pack_path.display().to_string()).ok()?;
+    let root = match jet::Loader::find_manifest_root_checked(start) {
+        Ok(Some(root)) => root,
+        Ok(None) => return None,
+        Err(diagnostic) => report_entry_diagnostic(diagnostic),
+    };
+    let manifest = match jet::Package::PackageFacts::load_checked(&root) {
+        Ok(Some(manifest)) => manifest,
+        Ok(None) => return None,
+        Err(error) => report_entry_authority_error(error),
+    };
     manifest.target
 }
 
@@ -2625,103 +2631,139 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
     let path = Path::new(raw);
     // A directory argument is a project root: resolve its canonical entry.
     // `jet run <dir>` just works.
-    if path.is_dir() {
-        let entry = find_project_entry(path);
-        if entry.is_file() {
+    match jet::Authority::AuthorityResolver::open(path) {
+        Ok(resolver) => {
+            let entry = find_project_entry(resolver.root());
+            if let Ok(relative) = entry.strip_prefix(resolver.root()) {
+                match resolver.checked_file(relative) {
+                    Ok(file) => {
+                        resolver
+                            .revalidate_file(&file)
+                            .unwrap_or_else(report_entry_authority_error);
+                        return file.path.to_string_lossy().into_owned();
+                    }
+                    Err(error) if error.is_missing() => {}
+                    Err(error) => report_entry_authority_error(error),
+                }
+            }
+            let has_package = match resolver.checked_manifest(Path::new(".")) {
+                Ok(_) => true,
+                Err(error) if error.is_missing() => false,
+                Err(error) => report_entry_authority_error(error),
+            };
+            if !has_package {
+                crate::cli_error!(
+                    "E2105",
+                    "no `{}` entry in `{}`",
+                    jet::Syntax::DEFAULT_ENTRY_FILE,
+                    raw
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
             return entry.to_string_lossy().into_owned();
         }
-        // No entry: if there's no manifest either, surface a clean error; with
-        // a manifest but no entry, fall through so the file-not-found path
-        // names the missing `run.jet`.
-        if jet::Loader::manifest_path(path).is_none() {
-            crate::cli_error!(
-                "E2105",
-                "no `{entry}` entry in `{dir}`",
-                entry = jet::Syntax::DEFAULT_ENTRY_FILE,
-                dir = raw,
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
-        return entry.to_string_lossy().into_owned();
+        Err(error) if error.is_missing() => {}
+        Err(error) if matches!(error, jet::Authority::AuthorityError::WrongKind { .. }) => {}
+        Err(error) => report_entry_authority_error(error),
     }
-    if path.exists() {
-        return raw.to_string();
+    if let Some(path) = checked_explicit_file(path) {
+        return path.to_string_lossy().into_owned();
     }
     let with_ext = format!("{}.{}", raw, jet::Syntax::FILE_EXT);
-    if Path::new(&with_ext).exists() {
-        return with_ext;
+    if let Some(path) = checked_explicit_file(Path::new(&with_ext)) {
+        return path.to_string_lossy().into_owned();
     }
     raw.to_string()
 }
 
+fn checked_explicit_file(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let resolver = match jet::Authority::AuthorityResolver::open(parent) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return None,
+        Err(error) => report_entry_authority_error(error),
+    };
+    let name = path.file_name()?;
+    match resolver.checked_file(Path::new(name)) {
+        Ok(file) => Some(file.path),
+        Err(error) if error.is_missing() => None,
+        Err(error) => report_entry_authority_error(error),
+    }
+}
+
 /// Find the entry `.jet` file for a project rooted at `root` (D-ILE1, owner
 /// amendment 2026-07-17). `run.jet` is the zero-ceremony default, followed by
-/// `src/run.jet` and `<package>.jet`. Old `main.jet` locations remain fallback
-/// inputs, never defaults. Missing-entry errors name `run.jet`.
+/// `src/run.jet` and `<package>.jet`. Missing-entry errors name `run.jet`.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
-    match package_output_entry(root) {
-        Ok(Some(entry)) => return entry,
-        Ok(None) => {}
-        Err(error) => {
-            crate::cli_error!(@fix "E2105", error, "repair the typed Package output or point at a `.jet` file directly");
-            exit(ExitCodes::USER_ERROR);
+    let resolver = match jet::Authority::AuthorityResolver::open(root) {
+        Ok(resolver) => resolver,
+        Err(error) => report_entry_authority_error(error),
+    };
+    let package = match resolver.checked_package(Path::new(".")) {
+        Ok(package) => Some(package),
+        Err(error) if error.is_missing() => None,
+        Err(error) => report_entry_authority_error(error),
+    };
+    if let Some(package) = &package {
+        match package.facts.resolve_run_entry_checked(&resolver) {
+            Ok(Some(entry)) => return entry.path,
+            Ok(None) => {}
+            Err(error) => {
+                crate::cli_error!(@fix "E2105", error, "repair the typed Package output or point at a `.jet` file directly");
+                exit(ExitCodes::USER_ERROR);
+            }
         }
     }
-    let default = root.join(jet::Syntax::DEFAULT_ENTRY_FILE);
-    if default.is_file() {
-        return default;
+    if let Some(entry) = checked_project_entry(&resolver, Path::new(jet::Syntax::DEFAULT_ENTRY_FILE)) {
+        return entry;
     }
-    let src_default = root.join("src").join(jet::Syntax::DEFAULT_ENTRY_FILE);
-    if src_default.is_file() {
-        return src_default;
+    if let Some(entry) = checked_project_entry(
+        &resolver,
+        &Path::new("src").join(jet::Syntax::DEFAULT_ENTRY_FILE),
+    ) {
+        return entry;
     }
-    if let Some(Ok(manifest)) = jet::Package::PackageFacts::load(root) {
-        let named = root.join(format!(
+    if let Some(manifest) = package.as_ref().map(|package| &package.facts) {
+        let named = resolver.root().join(format!(
             "{}.{}",
             manifest.name,
             jet::Syntax::FILE_EXT
         ));
-        if named.is_file() {
-            return named;
+        if let Ok(relative) = named.strip_prefix(resolver.root()) {
+            if let Some(entry) = checked_project_entry(&resolver, relative) {
+                return entry;
+            }
         }
     }
-    for legacy in [
-        root.join("src").join(jet::Syntax::LEGACY_ENTRY_FILE),
-        root.join(jet::Syntax::LEGACY_ENTRY_FILE),
-        root.join(jet::Syntax::SOURCE_ROOT_DIR)
-            .join(jet::Syntax::LEGACY_ENTRY_FILE),
-    ] {
-        if legacy.is_file() {
-            return legacy;
-        }
-    }
-    default
+    resolver.root().join(jet::Syntax::DEFAULT_ENTRY_FILE)
 }
 
-/// D-ENV-PACKAGE1 / #1003: select the singular runnable Package output before
-/// the migration-era `run.jet` convention. Invalid or incomplete package
-/// output paths are not trusted as filesystem paths; the compiler/manifest
-/// diagnostics remain the authority for the malformed Package itself.
-fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
-    let Some(package) = jet::Package::PackageFacts::load(root) else {
-        return Ok(None);
-    };
-    let package = match package {
-        Ok(package) => package,
-        Err(error) => {
-            let source = jet::Loader::manifest_path(root)
-                .unwrap_or_else(|| root.join(jet::Syntax::PACKAGE_FILE));
-            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+fn checked_project_entry(
+    resolver: &jet::Authority::AuthorityResolver,
+    relative: &Path,
+) -> Option<PathBuf> {
+    match resolver.checked_file(relative) {
+        Ok(file) => {
+            if let Err(error) = resolver.revalidate_file(&file) {
+                report_entry_authority_error(error);
+            }
+            Some(file.path)
         }
-    };
-    package.resolve_run_entry(root)
+        Err(error) if error.is_missing() => None,
+        Err(error) => report_entry_authority_error(error),
+    }
+}
+
+fn report_entry_authority_error(error: jet::Authority::AuthorityError) -> ! {
+    crate::cli_error!(@fix "E1334", error.to_string(), "restore the required regular no-follow authority file or directory");
+    exit(ExitCodes::USER_ERROR)
 }
 
 /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/
 /// `check`/`build` inside a package — the one rule all six share instead of
 /// each hand-rolling its own "no file given" fallback.
 ///
-/// A `workspace.jet` member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)
+/// A workspace member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)
 /// with more than one runnable member (a member whose own entry resolves to a
 /// real file, D-ILE1) is an ambiguity naming every member; `-p <member>`
 /// picks one explicitly, or the caller can always name a file directly. A
@@ -2729,7 +2771,8 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// runnable member) resolves exactly like `find_project_entry` always has —
 /// no behavior change for the overwhelmingly common single-package case.
 ///
-/// A `workspace.jet` (D-JPK-WORKSPACE2) is checked at `cwd` directly first —
+/// A declaration-resolved workspace source (D-JPK-WORKSPACE2) is checked at
+/// `cwd` directly first —
 /// `jetpack::WorkspaceFile::load` never walks upward, matching every
 /// other workspace-aware call site — because a monorepo workspace root often
 /// carries no `package.jet` of its own (Package facts live entirely in member
@@ -2739,16 +2782,41 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// D-CLI-BARE1). Returns `None` outside any package or workspace — the
 /// caller keeps today's "no file given" usage error verbatim.
 fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<PathBuf> {
+    let workspace_resolver = match jet::Authority::AuthorityResolver::open(cwd) {
+        Ok(resolver) => Some(resolver),
+        Err(error) if error.is_missing() => None,
+        Err(error) => report_entry_authority_error(error),
+    };
     // A workspace lock is a checked member index, not an optional cache. If
     // its source identity is stale while the workspace source is absent, do
     // not fall through to an ordinary package entry and run the wrong file.
-    if !cwd.join(jet::Syntax::WORKSPACE_FILE).is_file() {
-        let lock_path = cwd.join(jet::Syntax::UNIFIED_LOCK_FILE);
-        let stale_workspace_lock = jetpack::WorkspaceLock::load(cwd).is_none()
-            && std::fs::read_to_string(&lock_path)
-                .map(|source| jetpack::Lock::looks_like_workspace_lock(&source))
-                .unwrap_or(false);
+    let workspace_source = workspace_resolver.as_ref().and_then(|resolver| {
+        match resolver.resolve_workspace_source() {
+            Ok(source) => Some(Ok(source)),
+            Err(error) => Some(Err(error.workspace_diagnostic())),
+        }
+    });
+    if workspace_source.is_none() {
+        let stale_workspace_lock = match workspace_resolver.as_ref() {
+            Some(resolver) => match resolver.checked_file(Path::new(jet::Syntax::UNIFIED_LOCK_FILE)) {
+                Ok(lock_file) => {
+                    let source = match lock_file.text() {
+                        Ok(source) => source,
+                        Err(error) => report_entry_authority_error(error),
+                    };
+                    if let Err(error) = resolver.revalidate_file(&lock_file) {
+                        report_entry_authority_error(error);
+                    }
+                    jetpack::WorkspaceLock::load_checked_file(resolver, lock_file).is_none()
+                        && jetpack::Lock::looks_like_workspace_lock(&source)
+                }
+                Err(error) if error.is_missing() => false,
+                Err(error) => report_entry_authority_error(error),
+            },
+            None => false,
+        };
         if stale_workspace_lock {
+            let lock_path = cwd.join(jet::Syntax::UNIFIED_LOCK_FILE);
             let diagnostic = jetpack::Lock::e1202_workspace(&lock_path.display().to_string());
             eprint!(
                 "{}",
@@ -2765,17 +2833,54 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     // authority. Member selection (`-p`) remains an explicit escape to one
     // package and therefore bypasses this root orchestration path.
     if cmd == "build" && member_flag.is_none() {
-        let workspace = cwd.join(jet::Syntax::WORKSPACE_FILE);
-        if let Ok(source) = std::fs::read_to_string(&workspace) {
-            if jetpack::WorkspaceFile::has_build_entry(&source) {
-                return Some(workspace);
+        if let Some(Ok(source)) = workspace_source.as_ref() {
+            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
+                && jetpack::WorkspaceFile::has_build_entry(&source.source)
+            {
+                return Some(source.path.clone());
             }
         }
     }
-    if let Some(workspace) = jetpack::WorkspaceFile::load(cwd) {
+    let workspace = match (workspace_resolver.as_ref(), workspace_source.as_ref()) {
+        (Some(resolver), Some(Ok(source)))
+            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index => Some(
+                jetpack::WorkspaceFile::evaluate_checked_source(source, resolver),
+            ),
+        (_, Some(Err(diagnostic))) => Some(Err(diagnostic.clone())),
+        _ => None,
+    };
+    let canonical_workspace = workspace_source.as_ref().is_some_and(|source| {
+        matches!(
+            source,
+            Ok(source)
+                if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
+        )
+    });
+    if canonical_workspace && workspace.is_none() {
+        let diagnostic = Diagnostic::error(
+            "E3503",
+            format!("workspace source in `{}` disappeared", cwd.display()),
+            "workspace authority changed while the entry was being selected".to_string(),
+            "restore the workspace declaration before running the command".to_string(),
+            None,
+        );
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic])
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Some(workspace) = workspace {
         let plan = match workspace {
             Ok(plan) => plan,
             Err(diagnostic) => {
+                if cmd == "build" && member_flag.is_none() {
+                    if let Some(Ok(source)) = workspace_source.as_ref() {
+                        if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+                            return Some(source.path.clone());
+                        }
+                    }
+                }
                 eprint!(
                     "{}",
                     jet::render_diagnostics(
@@ -2792,7 +2897,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             .iter()
             .filter_map(|m| {
                 let entry = find_project_entry(&cwd.join(&m.path));
-                entry.is_file().then(|| (m.name.clone(), entry))
+                checked_explicit_file(&entry).map(|_| (m.name.clone(), entry))
             })
             .collect();
         if let Some(want) = member_flag {
@@ -2823,7 +2928,19 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             _ => {} // no runnable member — fall through to the single-project convention
         }
     }
-    jet::Loader::find_manifest_root(cwd).map(|root| find_project_entry(&root))
+    match jet::Loader::find_manifest_root_checked(cwd) {
+        Ok(Some(root)) => Some(find_project_entry(&root)),
+        Ok(None) => None,
+        Err(diagnostic) => report_entry_diagnostic(diagnostic),
+    }
+}
+
+fn report_entry_diagnostic(diagnostic: Diagnostic) -> ! {
+    eprint!(
+        "{}",
+        jet::render_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic])
+    );
+    exit(ExitCodes::USER_ERROR)
 }
 
 fn missing_bare_entry(cmd: &str, cwd: &Path) -> ! {
