@@ -39,55 +39,67 @@ pub(crate) const SOURCE_MAP_MARKER: &str = concat!("//# __jet_", "source_map");
 
 #[macro_export]
 macro_rules! jet_generated_format {
-    ($fmt:literal,) => {
-        ::std::format!(
-            $fmt,
-            jet_prefix = $crate::Codegen::generated_prefix()
-        )
-    };
-    ($fmt:literal, $($args:tt)* ,) => {
-        ::std::format!(
-            $fmt,
-            $($args)*,
-            jet_prefix = $crate::Codegen::generated_prefix()
-        )
+    ($fmt:literal) => {
+        ::std::format!($fmt, jet_prefix = $crate::Codegen::generated_prefix())
     };
     ($fmt:literal, $($args:tt)*) => {
+        $crate::jet_generated_format!(@collect $fmt; [] $($args)*)
+    };
+    (@collect $fmt:literal; []) => {
+        ::std::format!($fmt, jet_prefix = $crate::Codegen::generated_prefix())
+    };
+    (@collect $fmt:literal; [$($args:tt)*]) => {
         ::std::format!(
             $fmt,
             $($args)*,
             jet_prefix = $crate::Codegen::generated_prefix()
         )
     };
-    ($fmt:literal) => {
+    (@collect $fmt:literal; [$($args:tt)*] ,) => {
         ::std::format!(
             $fmt,
+            $($args)*,
             jet_prefix = $crate::Codegen::generated_prefix()
         )
+    };
+    (@collect $fmt:literal; [$($args:tt)*] , $head:tt $($rest:tt)*) => {
+        $crate::jet_generated_format!(@collect $fmt; [$($args)*, $head] $($rest)*)
+    };
+    (@collect $fmt:literal; [$($args:tt)*] $head:tt $($rest:tt)*) => {
+        $crate::jet_generated_format!(@collect $fmt; [$($args)* $head] $($rest)*)
     };
 }
 
 #[macro_export]
 macro_rules! jet_name_format {
-    ($fmt:literal,) => {
-        ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
-    };
-    ($fmt:literal, $($args:tt)* ,) => {
-        ::std::format!(
-            $fmt,
-            $($args)*,
-            name_prefix = $crate::Codegen::canonical_prefix()
-        )
-    };
-    ($fmt:literal, $($args:tt)*) => {
-        ::std::format!(
-            $fmt,
-            $($args)*,
-            name_prefix = $crate::Codegen::canonical_prefix()
-        )
-    };
     ($fmt:literal) => {
         ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
+    };
+    ($fmt:literal, $($args:tt)*) => {
+        $crate::jet_name_format!(@collect $fmt; [] $($args)*)
+    };
+    (@collect $fmt:literal; []) => {
+        ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
+    };
+    (@collect $fmt:literal; [$($args:tt)*]) => {
+        ::std::format!(
+            $fmt,
+            $($args)*,
+            name_prefix = $crate::Codegen::canonical_prefix()
+        )
+    };
+    (@collect $fmt:literal; [$($args:tt)*] ,) => {
+        ::std::format!(
+            $fmt,
+            $($args)*,
+            name_prefix = $crate::Codegen::canonical_prefix()
+        )
+    };
+    (@collect $fmt:literal; [$($args:tt)*] , $head:tt $($rest:tt)*) => {
+        $crate::jet_name_format!(@collect $fmt; [$($args)*, $head] $($rest)*)
+    };
+    (@collect $fmt:literal; [$($args:tt)*] $head:tt $($rest:tt)*) => {
+        $crate::jet_name_format!(@collect $fmt; [$($args)* $head] $($rest)*)
     };
 }
 
