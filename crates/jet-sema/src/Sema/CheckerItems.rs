@@ -88,6 +88,7 @@ impl<'a> Checker<'a> {
                 ret,
                 effect_bound,
                 param_contract,
+                call_metadata,
                 return_view_provenance,
             } => Type::Fn {
                 params: params
@@ -99,6 +100,7 @@ impl<'a> Checker<'a> {
                 }),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(

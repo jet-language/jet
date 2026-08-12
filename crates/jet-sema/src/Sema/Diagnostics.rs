@@ -7,7 +7,6 @@ use crate::AST::{BinOp, Expr, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) const WRITE_CAPABILITY_MARKER: &str = Syntax::WRITE_CAPABILITY_LABEL;
-pub(crate) const MOVE_CAPABILITY_MARKER: &str = Syntax::MOVE_CAPABILITY_LABEL;
 
 pub(crate) fn operator_label(op: BinOp) -> String {
     match op {

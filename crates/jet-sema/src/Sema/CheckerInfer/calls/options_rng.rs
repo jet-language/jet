@@ -96,13 +96,15 @@ impl<'a> Checker<'a> {
                                 ret: None,
                                 effect_bound: None,
                                 param_contract: None,
+                                call_metadata: None,
                                 return_view_provenance: None,
                             },
                             &Type::Fn {
-                                params,
+                                params: params.clone(),
                                 ret: None,
                                 effect_bound: None,
                                 param_contract: None,
+                                call_metadata: None,
                                 return_view_provenance: None,
                             },
                         ) => {

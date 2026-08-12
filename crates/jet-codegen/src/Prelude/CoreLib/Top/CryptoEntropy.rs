@@ -437,6 +437,7 @@ pub(crate) use jet_crypto_entropy::jet_crypto_entropy_zeroize;
 pub(crate) use jet_crypto_entropy::JetCryptoSecretBytes;
 
 #[cfg(test)]
+#[allow(unused_imports)]
 pub use jet_crypto_entropy::{
     jet_crypto_entropy_clear_test_provider, jet_crypto_entropy_fill_with,
     jet_crypto_entropy_clear_zeroize_test_observer, jet_crypto_entropy_set_test_provider,

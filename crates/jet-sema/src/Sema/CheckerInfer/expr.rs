@@ -3697,7 +3697,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             } else if owner_import_ns.is_none() {
-                if let Some(fty) = core_generic_struct_field(lookup_name, member, args) {
+                if let Some(fty) = core_generic_struct_field(leaf, member, args) {
                     // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
                     // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
                     // precedent: `Reader`/`Cursor`) means this fallback only runs when

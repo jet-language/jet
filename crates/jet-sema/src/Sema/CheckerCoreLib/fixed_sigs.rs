@@ -407,6 +407,7 @@ pub fn core_fixed_sig(
                     ret: None,
                     effect_bound: None, return_view_provenance: None,
                     param_contract: None,
+                    call_metadata: None,
                 },
             )],
             None,

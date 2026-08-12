@@ -950,18 +950,18 @@ impl<'a> Checker<'a> {
         }
 
         fn same_struct_name_identity(&self, want: &str, got: &str) -> bool {
-            let identity = |name: &str| {
-                let (import_ns, type_name) = Self::split_type_name(name);
-                let owner = self.struct_owner_module(type_name, import_ns)?;
-                self.struct_fields_of(owner, type_name)
-                    .map(|_| (owner, type_name))
+            let (want_ns, want_name) = Self::split_type_name(want);
+            let (got_ns, got_name) = Self::split_type_name(got);
+            let (Some(want_owner), Some(got_owner)) = (
+                self.struct_owner_module(want_name, want_ns),
+                self.struct_owner_module(got_name, got_ns),
+            ) else {
+                return false;
             };
-            match (identity(want), identity(got)) {
-                (Some((want_owner, want_name)), Some((got_owner, got_name))) => {
-                    want_owner == got_owner && want_name == got_name
-                }
-                _ => false,
-            }
+            self.struct_fields_of(want_owner, want_name).is_some()
+                && self.struct_fields_of(got_owner, got_name).is_some()
+                && want_owner == got_owner
+                && want_name == got_name
         }
 
         pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {

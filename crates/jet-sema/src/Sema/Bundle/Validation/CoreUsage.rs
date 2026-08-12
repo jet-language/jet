@@ -369,15 +369,6 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
-            // D-CONC-SPAWN1=D: `task.group name { … }` needs no `use core.X`
-            // import to reach the embedded `jet_std` task runtime (AOT embeds
-            // it, JIT/interpreter compile the same Prelude source) — parsed
-            // syntax, not raw source text, owns the requirement, exactly like
-            // `#Shield` below.
-            Stmt::TaskGroup { body, span, .. } => {
-                note_core_usage(used, spans, "core.concurrency::task", Some(*span));
-                collect_core_stmts(body, imports, used, spans, ffi_cb);
-            }
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
