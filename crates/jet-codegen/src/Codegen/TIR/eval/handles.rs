@@ -101,6 +101,19 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::CBORWriterWrite => "CBORWriterWrite",
         THandleOp::CBORWriterFlush => "CBORWriterFlush",
         THandleOp::CBORWriterFinish => "CBORWriterFinish",
+        THandleOp::TcpListenerAccept => "TcpListenerAccept",
+        THandleOp::TcpListenerLocalAddr => "TcpListenerLocalAddr",
+        THandleOp::TcpStreamRead => "TcpStreamRead",
+        THandleOp::TcpStreamWrite => "TcpStreamWrite",
+        THandleOp::TcpStreamPeerAddr => "TcpStreamPeerAddr",
+        THandleOp::TcpStreamLocalAddr => "TcpStreamLocalAddr",
+        THandleOp::TcpStreamClose => "TcpStreamClose",
+        THandleOp::TcpStreamReadBytes => "TcpStreamReadBytes",
+        THandleOp::TcpStreamReadText => "TcpStreamReadText",
+        THandleOp::TcpStreamWriteBytes => "TcpStreamWriteBytes",
+        THandleOp::TcpStreamWriteAllBytes => "TcpStreamWriteAllBytes",
+        THandleOp::TcpStreamWriteText => "TcpStreamWriteText",
+        THandleOp::TcpStreamShutdown => "TcpStreamShutdown",
         THandleOp::TcpStreamReady => "TcpStreamReady",
         THandleOp::UdpSocketReady => "UdpSocketReady",
         THandleOp::UdpSocketClose => "UdpSocketClose",
@@ -439,6 +452,31 @@ pub(super) fn eval_handle_with_type(
         return result;
     }
     let op_name = handle_op_name(op);
+    // A nominal Reader/Writer uses the Prelude's IOError conversion, while
+    // the concrete core.net methods expose NetError. Keep that distinction at
+    // the evaluator boundary so both surfaces call the same ambient Prelude
+    // adapter without changing the user-facing operation table.
+    let io_op_name = match (op, resolved_ret) {
+        (
+            THandleOp::TcpStreamReadBytes,
+            Some(Type::Result { err, .. }),
+        ) if matches!(err.as_ref(), Type::Named(name) if name == "IOError") && args.len() == 1 => {
+            "TcpStreamReadBytesIO"
+        }
+        (
+            THandleOp::TcpStreamWriteBytes,
+            Some(Type::Result { err, .. }),
+        ) if matches!(err.as_ref(), Type::Named(name) if name == "IOError") && args.len() == 1 => {
+            "TcpStreamWriteBytesIO"
+        }
+        (
+            THandleOp::TcpStreamWriteAllBytes,
+            Some(Type::Result { err, .. }),
+        ) if matches!(err.as_ref(), Type::Named(name) if name == "IOError") && args.len() == 1 => {
+            "TcpStreamWriteAllBytesIO"
+        }
+        _ => op_name.as_str(),
+    };
     // UDP readiness, deadline I/O, and close are runtime-only operations. Keep
     // them on the ambient bridge so the interpreter marshals through the same
     // Prelude socket operation as AOT and JIT, rather than growing local policy.
@@ -450,14 +488,14 @@ pub(super) fn eval_handle_with_type(
             | THandleOp::UdpSocketSendToDeadline
     );
     if udp_ambient {
-        if let Some(result) = crate::Comptime::try_ambient_handle(&op_name, recv, args, span) {
+        if let Some(result) = crate::Comptime::try_ambient_handle(io_op_name, recv, args, span) {
             return result;
         }
     } else if !op_name.is_empty() {
         if let Some(result) = crate::Comptime::eval_args_handle(&op_name, recv, args, span) {
             return result;
         }
-        if let Some(result) = crate::Comptime::try_ambient_handle(&op_name, recv, args, span) {
+        if let Some(result) = crate::Comptime::try_ambient_handle(io_op_name, recv, args, span) {
             return result;
         }
     }

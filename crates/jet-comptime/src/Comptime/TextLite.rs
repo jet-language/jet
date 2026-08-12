@@ -262,6 +262,81 @@ mod text_kernel {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum IoErrorOperation {
+    Read,
+    Write,
+    Resolve,
+}
+
+pub(super) fn io_error_value(
+    operation: IoErrorOperation,
+    path: &str,
+    error: std::io::Error,
+) -> crate::AST::CtValue {
+    let operation = match operation {
+        IoErrorOperation::Read => text_kernel::jet_std::IOOperation::Read,
+        IoErrorOperation::Write => text_kernel::jet_std::IOOperation::Write,
+        IoErrorOperation::Resolve => text_kernel::jet_std::IOOperation::Resolve,
+    };
+    let error = text_kernel::jet_std::io_error_at(operation, path, error);
+    let operation_value = |operation| {
+        let variant = match operation {
+            text_kernel::jet_std::IOOperation::Read => "Read",
+            text_kernel::jet_std::IOOperation::Write => "Write",
+            text_kernel::jet_std::IOOperation::Flush => "Flush",
+            text_kernel::jet_std::IOOperation::Connect => "Connect",
+            text_kernel::jet_std::IOOperation::Accept => "Accept",
+            text_kernel::jet_std::IOOperation::Close => "Close",
+            text_kernel::jet_std::IOOperation::Resolve => "Resolve",
+            text_kernel::jet_std::IOOperation::Codec => "Codec",
+        };
+        crate::AST::CtValue::Enum {
+            type_name: "IOOperation".to_string(),
+            variant: variant.to_string(),
+            args: Vec::new(),
+        }
+    };
+    let context_value = |context: text_kernel::jet_std::IOContext| {
+        let optional_string = |value: Option<String>| {
+            value
+                .map(|value| crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(value))))
+                .unwrap_or_else(|| crate::AST::CtValue::absent(crate::AST::Type::String))
+        };
+        let optional_int = |value: Option<i64>| {
+            value
+                .map(|value| crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Int(value))))
+                .unwrap_or_else(|| crate::AST::CtValue::absent(crate::AST::Type::Int))
+        };
+        crate::AST::CtValue::Struct {
+            type_name: "IOContext".to_string(),
+            fields: vec![
+                ("operation".to_string(), operation_value(context.operation)),
+                ("resource".to_string(), optional_string(context.resource)),
+                ("os_code".to_string(), optional_int(context.os_code)),
+                ("cause".to_string(), optional_string(context.cause)),
+            ],
+        }
+    };
+    let (variant, context) = match error {
+        text_kernel::jet_std::IOError::InvalidInput(context) => ("InvalidInput", context),
+        text_kernel::jet_std::IOError::NotFound(context) => ("NotFound", context),
+        text_kernel::jet_std::IOError::PermissionDenied(context) => {
+            ("PermissionDenied", context)
+        }
+        text_kernel::jet_std::IOError::TimedOut(context) => ("TimedOut", context),
+        text_kernel::jet_std::IOError::Cancelled(context) => ("Cancelled", context),
+        text_kernel::jet_std::IOError::Closed(context) => ("Closed", context),
+        text_kernel::jet_std::IOError::Protocol(context) => ("Protocol", context),
+        text_kernel::jet_std::IOError::Other(context) => ("Other", context),
+    };
+    crate::AST::CtValue::Enum {
+        type_name: "IOError".to_string(),
+        variant: variant.to_string(),
+        args: vec![(None, context_value(context))],
+    }
+}
+
 pub(super) fn nfd(s: &str) -> String { text_kernel::nfd(s) }
 pub(super) fn nfkd(s: &str) -> String { text_kernel::nfkd(s) }
 pub(super) fn nfc(s: &str) -> String { text_kernel::nfc(s) }
