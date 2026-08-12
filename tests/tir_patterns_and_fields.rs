@@ -80,13 +80,13 @@ struct Pair {
 fn run() {
     value :: 7
     v :: 3
-    range :: 0
+    range := 0
     s :: "ok"
     loop i, 1..<4 {
         range = (range + i)
     }
     pair :: Pair.{ left: value, right: range }
-    xs :: [v, pair.right]
+    xs := [v, pair.right]
     xs[0] = value
     loop item, xs {
         print(item)
@@ -95,7 +95,7 @@ fn run() {
 }
 "#;
     let rust = compile("tir_generated_name_patterns", src);
-    for stem in ["v", "range", "item"] {
+    for stem in ["v", "i", "item"] {
         let user = jet::AST::mangle(stem);
         let generated = jet::AST::mangle_generated(stem);
         assert_ne!(user, generated, "allocator lanes must stay distinct for {stem}");
@@ -534,7 +534,8 @@ fn run() {
     // own `Clone` impl is a cheap handle clone, so plain `.clone()` replaces the
     // old `Arc::clone(&…)` text.)
     assert!(
-        out.rust.contains("__jet_noop(&(((*__jet_h)).clone()));"),
+        out.rust
+            .contains("let __jet___arg91_0 = &(((*__jet_h)).clone());\n    __jet_noop(__jet___arg91_0)"),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );

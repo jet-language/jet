@@ -17,7 +17,7 @@ fn run() {
     k :: "apple"
     item :: 0
     i :: 9
-    xs :: [value, v]
+    xs := [value, v]
     xs[1] = value
     loop (list_index, list_item), xs {
         print("{list_index}:{list_item}")

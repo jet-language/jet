@@ -6,7 +6,6 @@
 //! point; this module only renders wrappers and deterministic foreign text.
 
 use crate::AST::{Item, ProgramBundle};
-use crate::jet_name_format;
 use jet_foundation::Names::mangle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

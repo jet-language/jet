@@ -1,5 +1,4 @@
 use crate::jet_generated_format as jet_format;
-use crate::jet_name_format;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;

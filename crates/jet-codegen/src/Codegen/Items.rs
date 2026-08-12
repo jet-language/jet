@@ -1,5 +1,4 @@
 use crate::jet_generated_format as jet_format;
-use crate::jet_name_format;
 use super::*;
 use crate::Generics;
 use crate::AST::{
@@ -1290,7 +1289,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     } else {
         String::new()
     };
-    let type_arg = impl_generic;
+    let type_arg = &impl_generic;
     if !has_shared_guard && cx.auto_printable.contains(&e.name) {
         out.push_str(&format!(
             "impl{impl_generic} JetShow for {rust_name}{type_arg} {{\n    fn jet_show(&self) -> String {{ {body} }}\n}}\n\n",

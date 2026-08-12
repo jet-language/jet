@@ -198,7 +198,7 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
                     base: Box::new(TExpr {
                         ty: tuple_ty.clone(),
-                        kind: TExprKind::Local(TLocal::user(tuple_local)),
+                        kind: TExprKind::Local(TLocal::user(&tuple_local)),
                     }),
                     index: i,
                 })),
@@ -274,7 +274,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
                     base: Box::new(TExpr {
                         ty: tuple_ty.clone(),
-                        kind: TExprKind::Local(TLocal::user(tuple_local)),
+                        kind: TExprKind::Local(TLocal::user(&tuple_local)),
                     }),
                     index: i,
                 })),
