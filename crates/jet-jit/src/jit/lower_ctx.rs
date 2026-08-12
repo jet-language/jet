@@ -599,7 +599,11 @@ impl LowerCtx<'_, '_> {
     }
 
     fn emit_requested_return(&mut self, values: &[Value]) {
-        if values.is_empty() {
+        // A Jet `Unit` function may still carry a value-producing expression
+        // in `return` position (for example an in-place Prelude call). Lower
+        // that expression for its effects, but do not pass its dummy carrier
+        // to a void Cranelift signature.
+        if values.is_empty() || (!self.ret_range && self.ret_clif.is_none()) {
             self.emit_dummy_return();
         } else {
             self.b.ins().return_(values);
@@ -14964,8 +14968,21 @@ impl LowerCtx<'_, '_> {
                     let ok_block = self.b.create_block();
                     let fail_block = self.b.create_block();
                     let merge = self.b.create_block();
-                    self.b.append_block_param(merge, types::I64);
                     let is_result_option = self.uses_result_option_abi(value);
+                    let inner = match &value.ty {
+                        Type::Option(inner) => inner.as_ref(),
+                        _ => unreachable!("Option branch checked above"),
+                    };
+                    // The option carrier is packed as I64, but `??` produces
+                    // the payload type. In particular Option<Float> must
+                    // merge as F64 with its fallback; using an I64 merge
+                    // parameter leaves Cranelift with an invalid fcmp.i64.
+                    let merge_ty = self
+                        .meta
+                        .clif_ty(inner)
+                        .or_else(|| clif_ty(inner))
+                        .unwrap_or(types::I64);
+                    self.b.append_block_param(merge, merge_ty);
                     let present = if is_result_option {
                         self.call_host(self.host.result_is_ok, &[status])
                     } else {
@@ -14976,9 +14993,20 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().brif(present, ok_block, &[], fail_block, &[]);
                     self.b.switch_to_block(ok_block);
                     self.b.seal_block(ok_block);
-                    let val = if is_result_option
-                        || matches!(&value.kind, TExprKind::OverflowOpt { .. })
-                    {
+                    let val = if is_result_option {
+                        match merge_ty {
+                            ty if ty == types::F64 => {
+                                self.call_host(self.host.result_get_f64, &[status])
+                            }
+                            ty if ty == types::I8 => {
+                                self.call_host(self.host.result_get_i8, &[status])
+                            }
+                            ty if ty == types::I32 => {
+                                self.call_host(self.host.result_get_i32, &[status])
+                            }
+                            _ => self.call_host(self.host.result_get_i64, &[status]),
+                        }
+                    } else if matches!(&value.kind, TExprKind::OverflowOpt { .. }) {
                         self.call_host(self.host.result_get_i64, &[status])
                     } else if let Type::Option(inner) = &value.ty {
                         self.unpack_option_payload(status, inner)?
@@ -15024,7 +15052,11 @@ impl LowerCtx<'_, '_> {
                                 .declare_func_in_func(self.host.trap_panic, self.b.func);
                             self.b.ins().call(host_ref, &[zero]);
                             self.emit_trap_check()?;
-                            let dummy = self.b.ins().iconst(types::I64, 0);
+                            let dummy = if merge_ty == types::F64 {
+                                self.b.ins().f64const(0.0)
+                            } else {
+                                self.b.ins().iconst(merge_ty, 0)
+                            };
                             self.b.ins().jump(merge, &[dummy]);
                         }
                     }
@@ -22683,6 +22715,32 @@ impl LowerCtx<'_, '_> {
         if matches!(op, BinOp::Eq | BinOp::Ne) && matches!(lhs_ty, Type::Tuple(_)) {
             return self.lower_tuple_eq(op, &lhs_ty, l, r);
         }
+        let string_like = |ty: &Type| {
+            matches!(ty, Type::String)
+                || matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_STRING || name == "str")
+        };
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && (string_like(&lhs_ty) || string_like(&rhs_ty))
+        {
+            let equal = self.call_host(self.host.str_eq, &[l, r]);
+            return Ok(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, equal)
+            });
+        }
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && matches!(&lhs_ty, Type::Named(name) if matches!(name.as_str(), "Date" | "LocalDate"))
+        {
+            let equal = self.call_host(self.host.time.date_equal, &[l, r]);
+            return Ok(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, equal)
+            });
+        }
         // UiNode.label is a heap string; TIR may leave the Field ty as Unit/Named
         // when UiNode is an opaque host handle — still content-compare.
         let ui_label_eq = matches!(op, BinOp::Eq | BinOp::Ne)
@@ -22768,10 +22826,30 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().isub(one, eq)
             }
             (Type::List(_) | Type::FixedList { .. }, BinOp::Eq) => {
-                self.call_host(self.host.coll.list_eq, &[l, r])
+                let elem = match &lhs_ty {
+                    Type::List(elem) => Some(elem.as_ref()),
+                    Type::FixedList { elem, .. } => Some(elem.as_ref()),
+                    _ => None,
+                };
+                let host = match elem {
+                    Some(Type::String) => self.host.coll.list_eq_str,
+                    Some(Type::Float | Type::Float32) => self.host.coll.list_eq_f64,
+                    _ => self.host.coll.list_eq,
+                };
+                self.call_host(host, &[l, r])
             }
             (Type::List(_) | Type::FixedList { .. }, BinOp::Ne) => {
-                let eq = self.call_host(self.host.coll.list_eq, &[l, r]);
+                let elem = match &lhs_ty {
+                    Type::List(elem) => Some(elem.as_ref()),
+                    Type::FixedList { elem, .. } => Some(elem.as_ref()),
+                    _ => None,
+                };
+                let host = match elem {
+                    Some(Type::String) => self.host.coll.list_eq_str,
+                    Some(Type::Float | Type::Float32) => self.host.coll.list_eq_f64,
+                    _ => self.host.coll.list_eq,
+                };
+                let eq = self.call_host(host, &[l, r]);
                 let one = self.b.ins().iconst(types::I8, 1);
                 self.b.ins().isub(one, eq)
             }

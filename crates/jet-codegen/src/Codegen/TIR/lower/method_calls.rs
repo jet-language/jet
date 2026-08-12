@@ -13,6 +13,7 @@ use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::builtin_result_ty;
 use crate::Codegen::TIR::call_return_type_with_args;
 use crate::Codegen::TIR::core_call_return_ty;
+use crate::Codegen::TIR::core_enum_equal_type;
 use crate::Codegen::TIR::duration_new_unit;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::fn_field_call_ty;
@@ -4398,6 +4399,29 @@ fn lower_method_call_impl(
                 };
             }
         }
+    }
+    // Core enum equality is represented by the shared Prelude's native
+    // `PartialEq` value operation. Sema has already proved the Equatable
+    // contract; preserve it as the existing typed equality node so emitters do
+    // not rediscover the representation.
+    if method == "equal"
+        && args.len() == 1
+        && recv_type.as_deref().is_some_and(|name| {
+            core_enum_equal_type(name.rsplit('.').next().unwrap_or(name))
+        })
+    {
+        let lhs = lower_expr(receiver, cx, env);
+        let rhs = lower_expr(&args[0].expr, cx, env);
+        return TExpr {
+            ty: resolved_ret.cloned().unwrap_or(Type::Bool),
+            kind: TExprKind::Binary {
+                op: crate::AST::BinOp::Eq,
+                overflow: false,
+                line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+        };
     }
     // c109 Phase 25: HTTPRouter route registration `router.get/post/put/delete(path,
     // handler)` (D-ROUTE1=A). The gate (`router_register_in_subset`) proved the receiver

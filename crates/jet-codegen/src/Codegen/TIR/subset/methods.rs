@@ -9,6 +9,7 @@ use crate::Codegen::foreign_binding_method_key;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::core_call_covered;
 use crate::Codegen::TIR::core_closure_call_in_subset;
+use crate::Codegen::TIR::core_enum_equal_type;
 use crate::Codegen::TIR::duration_new_unit;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
@@ -917,6 +918,19 @@ pub(crate) fn method_call_in_subset(
         {
             return expr_in_subset(receiver, cx, locals);
         }
+    }
+    // Core enum equality is sema-resolved as `Equatable.equal`, but the
+    // representation is a shared Prelude enum rather than a user item with a
+    // registered method signature. Lowering reuses the existing typed equality
+    // node, so every execution tier consumes the same operation.
+    if method == "equal"
+        && args.len() == 1
+        && recv_type.as_deref().is_some_and(|name| {
+            core_enum_equal_type(name.rsplit('.').next().unwrap_or(name))
+        })
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && expr_in_subset(&args[0].expr, cx, locals);
     }
     // Shape (h2) [c109 Phase 25]: HTTPRouter route registration `router.get(path, handler)`
     // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HTTPRouter")`.

@@ -1657,6 +1657,9 @@ impl TraitRegistry {
         ] {
             self.auto_debug.insert(ty.to_string());
         }
+        // D-TIME-CALENDAR1: LocalDate is a value type backed by the Prelude's
+        // `JetDate`, whose civil date fields define ordinary equality.
+        self.auto_equatable.insert("LocalDate".to_string());
         // D-RANGE-VALUE1=A: Range uses the same structural value contracts as
         // an ordinary record. Values.rs owns the matching runtime protocols.
         self.auto_equatable.insert(Syntax::TYPE_RANGE.to_string());

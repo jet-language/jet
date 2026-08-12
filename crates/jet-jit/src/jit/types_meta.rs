@@ -1621,6 +1621,11 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "max_total_bytes" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         },
+        "CBOROptions" => match field {
+            "max_depth" | "max_items" | "max_bytes" => Some(Type::Int),
+            "require_canonical" => Some(Type::Bool),
+            _ => None,
+        },
         "DataLimits" => match field {
             "encoding" => Some(Type::Named("EncodingLimits".into())),
             "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => Some(Type::Int),

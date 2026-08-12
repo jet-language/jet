@@ -2949,9 +2949,15 @@ pub(crate) fn emit_tir_core_call(
         
         
         // D-TIMEDEPTH1=A: civil-time constructors.
-        
-        
+        ("core.time.date", "new") => {
+            format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2))
+        }
+        ("core.time.date", "today") => "JetDate::today_utc()".to_string(),
         ("core.time.date", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
+        ("core.time.datetime", "from_timestamp") => {
+            format!("JetDateTime::from_timestamp({})", arg(0))
+        }
+        ("core.time.datetime", "now") => "JetDateTime::now()".to_string(),
         
         _ => "/* unknown std call */".to_string(),
     }

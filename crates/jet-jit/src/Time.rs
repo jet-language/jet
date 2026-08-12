@@ -113,6 +113,23 @@ extern "C" fn jet_jit_date_today() -> i64 {
     push(TimeValue::Date(time_rt::JetDate::today_utc()))
 }
 
+extern "C" fn jet_jit_date_equal(left: i64, right: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = left
+            .checked_sub(1)
+            .and_then(|index| rt.time_values.get(index as usize))
+            .and_then(Option::as_ref);
+        let right = right
+            .checked_sub(1)
+            .and_then(|index| rt.time_values.get(index as usize))
+            .and_then(Option::as_ref);
+        match (left, right) {
+            (Some(TimeValue::Date(left)), Some(TimeValue::Date(right))) => i8::from(left == right),
+            _ => 0,
+        }
+    })
+}
+
 extern "C" fn jet_jit_date_parse(s: i64) -> i64 {
     match time_rt::JetDate::parse(&clone_string(s)) {
         Ok(d) => result_ok(push(TimeValue::Date(d)) as u64),
@@ -402,6 +419,10 @@ host_fns! {
         binary.params.push(AbiParam::new(types::I64));
         binary.params.push(AbiParam::new(types::I64));
         binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_i8 = Signature::new(cc);
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.returns.push(AbiParam::new(types::I8));
         let mut ternary = Signature::new(cc);
         for _ in 0..3 {
             ternary.params.push(AbiParam::new(types::I64));
@@ -430,6 +451,7 @@ host_fns! {
     }
     date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
     date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
+    date_equal: "jet_jit_date_equal" => jet_jit_date_equal: binary_i8;
     start: "jet_jit_time_start" => jet_jit_time_start: nullary;
     stopwatch_elapsed: "jet_jit_stopwatch_elapsed_millis" => jet_jit_stopwatch_elapsed_millis: unary;
     date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;

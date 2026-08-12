@@ -820,9 +820,34 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     }
     if name == Syntax::TYPE_TYPE_INFO {
         return match field {
-            "layout" => {
-                Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()))
+            "name" | "path" | "identity" | "kind" => Some(Type::String),
+            "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
+            "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
+            "type_params" => Some(Type::List(Box::new(Type::Named(
+                "TypeParamInfo".to_string(),
+            )))),
+            "markers" | "expanded_markers" => {
+                Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string()))))
             }
+            "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
+            "transitions" => Some(Type::List(Box::new(Type::Named(
+                "TransitionInfo".to_string(),
+            )))),
+            "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+            "dimensions" => Some(Type::List(Box::new(Type::Named(
+                "DimensionInfo".to_string(),
+            )))),
+            "implements" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if name == "TypeParamInfo" {
+        return match field {
+            "name" => Some(Type::String),
+            "bounds" => Some(Type::List(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };
     }

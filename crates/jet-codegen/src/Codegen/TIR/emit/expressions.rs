@@ -3029,7 +3029,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let a = emit_tir_expr(a, cx);
             let b = emit_tir_expr(b, cx);
             jet_format!(
-                "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |{jet_prefix}value| Ok({jet_prefix}value), || ({}))",
+                "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |{jet_prefix}value| Ok({jet_prefix}value), || {{ let {jet_prefix}f = ({}); move |{jet_prefix}a, {jet_prefix}b| ({jet_prefix}f)({jet_prefix}a, {jet_prefix}b) }})",
                 a, b, f
             )
         }

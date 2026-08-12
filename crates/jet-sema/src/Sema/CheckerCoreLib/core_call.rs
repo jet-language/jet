@@ -12,7 +12,7 @@ use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
 use super::core_types::{decode_error_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
-    freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
+    freestanding_hint, is_freestanding_forbidden, module_short_name,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
 
@@ -228,7 +228,7 @@ fn safe_envelope_raw_argument(
     args: &[crate::AST::CallArg],
     expected_arity: usize,
 ) -> Option<Diagnostic> {
-    if !matches!(module, "jet.crypto" | "core.crypto")
+    if module != "core.crypto"
         || !matches!(name, "seal" | "open" | "file_seal" | "file_open")
         || args.len() != expected_arity + 1
     {
@@ -271,7 +271,7 @@ fn crypto_misuse_diagnostic(
     name: &str,
     args: &[crate::AST::CallArg],
 ) -> Option<Diagnostic> {
-    if matches!(module, "jet.crypto" | "core.crypto") && name == "password_hash_with_salt" {
+    if module == "core.crypto" && name == "password_hash_with_salt" {
         return Some(Diagnostic::crypto_misuse_fact(
             "`password_hash_with_salt` would use caller-controlled salt bytes, which makes a deterministic entropy seam reachable from a release build".to_string(),
             "use `crypto.password_hash` so Jet generates the salt, or move a fixed vector to `expert.argon2id` inside `#Unsafe`".to_string(),
@@ -281,7 +281,7 @@ fn crypto_misuse_diagnostic(
         ));
     }
     let hkdf_operation = match (module, name) {
-        ("jet.crypto" | "core.crypto", "hkdf_sha256") => Some("hkdf_sha256"),
+        ("core.crypto", "hkdf_sha256") => Some("hkdf_sha256"),
         ("core.crypto.expert", "hkdf_sha256_raw") => Some("hkdf_sha256_raw"),
         _ => None,
     };
@@ -473,7 +473,7 @@ fn resolved_core_fixed_sig(
         Some(row) => core_fixed_sig_for_row(row)?,
         None => core_fixed_sig(module, name)?,
     };
-    if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert") {
+    if matches!(module, "core.crypto" | "core.crypto.expert") {
         Some((
             params
                 .into_iter()

@@ -3614,19 +3614,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
             }
-            // Sema's IndexKind::Unknown violates the handoff invariant. Catch it
-            // in debug builds; release builds retain the list fallback so an
-            // interpreter path remains total if an unresolved kind leaks through.
-            debug_assert!(
-                !matches!(kind, IndexKind::Unknown),
-                "sema-to-TIR handoff violated"
-            );
+            let base_t = lower_expr(base, cx, env);
+            // Fragment evaluation intentionally lowers a small AST without the
+            // ordinary sema fact table. In that path reflection values can still
+            // carry an unresolved index kind; use the already lowered collection
+            // type to recover the same list/map operation. Ordinary functions
+            // retain the sema-to-TIR handoff assertion.
+            let fallback_kind = if matches!(base_t.ty.without_user_tags(), Type::Map { .. }) {
+                IndexKind::Map
+            } else {
+                IndexKind::List
+            };
             let kind = if matches!(kind, IndexKind::Unknown) {
-                &IndexKind::List
+                debug_assert!(super::is_eval_fragment(), "sema-to-TIR handoff violated");
+                &fallback_kind
             } else {
                 kind
             };
-            let base_t = lower_expr(base, cx, env);
             let index_t = lower_expr(index, cx, env);
             let base_ty = base_t.ty.without_user_tags();
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
