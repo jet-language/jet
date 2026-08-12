@@ -13,7 +13,8 @@ use super::core_types::{decode_error_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
     freestanding_hint, is_freestanding_forbidden, module_short_name,
-    reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
+    reactive_derived_unit, reactive_lambda_arity, reactive_not_lambda, unknown_core_item,
+    wrong_core_arity,
 };
 
 /// The Core row owns the lookup key for plain calls. Keep the fallback for
