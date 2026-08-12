@@ -1377,6 +1377,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         return None;
     }
     let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    let mut reflect_paths = cx.reflect_paths.clone();
     // File-module calls carry their already-resolved Rust path in TIR. Give the
     // resident JIT the same qualified target instead of forcing the whole
     // program through the interpreter, which cannot execute foreign binders.
@@ -1392,6 +1393,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+        for (name, path) in imported_cx.reflect_paths.iter() {
+            reflect_paths
+                .entry(name.clone())
+                .or_insert_with(|| path.clone());
+        }
         imported_cx.jit_spawn_site_base = spawn_lambdas.len();
         for item in &imported.items {
             match item {
@@ -1816,7 +1822,6 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
     let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
     let canonical_calls = cx.jit_canonical_calls.borrow().clone();
-    let reflect_paths = cx.reflect_paths.clone();
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
