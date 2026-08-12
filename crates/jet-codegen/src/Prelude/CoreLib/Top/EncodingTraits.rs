@@ -291,14 +291,17 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
         match t {
             jet_std::DataTree::Bytes(bytes) if std::any::type_name::<T>() == "u8" => {
                 let mut out = Vec::with_capacity(bytes.len());
-                let mut errors = Vec::new();
+                let mut errors = Vec::with_capacity(bytes.len());
                 for (index, byte) in bytes.iter().enumerate() {
                     match T::jet_decode(&jet_std::DataTree::Int(*byte as i64)) {
                         Ok(value) => out.push(value),
-                        Err(error) => errors.extend(jet_std::FieldError::under_errors(
-                            &format!("[{}]", index),
-                            error,
-                        )),
+                        Err(error) => {
+                            let mut framed = jet_std::FieldError::under_errors(
+                                &format!("[{}]", index),
+                                error,
+                            );
+                            errors.append(&mut framed);
+                        }
                     }
                 }
                 if !errors.is_empty() {
@@ -308,14 +311,17 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
             }
             jet_std::DataTree::Array(items) => {
                 let mut out = Vec::with_capacity(items.len());
-                let mut errors = Vec::new();
+                let mut errors = Vec::with_capacity(items.len());
                 for (i, item) in items.iter().enumerate() {
                     match T::jet_decode(item) {
                         Ok(value) => out.push(value),
-                        Err(error) => errors.extend(jet_std::FieldError::under_errors(
-                            &format!("[{}]", i),
-                            error,
-                        )),
+                        Err(error) => {
+                            let mut framed = jet_std::FieldError::under_errors(
+                                &format!("[{}]", i),
+                                error,
+                            );
+                            errors.append(&mut framed);
+                        }
                     }
                 }
                 if !errors.is_empty() {

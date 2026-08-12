@@ -44,19 +44,18 @@
         // the canonical error type makes nested records, lists, and maps
         // preserve all failures instead of collapsing to the first one.
         pub fn under_errors(seg: &str, errors: Vec<FieldError>) -> Vec<FieldError> {
-            errors
-                .into_iter()
-                .map(|mut error| {
-                    error.path = if error.path.is_empty() {
-                        seg.to_string()
-                    } else if error.path.starts_with('[') {
-                        format!("{}{}", seg, error.path)
-                    } else {
-                        format!("{}.{}", seg, error.path)
-                    };
-                    error
-                })
-                .collect()
+            let mut framed = Vec::with_capacity(errors.len());
+            for mut error in errors {
+                error.path = if error.path.is_empty() {
+                    seg.to_string()
+                } else if error.path.starts_with('[') {
+                    format!("{}{}", seg, error.path)
+                } else {
+                    format!("{}.{}", seg, error.path)
+                };
+                framed.push(error);
+            }
+            framed
         }
 
         // The Jet-facing transform keeps a child Result intact on success and

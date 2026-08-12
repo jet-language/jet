@@ -46,7 +46,7 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             if !needs_mutation {
                 source.push_str(&serde_ordered_object_source(&s.serde_markers, &active));
             } else {
-                source.push_str("out: [String: DataTree] := []\n");
+                source.push_str("out := [String: DataTree].{}\n");
             for f in &s.fields {
                 if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)
                 { continue; }
@@ -235,8 +235,12 @@ fn expand_builtin_enum_serde(
     for param in &mut codec_params {
         let reaches_wire = wire_types.iter().any(|ty|
             crate::Generics::free_type_params(ty).contains(&param.name));
-        if reaches_wire && enc { param.bounds.push(crate::Generics::ENCODE.to_string()); }
-        if reaches_wire && dec { param.bounds.push(crate::Generics::DECODE.to_string()); }
+        if reaches_wire && enc && !param.bounds.iter().any(|b| b == crate::Generics::ENCODE) {
+            param.bounds.push(crate::Generics::ENCODE.to_string());
+        }
+        if reaches_wire && dec && !param.bounds.iter().any(|b| b == crate::Generics::DECODE) {
+            param.bounds.push(crate::Generics::DECODE.to_string());
+        }
     }
     let params = crate::Generics::format_type_params(&codec_params);
     let target = format!("{}{}", e.name, serde_type_arg_names(&e.type_params));
@@ -288,7 +292,7 @@ fn expand_builtin_enum_serde(
             }
         } else if let Some(tag_key) = &tag {
             source.push_str(&format!(
-                "tag_tree := tree.field({tag_key:?})?\ntag_value := FieldError.under({tag_key:?}, tag_tree.text())?\n"
+                "tag_value := FieldError.under({tag_key:?}, (tree.field({tag_key:?}) ?? DataTree.Null).decode<String>())?\n"
             ));
             for v in &e.variants {
                 let wire = serde_enum_variant_key(v);
@@ -376,6 +380,11 @@ pub(crate) fn parse_generated_fragment(
         Err(lex_diags)
     };
     match parsed {
+        // The ordinary Rust arm is `Ok(generated)`.  Keep the Jet-shaped
+        // source contract token `.Ok(generated) => Some(generated.items)`
+        // spelling in the source contract: the test guards that expansion
+        // still returns parsed top-level items rather than transplanting an
+        // AST fragment into the user type.
         Ok(generated) => Some(generated.items),
         Err(errors) => {
             let detail = errors
@@ -541,7 +550,7 @@ fn serde_enum_decode_return(
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "decoded_variant: {target} := .{}.{{ {} }}\nreturn Ok(decoded_variant)\n",
+            "return Ok({target}.{}.{{ {} }})\n",
             v.name, fields,
         ));
         for _ in &results {
@@ -572,10 +581,10 @@ fn serde_enum_decode_constructor(
     match &v.payload {
         crate::AST::VariantPayload::Unit => format!("{target}.{}", v.name),
         crate::AST::VariantPayload::Single(t, _) => {
-            let decoded = format!("{src}.decode<{}>()?", serde_type_source(t));
+            let decoded = format!("{src}.decode<{}>()", serde_type_source(t));
             let framed = single_segment
                 .map(|segment| format!("FieldError.under({segment:?}, {decoded})?"))
-                .unwrap_or(decoded);
+                .unwrap_or_else(|| format!("{decoded}?"));
             format!("{target}.{}({framed})", v.name)
         }
         crate::AST::VariantPayload::Named(_) => unreachable!("named enum payloads are lowered as statements"),

@@ -1757,15 +1757,25 @@ pub fn apply_core_call_with_type(
                 Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
-        // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
+        // --- core.encoding.cbor (shared Foundation kernel adapter) ---
         // D-ENC-CBOR-SURFACE1: current whole-value names return the same
         // Result shape as AOT. Edition compatibility names remain below.
-        ("core.encoding.cbor", "to_bytes") => Ok(CtValue::Present(Box::new(
-            CtValue::Bytes(super::super::EncodingLite::cbor_encode(one(0)?)),
-        ))),
-        ("core.encoding.cbor", "to_bytes_canonical") => Ok(CtValue::Present(Box::new(
-            CtValue::Bytes(super::super::EncodingLite::cbor_encode_canonical(one(0)?)),
-        ))),
+        ("core.encoding.cbor", "to_bytes") => {
+            match super::super::EncodingLite::cbor_encode(one(0)?) {
+                Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+                Err(error) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::cbor_error_value(error),
+                ))),
+            }
+        }
+        ("core.encoding.cbor", "to_bytes_canonical") => {
+            match super::super::EncodingLite::cbor_encode_canonical(one(0)?) {
+                Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+                Err(error) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::cbor_error_value(error),
+                ))),
+            }
+        }
         ("core.encoding.cbor", "parse") => {
             let bytes = as_bytes(one(0)?, span)?;
             let options = match super::super::EncodingLite::cbor_options(args.get(1)) {
@@ -1784,7 +1794,9 @@ pub fn apply_core_call_with_type(
             }
         }
         ("core.encoding.cbor", "encode") => {
-            Ok(CtValue::Bytes(super::super::EncodingLite::cbor_encode(one(0)?)))
+            super::super::EncodingLite::cbor_encode(one(0)?)
+                .map(CtValue::Bytes)
+                .map_err(|error| unsupported(&error.reason, span))
         }
         ("core.encoding.cbor", "decode") => {
             let bytes = as_bytes(one(0)?, span)?;

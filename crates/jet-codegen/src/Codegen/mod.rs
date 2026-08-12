@@ -749,6 +749,13 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str("\nmod jet_xml_kernel {\n");
     out.push_str(include_str!("../../../jet-foundation/src/XmlKernel.rs"));
     out.push_str("\n}\n");
+    out.push_str("\nmod jet_cbor_budget {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/CborBudget.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\n#[allow(non_snake_case)]\nmod CborBudget { pub use crate::jet_cbor_budget::*; }\n");
+    out.push_str("\nmod jet_cbor_kernel {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/CborKernel.rs"));
+    out.push_str("\n}\n");
     out.push_str("\nmod jet_base_encoding_strict {\n");
     out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
     out.push_str("\n}\n");

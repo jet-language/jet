@@ -241,7 +241,12 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) eof: bool,
         pub(crate) record_mode: bool,
-        pub(crate) allocation_budget: Option<super::JetJSONAllocationBudget>,
+        pub(crate) allocation_budget: Option<super::JetEncodingAllocationBudget>,
+        // A string event owns its decoded backing until `next_event` hands the
+        // event to the caller.  Keeping that charge live through object-key
+        // cloning makes the transient peak observable and releases it exactly
+        // once on both success and terminal error.
+        pub(crate) output_heap: usize,
     }
     pub struct JSONWriter {
         pub(crate) output: super::JetFileWriter,
@@ -299,7 +304,7 @@
         pub(crate) total: i64,
         pub(crate) eof: bool,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling for retained events.
-        pub(crate) allocation: super::JetJSONAllocationBudget,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
     pub struct XMLWriter {
         pub(crate) output: super::JetFileWriter,
@@ -309,6 +314,7 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
         pub(crate) finished: bool,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
     pub struct CBORReader {
         pub(crate) input: super::JetFileReader,
@@ -322,7 +328,7 @@
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
-        pub(crate) allocation: super::JetJSONAllocationBudget,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
     pub struct CBORWriter {
         pub(crate) output: super::JetFileWriter,
@@ -337,7 +343,7 @@
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
-        pub(crate) allocation: super::JetJSONAllocationBudget,
+        pub(crate) allocation: super::JetEncodingAllocationBudget,
     }
 
     #[derive(Clone, Debug, PartialEq)]

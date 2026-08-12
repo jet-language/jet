@@ -502,6 +502,20 @@ pub fn cbor_encode_typed_for_tir(
     EncodingLite::cbor_encode_typed(value, Some(root_ty), struct_fields, canonical)
 }
 
+/// TIR/JIT bridge for whole-value CBOR encoding. Keep the wire encoder in the
+/// same comptime-reachable Prelude implementation used by interpreter calls.
+pub fn cbor_encode_for_tir(
+    value: &CtValue,
+    canonical: bool,
+) -> Result<Vec<u8>, CtValue> {
+    if canonical {
+        EncodingLite::cbor_encode_canonical(value)
+    } else {
+        EncodingLite::cbor_encode(value)
+    }
+    .map_err(EncodingLite::cbor_error_value)
+}
+
 pub fn render_datatree_for_tir(value: &CtValue) -> String {
     JSONInterp::render_json_pretty(value, false, 0)
 }

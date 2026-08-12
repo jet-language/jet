@@ -2142,6 +2142,37 @@ impl<'a> Checker<'a> {
                 span,
                 ..
             } => {
+                // D-UITREE1/D-DOTCTOR1: the explicit named-payload enum form
+                // (`Event.Named.{ field: value }`) is parsed as a dotted
+                // struct head because the parser cannot know which dotted
+                // names are enum variants. Resolve the head here, where the
+                // registry is authoritative, and lower it to the same
+                // EnumLit node as `.Named.{ ... }`.
+                if !*inferred && type_args.is_empty() && import_ns.is_none() {
+                    if let Some((enum_name, variant)) = type_name.split_once('.') {
+                        let is_variant = self
+                            .resolve_enum_variants_cloned(enum_name)
+                            .is_some_and(|variants| variants.contains_key(variant));
+                        if is_variant {
+                            let args = std::mem::take(fields)
+                                .into_iter()
+                                .map(|(label, _, expr)| crate::AST::EnumLitArg::Named {
+                                    label,
+                                    expr,
+                                })
+                                .collect();
+                            let enum_lit = Expr::EnumLit {
+                                type_name: enum_name.to_string(),
+                                variant: variant.to_string(),
+                                args,
+                                leading_dot: false,
+                                span: *span,
+                            };
+                            *e = enum_lit;
+                            return self.infer(e);
+                        }
+                    }
+                }
                 // D-DOTCTOR1: inferred `.{ … }` form — resolve type_name from context
                 // and write it back so later passes (TIR lowering, codegen) see it.
                 if *inferred {
