@@ -25,6 +25,7 @@
         match j {
             JSON::Null => "null".to_string(),
             JSON::Boolean(b) => b.to_string(),
+            JSON::Integer(n) => n.to_string(),
             JSON::Number(n) => format!("{:?}", n),
             JSON::Text(s) => quote_json(s),
             JSON::Array(items) => {
@@ -268,6 +269,11 @@
                 }
             }
             let s: String = self.chars[start..self.pos].iter().collect();
+            if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+                if let Ok(n) = s.parse::<i64>() {
+                    return Ok(JSON::Integer(n));
+                }
+            }
             match s.parse::<f64>() {
                 Ok(n) => Ok(JSON::Number(n)),
                 Err(_) => Err(self.err("bad number")),

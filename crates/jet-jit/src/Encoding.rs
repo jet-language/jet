@@ -12,10 +12,25 @@ use jet_foundation::AST::{CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
+use crate::Time::TimeValue;
 
 mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
 }
+
+mod codec_rt {
+    pub(crate) mod jet_std {
+        pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
+    }
+    include!("../../jet-codegen/src/Prelude/Core/Codec.rs");
+}
+
+pub(crate) const CODEC_KIND_DATE: i64 = 0;
+pub(crate) const CODEC_KIND_LOCAL_DATE: i64 = 1;
+pub(crate) const CODEC_KIND_LOCAL_TIME: i64 = 2;
+pub(crate) const CODEC_KIND_DATETIME: i64 = 3;
+pub(crate) const CODEC_KIND_DURATION: i64 = 4;
+pub(crate) const CODEC_KIND_DECIMAL: i64 = 5;
 
 /// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
@@ -30,6 +45,7 @@ pub(crate) mod json_rt {
         Null,
         Boolean(bool),
         Number(f64),
+        Integer(i64),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),
@@ -2063,6 +2079,142 @@ extern "C" fn jet_jit_bytes_datatree(bytes: i64) -> i64 {
     alloc_dt_record(DT_BYTES, bytes)
 }
 
+fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, String> {
+    match kind {
+        CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE => {
+            let text = crate::Time::with_time(value, |value| match value {
+                TimeValue::Date(date) => Some(codec_rt::jet_codec_date_encode(
+                    date.year(),
+                    date.month(),
+                    date.day(),
+                )),
+                _ => None,
+            });
+            text.map(json_rt::DataTree::Text)
+                .ok_or_else(|| "invalid Date codec value".to_string())
+        }
+        CODEC_KIND_LOCAL_TIME => {
+            let text = crate::Time::with_time(value, |value| match value {
+                TimeValue::LocalTime(time) => Some(codec_rt::jet_codec_local_time_encode(
+                    time.hour(),
+                    time.minute(),
+                    time.second(),
+                )),
+                _ => None,
+            });
+            text.map(json_rt::DataTree::Text)
+                .ok_or_else(|| "invalid LocalTime codec value".to_string())
+        }
+        CODEC_KIND_DATETIME => {
+            let text = crate::Time::with_time(value, |value| match value {
+                TimeValue::DateTime(datetime) => {
+                    Some(codec_rt::jet_codec_datetime_encode(
+                        datetime.to_timestamp(),
+                        datetime.nanosecond() as u32,
+                    ))
+                }
+                _ => None,
+            });
+            text.map(json_rt::DataTree::Text)
+                .ok_or_else(|| "invalid DateTime codec value".to_string())
+        }
+        CODEC_KIND_DURATION => Ok(json_rt::DataTree::Int(codec_rt::jet_codec_duration_encode(value))),
+        CODEC_KIND_DECIMAL => {
+            let decimal = Concurrency::with_runtime_mut(|rt| {
+                let index = value.saturating_sub(1) as usize;
+                rt.decimal_values
+                    .get(index)
+                    .and_then(|decimal| decimal.as_ref())
+                    .cloned()
+            })
+            .ok_or_else(|| "invalid Decimal codec value".to_string())?;
+            Ok(json_rt::DataTree::Text(codec_rt::jet_codec_decimal_encode(
+                &decimal,
+            )))
+        }
+        _ => Err(format!("unknown codec kind {kind}")),
+    }
+}
+
+extern "C" fn jet_jit_codec_encode(kind: i64, value: i64) -> i64 {
+    let tree = match jit_codec_encode_tree(kind, value) {
+        Ok(tree) => tree,
+        Err(error) => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap(&error));
+            json_rt::DataTree::Null
+        }
+    };
+    alloc_datatree(&tree)
+}
+
+extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
+    let Some(tree) = read_datatree(tree) else {
+        return result_err_decode("", "invalid DataTree");
+    };
+    match (kind, tree) {
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_date_decode(&text) {
+                Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
+                    crate::Time::time_rt::JetDate::new(year, month, day),
+                )) as u64),
+                Err(error) => result_err_decode("", &format!("expected Date: {error}")),
+            }
+        }
+        (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_local_time_decode(&text) {
+                Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
+                    crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
+                )) as u64),
+                Err(error) => result_err_decode("", &format!("expected LocalTime: {error}")),
+            }
+        }
+        (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_datetime_decode(&text) {
+                Ok((secs, nanos)) => result_ok(crate::Time::push(TimeValue::DateTime(
+                    crate::Time::time_rt::JetDateTime::from_timestamp_ns(secs, nanos),
+                )) as u64),
+                Err(error) => result_err_decode("", &format!("expected DateTime: {error}")),
+            }
+        }
+        (CODEC_KIND_DURATION, json_rt::DataTree::Int(ns)) => {
+            result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
+        }
+        (CODEC_KIND_DECIMAL, json_rt::DataTree::Text(text)) => {
+            match codec_rt::jet_codec_decimal_decode_text(&text) {
+                Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
+                Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
+            }
+        }
+        (CODEC_KIND_DECIMAL, json_rt::DataTree::Int(value)) => {
+            match codec_rt::jet_codec_decimal_decode_int(value) {
+                Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
+                Err(error) => result_err_decode("", &error),
+            }
+        }
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, other) => result_err_decode(
+            "",
+            &format!("expected Date, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_LOCAL_TIME, other) => result_err_decode(
+            "",
+            &format!("expected LocalTime, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_DATETIME, other) => result_err_decode(
+            "",
+            &format!("expected DateTime, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_DURATION, other) => result_err_decode(
+            "",
+            &format!("expected Duration, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (CODEC_KIND_DECIMAL, other) => result_err_decode(
+            "",
+            &format!("expected Decimal, found {}", json_rt::datatree_kind(&other)),
+        ),
+        (_, _) => result_err_decode("", "unknown codec kind"),
+    }
+}
+
 host_fns! {
     struct EncodingHostFns;
     register: register_encoding_symbols;
@@ -2132,6 +2284,8 @@ host_fns! {
     cbor_decode_tree: "jet_jit_cbor_decode_tree" => jet_jit_cbor_decode_tree: sig_unary;
     cbor_decode_tree_options: "jet_jit_cbor_decode_tree_options" => jet_jit_cbor_decode_tree_options: sig_binary;
     bytes_datatree: "jet_jit_bytes_datatree" => jet_jit_bytes_datatree: sig_unary;
+    codec_encode: "jet_jit_codec_encode" => jet_jit_codec_encode: sig_binary;
+    codec_decode: "jet_jit_codec_decode" => jet_jit_codec_decode: sig_binary;
     csv_decode_trees: "jet_jit_csv_decode_trees" => jet_jit_csv_decode_trees: sig_unary;
     datatree_field: "jet_jit_datatree_field" => jet_jit_datatree_field: sig_binary;
     datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;

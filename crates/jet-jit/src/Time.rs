@@ -21,14 +21,14 @@ pub(crate) enum TimeValue {
     LocalTime(time_rt::JetLocalTime),
 }
 
-fn push(value: TimeValue) -> i64 {
+pub(crate) fn push(value: TimeValue) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.time_values.push(Some(value));
         rt.time_values.len() as i64
     })
 }
 
-fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
+pub(crate) fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
     Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
         match rt.time_values.get(idx).and_then(|s| s.as_ref()) {
@@ -326,5 +326,4 @@ host_fns! {
     duration_unit: "jet_jit_time_duration_unit" => jet_jit_time_duration_unit: binary;
     civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
 }
-
 

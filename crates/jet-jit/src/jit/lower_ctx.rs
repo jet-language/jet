@@ -1154,6 +1154,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.block_params(merge)[0])
             }
             Type::Named(_) | Type::Apply { .. } => {
+                if let Some(kind) = Self::serde_builtin_codec_kind(&ty) {
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    let result = self
+                        .call_host(self.host.encoding.codec_encode, &[kind, val]);
+                    self.emit_trap_check()?;
+                    return Ok(result);
+                }
                 let key = self
                     .serde_codec_key(&ty, "encode")
                     .ok_or_else(|| format!("jit SerdeEncode unsupported: {ty:?}"))?;
@@ -1172,6 +1179,21 @@ impl LowerCtx<'_, '_> {
 
     /// Monomorphized Codable methods are named `Wrap<Int>::encode`; fall back to
     /// `Wrap::encode` when only the base owner was lowered.
+    fn serde_builtin_codec_kind(ty: &Type) -> Option<i64> {
+        let Type::Named(name) = ty else {
+            return None;
+        };
+        match name.as_str() {
+            "Date" => Some(crate::Encoding::CODEC_KIND_DATE),
+            "LocalDate" => Some(crate::Encoding::CODEC_KIND_LOCAL_DATE),
+            "LocalTime" => Some(crate::Encoding::CODEC_KIND_LOCAL_TIME),
+            "DateTime" => Some(crate::Encoding::CODEC_KIND_DATETIME),
+            "Duration" => Some(crate::Encoding::CODEC_KIND_DURATION),
+            "Decimal" => Some(crate::Encoding::CODEC_KIND_DECIMAL),
+            _ => None,
+        }
+    }
+
     fn serde_codec_key(&self, ty: &Type, method: &str) -> Option<String> {
         let base = user_type_name(ty)?;
         if matches!(ty, Type::Apply { .. }) {
@@ -1379,6 +1401,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.block_params(merge)[0])
             }
             Type::Named(_) | Type::Apply { .. } => {
+                if let Some(kind) = Self::serde_builtin_codec_kind(&target) {
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    let result = self
+                        .call_host(self.host.encoding.codec_decode, &[kind, tree]);
+                    self.emit_trap_check()?;
+                    return Ok(result);
+                }
                 let key = self
                     .serde_codec_key(&target, "decode")
                     .ok_or_else(|| format!("jit DataTreeDecode unsupported: {target:?}"))?;
@@ -22796,7 +22825,26 @@ impl LowerCtx<'_, '_> {
         if matches!(&pattern.pattern, Pattern::Variant { .. })
             && Self::is_datatree_value_ty(&subj.ty)
         {
-            return Err("jit if-expression datatree if-let unsupported".to_string());
+            return self.lower_datatree_if_let_expr(
+                pattern,
+                subj,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                result_ty,
+            );
+        }
+        if matches!(&pattern.pattern, Pattern::Ok { .. } | Pattern::Err { .. }) {
+            return self.lower_result_if_let_expr(
+                pattern,
+                subj,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                result_ty,
+            );
         }
         if matches!(&pattern.pattern, Pattern::Variant { .. }) {
             return self.lower_enum_if_let_expr(
@@ -22810,6 +22858,252 @@ impl LowerCtx<'_, '_> {
             );
         }
         Err("jit if-expression result/option if-let unsupported".to_string())
+    }
+
+    fn lower_result_if_let_expr(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        then_value: &TExpr,
+        else_body: &[TStmt],
+        else_value: &TExpr,
+        result_ty: &Type,
+    ) -> Result<Value, String> {
+        let (want_ok, binding, payload_ty) = match &pattern.pattern {
+            Pattern::Ok { binding, .. } => {
+                let Type::Result { ok, .. } = &subj.ty else {
+                    return Err("jit if-expression Ok on non-Result".to_string());
+                };
+                (true, binding.clone(), ok.as_ref().clone())
+            }
+            Pattern::Err { binding, .. } => {
+                let Type::Result { err, .. } = &subj.ty else {
+                    return Err("jit if-expression Err on non-Result".to_string());
+                };
+                (false, binding.clone(), err.as_ref().clone())
+            }
+            _ => return Err("jit if-expression Result pattern unsupported".to_string()),
+        };
+        let handle = self.lower_expr(subj)?;
+        let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
+        let zero_b = self.b.ins().iconst(types::I8, 0);
+        let cond = if want_ok {
+            self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b)
+        } else {
+            self.b.ins().icmp(IntCC::Equal, is_ok, zero_b)
+        };
+
+        let ret_ty = clif_ty(result_ty);
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        if let Some(ret_ty) = ret_ty {
+            self.b.append_block_param(merge_block, ret_ty);
+        }
+        self.b
+            .ins()
+            .brif(cond, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+        let payload = self.result_payload(handle, &payload_ty)?;
+        let place = TIR::local_place(&binding);
+        let clif = self.b.func.dfg.value_type(payload);
+        let old_var = self.vars.remove(&place);
+        let old_ty = self.var_tys.remove(&place);
+        let var = self.fresh_var(clif);
+        self.b.def_var(var, payload);
+        self.vars.insert(place.clone(), var);
+        self.var_tys.insert(place.clone(), payload_ty);
+
+        self.lower_stmts_scoped(then_body)?;
+        let mut then_reaches_merge = !self.dead;
+        if then_reaches_merge {
+            let then_val = self.lower_expr(then_value)?;
+            if !self.dead {
+                if ret_ty.is_some() {
+                    self.b.ins().jump(merge_block, &[then_val]);
+                } else {
+                    self.b.ins().jump(merge_block, &[]);
+                }
+            } else {
+                then_reaches_merge = false;
+            }
+        }
+        self.vars.remove(&place);
+        self.var_tys.remove(&place);
+        if let Some(var) = old_var {
+            self.vars.insert(place.clone(), var);
+        }
+        if let Some(ty) = old_ty {
+            self.var_tys.insert(place, ty);
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        self.lower_stmts_scoped(else_body)?;
+        let mut else_reaches_merge = !self.dead;
+        if else_reaches_merge {
+            let else_val = self.lower_expr(else_value)?;
+            if !self.dead {
+                if ret_ty.is_some() {
+                    self.b.ins().jump(merge_block, &[else_val]);
+                } else {
+                    self.b.ins().jump(merge_block, &[]);
+                }
+            } else {
+                else_reaches_merge = false;
+            }
+        }
+
+        self.b.switch_to_block(merge_block);
+        self.b.seal_block(merge_block);
+        self.dead = !(then_reaches_merge || else_reaches_merge);
+        let result = if ret_ty.is_some() {
+            self.b.block_params(merge_block)[0]
+        } else {
+            self.b.ins().iconst(types::I8, 0)
+        };
+        Ok(result)
+    }
+
+    fn lower_datatree_if_let_expr(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        then_value: &TExpr,
+        else_body: &[TStmt],
+        else_value: &TExpr,
+        result_ty: &Type,
+    ) -> Result<Value, String> {
+        let Pattern::Variant {
+            variant, bindings, ..
+        } = &pattern.pattern
+        else {
+            return Err("jit DataTree if-let needs a variant pattern".to_string());
+        };
+        let want_disc = Self::datatree_variant_disc(variant)
+            .ok_or_else(|| format!("jit DataTree variant `{variant}`"))?;
+        let payload_ty = self
+            .meta
+            .enum_variant_payload_types("DataTree", variant)
+            .and_then(|tys| tys.first())
+            .cloned();
+
+        let subject = self.lower_expr(subj)?;
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let actual_disc = self.call_host(self.host.struct_get_i64, &[subject, zero]);
+        let want = self.b.ins().iconst(types::I64, want_disc);
+        let cond = self.bool_from_icmp(IntCC::Equal, actual_disc, want);
+
+        let ret_ty = clif_ty(result_ty);
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        if let Some(ret_ty) = ret_ty {
+            self.b.append_block_param(merge_block, ret_ty);
+        }
+        self.b
+            .ins()
+            .brif(cond, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+
+        let mut bound_place: Option<String> = None;
+        let mut old_var = None;
+        let mut old_ty = None;
+        match &pattern.position {
+            TPatternPosition::DataEntries { temp } => {
+                let entries_ty = payload_ty
+                    .clone()
+                    .unwrap_or(Type::List(Box::new(Type::Int)));
+                let payload = self.unpack_enum_heap_payload(subject, &entries_ty)?;
+                let place = temp.clone();
+                old_var = self.vars.remove(&place);
+                old_ty = self.var_tys.remove(&place);
+                let var = self.fresh_var(types::I64);
+                self.b.def_var(var, payload);
+                self.vars.insert(place.clone(), var);
+                self.var_tys.insert(place.clone(), entries_ty);
+                bound_place = Some(place);
+            }
+            _ => {
+                if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
+                    if name != "_" {
+                        let pty = payload_ty.clone().unwrap_or(Type::Int);
+                        let payload = self.unpack_enum_heap_payload(subject, &pty)?;
+                        let place = TIR::local_place(name);
+                        old_var = self.vars.remove(&place);
+                        old_ty = self.var_tys.remove(&place);
+                        let clif = self.meta.clif_ty(&pty).unwrap_or(types::I64);
+                        let var = self.fresh_var(clif);
+                        self.b.def_var(var, payload);
+                        self.vars.insert(place.clone(), var);
+                        self.var_tys.insert(place.clone(), pty);
+                        bound_place = Some(place);
+                    }
+                }
+            }
+        }
+
+        self.lower_stmts_scoped(then_body)?;
+        let mut then_reaches_merge = !self.dead;
+        if then_reaches_merge {
+            let then_val = self.lower_expr(then_value)?;
+            if !self.dead {
+                if ret_ty.is_some() {
+                    self.b.ins().jump(merge_block, &[then_val]);
+                } else {
+                    self.b.ins().jump(merge_block, &[]);
+                }
+            } else {
+                then_reaches_merge = false;
+            }
+        }
+        if let Some(place) = bound_place {
+            if let Some(var) = old_var {
+                self.vars.insert(place.clone(), var);
+            } else {
+                self.vars.remove(&place);
+            }
+            if let Some(ty) = old_ty {
+                self.var_tys.insert(place, ty);
+            } else {
+                self.var_tys.remove(&place);
+            }
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        self.lower_stmts_scoped(else_body)?;
+        let mut else_reaches_merge = !self.dead;
+        if else_reaches_merge {
+            let else_val = self.lower_expr(else_value)?;
+            if !self.dead {
+                if ret_ty.is_some() {
+                    self.b.ins().jump(merge_block, &[else_val]);
+                } else {
+                    self.b.ins().jump(merge_block, &[]);
+                }
+            } else {
+                else_reaches_merge = false;
+            }
+        }
+
+        self.b.switch_to_block(merge_block);
+        self.b.seal_block(merge_block);
+        self.dead = !(then_reaches_merge || else_reaches_merge);
+        let result = if ret_ty.is_some() {
+            self.b.block_params(merge_block)[0]
+        } else {
+            self.b.ins().iconst(types::I8, 0)
+        };
+        Ok(result)
     }
 
     fn lower_enum_if_let_expr(

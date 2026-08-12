@@ -132,7 +132,7 @@ fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
         ),
         "E3208" => (
             "header parsing or translation failed in the bind backend",
-            "fix the header or schema, then rerun the matching `jet bind` command",
+            "fix the header or schema, then rerun the matching `jet inspect bind` command",
         ),
         "E2941" => (
             "jet prove accepts only its registered proof lenses",
@@ -498,7 +498,7 @@ usage:
   {bin} repl  --project <dir>        same, with access to a project's imports
   {bin} repl  --allow-<root>         pre-authorize one Core effect root ({effect_roots})
   {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts ({effect_roots})
-  {bin} bind <schema> ...            generate Jet bindings from a foreign schema
+  {bin} inspect bind <schema> ...     generate Jet bindings from a foreign schema
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt                         rewrite all .jet files in the project to canonical style
   {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
@@ -758,8 +758,30 @@ fn unknown_subcommand(cmd: &str) -> ! {
 }
 
 /// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: grouped spelling is canonical.
-/// Normalize only after rejecting retired bare spellings, so grouped commands
+/// Normalize only after rejecting the retired top-level spelling, so grouped commands
 /// reach the existing real handlers without keeping compatibility aliases.
+fn first_cli_positional(raw: &[String]) -> Option<&str> {
+    let end = raw.iter().position(|arg| arg == "--").unwrap_or(raw.len());
+    let mut skip_next = false;
+    for arg in &raw[..end] {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if matches!(arg.as_str(), "-p" | "--task" | "--output") {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("--task=") || arg.starts_with("--output=") {
+            continue;
+        }
+        if arg == "-" || !arg.starts_with('-') {
+            return Some(arg);
+        }
+    }
+    None
+}
+
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     let Some(first) = raw.first().map(String::as_str) else { return };
     if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
@@ -774,6 +796,15 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
             raw.iter().any(|arg| arg == "--json"),
         );
         exit(ExitCodes::USAGE);
+    }
+    if first_cli_positional(raw) == Some("bind") {
+        let replacement = format!("{} inspect bind", jet::Syntax::BINARY_NAME);
+        teach_retired(
+            "bind",
+            &replacement,
+            "the binding tool is owned by the `inspect` command group",
+            raw.iter().any(|arg| arg == "--json"),
+        );
     }
     let Some(group) = raw.first().cloned() else { return };
     // D-CLI-SURFACE3=B: `os` is not exhaustive — jetos's own native verbs

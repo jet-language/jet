@@ -42,6 +42,13 @@ impl crate::option_lift2::JetOptionValue for EvalOptionValue {
     }
 }
 
+mod codec_rt {
+    pub(crate) mod jet_std {
+        pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
+    }
+    include!("../../../Prelude/Core/Codec.rs");
+}
+
 fn progress_parts(
     value: &CtValue,
 ) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
@@ -1239,6 +1246,204 @@ fn datatree_kind(value: &CtValue) -> &'static str {
     }
 }
 
+fn builtin_codec_name(ty: &Type) -> Option<&'static str> {
+    let Type::Named(name) = ty else {
+        return None;
+    };
+    match name.as_str() {
+        "Date" | "LocalDate" => Some("Date"),
+        "LocalTime" => Some("LocalTime"),
+        "DateTime" => Some("DateTime"),
+        "Duration" => Some("Duration"),
+        "Decimal" => Some("Decimal"),
+        _ => None,
+    }
+}
+
+fn codec_date_from_value(value: &CtValue) -> Option<(i64, i64, i64)> {
+    Some((
+        struct_int(value, "year")?,
+        struct_int(value, "month")?,
+        struct_int(value, "day")?,
+    ))
+}
+
+fn codec_local_time_from_value(value: &CtValue) -> Option<(i64, i64, i64)> {
+    Some((
+        struct_int(value, "hour")?,
+        struct_int(value, "minute")?,
+        struct_int(value, "second")?,
+    ))
+}
+
+fn codec_datetime_from_value(value: &CtValue) -> Option<(i64, u32)> {
+    let nanos = u32::try_from(struct_int(value, "nanos").unwrap_or(0)).ok()?;
+    Some((struct_int(value, "secs")?, nanos))
+}
+
+fn builtin_codec_encode(
+    value: CtValue,
+    name: &str,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let tree = match name {
+        "Date" => {
+            let (year, month, day) = codec_date_from_value(&value)
+                .ok_or_else(|| unsupported("malformed Date value", span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_date_encode(year, month, day))),
+            )
+        }
+        "LocalTime" => {
+            let (hour, minute, second) = codec_local_time_from_value(&value)
+                .ok_or_else(|| unsupported("malformed LocalTime value", span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_local_time_encode(
+                    hour, minute, second,
+                ))),
+            )
+        }
+        "DateTime" => {
+            let (secs, nanos) = codec_datetime_from_value(&value)
+                .ok_or_else(|| unsupported("malformed DateTime value", span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_datetime_encode(secs, nanos))),
+            )
+        }
+        "Duration" => {
+            let ns = struct_int(&value, "ns")
+                .ok_or_else(|| unsupported("malformed Duration value", span))?;
+            datatree(
+                "Int",
+                Some(CtValue::Int(codec_rt::jet_codec_duration_encode(ns))),
+            )
+        }
+        "Decimal" => {
+            let decimal = jet_foundation::Numeric::CtDecimal::from_value(&value)
+                .map_err(|error| unsupported(&error, span))?;
+            datatree(
+                "Text",
+                Some(CtValue::Str(codec_rt::jet_codec_decimal_encode(&decimal))),
+            )
+        }
+        _ => return Err(unsupported(&format!("Encode body for `{name}`"), span)),
+    };
+    Ok(tree)
+}
+
+fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
+    match name {
+        "Date" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_date_decode(text) {
+                    Ok((year, month, day)) => CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "LocalDate".to_string(),
+                        fields: vec![
+                            ("year".to_string(), CtValue::Int(year)),
+                            ("month".to_string(), CtValue::Int(month)),
+                            ("day".to_string(), CtValue::Int(day)),
+                        ],
+                    })),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected Date: {error}"),
+                    ))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Date, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "LocalTime" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_local_time_decode(text) {
+                    Ok((hour, minute, second)) => CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "LocalTime".to_string(),
+                        fields: vec![
+                            ("hour".to_string(), CtValue::Int(hour)),
+                            ("minute".to_string(), CtValue::Int(minute)),
+                            ("second".to_string(), CtValue::Int(second)),
+                        ],
+                    })),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected LocalTime: {error}"),
+                    ))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected LocalTime, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "DateTime" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_datetime_decode(text) {
+                    Ok((secs, nanos)) => CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "DateTime".to_string(),
+                        fields: vec![
+                            ("secs".to_string(), CtValue::Int(secs)),
+                            ("nanos".to_string(), CtValue::Int(nanos as i64)),
+                        ],
+                    })),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected DateTime: {error}"),
+                    ))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected DateTime, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "Duration" => match datatree_variant(&tree) {
+            Some(("Int", Some(CtValue::Int(ns)))) => CtValue::Present(Box::new(
+                CtValue::Struct {
+                    type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                    fields: vec![(
+                        "ns".to_string(),
+                        CtValue::Int(codec_rt::jet_codec_duration_decode(*ns)),
+                    )],
+                },
+            )),
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Duration, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        "Decimal" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                match codec_rt::jet_codec_decimal_decode_text(text) {
+                    Ok(decimal) => CtValue::Present(Box::new(decimal.to_value())),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected Decimal: {error}"),
+                    ))),
+                }
+            }
+            Some(("Int", Some(CtValue::Int(value)))) => {
+                match codec_rt::jet_codec_decimal_decode_int(*value) {
+                    Ok(decimal) => CtValue::Present(Box::new(decimal.to_value())),
+                    Err(error) => CtValue::failed(Box::new(decode_error("", error))),
+                }
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Decimal, found {}", datatree_kind(&tree)),
+            ))),
+        },
+        _ => CtValue::failed(Box::new(decode_error(
+            "",
+            format!("unknown codec type {name}"),
+        ))),
+    }
+}
+
 fn datatree_object_pairs(value: &CtValue) -> Option<Vec<(String, CtValue)>> {
     let ("Object", Some(payload)) = datatree_variant(value)? else {
         return None;
@@ -1626,6 +1831,9 @@ impl<'a> EvalCtx<'a> {
             Type::Tagged { inner, .. } => self.eval_serde_encode_value(value, inner),
             Type::Named(_) | Type::Apply { .. } => {
                 if let Type::Named(name) = ty {
+                    if let Some(codec_name) = builtin_codec_name(ty) {
+                        return builtin_codec_encode(value, codec_name, self.span());
+                    }
                     if let Some(base) = self.distinct_bases.get(name).cloned() {
                         return self.eval_serde_encode_value(value, &base);
                     }
@@ -2202,6 +2410,10 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                         return Ok(decoded);
+                    }
+                    if let Some(codec_name) = builtin_codec_name(ty) {
+                        *status = Some(migration_status_fresh());
+                        return Ok(builtin_codec_decode(tree, codec_name));
                     }
                 }
                 let func = self

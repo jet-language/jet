@@ -116,6 +116,7 @@ fn jet_auth_required_i64(
 ) -> Result<i64, JetAuthError> {
     match fields.get(name) {
         None => Err(JetAuthError::MissingClaim(name.to_string())),
+        Some(jet_std::JSON::Integer(value)) => Ok(*value),
         Some(jet_std::JSON::Number(value))
             if value.is_finite()
                 && value.fract() == 0.0
@@ -131,6 +132,7 @@ fn jet_auth_optional_i64(
 ) -> Result<Option<i64>, JetAuthError> {
     match fields.get(name) {
         None => Ok(None),
+        Some(jet_std::JSON::Integer(value)) => Ok(Some(*value)),
         Some(jet_std::JSON::Number(value))
             if value.is_finite()
                 && value.fract() == 0.0

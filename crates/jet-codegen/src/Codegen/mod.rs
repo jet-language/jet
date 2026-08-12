@@ -927,6 +927,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
     out.push_str(include_str!("../Prelude/Core/Path.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
+    out.push_str(include_str!("../Prelude/Core/Codec.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));

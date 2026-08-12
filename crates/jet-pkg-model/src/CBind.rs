@@ -407,6 +407,7 @@ pub struct DataBindResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum BoundType {
     Scalar(&'static str),
+    Bytes,
     Named(String),
     Array(Box<BoundType>),
     Optional(Box<BoundType>),
@@ -417,11 +418,20 @@ impl BoundType {
     fn render(&self) -> String {
         match self {
             Self::Scalar(name) => (*name).to_string(),
+            Self::Bytes => "[U8]".to_string(),
             Self::Named(name) => name.clone(),
             Self::Array(element) => format!("[{}]", element.render()),
             Self::Optional(value) => format!("{}?", value.render()),
             Self::Dynamic => "DataTree".to_string(),
         }
+    }
+}
+
+fn bound_scalar(name: &'static str) -> BoundType {
+    if name == "[U8]" {
+        BoundType::Bytes
+    } else {
+        BoundType::Scalar(name)
     }
 }
 
@@ -533,9 +543,9 @@ fn input_stem_type_name(input_path: &str) -> String {
 #[derive(Debug)]
 enum JsonBindValue {
     Null,
-    Bool(bool),
+    Bool,
     Number { lexeme: String },
-    String(String),
+    String,
     Array(Vec<JsonBindValue>),
     Object(BTreeMap<String, JsonBindValue>),
 }
@@ -564,7 +574,10 @@ impl JsonBindParser {
     }
 
     fn skip_space(&mut self) {
-        while self.peek().is_some_and(char::is_whitespace) {
+        while self
+            .peek()
+            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r'))
+        {
             self.pos += 1;
         }
     }
@@ -710,14 +723,17 @@ impl JsonBindParser {
         }
         if self.starts_with("true") {
             self.pos += 4;
-            return Ok(JsonBindValue::Bool(true));
+            return Ok(JsonBindValue::Bool);
         }
         if self.starts_with("false") {
             self.pos += 5;
-            return Ok(JsonBindValue::Bool(false));
+            return Ok(JsonBindValue::Bool);
         }
         match self.peek() {
-            Some('"') => self.parse_string().map(JsonBindValue::String),
+            Some('"') => {
+                self.parse_string()?;
+                Ok(JsonBindValue::String)
+            }
             Some('[') => self.parse_array(),
             Some('{') => self.parse_object(),
             Some('-' | '0'..='9') => self.parse_number(),
@@ -848,15 +864,15 @@ fn json_values_type(
                 BoundType::Array(Box::new(element))
             }
         }
-        JsonBindValue::Bool(_) => {
-            if nonnull.iter().all(|value| matches!(value, JsonBindValue::Bool(_))) {
+        JsonBindValue::Bool => {
+            if nonnull.iter().all(|value| matches!(value, JsonBindValue::Bool)) {
                 BoundType::Scalar("Bool")
             } else {
                 BoundType::Dynamic
             }
         }
-        JsonBindValue::String(_) => {
-            if nonnull.iter().all(|value| matches!(value, JsonBindValue::String(_))) {
+        JsonBindValue::String => {
+            if nonnull.iter().all(|value| matches!(value, JsonBindValue::String)) {
                 BoundType::Scalar("String")
             } else {
                 BoundType::Dynamic
@@ -1471,7 +1487,7 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
             }
             "String"
         }
-        "DATE" => "Date",
+        "DATE" => "LocalDate",
         "TIME" => {
             sql_parenthesized_digits(tokens, index, "time precision", false)?;
             if tokens
@@ -1527,7 +1543,7 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
             } else if tokens.get(*index).map(String::as_str) == Some("(") {
                 return Err(format!("SQL type {first} does not accept a width modifier"));
             }
-            "Bytes"
+            "[U8]"
         }
         _ => return Err(format!("SQL type for {column} is unsupported")),
     };
@@ -2028,7 +2044,7 @@ fn parse_sql_table(statement: &str) -> Result<(String, Vec<FieldSeed>), String> 
         }
         fields.push(FieldSeed {
             wire_name: column,
-            ty: BoundType::Scalar(ty),
+            ty: bound_scalar(ty),
             optional: !required,
             note: None,
         });
@@ -2080,12 +2096,24 @@ fn bind_sql(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Strin
 }
 
 #[derive(Clone, Debug)]
+enum XmlContent {
+    Text,
+    CData,
+    Element(XmlNode),
+    Comment,
+    ProcessingInstruction,
+}
+
+#[derive(Clone, Debug)]
 struct XmlNode {
     name: String,
     attrs: Vec<(String, String)>,
-    text: String,
-    children: Vec<XmlNode>,
+    content: Vec<XmlContent>,
+    namespaces: BTreeMap<String, String>,
 }
+
+const XML_NAMESPACE_URI: &str = "http://www.w3.org/XML/1998/namespace";
+const XMLNS_NAMESPACE_URI: &str = "http://www.w3.org/2000/xmlns/";
 
 struct XmlParser {
     chars: Vec<char>,
@@ -2154,13 +2182,75 @@ impl XmlParser {
         Ok(name)
     }
 
+    fn initial_namespaces() -> BTreeMap<String, String> {
+        BTreeMap::from([(String::from("xml"), String::from(XML_NAMESPACE_URI))])
+    }
+
+    fn is_namespace_declaration(name: &str) -> bool {
+        name == "xmlns" || name.starts_with("xmlns:")
+    }
+
+    fn resolve_namespaces(
+        inherited: &BTreeMap<String, String>,
+        attrs: &[(String, String)],
+    ) -> Result<BTreeMap<String, String>, String> {
+        let mut namespaces = inherited.clone();
+        for (name, value) in attrs {
+            let Some(prefix) = name.strip_prefix("xmlns:") else {
+                if name == "xmlns" {
+                    namespaces.insert(String::new(), value.clone());
+                }
+                continue;
+            };
+            if prefix.is_empty() || prefix == "xmlns" {
+                return Err(format!("XML namespace prefix {prefix} is reserved"));
+            }
+            if value.is_empty() {
+                return Err(format!("XML namespace prefix {prefix} has an empty URI"));
+            }
+            if prefix == "xml" && value != XML_NAMESPACE_URI {
+                return Err("XML prefix xml must use its reserved namespace URI".to_string());
+            }
+            if value == XMLNS_NAMESPACE_URI {
+                return Err("XML namespace URI for xmlns is reserved".to_string());
+            }
+            namespaces.insert(prefix.to_string(), value.clone());
+        }
+        if let Some(xml_uri) = namespaces.get("xml") {
+            if xml_uri != XML_NAMESPACE_URI {
+                return Err("XML prefix xml must use its reserved namespace URI".to_string());
+            }
+        }
+        Ok(namespaces)
+    }
+
+    fn resolve_name(
+        name: &str,
+        namespaces: &BTreeMap<String, String>,
+        element: bool,
+    ) -> Result<String, String> {
+        if let Some((prefix, local)) = name.split_once(':') {
+            let namespace = namespaces
+                .get(prefix)
+                .filter(|namespace| !namespace.is_empty())
+                .ok_or_else(|| format!("XML name {name} uses an undeclared namespace prefix {prefix}"))?;
+            return Ok(format!("{{{namespace}}}{local}"));
+        }
+        if element {
+            if let Some(namespace) = namespaces.get("").filter(|namespace| !namespace.is_empty()) {
+                return Ok(format!("{{{namespace}}}{name}"));
+            }
+        }
+        Ok(name.to_string())
+    }
+
     fn attach(
         stack: &mut Vec<XmlNode>,
         root: &mut Option<XmlNode>,
         node: XmlNode,
     ) -> Result<(), String> {
         if let Some(parent) = stack.last_mut() {
-            parent.children.push(node);
+            parent.content.push(XmlContent::Element(node));
         } else if root.is_some() {
             return Err("XML has more than one root element".to_string());
         } else {
@@ -2310,7 +2400,7 @@ impl XmlParser {
                 }
                 validate_xml_entities(&text)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.text.push_str(&text);
+                    parent.content.push(XmlContent::Text);
                 } else if text.chars().any(|ch| !matches!(ch, ' ' | '\t' | '\r' | '\n')) {
                     return Err("XML has text outside its root element".to_string());
                 }
@@ -2330,6 +2420,9 @@ impl XmlParser {
                     return Err("XML comment contains an invalid double hyphen".to_string());
                 }
                 validate_xml_characters(&body)?;
+                if let Some(parent) = stack.last_mut() {
+                    parent.content.push(XmlContent::Comment);
+                }
                 self.pos += 3;
                 continue;
             }
@@ -2345,7 +2438,7 @@ impl XmlParser {
                 let body: String = self.chars[start..self.pos].iter().collect();
                 validate_xml_characters(&body)?;
                 if let Some(parent) = stack.last_mut() {
-                    parent.text.push_str(&body);
+                    parent.content.push(XmlContent::CData);
                 } else {
                     return Err("XML CDATA appears outside its root element".to_string());
                 }
@@ -2354,11 +2447,14 @@ impl XmlParser {
             }
             if self.starts_with("<?") {
                 self.consume_processing_instruction()?;
+                if let Some(parent) = stack.last_mut() {
+                    parent.content.push(XmlContent::ProcessingInstruction);
+                }
                 continue;
             }
             if self.starts_with("</") {
                 self.pos += 2;
-                let name = self.read_name()?;
+                let raw_name = self.read_name()?;
                 self.skip_space();
                 if self.peek() != Some('>') {
                     return Err("XML close tag has trailing content".to_string());
@@ -2367,9 +2463,10 @@ impl XmlParser {
                 let node = stack
                     .pop()
                     .ok_or_else(|| "XML has an unmatched close tag".to_string())?;
+                let name = Self::resolve_name(&raw_name, &node.namespaces, true)?;
                 if node.name != name {
                     return Err(format!(
-                        "XML close tag {name} does not match {}",
+                        "XML close tag {raw_name} does not match {}",
                         node.name
                     ));
                 }
@@ -2380,8 +2477,8 @@ impl XmlParser {
                 return Err("XML declaration is unsupported here".to_string());
             }
             self.pos += 1;
-            let name = self.read_name()?;
-            let mut attrs = Vec::new();
+            let raw_name = self.read_name()?;
+            let mut raw_attrs = Vec::new();
             let mut attr_names = BTreeSet::new();
             let self_closing;
             loop {
@@ -2411,13 +2508,31 @@ impl XmlParser {
                     return Err(format!("XML attribute {attr_name} contains <"));
                 }
                 validate_xml_entities(&value)?;
-                attrs.push((attr_name, value));
+                raw_attrs.push((attr_name, value));
+            }
+            let inherited = stack
+                .last()
+                .map(|node| node.namespaces.clone())
+                .unwrap_or_else(Self::initial_namespaces);
+            let namespaces = Self::resolve_namespaces(&inherited, &raw_attrs)?;
+            let name = Self::resolve_name(&raw_name, &namespaces, true)?;
+            let mut attrs = Vec::new();
+            let mut expanded_attr_names = BTreeSet::new();
+            for (attr_name, value) in raw_attrs {
+                if Self::is_namespace_declaration(&attr_name) {
+                    continue;
+                }
+                let expanded = Self::resolve_name(&attr_name, &namespaces, false)?;
+                if !expanded_attr_names.insert(expanded.clone()) {
+                    return Err(format!("XML has duplicate attribute {expanded}"));
+                }
+                attrs.push((expanded, value));
             }
             let node = XmlNode {
                 name,
                 attrs,
-                text: String::new(),
-                children: Vec::new(),
+                content: Vec::new(),
+                namespaces,
             };
             if self_closing {
                 Self::attach(&mut stack, &mut root, node)?;
@@ -2430,6 +2545,21 @@ impl XmlParser {
         }
         root.ok_or_else(|| "XML has no root element".to_string())
     }
+}
+
+fn xml_child_elements(node: &XmlNode) -> impl Iterator<Item = &XmlNode> {
+    node.content.iter().filter_map(|content| match content {
+        XmlContent::Element(child) => Some(child),
+        _ => None,
+    })
+}
+
+fn xml_is_text_like(content: &XmlContent) -> bool {
+    matches!(content, XmlContent::Text | XmlContent::CData)
+}
+
+fn xml_is_simple(node: &XmlNode) -> bool {
+    node.content.iter().all(xml_is_text_like)
 }
 
 fn validate_xml_characters(text: &str) -> Result<(), String> {
@@ -2469,17 +2599,21 @@ fn validate_xml_entities(text: &str) -> Result<(), String> {
             .strip_prefix("#x")
             .or_else(|| entity.strip_prefix("#X"))
             .and_then(|digits| {
-                (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_hexdigit()))
-                    .then(|| u32::from_str_radix(digits, 16).ok())
+                if !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                    u32::from_str_radix(digits, 16).ok()
+                } else {
+                    None
+                }
             })
-            .flatten()
             .or_else(|| {
                 entity.strip_prefix('#').and_then(|digits| {
-                    (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
-                        .then(|| digits.parse::<u32>().ok())
+                    if !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()) {
+                        digits.parse::<u32>().ok()
+                    } else {
+                        None
+                    }
                 })
-            })
-            .flatten();
+            });
         let valid = matches!(entity.as_str(), "amp" | "lt" | "gt" | "quot" | "apos")
             || valid_numeric.is_some_and(|codepoint| {
                 char::from_u32(codepoint).is_some_and(xml_character_allowed)
@@ -2502,7 +2636,7 @@ fn add_xml_record(
     let mut child_names = BTreeSet::new();
     for node in nodes {
         attr_names.extend(node.attrs.iter().map(|(attr, _)| attr.clone()));
-        child_names.extend(node.children.iter().map(|child| child.name.clone()));
+        child_names.extend(xml_child_elements(node).map(|child| child.name.clone()));
     }
     let mut fields = Vec::new();
     for attr in attr_names {
@@ -2517,12 +2651,21 @@ fn add_xml_record(
             note: None,
         });
     }
-    let text_present = nodes.iter().any(|node| !node.text.trim().is_empty());
-    if text_present {
+    let simple_count = nodes.iter().filter(|node| xml_is_simple(node)).count();
+    let mixed_count = nodes.len() - simple_count;
+    if simple_count > 0 {
         fields.push(FieldSeed {
             wire_name: "$text".to_string(),
             ty: BoundType::Scalar("String"),
-            optional: nodes.iter().any(|node| node.text.trim().is_empty()),
+            optional: mixed_count > 0,
+            note: None,
+        });
+    }
+    if mixed_count > 0 {
+        fields.push(FieldSeed {
+            wire_name: "$content".to_string(),
+            ty: BoundType::Scalar("DataTree"),
+            optional: simple_count > 0,
             note: None,
         });
     }
@@ -2531,9 +2674,7 @@ fn add_xml_record(
         let mut present_count = 0usize;
         let mut repeated = false;
         for node in nodes {
-            let matching: Vec<&XmlNode> = node
-                .children
-                .iter()
+            let matching: Vec<&XmlNode> = xml_child_elements(node)
                 .filter(|child| child.name == child_name)
                 .collect();
             if !matching.is_empty() {
@@ -2545,11 +2686,23 @@ fn add_xml_record(
             children.extend(matching);
         }
         let child_hint = format!("{}{}", name, pascal_name(&child_name));
-        let child_type = add_xml_record(builder, &child_hint, &children);
-        let ty = if repeated {
-            BoundType::Array(Box::new(BoundType::Named(child_type)))
+        let ty = if children
+            .iter()
+            .all(|child| child.attrs.is_empty() && xml_is_simple(child))
+        {
+            let scalar = BoundType::Scalar("String");
+            if repeated {
+                BoundType::Array(Box::new(scalar))
+            } else {
+                scalar
+            }
         } else {
-            BoundType::Named(child_type)
+            let child_type = add_xml_record(builder, &child_hint, &children);
+            if repeated {
+                BoundType::Array(Box::new(BoundType::Named(child_type)))
+            } else {
+                BoundType::Named(child_type)
+            }
         };
         fields.push(FieldSeed {
             wire_name: child_name,
@@ -2800,7 +2953,6 @@ struct ProtoMessage {
 
 struct ProtoEnum {
     source_name: String,
-    short_name: String,
 }
 
 struct ProtoSchema {
@@ -2968,51 +3120,44 @@ impl ProtoParser {
         }
         if let Some(value) = self.tokens.get(self.pos).cloned() {
             match value {
-                ProtoToken::StringLiteral(value) => {
+                ProtoToken::StringLiteral(_) => {
                     self.pos += 1;
-                    let mut value = value;
-                    while let Some(ProtoToken::StringLiteral(next)) = self.tokens.get(self.pos).cloned() {
+                    while matches!(self.tokens.get(self.pos), Some(ProtoToken::StringLiteral(_))) {
                         self.pos += 1;
-                        value.push_str(&next);
                     }
-                    Ok(OptionValue::String(value))
+                    Ok(OptionValue::String)
                 }
-                ProtoToken::Number(value) => {
+                ProtoToken::Number(_) => {
                     self.pos += 1;
-                    Ok(OptionValue::Number(value))
+                    Ok(OptionValue::Number)
                 }
                 ProtoToken::Word(value) => {
                     self.pos += 1;
-                    let mut value = value;
-                    while self.symbol_at(0, '.') {
-                        self.pos += 1;
-                        value.push('.');
-                        value.push_str(&self.take_word("an option value segment")?);
-                    }
-                    if value.eq_ignore_ascii_case("true") {
+                    if self.symbol_at(0, '.') {
+                        while self.symbol_at(0, '.') {
+                            self.pos += 1;
+                            self.take_word("an option value segment")?;
+                        }
+                        Ok(OptionValue::Identifier)
+                    } else if value.eq_ignore_ascii_case("true") {
                         Ok(OptionValue::Bool(true))
                     } else if value.eq_ignore_ascii_case("false") {
                         Ok(OptionValue::Bool(false))
                     } else {
-                        Ok(OptionValue::Identifier(value))
+                        Ok(OptionValue::Identifier)
                     }
                 }
                 ProtoToken::Symbol('+') | ProtoToken::Symbol('-') => {
-                    let sign = match value {
-                        ProtoToken::Symbol(sign) => sign,
-                        _ => unreachable!(),
-                    };
                     self.pos += 1;
-                    let number = match self.tokens.get(self.pos).cloned() {
-                        Some(ProtoToken::Number(number)) => number,
-                        _ => return Err("proto option sign needs a number".to_string()),
-                    };
+                    if !matches!(self.tokens.get(self.pos), Some(ProtoToken::Number(_))) {
+                        return Err("proto option sign needs a number".to_string());
+                    }
                     self.pos += 1;
-                    Ok(OptionValue::Number(format!("{sign}{number}")))
+                    Ok(OptionValue::Number)
                 }
                 ProtoToken::Symbol('.') => {
-                    let name = self.parse_type_name()?;
-                    Ok(OptionValue::Identifier(name))
+                    self.parse_type_name()?;
+                    Ok(OptionValue::Identifier)
                 }
                 _ => Err("proto option value is malformed".to_string()),
             }
@@ -3256,7 +3401,7 @@ impl ProtoParser {
         let source_name = self.full_name(parent, &short_name);
         self.declare_message(&source_name)?;
         self.expect_symbol('{', "a message block")?;
-        let mut fields = Vec::new();
+        let mut fields: Vec<ProtoField> = Vec::new();
         let mut field_names = BTreeSet::new();
         let mut field_numbers = BTreeSet::new();
         let mut nested_names = BTreeSet::new();
@@ -3367,7 +3512,6 @@ impl ProtoParser {
                 }
                 self.enums.push(ProtoEnum {
                     source_name: source_name.clone(),
-                    short_name,
                 });
                 return Ok(source_name);
             }
@@ -3521,9 +3665,9 @@ impl ProtoParser {
 #[derive(Clone, Debug)]
 enum OptionValue {
     Bool(bool),
-    String(String),
-    Number(String),
-    Identifier(String),
+    String,
+    Number,
+    Identifier,
     Aggregate,
 }
 
@@ -3583,11 +3727,11 @@ fn proto_scalar(type_name: &str) -> Option<&'static str> {
         | "uint64" | "fixed32" | "fixed64" => Some("Int"),
         "bool" => Some("Bool"),
         "string" => Some("String"),
-        "bytes" => Some("Bytes"),
+        "bytes" => Some("[U8]"),
         "google.protobuf.timestamp" => Some("DateTime"),
         "google.protobuf.duration" => Some("Duration"),
         "google.protobuf.stringvalue" => Some("String"),
-        "google.protobuf.bytesvalue" => Some("Bytes"),
+        "google.protobuf.bytesvalue" => Some("[U8]"),
         "google.protobuf.int32value" | "google.protobuf.int64value" => Some("Int"),
         "google.protobuf.boolvalue" => Some("Bool"),
         "google.protobuf.doublevalue" | "google.protobuf.floatvalue" => Some("Float"),
@@ -3642,7 +3786,7 @@ fn bind_proto(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Str
         let mut fields = Vec::new();
         for field in &message.fields {
             let base = if let Some(scalar) = proto_scalar(&field.type_name) {
-                BoundType::Scalar(scalar)
+                bound_scalar(scalar)
             } else {
                 let reference = field.type_name.trim_start_matches('.');
                 let leaf = reference.rsplit('.').next().unwrap_or(reference);
@@ -3702,7 +3846,7 @@ fn inference_rules(format: &str) -> &'static [&'static str] {
             "NOT NULL and PRIMARY KEY columns stay required; supported constraints are validated.",
         ],
         "xml" => &[
-            "XML attributes use @ wire keys; element text uses the $text wire key.",
+            "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as DataTree.",
             "Nested elements become records; repeated child elements become arrays.",
         ],
         "proto" => &[
@@ -3729,6 +3873,12 @@ fn escape_provenance(value: &str) -> String {
         .collect()
 }
 
+fn quote_jet_string(value: &str) -> String {
+    crate::JSON::quote(value)
+        .replace('{', "{{")
+        .replace('}', "}}")
+}
+
 fn render_data_source(
     format: &str,
     input_path: &str,
@@ -3739,7 +3889,7 @@ fn render_data_source(
     let hash = crate::SHA256::sha256_hex(input.as_bytes());
     let mut source = String::new();
     let command = if command.is_empty() {
-        format!("jet bind {format} {input_path}")
+        format!("jet inspect bind {format} {input_path}")
     } else {
         command.to_string()
     };
@@ -3762,7 +3912,7 @@ fn render_data_source(
                 let _ = writeln!(
                     source,
                     "    #Rename({}) {}: {}{}",
-                    crate::JSON::quote(&field.wire_name),
+                    quote_jet_string(&field.wire_name),
                     field.name,
                     field.ty.render(),
                     if field.optional { "?" } else { "" }
