@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jet Memory — Checkpoint, Revision 2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#12161C; --panel:#1A202A; --ink:#E7EAF0; --ink-soft:#9AA5B3; --line:#2A323E;
+    --teal:#4FC1B7; --teal-deep:#0E7C7B; --teal-soft:#12312F;
+    --amber:#D9A441; --red:#E8837B; --green:#8FBE8F;
+    --code-bg:#0E1218; --code-ink:#D8DEE9; --code-cm:#6B7686; --code-new:#7FD1C8; --code-ok:#8FBE8F; --code-err:#E8837B;
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+    --sans:"IBM Plex Sans",system-ui,sans-serif;
+    --disp:"Space Grotesk",var(--sans);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 28px 96px}
+  code{font-family:var(--mono);font-size:.92em;background:var(--teal-soft);color:var(--teal);padding:.08em .35em;border-radius:4px}
+
+  header{padding:52px 0 6px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+  h1{font-family:var(--disp);font-weight:700;font-size:clamp(32px,4.6vw,50px);line-height:1.06;margin:.3em 0 .25em;letter-spacing:-.015em}
+  .sub{color:var(--ink-soft);max-width:74ch;font-size:17px}
+  .sub b{color:var(--ink)}
+  .meta{margin-top:14px;font-family:var(--mono);font-size:12.5px;color:var(--ink-soft)}
+
+  section{margin-top:64px}
+  .qtag{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.1em;color:#0B1512;background:var(--teal);padding:3px 10px;border-radius:6px;margin-bottom:8px}
+  .qtag.done{background:var(--green)}
+  .qtag.dead{background:#5A6572;color:#EEF1F4}
+  h2{font-family:var(--disp);font-weight:700;font-size:26px;letter-spacing:-.01em;margin:0 0 4px}
+  .setup{color:var(--ink-soft);max-width:80ch;margin:6px 0 18px}
+  .setup b{color:var(--ink)}
+
+  .panes{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  @media (max-width:880px){.panes{grid-template-columns:1fr}}
+  .pane{border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--panel)}
+  .pane .bar{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase}
+  .pane.today .bar{background:#232B36;color:var(--ink-soft)}
+  .pane.prop .bar{background:var(--teal-deep);color:#E4F5F2}
+  .pane.prop.alt .bar{background:#33414F;color:#DCE6EE}
+  .bar .status{font-weight:600}
+  .bar .status.err{color:var(--red)} .pane.prop .bar .status{color:#BFF0E6}
+  pre{margin:0;padding:16px 18px;background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:13.2px;line-height:1.6;overflow-x:auto}
+  pre .cm{color:var(--code-cm)} pre .new{color:var(--code-new);font-weight:600} pre .ok{color:var(--code-ok)}
+  .term{background:#0A0D12;border-top:1px solid #232B36}
+  .term .hd{color:var(--code-cm)}
+  .term .e{color:var(--code-err)} .term .f{color:var(--code-ok)}
+  .caption{padding:10px 14px;font-size:13.5px;color:var(--ink-soft);border-top:1px solid var(--line);background:var(--panel)}
+  .caption b{color:var(--ink)} .caption i{color:var(--ink-soft)}
+
+  .delta{margin:18px 0 0;padding:14px 18px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--amber);border-radius:10px;font-size:15px}
+  .delta b{font-family:var(--disp)}
+  .decide{margin:12px 0 0;padding:14px 18px;background:var(--teal-soft);border:1px solid #1E4A46;border-radius:10px;font-size:15px}
+  .decide b{font-family:var(--disp);color:var(--teal)}
+  .decided{margin:12px 0 0;padding:14px 18px;background:#1D2B20;border:1px solid #2E4A34;border-radius:10px;font-size:15px}
+  .decided b{font-family:var(--disp);color:var(--green)}
+
+  .stack{display:grid;gap:16px;margin-top:16px}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-soft);text-align:left;padding:8px 10px;border-bottom:2px solid var(--teal-deep)}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink)}
+  .tcard{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);margin-top:14px}
+
+  footer{margin-top:64px;border-top:1px solid var(--line);padding-top:20px;color:var(--ink-soft);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Jet · memory audit · final record — all decisions ratified</div>
+  <h1>Today's Jet vs proposed Jet,<br>same program, side by side</h1>
+  <p class="sub">Every "today" pane is a real program with the compiler's real output — probed on <code>420b11b93</code>, both tiers. Every "proposed" pane is the <b>same program</b> under the proposal, every new line marked. <b>All decisions are made and ratified</b> (card #1889, ballots D-MEM-COPYSEM1 · D-FFI-CAP1 · D-CONC-FREEZE1 · D-MEM-SENTRY1 · D-MEM-GUARANTEE1). Proposal: <code>docs/proposals/memory-one-question.md</code>.</p>
+  <p class="meta">Evidence: blind-design dossier · advocate dossier (57 live probes) · 130-cell delta scorecard — published with the Phase D proposal.</p>
+</header>
+
+<!-- ============================================================ A -->
+<section id="qa">
+  <div class="qtag done">RATIFIED · D-MEM-COPYSEM1</div>
+  <h2>Storing a view: the store means the copy.</h2>
+  <p class="setup">Final ruling: <b>a store of a read-only view means a copy — a language semantic, not an injection.</b> Nothing is written into your file; the store behaves exactly as if you typed <code>~</code>, on every tier. Mutable views (<code>ViewMut</code>) are <b>never</b> auto-copied — copying one would silently break write-back — so they keep today's error. <code>#Policy(gc)</code> stays exactly what you designed: the one-line explicit opt-in for zero-copy keep-alive.</p>
+
+  <div class="panes">
+    <div class="pane today">
+      <div class="bar"><span>today — probed P04j</span><span class="status err">✗ E2307, both tiers</span></div>
+      <pre>fn run() {
+    a :: "alpha:1"
+    b :: "beta:2"
+    ha :: a.before(":")     <span class="cm">// zero-copy view — free</span>
+    hb :: b.before(":")     <span class="cm">// zero-copy view — free</span>
+    cache :: [ha, hb]       <span class="cm">// …store them? error.</span>
+    print(cache[0])
+}</pre>
+      <pre class="term"><span class="hd">$ jet run cache.jet</span>
+<span class="e">Error [E2307]: `ha` can't be used directly here yet</span>
+ Why: `ha` is a zero-copy view into `a`; only chaining
+      another .trim()/.after()/.before() works directly
+ <span class="f">Fix: write `~ha` first to get an owned `String`</span></pre>
+      <div class="caption"><b>The compiler already knows the fix — it prints it.</b> Then it makes you type it. Every store of a view, forever.</div>
+    </div>
+
+    <div class="pane prop">
+      <div class="bar"><span>ratified direction — unbuilt, lands with #1890</span><span class="status">proposed</span></div>
+      <pre>fn run() {
+    a :: "alpha:1"
+    b :: "beta:2"
+    ha :: a.before(":")
+    hb :: b.before(":")
+    cache :: [ha, hb]       <span class="cm">// a store IS a copy — semantic, nothing injected</span>
+    print(cache[0])
+}</pre>
+      <pre class="term"><span class="hd">$ jet run cache.jet</span>
+<span class="ok">alpha</span>
+<span class="hd">$ jet audit copies            # rung 1 — the receipt</span>
+cache.jet:6  `ha` stored into `cache` as a copy (5 bytes)
+cache.jet:6  `hb` stored into `cache` as a copy (4 bytes)
+<span class="hd">$ jet fmt --explicit-copies   # rung 3 — YOU invite real ~ into the file</span>
+<span class="hd"># package.jet — rung 4 — refusal: policy: .{ copies: .Explicit }</span></pre>
+      <div class="caption"><b>Predictable by construction:</b> the program behaves exactly as if you had typed <code>~ha</code>. The ladder: see it (<code>jet audit copies</code>), ghost it (LSP inlay), materialize it (<code>jet fmt --explicit-copies</code>), refuse it (<code>#Policy(copies: .Explicit)</code> / <code>policy: .{ copies: .Explicit }</code>). The compiler never edits your source uninvited. Declared <code>View&lt;T&gt;</code>/<code>ViewMut&lt;T&gt;</code> fields and returns keep their ratified semantics — this rule covers only flows the checker refuses today. <i>(Ratified direction D-MEM-COPYSEM1=A; unbuilt; implementation #1890.)</i></div>
+    </div>
+  </div>
+
+  <div class="delta"><b>Delta.</b> Today: the compiler prints the fix and makes you type it. Ratified: the store means the copy, with a receipt, a manual spelling, and a project-wide refusal.</div>
+  <div class="decided"><b>Ratified:</b> "Language semantic + visibility ladder" — D-MEM-COPYSEM1=A. Sigil law recorded: <code>&amp;</code> and <code>^</code> stay mandatory forever (they change what others observe); <code>~</code> marks cost, and cost defaults on with receipts.</div>
+</section>
+
+<!-- ============================================================ fix command -->
+<section id="qfix">
+  <div class="qtag">FOLDED INTO PROPOSAL · your idea #3</div>
+  <h2>The runtime as a linter — and one command to make it unnecessary.</h2>
+  <p class="setup">Your framing, adopted wholesale: <b>anywhere the runtime had to step in is a place the code isn't statically memory-safe yet — so list those places, and give one command that repairs them.</b> Two sources write that ledger: the tracker inside explicit <code>#Policy(gc)</code> scopes, and the dev-tier sentries inside <code>#Unsafe</code> gates (Decision F, adopted). One honest limit, stated up front: the JIT sees only the runs you actually ran — the ledger is evidence from execution, not a proof, so fixes cover what your dev runs exercised.</p>
+
+  <div class="stack">
+    <div class="pane prop">
+      <div class="bar"><span>proposed — the loop: run → ledger → fix → static (unbuilt, #1895)</span><span class="status">proposed</span></div>
+      <pre><span class="hd">$ jet run server.jet                 # dev tier; gc scope active in session.jet</span>
+<span class="ok">…runs fine…</span>
+<span class="hd">$ jet audit memory                   # where did the runtime step in, and why?</span>
+session.jet:14  gc kept `user_cache` alive across requests (12 collections this run)
+                static form exists: hoist owner to `App` struct — run `jet fix memory`
+audio.jet:4     sentry caught raw write 8 bytes past `ring` (2 runs)
+                static form exists: clamp `head` — run `jet fix memory`
+graph.jet:31    gc managed `nodes` — cyclic links, no static form
+                options: Pool&lt;Node&gt; with Ids, or keep the gc scope (documented)
+<span class="hd">$ jet fix memory                     # applies every repair that has exactly one static form</span>
+fixed session.jet:14  owner hoisted — gc scope no longer needed, removed
+fixed audio.jet:4     clamp inserted — obligation `valid_ptr` now met statically
+skipped graph.jet:31  two valid shapes — choose one (shown above)</pre>
+      <div class="caption"><b>The runtime becomes scaffolding that teaches its own removal.</b> Deterministic repairs are applied; genuinely ambiguous ones are named with their options, never guessed. Perf-strict projects were never in this loop — their policies refused the dynamic layer to begin with. <i>(All proposed; composes with F's sentries and today's `#Policy(gc)`.)</i></div>
+    </div>
+  </div>
+  <div class="decided"><b>Status:</b> adopted as the tooling spine (<code>jet audit memory</code> / <code>jet audit copies</code> / <code>jet fix memory</code>) — implementation card #1895.</div>
+</section>
+
+<!-- ============================================================ D -->
+<section id="qd">
+  <div class="qtag done">RATIFIED · D-CONC-FREEZE1</div>
+  <h2>Four tasks read one asset table.</h2>
+  <p class="setup">One program, twice. Today the only legal spelling wraps the table in <code>Shared</code> and pays a lock on <b>every read</b>. Proposed: freeze it once; the compiler then allows the bare capture <b>because</b> frozen data can never race. <code>Shared</code> is untouched — it remains the right tool for data that genuinely mutates concurrently.</p>
+
+  <div class="panes">
+    <div class="pane today">
+      <div class="bar"><span>today — the only legal spelling (P09c shape)</span><span class="status">✓ compiles; lock per read</span></div>
+      <pre>struct Assets { names: [String] }
+
+fn render(a: Shared&lt;Assets&gt;, id: Int) => String {
+    a.read(v => v.names[id])   <span class="cm">// lock taken on EVERY read</span>
+}
+
+fn run() {
+    assets :: Shared.new(Assets.{ names: ["sword", "shield"] })
+    task.group g {
+        r :: task.all { render(assets, 0), render(assets, 1) }
+        print(r)
+    }
+}</pre>
+      <div class="caption"><b>The data never mutates, but the lock doesn't know that.</b> Eight render tasks × every read = contention for nothing, and the wrapper infects the signature. Note: this <code>Shared.new</code>/<code>.read</code> spelling is what the shipped binary runs (probe P09c); ratified D-CONC-SHARE1 replaces it with <code>shared expr</code> + plain field access. Lexical groups can already borrow provably non-overlapping reads (D-TASKBORROW1) — <code>freeze</code> covers sharing past that proof and past the group.</div>
+    </div>
+
+    <div class="pane prop">
+      <div class="bar"><span>ratified direction — unbuilt, lands with #1891</span><span class="status">proposed</span></div>
+      <pre>struct Assets { names: [String] }
+
+fn render(a: Assets, id: Int) => String {
+    a.names[id]                <span class="cm">// plain read — no lock exists to take</span>
+}
+
+fn run() {
+    assets :: <span class="new">freeze(Assets.{ names: ["sword", "shield"] })</span>  <span class="cm">// (proposed)</span>
+    task.group g {
+        r :: task.all { render(assets, 0), render(assets, 1) }  <span class="cm">// bare capture legal BECAUSE frozen</span>
+        print(r)
+    }
+}</pre>
+      <div class="caption"><b>Delete the wrapper, delete the closures, delete the lock.</b> <code>freeze(x)</code> makes the value deeply immutable forever; sharing immutable data across tasks is race-free by definition, so the E1101 capture rejection no longer applies to it. Writing to a frozen value is a compile error.</div>
+    </div>
+  </div>
+
+  <h3 style="font-family:var(--disp);font-size:17px;margin:26px 0 8px">Same shape, second verb: hand a batch to one worker.</h3>
+  <div class="panes">
+    <div class="pane today">
+      <div class="bar"><span>today — probed P09 (E1101)</span><span class="status err">✗ plain capture rejected</span></div>
+      <pre>fn run() {
+    job := build_batch()
+    task.group g {
+        done :: task.all { process(job) }   <span class="cm">// ✗ E1101: task may not</span>
+    }                                        <span class="cm">//   capture mutable local</span>
+}</pre>
+      <div class="caption"><b>Correct rejection, no good exit:</b> today you wrap <code>job</code> in <code>Shared</code> (a lock nobody else will contend) or copy it. The one thing you meant — "it's yours now" — has no spelling in a capture.</div>
+    </div>
+
+    <div class="pane prop">
+      <div class="bar"><span>ratified direction — unbuilt, lands with #1891</span><span class="status">proposed</span></div>
+      <pre>fn run() {
+    job := build_batch()
+    task.group g {
+        done :: task.all { process(<span class="new">^job</span>) }  <span class="cm">// ^ = give — task owns the batch (proposed)</span>
+    }
+    <span class="cm">// `job` is gone here — the same rule ^ already has everywhere else</span>
+}</pre>
+      <div class="caption"><b><code>^</code> means in a capture exactly what it means at every callsite today.</b> Use <code>job</code> after the handoff and you get the existing E0121 use-after-move error, verbatim.</div>
+    </div>
+  </div>
+
+  <div class="delta"><b>Delta.</b> Both panes, both stories: same program, one marked line of difference. The rule set after the change: <b>give it (<code>^</code>), freeze it (<code>freeze</code>), or lock it (<code>Shared</code>)</b> — and the compiler tells you which one your capture needs.</div>
+  <div class="decided"><b>Ratified:</b> "i accept your proposals" — D-CONC-FREEZE1=A. <code>freeze</code> + <code>^</code>-captures adopted; <code>Shared</code> stays for shared-mutable. implementation plan #1891.</div>
+</section>
+
+<!-- ============================================================ fence -->
+<section id="qg">
+  <div class="qtag done">RATIFIED · D-MEM-GUARANTEE1</div>
+  <h2>Wrapped raw pointers: an opt-in fence, not an ambient mode.</h2>
+  <p class="setup">Your instinct — tracked "smart" pointers for untrusted code — is real (Fil-C ships it for C). It cannot be ambient: it goes blind when an address crosses to C, the OS, or hardware, costs 1.5–4× per pointer op, and would give one <code>#Unsafe</code> block two meanings. Final ruling: <b>an explicit trust dial, decoupled from gc</b> — gc buys lifetime convenience, never safety; the prover already guarantees safe Jet with gc off.</p>
+
+  <div class="stack">
+    <div class="pane prop">
+      <div class="bar"><span>proposed — per-dependency containment</span><span class="status">opt-in, priced, visible</span></div>
+      <pre><span class="cm"># package.jet — the ratified policy shape (D-PACKAGE-POLICY-SCOPE1, tighten-only)   (proposed keys)</span>
+policy: .{
+    contain: ["libxml"],   <span class="cm"># fence just this dep — it pays 2–4×, your code pays nothing</span>
+}
+<span class="cm"># harden: true = the total switch: sentries stay in release AND every dep is contained —</span>
+<span class="cm"># with harden on, no row below may read TRUSTED</span>
+
+<span class="hd">$ jet inspect guarantees</span>
+your code            proven      compile time
+#Unsafe gates (2)    watched     sentries (dev always; release via harden)
+libxml (contained)   fenced      cannot corrupt your heap
+libz                 TRUSTED     outside the guarantee — named, not hidden</pre>
+      <div class="caption"><b>The fence is a place, not a mode:</b> your code's pointers never change meaning; the contained library's do, and its boundary is exactly the audited extern surface from Decision C. <i>(All proposed.)</i></div>
+    </div>
+  </div>
+  <div class="decided"><b>Ratified:</b> "Own dial, decoupled from gc" — D-MEM-GUARANTEE1=A. <code>contain:</code> + <code>harden:</code> + <code>jet inspect guarantees</code>. implementation plan #1894.</div>
+</section>
+
+<!-- ============================================================ decided -->
+<section id="done">
+  <div class="qtag done">THE FULL RECORD</div>
+  <h2>Locked in — all of it.</h2>
+  <div class="tcard"><table>
+    <tr><th>Decision</th><th>Your ruling</th><th>What it looks like</th></tr>
+    <tr><td><b>A — stored views</b></td><td>D-MEM-COPYSEM1=A</td><td>A store of a read view means a copy; ladder: <code>jet audit copies</code> → ghosts → <code>jet fmt --explicit-copies</code> → <code>policy: .{ copies: .Explicit }</code>. plan #1890.</td></tr>
+    <tr><td><b>D — freeze / give</b></td><td>D-CONC-FREEZE1=A</td><td>Give it (<code>^</code>), freeze it (<code>freeze</code>), or lock it (<code>Shared</code>). plan #1891.</td></tr>
+    <tr><td><b>G — guarantee dial</b></td><td>D-MEM-GUARANTEE1=A</td><td><code>contain:</code>/<code>harden:</code> in package.jet + <code>jet inspect guarantees</code>; decoupled from gc. plan #1894.</td></tr>
+    <tr><td><b>C — FFI ceiling</b></td><td>D-FFI-CAP1=A</td><td><code>fn c_hash(buf: &amp;[U8])</code> lends · <code>fn c_submit(job: ^Packet)</code> gives · <code>#Close(c_close)</code> joins <code>close(^)</code>. By-value floor stays the default. plan #1893.</td></tr>
+    <tr><td><b>F — unsafe runtime</b></td><td>D-MEM-SENTRY1=A</td><td><code>jet run</code> guards raw ops and reports located faults (R08xx); <code>--release</code> silent; hardened profile ships watched. plan #1892.</td></tr>
+    <tr><td><b>E — housekeeping</b></td><td>Repair cards; slate stays pure design</td><td>#1883 tier disagreement, view ICEs, dead freestanding gates, <code>Pool.add</code>, recursive enums → ordinary cards under I9.</td></tr>
+    <tr><td><b>B — one attachment point</b></td><td><span style="color:var(--ink-soft)">Withdrawn on your pushback</span></td><td>Allocator, container, type, and scope-attribute are different things on purpose; <code>#Policy(gc)</code> stays the one-line opt-in you designed. A convention note (future value-form strategies join <code>mem.*</code>) goes in the proposal — no ballot.</td></tr>
+  </table></div>
+</section>
+
+<footer>
+  Evidence: blind-design dossier (455 lines) · advocate dossier (2,554 lines, 57 probes verbatim, both tiers) · 130-cell delta scorecard — all under <code>docs/audits/</code>. Proposal: <code>docs/proposals/memory-one-question.md</code>. Slate ratified on card #1889; implementation cards #1890–#1895. Repo <code>420b11b93</code>, 2026-08-12.
+</footer>
+
+</div>
+</body>
+</html>
