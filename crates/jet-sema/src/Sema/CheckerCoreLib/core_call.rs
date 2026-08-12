@@ -529,6 +529,8 @@ impl<'a> Checker<'a> {
                 params,
                 ret,
                 effect_bound,
+                param_contract,
+                call_metadata,
                 ..
             }) = f_ty
             else {
@@ -739,6 +741,48 @@ impl<'a> Checker<'a> {
             } else {
                 params.clone()
             };
+            let transform_contract = param_contract.map(|contract| {
+                if name == "jvp" {
+                    contract
+                        .iter()
+                        .cloned()
+                        .chain(contract.iter().cloned())
+                        .collect()
+                } else {
+                    contract
+                }
+            });
+            let transform_metadata = call_metadata.map(|metadata| {
+                if name != "jvp" {
+                    return metadata;
+                }
+                crate::AST::FunctionCallMetadata {
+                    names: metadata
+                        .names
+                        .iter()
+                        .cloned()
+                        .chain(metadata.names.iter().cloned())
+                        .collect(),
+                    defaults: metadata
+                        .defaults
+                        .iter()
+                        .cloned()
+                        .chain(metadata.defaults.iter().cloned())
+                        .collect(),
+                    variadic: metadata
+                        .variadic
+                        .iter()
+                        .copied()
+                        .chain(metadata.variadic.iter().copied())
+                        .collect(),
+                    conventions: metadata
+                        .conventions
+                        .iter()
+                        .copied()
+                        .chain(metadata.conventions.iter().copied())
+                        .collect(),
+                }
+            });
             let transform_return = match name {
                 "gradient" => gradient_ty.clone(),
                 "value_and_gradient" => Type::Tuple(vec![
@@ -756,13 +800,8 @@ impl<'a> Checker<'a> {
                 params: transform_params,
                 ret: Some(Box::new(transform_return)),
                 effect_bound: effect_bound.clone(),
-                param_contract: Some(
-                    names
-                        .iter()
-                        .map(|name| (name.clone(), ParamZone::Either))
-                        .collect(),
-                ),
-                call_metadata: None,
+                param_contract: transform_contract,
+                call_metadata: transform_metadata,
                 return_view_provenance: None,
             })
         }

@@ -3395,7 +3395,14 @@ fn bind_arg_temporaries<A: OrderedArg>(
     // TIR argument list, while `order` was computed over the AST list the
     // receiver was stripped from. Recover the offset from the two lengths.
     let offset = args.len().saturating_sub(ast_arg_count);
-    let order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+    let mut order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+    if offset > 0 {
+        // `#Root` dot calls keep the receiver in TIR slot zero even though
+        // sema stripped it from the AST argument list. Materialize that slot
+        // before the written arguments: later defaults may refer to the root
+        // parameter, and the reference must read the same once-evaluated temp.
+        order.splice(0..0, 0..offset);
+    }
     // Every slot in the binder's source order is evaluated exactly once. This
     // includes pure-looking expressions and borrowed/mut-borrowed places: the
     // capability wrapper is moved into the temporary by `take_for_binding`.
@@ -3413,7 +3420,8 @@ fn bind_arg_temporaries<A: OrderedArg>(
         // offset, so two calls can never collide and the name stays stable
         // across runs.
         let ast_slot = slot.saturating_sub(offset);
-        let temp = format!("__jet_arg{site}_{ast_slot}");
+        let temp_slot = if offset > 0 { slot } else { ast_slot };
+        let temp = format!("__jet_arg{site}_{temp_slot}");
         let ty = arg.value().ty.clone();
         let bound = arg.take_for_binding(TExpr {
             ty: ty.clone(),

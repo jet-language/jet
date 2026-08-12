@@ -729,130 +729,13 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                if arg.convention == AccessConvention::Write
-                    && !matches!(arg.expr, Expr::Ident(_, _))
-                {
-                    self.diags.push(Diagnostic::error(
-                        "E0202",
-                        format!(
-                            "{} needs a plain named binding after it",
-                            crate::Sema::Diagnostics::WRITE_CAPABILITY_MARKER
-                        ),
-                        "write access from the write-capability marker `&` can only be granted to a named binding, not an expression".to_string(),
-                        self.non_name_write_argument_fix(&arg.expr),
-                        Some(arg.span),
-                    ));
-                }
-                // Same ownership rules as plain calls (E0201/E0202/E0203).
-                match (param_conv, arg.convention) {
-                    (AccessConvention::Move, AccessConvention::Read) => {
-                        if let Expr::Ident(name, span) = &arg.expr {
-                            if is_cloneable(param_ty, self.registry) {
-                                arg.flags.implicit_clone = true;
-                                // D-MEM1/S2 (was D-L0201 lint): a hard error now,
-                                // regardless of liveness — no clone is ever silent.
-                                let diag = self.e0209_implicit_clone(
-                                    format!("implicit clone of `{}`", name),
-                                    format!("`{}` expects to take ownership of this value", method),
-                                    name,
-                                    *span,
-                                );
-                                self.diags.push(diag);
-                            } else {
-                                self.diags.push(Diagnostic::error(
-                                    "E0201",
-                                    format!(
-                                        "`{}` needs {} here — this value can't be copied",
-                                        method,
-                                        crate::Sema::Diagnostics::MOVE_CAPABILITY_MARKER
-                                    ),
-                                    format!(
-                                        "parameter {} takes ownership through the move-capability marker `^`; passing `{}` without that marker would have to copy it, but this type can't be copied",
-                                        arg_idx + 1,
-                                        name
-                                    ),
-                                    format!(
-                                        "write the move-capability marker `^` (`{}{}`) to move ownership to `{}`",
-                                        Syntax::SIGIL_MOVE,
-                                        name,
-                                        method
-                                    ),
-                                    Some(*span),
-                                ));
-                            }
-                        }
-                    }
-                    (AccessConvention::Move, AccessConvention::Move) => {
-                        if let Expr::Ident(name, span) = &arg.expr {
-                            if !param_ty.is_scalar() {
-                                self.mark_moved(name.clone(), *span);
-                            }
-                        }
-                    }
-                    (AccessConvention::Write, AccessConvention::Read) => {
-                        if let Expr::Ident(name, nspan) = &arg.expr {
-                            self.diags.push(Diagnostic::error(
-                                "E0202",
-                                format!(
-                                    "parameter `{}` requires the write-capability marker `&` at the call site",
-                                    name,
-                                ),
-                                format!(
-                                    "`{method}` needs to edit this value with the write-capability marker `&`; passing it without that marker grants only read access",
-                                ),
-                                format!(
-                                    "write the write-capability marker `&` (`{}{}`) when calling `{method}`",
-                                    Syntax::SIGIL_WRITE,
-                                    name
-                                ),
-                                Some(*nspan),
-                            ));
-                        }
-                    }
-                    (AccessConvention::Write, AccessConvention::Write) => {
-                        if let Expr::Ident(name, span) = &arg.expr {
-                            if let Some(info) = self.lookup(name) {
-                                if !info.mutable {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0111",
-                                        format!(
-                                            "`{}` was made with `{}`, so it can't be changed",
-                                            name,
-                                            Syntax::SIGIL_BIND_IMMUT
-                                        ),
-                                        format!(
-                                            "`{}` will change this value, so it must be mutable (`{}`)",
-                                            method,
-                                            Syntax::SIGIL_BIND_MUT
-                                        ),
-                                        format!(
-                                            "declare it with `{} {} ...`",
-                                            name,
-                                            Syntax::SIGIL_BIND_MUT
-                                        ),
-                                        Some(*span),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0203",
-                            format!(
-                                "a value was passed with the move-capability marker `^` to a parameter that does not consume"
-                            ),
-                            "only parameters declared with the move-capability marker `^` accept a moved value at the call site"
-                                .to_string(),
-                            format!(
-                                "remove the move-capability marker `^`, or declare the parameter with that marker to take ownership"
-                            ),
-                            Some(arg.span),
-                        ));
-                    }
-                    _ => {}
-                }
-                self.check_write_arg_change(arg);
+                self.check_callable_argument_ownership(
+                    method,
+                    arg_idx,
+                    *param_conv,
+                    param_ty,
+                    arg,
+                );
                 arg_idx += 1;
             }
         }
@@ -1056,7 +939,13 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            self.check_write_arg_change(arg);
+            self.check_callable_argument_ownership(
+                method,
+                index,
+                param.convention,
+                &param_ty,
+                arg,
+            );
         }
         self.activate_call_reservations(&call_access, span);
         sig.return_type.clone()

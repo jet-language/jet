@@ -14,6 +14,10 @@
 
 use crate::AST::{CallArg, ParamZone};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Diagnostics::{
+    binder_ambiguous_positional, binder_label_forbidden, binder_label_required,
+    binder_missing_argument, binder_repeated_label, binder_unknown_label,
+};
 
 /// One parameter's public call contract, as the binder needs to see it.
 pub(crate) struct BindParam<'a> {
@@ -159,7 +163,7 @@ pub(crate) fn bind_call_args(
                     // One report per call: every later bare argument has the
                     // same cause, and repeating it just buries the fix.
                     if ok {
-                        diags.push(ambiguous_positional(callee, arg.span));
+                        diags.push(binder_ambiguous_positional(callee, arg.span));
                     }
                     ok = false;
                     continue;
@@ -175,7 +179,7 @@ pub(crate) fn bind_call_args(
                 }
                 match params.get(next_positional) {
                     Some(param) if param.zone == ParamZone::LabelOnly => {
-                        diags.push(label_required(callee, param.label, arg.span));
+                        diags.push(binder_label_required(callee, param.label, arg.span));
                         ok = false;
                     }
                     Some(param) => {
@@ -193,17 +197,22 @@ pub(crate) fn bind_call_args(
                     first_label = Some(*label_span);
                 }
                 let Some(position) = params.iter().position(|p| p.label == label) else {
-                    diags.push(unknown_label(callee, label, params, *label_span));
+                    let callable: Vec<&str> = params
+                        .iter()
+                        .filter(|param| param.zone != ParamZone::PositionalOnly)
+                        .map(|param| param.label)
+                        .collect();
+                    diags.push(binder_unknown_label(callee, label, &callable, *label_span));
                     ok = false;
                     continue;
                 };
                 if params[position].zone == ParamZone::PositionalOnly {
-                    diags.push(label_forbidden(callee, label, *label_span));
+                    diags.push(binder_label_forbidden(callee, label, *label_span));
                     ok = false;
                     continue;
                 }
                 if !slots[position].is_empty() {
-                    diags.push(repeated_label(callee, label, *label_span));
+                    diags.push(binder_repeated_label(callee, label, *label_span));
                     ok = false;
                     continue;
                 }
@@ -242,7 +251,7 @@ pub(crate) fn bind_call_args(
     }
 
     for position in missing {
-        diags.push(missing_argument(callee, params[position].label, call_span));
+        diags.push(binder_missing_argument(callee, params[position].label, call_span));
         ok = false;
     }
     if !ok {
@@ -351,82 +360,4 @@ fn rewrite(
         }
     }
     binding
-}
-
-// ── diagnostics (D-APILABEL1=A) ──────────────────────────────────────────────
-
-fn unknown_label(
-    callee: &str,
-    label: &str,
-    params: &[BindParam<'_>],
-    span: Span,
-) -> Diagnostic {
-    let callable: Vec<&str> = params
-        .iter()
-        .filter(|p| p.zone != ParamZone::PositionalOnly)
-        .map(|p| p.label)
-        .collect();
-    Diagnostic::error(
-        "E0764",
-        format!("`{callee}` has no parameter labelled `{label}`"),
-        "a label binds an argument to the parameter of that name".to_string(),
-        if callable.is_empty() {
-            format!("`{callee}` takes no labelled arguments")
-        } else {
-            format!("`{callee}` accepts `{}`", callable.join("`, `"))
-        },
-        Some(span),
-    )
-}
-
-fn repeated_label(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0765",
-        format!("`{label}:` is written twice in this call to `{callee}`"),
-        "each parameter takes exactly one argument".to_string(),
-        format!("remove one of the `{label}:` arguments"),
-        Some(span),
-    )
-}
-
-fn missing_argument(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0766",
-        format!("this call to `{callee}` is missing `{label}`"),
-        "`{label}` has no default, so every call has to supply it".replace("{label}", label),
-        format!("add `{label}: …` to the call"),
-        Some(span),
-    )
-}
-
-fn label_forbidden(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0767",
-        format!("`{label}` is a positional-only parameter of `{callee}`"),
-        "the `/` in the declaration keeps these parameters positional, so their names stay free to change"
-            .to_string(),
-        format!("drop the `{label}:` label and pass the value by position"),
-        Some(span),
-    )
-}
-
-fn ambiguous_positional(callee: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0768",
-        format!("this argument to `{callee}` follows a labelled one without a label"),
-        "labels bind by name, so a bare argument after one has no parameter to fill".to_string(),
-        "label this argument, or move it before the labelled ones".to_string(),
-        Some(span),
-    )
-}
-
-fn label_required(callee: &str, label: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0769",
-        format!("`{label}` is a label-only parameter of `{callee}`"),
-        "the `*` in the declaration requires the label, so the call says what the value means"
-            .to_string(),
-        format!("write `{label}: …` for this argument"),
-        Some(span),
-    )
 }

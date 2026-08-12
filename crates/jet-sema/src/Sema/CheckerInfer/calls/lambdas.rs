@@ -17,9 +17,20 @@ use std::collections::HashSet;
             let collecting_loop = lam.meta.collecting_loop;
             let result_loop = lam.meta.result_loop;
             let inline_loop = collecting_loop || result_loop;
-            let (exp_params, exp_ret) = match expected {
-                Some(Type::Fn { params, ret, .. }) => (Some(params.as_slice()), ret.as_ref()),
-                _ => (None, None),
+            let (exp_params, exp_ret, exp_contract, exp_metadata) = match expected {
+                Some(Type::Fn {
+                    params,
+                    ret,
+                    param_contract,
+                    call_metadata,
+                    ..
+                }) => (
+                    Some(params.as_slice()),
+                    ret.as_ref(),
+                    param_contract.as_ref(),
+                    call_metadata.as_ref(),
+                ),
+                _ => (None, None, None, None),
             };
     
             if let Some(ep) = exp_params {
@@ -688,8 +699,8 @@ use std::collections::HashSet;
                 // carries no effect bound (D-EFF2 bounds ride callback *parameter*
                 // types, checked against this value at the call site).
                 effect_bound: None,
-                param_contract: None,
-                call_metadata: None,
+                param_contract: exp_contract.cloned(),
+                call_metadata: exp_metadata.cloned(),
                 return_view_provenance: lambda_return_view_provenance,
             })
         }

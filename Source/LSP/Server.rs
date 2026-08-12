@@ -1141,6 +1141,7 @@ fn signature_help_response(
             let active = jet_semindex::binder_active_parameter(
                 call.active_label.as_deref(),
                 call.active_param,
+                &call.consumed_labels,
                 param_contract,
                 parameter_parts.len(),
             );
@@ -2035,6 +2036,7 @@ struct ActiveCall {
     name: String,
     active_param: usize,
     active_label: Option<String>,
+    consumed_labels: Vec<String>,
 }
 
 fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
@@ -2053,17 +2055,22 @@ fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
                     active_start = i + 1;
                 }
                 let active_label = call_argument_label(&src[active_start..offset.min(src.len())]);
+                let prior_end = active_start.saturating_sub(1);
+                let consumed_labels = if prior_end > i + 1 {
+                    call_argument_labels(&src[i + 1..prior_end])
+                } else {
+                    Vec::new()
+                };
                 return Some(ActiveCall {
                     name,
                     active_param,
                     active_label,
+                    consumed_labels,
                 });
             }
             b'(' | b'[' | b'{' => nested = nested.saturating_sub(1),
             b',' if nested == 0 => {
-                if active_param == 0 {
-                    active_start = i + 1;
-                }
+                active_start = i + 1;
                 active_param += 1;
             }
             _ => {}
@@ -2087,6 +2094,30 @@ fn call_argument_label(argument: &str) -> Option<String> {
         return None;
     }
     Some(argument[..label_len].to_string())
+}
+
+fn call_argument_labels(arguments: &str) -> Vec<String> {
+    let bytes = arguments.as_bytes();
+    let mut labels = Vec::new();
+    let mut start = 0usize;
+    let mut nested = 0usize;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        match byte {
+            b'(' | b'[' | b'{' => nested += 1,
+            b')' | b']' | b'}' => nested = nested.saturating_sub(1),
+            b',' if nested == 0 => {
+                if let Some(label) = call_argument_label(&arguments[start..index]) {
+                    labels.push(label);
+                }
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    if let Some(label) = call_argument_label(&arguments[start..]) {
+        labels.push(label);
+    }
+    labels
 }
 
 fn callee_name_before_paren(bytes: &[u8], paren: usize) -> Option<String> {

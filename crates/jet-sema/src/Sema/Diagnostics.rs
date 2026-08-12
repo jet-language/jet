@@ -129,6 +129,79 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
     ))
 }
 
+// D-APILABEL1=A: canonical call-binder diagnostics. The binder supplies only
+// callable facts; wording and fixes live in this registered diagnostic seam.
+pub(crate) fn binder_unknown_label(
+    callee: &str,
+    label: &str,
+    callable: &[&str],
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E0764",
+        format!("`{callee}` has no parameter labelled `{label}`"),
+        "a label binds an argument to the parameter of that name".to_string(),
+        if callable.is_empty() {
+            format!("`{callee}` takes no labelled arguments")
+        } else {
+            format!("`{callee}` accepts `{}`", callable.join("`, `"))
+        },
+        Some(span),
+    )
+}
+
+pub(crate) fn binder_repeated_label(callee: &str, label: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0765",
+        format!("`{label}:` is written twice in this call to `{callee}`"),
+        "each parameter takes exactly one argument".to_string(),
+        format!("remove one of the `{label}:` arguments"),
+        Some(span),
+    )
+}
+
+pub(crate) fn binder_missing_argument(callee: &str, label: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0766",
+        format!("this call to `{callee}` is missing `{label}`"),
+        format!("`{label}` has no default, so every call has to supply it"),
+        format!("add `{label}: …` to the call"),
+        Some(span),
+    )
+}
+
+pub(crate) fn binder_label_forbidden(callee: &str, label: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0767",
+        format!("`{label}` is a positional-only parameter of `{callee}`"),
+        "the `/` in the declaration keeps these parameters positional, so their names stay free to change"
+            .to_string(),
+        format!("drop the `{label}:` label and pass the value by position"),
+        Some(span),
+    )
+}
+
+pub(crate) fn binder_ambiguous_positional(callee: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0768",
+        format!("this argument to `{callee}` follows a labelled one without a label"),
+        "labels bind by name, so a bare argument after one has no parameter to fill".to_string(),
+        "label this argument, or move it before the labelled ones".to_string(),
+        Some(span),
+    )
+}
+
+pub(crate) fn binder_label_required(callee: &str, label: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0769",
+        format!("`{label}` is a label-only parameter of `{callee}`"),
+        "the `*` in the declaration requires the label, so the call says what the value means"
+            .to_string(),
+        format!("write `{label}: …` for this argument"),
+        Some(span),
+    )
+}
+
 pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0204",

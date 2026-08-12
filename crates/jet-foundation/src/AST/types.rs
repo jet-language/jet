@@ -1,4 +1,4 @@
-use super::Expr;
+use crate::AST::Expr;
 use crate::Diagnostics::Span;
 
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
@@ -169,6 +169,9 @@ impl Measure {
 pub struct FunctionObligations {
     pub effect_bound: Option<Vec<String>>,
     pub param_contract: Option<Vec<(String, super::ParamZone)>>,
+    /// Declaration-ordered rest-slot facts. Local names and default bodies
+    /// stay out of callable identity.
+    pub variadic: Option<Vec<bool>>,
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
@@ -202,12 +205,20 @@ impl FunctionObligations {
                     .join(",")
             })
             .unwrap_or_default();
+        let variadic = self.variadic.as_ref().map_or_else(String::new, |row| {
+            row.iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        });
         let provenance = self
             .return_view_provenance
             .as_ref()
             .map(super::canonical_view_provenance_map)
             .unwrap_or_default();
-        format!("effects=[{effects}];contract=[{contract}];provenance=[{provenance}]")
+        format!(
+            "effects=[{effects}];contract=[{contract}];variadic=[{variadic}];provenance=[{provenance}]"
+        )
     }
 
     /// required is the contract at the use site. offered is the contract
@@ -240,6 +251,17 @@ impl FunctionObligations {
             }),
         };
         if !contract_ok {
+            return false;
+        }
+
+        let variadic_ok = match &required.variadic {
+            None => true,
+            Some(required) => self
+                .variadic
+                .as_ref()
+                .is_none_or(|offered| offered == required),
+        };
+        if !variadic_ok {
             return false;
         }
 
@@ -369,21 +391,23 @@ impl KnowledgeVector {
                     if entry.plane != crate::Registry::TYPE_PLANE_OBLIGATION {
                         return None;
                     }
-                    // D-APILABEL1: this mixed plane contributes only its call
-                    // contract to identity; effects and return provenance
-                    // remain directional obligations.
+                    // D-APILABEL1/D-VARIADIC1: this mixed plane contributes
+                    // only declaration-ordered public call facts to identity;
+                    // effects, defaults, and return provenance remain
+                    // directional or local implementation details.
                     let KnowledgeFact::Obligation(obligations) = &entry.fact else {
                         return None;
                     };
-                    let Some(param_contract) = &obligations.param_contract else {
+                    if obligations.param_contract.is_none() && obligations.variadic.is_none() {
                         return None;
-                    };
+                    }
                     Some(KnowledgeEntry {
                         path: entry.path.clone(),
                         plane: entry.plane,
                         fact: KnowledgeFact::Obligation(FunctionObligations {
                             effect_bound: None,
-                            param_contract: Some(param_contract.clone()),
+                            param_contract: obligations.param_contract.clone(),
+                            variadic: obligations.variadic.clone(),
                             return_view_provenance: None,
                         }),
                     })
@@ -1060,14 +1084,23 @@ impl Type {
         let Type::Fn {
             effect_bound,
             param_contract,
+            call_metadata,
             return_view_provenance,
             ..
         } = self
         else {
             return None;
         };
+        let variadic = call_metadata.as_ref().and_then(|metadata| {
+            metadata
+                .variadic
+                .iter()
+                .any(|is_variadic| *is_variadic)
+                .then(|| metadata.variadic.clone())
+        });
         if effect_bound.is_none()
             && param_contract.is_none()
+            && variadic.is_none()
             && return_view_provenance.is_none()
         {
             return None;
@@ -1077,6 +1110,7 @@ impl Type {
                 .as_ref()
                 .map(|row| row.iter().map(|(name, _)| name.clone()).collect()),
             param_contract: param_contract.clone(),
+            variadic,
             return_view_provenance: return_view_provenance.clone(),
         })
     }

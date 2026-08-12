@@ -3381,7 +3381,14 @@ pub(crate) fn build_cx_items(
                         ef.name.clone(),
                         ef.params
                             .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, ty)
+                            })
                             .collect(),
                     );
                     // JIT print/use sites need the real return type (AOT emits the
@@ -3390,11 +3397,33 @@ pub(crate) fn build_cx_items(
                     cx.fn_types.insert(
                         ef.name.clone(),
                         Type::Fn {
-                            params: ef.params.iter().map(|p| p.ty.clone()).collect(),
+                            params: ef
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    if p.variadic {
+                                        Type::List(Box::new(p.ty.clone()))
+                                    } else {
+                                        p.ty.clone()
+                                    }
+                                })
+                                .collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
-                            param_contract: None,
-                call_metadata: None,
+                            param_contract: (!ef.params.is_empty()).then(|| {
+                                ef.params
+                                    .iter()
+                                    .map(|p| (p.call_label().to_string(), p.zone))
+                                    .collect()
+                            }),
+                            call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                names: ef.params.iter().map(|p| p.name.clone()).collect(),
+                                // `extern_to_sig` owns the foreign contract and
+                                // deliberately has no Jet default bodies.
+                                defaults: ef.params.iter().map(|_| None).collect(),
+                                variadic: ef.params.iter().map(|p| p.variadic).collect(),
+                                conventions: ef.params.iter().map(|p| p.convention).collect(),
+                            }),
                         },
                     );
                 }
@@ -3407,17 +3436,44 @@ pub(crate) fn build_cx_items(
                         ef.name.clone(),
                         ef.params
                             .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| {
+                                let ty = if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                };
+                                (p.convention, ty)
+                            })
                             .collect(),
                     );
                     cx.fn_types.insert(
                         ef.name.clone(),
                         Type::Fn {
-                            params: ef.params.iter().map(|p| p.ty.clone()).collect(),
+                            params: ef
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    if p.variadic {
+                                        Type::List(Box::new(p.ty.clone()))
+                                    } else {
+                                        p.ty.clone()
+                                    }
+                                })
+                                .collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
-                            param_contract: None,
-                call_metadata: None,
+                            param_contract: (!ef.params.is_empty()).then(|| {
+                                ef.params
+                                    .iter()
+                                    .map(|p| (p.call_label().to_string(), p.zone))
+                                    .collect()
+                            }),
+                            call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                names: ef.params.iter().map(|p| p.name.clone()).collect(),
+                                defaults: ef.params.iter().map(|_| None).collect(),
+                                variadic: ef.params.iter().map(|p| p.variadic).collect(),
+                                conventions: ef.params.iter().map(|p| p.convention).collect(),
+                            }),
                         },
                     );
                 }

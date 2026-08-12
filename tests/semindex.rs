@@ -235,7 +235,7 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 #[test]
 fn semindex_schema_version() {
     // D-EFFECT-OMIT1 added effect provenance and normalized inferred rows.
-    assert_eq!(SCHEMA_VERSION, 12);
+    assert_eq!(SCHEMA_VERSION, 13);
 }
 
 #[test]

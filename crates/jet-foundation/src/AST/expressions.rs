@@ -760,8 +760,9 @@ impl Expr {
             match e {
                 Expr::Str(parts, _) => {
                     for part in parts {
-                        if let StrPart::Interp(inner, _) = part {
-                            walk(inner, f);
+                        match part {
+                            StrPart::Lit(_) => {}
+                            StrPart::Interp(inner, _) => walk(inner, f),
                         }
                     }
                 }

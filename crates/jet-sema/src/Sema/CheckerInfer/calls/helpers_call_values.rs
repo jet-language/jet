@@ -175,22 +175,20 @@ impl<'a> Checker<'a> {
                     }
                 })
                 .collect();
-            let mut owned: Vec<crate::AST::CallArg> = args.to_vec();
             let callee_name = match callee.as_ref() {
                 Expr::Ident(name, _) => name.clone(),
                 _ => "this function value".to_string(),
             };
             let bound = crate::Sema::CallBinder::bind_call_args(
-                &callee_name, &bind, &mut owned, span, &mut self.diags,
+                &callee_name, &bind, args, span, &mut self.diags,
             );
-            self.register_binder_refs(&owned);
+            self.register_binder_refs(args);
             if bound.is_none() {
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
                 return ret.map(|r| *r);
             }
-            *args = owned;
             if metadata.is_some_and(|meta| meta.variadic.last().copied().unwrap_or(false)) {
                 let fake_sig = crate::AST::FuncSig {
                     params: params
@@ -276,14 +274,19 @@ impl<'a> Checker<'a> {
             }
             for (i, arg) in args.iter_mut().enumerate() {
                 if let Some(param_ty) = params.get(i) {
+                    let param_convention = metadata
+                        .and_then(|meta| meta.conventions.get(i))
+                        .copied()
+                        .unwrap_or(AccessConvention::Read);
                     let saved = self.expected_type.clone();
                     let saved_borrow = self.borrow_ctx;
                     self.expected_type = Some(param_ty.clone());
-                    self.borrow_ctx = !param_ty.is_scalar();
+                    self.borrow_ctx = param_convention == AccessConvention::Read
+                        && !param_ty.is_scalar();
                     let got = self.with_call_access(&mut call_access, |checker| {
                         checker.check_call_argument_access(
                             arg,
-                            AccessConvention::Read,
+                            param_convention,
                             param_ty,
                             true,
                         );
@@ -298,7 +301,7 @@ impl<'a> Checker<'a> {
                             &mut arg.expr,
                             got,
                             param_ty,
-                            AccessConvention::Read,
+                            param_convention,
                         );
                         if got != *param_ty {
                             self.diags.push(Diagnostic::error(
@@ -315,43 +318,13 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                    if arg.convention == AccessConvention::Move {
-                        self.diags.push(Diagnostic::error(
-                            "E0203",
-                            "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
-                            "function-value parameters have plain read access; they do not take ownership"
-                                .to_string(),
-                            "remove the move-capability marker `^`".to_string(),
-                            Some(arg.span),
-                        ));
-                    }
-                    if arg.convention == AccessConvention::Write
-                        && !matches!(arg.expr, Expr::Ident(_, _))
-                    {
-                        self.diags.push(Diagnostic::error(
-                            "E0202",
-                            "the write-capability marker `&` needs a plain named binding after it".to_string(),
-                            "write access from the write-capability marker `&` can only be granted to a named binding, not an expression"
-                                .to_string(),
-                            self.non_name_write_argument_fix(&arg.expr),
-                            Some(arg.span),
-                        ));
-                    }
-                    if let Expr::Ident(name, _) = &arg.expr {
-                        if arg.convention == AccessConvention::Write {
-                            if let Some(info) = self.lookup(name) {
-                                if !info.mutable {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0111",
-                                        format!("`{name}` cannot be changed"),
-                                        "write access requires a mutable binding".to_string(),
-                                        format!("declare `{name}` with `:=`"),
-                                        Some(arg.span),
-                                    ));
-                                }
-                            }
-                        }
-                    }
+                    self.check_callable_argument_ownership(
+                        &callee_name,
+                        i,
+                        param_convention,
+                        param_ty,
+                        arg,
+                    );
                 } else {
                     self.infer(&mut arg.expr);
                 }

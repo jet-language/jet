@@ -425,12 +425,24 @@ pub fn function_parameter_parts(
 pub fn binder_active_parameter(
     active_label: Option<&str>,
     active_positional: usize,
+    consumed_labels: &[String],
     contract: &[(String, String, AST::ParamZone)],
     visible_parameter_count: usize,
 ) -> usize {
     if visible_parameter_count == 0 {
         return 0;
     }
+    let mut consumed_slots = Vec::new();
+    for label in consumed_labels {
+        if let Some((index, _)) = contract.iter().enumerate().find(|(index, (_, public, zone))| {
+            !consumed_slots.contains(index)
+                && *zone != AST::ParamZone::PositionalOnly
+                && public == label
+        }) {
+            consumed_slots.push(index);
+        }
+    }
+    let positional_before_active = active_positional.saturating_sub(consumed_slots.len());
     let declaration_slot = active_label
         .and_then(|label| {
             contract.iter().position(|(_, public, zone)| {
@@ -438,20 +450,33 @@ pub fn binder_active_parameter(
             })
         })
         .or_else(|| {
-            contract
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, _, zone))| *zone != AST::ParamZone::LabelOnly)
-                .nth(active_positional)
-                .map(|(index, _)| index)
+            let mut bare_parameters_before_active = positional_before_active;
+            for (index, (_, _, zone)) in contract.iter().enumerate() {
+                if consumed_slots_contains(&consumed_slots, index) {
+                    continue;
+                }
+                if *zone == AST::ParamZone::LabelOnly {
+                    if bare_parameters_before_active == 0 {
+                        return Some(index);
+                    }
+                    continue;
+                }
+                if bare_parameters_before_active == 0 {
+                    return Some(index);
+                }
+                bare_parameters_before_active -= 1;
+            }
+            None
         });
-    let visible_index = declaration_slot.map_or(active_positional, |slot| {
-        contract[..slot]
-            .iter()
-            .filter(|(_, _, zone)| *zone != AST::ParamZone::LabelOnly)
-            .count()
-    });
+    // `parameter_parts` removes only the zone separators (`/` and `*`), not
+    // label-only declarations. Every declaration slot therefore occupies one
+    // visible parameter index.
+    let visible_index = declaration_slot.map_or(active_positional, |slot| slot);
     visible_index.min(visible_parameter_count - 1)
+}
+
+fn consumed_slots_contains(slots: &[usize], slot: usize) -> bool {
+    slots.contains(&slot)
 }
 
 fn method_fact(

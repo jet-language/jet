@@ -76,12 +76,14 @@ use crate::Codegen::TIR::lower::static_call_type_name_lower;
 use crate::Codegen::TIR::pool_field_ty_hint;
 use crate::Codegen::TIR::render_router_handler;
 use crate::Codegen::TIR::render_spawn_lambda;
+use crate::Codegen::TIR::preserve_source_arg_order;
 use crate::Codegen::TIR::resolve_builtin_op;
 use crate::Codegen::TIR::resolve_closure_op;
 use crate::Codegen::TIR::resolve_numeric_conversion_op;
 use crate::Codegen::TIR::resolve_numeric_op;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::solve_new_type;
+use crate::Codegen::TIR::source_arg_order;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TCoreClosureKind;
@@ -1878,23 +1880,48 @@ fn lower_method_call_impl(
     // with PLAIN args. Resolve the field's Rust name + the call's result type (the Fn's
     // return) here; emit just splices. (Tried before the JSON/core/user shapes, mirroring
     // the AST dispatch order — a fn-field check fires before user-method dispatch.)
-    if let Some(Type::Fn { params, ret, .. }) = fn_field_call_ty(method, recv_type, cx) {
+    if let Some(fn_ty @ Type::Fn { params, ret, .. }) = fn_field_call_ty(method, recv_type, cx) {
         let ret_ty = ret.as_deref().cloned().unwrap_or_else(unit_type);
         let recv = lower_expr(receiver, cx, env);
+        let conventions = match &fn_ty {
+            Type::Fn {
+                call_metadata: Some(metadata),
+                ..
+            } => Some(metadata.conventions.as_slice()),
+            _ => None,
+        };
         let targs: Vec<TCallArg> = args
             .iter()
-            .zip(params.iter())
-            .map(|(a, ty)| {
-                lower_one_call_arg(a, Some((AccessConvention::Read, ty.clone())), env, cx)
+            .enumerate()
+            .map(|(index, a)| {
+                let conv = params.get(index).cloned().map(|ty| {
+                    (
+                        conventions
+                            .and_then(|row| row.get(index))
+                            .copied()
+                            .unwrap_or(AccessConvention::Read),
+                        ty,
+                    )
+                });
+                lower_one_call_arg(a, conv, env, cx)
             })
             .collect();
-        return TExpr {
+        let lowered = TExpr {
             ty: ret_ty,
             kind: TExprKind::FnFieldCall {
                 recv: Box::new(recv),
                 field: method.to_string(),
                 args: targs,
             },
+        };
+        return match source_arg_order(args) {
+            Some(order) => preserve_source_arg_order(
+                lowered,
+                &order,
+                args.len(),
+                method_span.start as u32,
+            ),
+            None => lowered,
         };
     }
     // D-ENC-DYN1=A+: a dynamic `Data` construction `Data.<Variant>(arg)` (the gate
