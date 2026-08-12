@@ -354,7 +354,15 @@ fn jet_auth_i64_claim(
 ) -> Result<Option<i64>, JetAuthError> {
     match fields.get(name) {
         None => Ok(None),
-        Some(jet_std::JSON::Integer(value)) => Ok(Some(*value)),
+        Some(jet_std::JSON::Integer(_)) => {
+            let lexeme = jet_auth_number_lexeme(text, name).ok_or_else(|| {
+                JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
+            })?;
+            let value = jet_auth_parse_i64_decimal(&lexeme).ok_or_else(|| {
+                JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
+            })?;
+            Ok(Some(value))
+        }
         // `Number` is only the JSON type check. Range and integrality come
         // from the source lexeme, never from the rounded f64 payload.
         Some(jet_std::JSON::Number(_)) => {

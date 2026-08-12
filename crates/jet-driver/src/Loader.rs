@@ -1192,37 +1192,38 @@ pub fn manifest_path_checked(root: &Path) -> Result<Option<PathBuf>, Diagnostic>
 /// returned so an inner malformed or ambiguous workspace cannot expose an
 /// outer package authority.
 pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = AuthorityResolver::open(start)
-        .map_err(|error| error.diagnostic())?
-        .root()
-        .to_path_buf();
+    let mut dir = AuthorityResolver::authority_walk_root(start)
+        .map_err(|error| error.diagnostic())?;
     loop {
-        let resolver = AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
-        match resolver.resolve_workspace_source() {
-            Ok(Some(_)) => {
-                return resolver
-                    .checked_manifest(Path::new("."))
-                    .map(|_| Some(dir.clone()))
-                    .or_else(|error| {
-                        if error.is_missing() {
-                            Ok(None)
-                        } else {
-                            Err(error.diagnostic())
-                        }
-                    });
+        if let Some(resolver) = AuthorityResolver::open_for_authority_walk(&dir)
+            .map_err(|error| error.diagnostic())?
+        {
+            match resolver.resolve_workspace_source() {
+                Ok(Some(_)) => {
+                    return resolver
+                        .checked_manifest(Path::new("."))
+                        .map(|_| Some(dir.clone()))
+                        .or_else(|error| {
+                            if error.is_missing() {
+                                Ok(None)
+                            } else {
+                                Err(error.diagnostic())
+                            }
+                        });
+                }
+                Ok(None) => {}
+                Err(error) => return Err(error.workspace_diagnostic()),
             }
-            Ok(None) => {}
-            Err(error) => return Err(error.workspace_diagnostic()),
+            match resolver.checked_manifest(Path::new(".")) {
+                Ok(_) => return Ok(Some(dir)),
+                Err(error) if error.is_missing() => {}
+                Err(error) => return Err(error.diagnostic()),
+            }
         }
-        match resolver.checked_manifest(Path::new(".")) {
-            Ok(_) => return Ok(Some(dir)),
-            Err(error) if error.is_missing() => {}
-            Err(error) => return Err(error.diagnostic()),
-        }
-        match dir.parent() {
-            Some(p) => dir = p.to_path_buf(),
-            None => return Ok(None),
-        }
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+            return Ok(None);
+        };
+        dir = parent;
     }
 }
 
@@ -1265,21 +1266,22 @@ pub fn authority_name_for_entry(entry: &Path) -> Result<String, Diagnostic> {
 /// workspace nested below a package root must own file and module imports
 /// inside that workspace instead of inheriting the package's wider tree.
 pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = AuthorityResolver::open(start)
-        .map_err(|error| error.diagnostic())?
-        .root()
-        .to_path_buf();
+    let mut dir = AuthorityResolver::authority_walk_root(start)
+        .map_err(|error| error.diagnostic())?;
     loop {
-        let resolver = AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
-        match resolver.resolve_workspace_source() {
-            Ok(Some(_)) => return Ok(Some(dir)),
-            Ok(None) => {}
-            Err(error) => return Err(error.workspace_diagnostic()),
+        if let Some(resolver) = AuthorityResolver::open_for_authority_walk(&dir)
+            .map_err(|error| error.diagnostic())?
+        {
+            match resolver.resolve_workspace_source() {
+                Ok(Some(_)) => return Ok(Some(dir)),
+                Ok(None) => {}
+                Err(error) => return Err(error.workspace_diagnostic()),
+            }
         }
-        match dir.parent() {
-            Some(p) => dir = p.to_path_buf(),
-            None => return Ok(None),
-        }
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+            return Ok(None);
+        };
+        dir = parent;
     }
 }
 
@@ -1290,9 +1292,14 @@ pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diag
 /// "no pkg.jet found" message into the E1226 teaching diagnostic when the
 /// user's project still carries an old filename.
 pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)> {
-    let mut dir = AuthorityResolver::open(start).ok()?.root().to_path_buf();
+    let mut dir = AuthorityResolver::authority_walk_root(start).ok()?;
     loop {
-        let resolver = AuthorityResolver::open(&dir).ok()?;
+        let resolver = AuthorityResolver::open_for_authority_walk(&dir).ok()?;
+        let Some(resolver) = resolver else {
+            let parent = AuthorityResolver::authority_walk_parent(&dir)?;
+            dir = parent;
+            continue;
+        };
         match resolver.checked_manifest(Path::new(".")) {
             Ok(_) => return None,
             Err(error) if error.is_missing() => {}
@@ -1316,10 +1323,10 @@ pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)>
             Ok(None) => {}
             Err(_) => return None,
         }
-        match dir.parent() {
-            Some(p) => dir = p.to_path_buf(),
-            None => return None,
-        }
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+            return None;
+        };
+        dir = parent;
     }
 }
 

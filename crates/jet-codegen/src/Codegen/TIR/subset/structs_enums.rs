@@ -57,7 +57,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     if name == crate::Syntax::TYPE_TASK_FAILURE {
         return true;
     }
-    if crate::Generics::is_type_var_name(name)
+    if (crate::Generics::is_type_var_name(name) && !cx.enum_variants.contains_key(name))
         || is_json_type_name(name)
         || is_db_value_type_name(name)
         || core_enum_or_prelude(name)

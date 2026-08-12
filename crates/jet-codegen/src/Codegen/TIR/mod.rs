@@ -2928,6 +2928,8 @@ pub struct TPattern {
 pub enum TPatternPosition {
     /// A binding test that destructures payload slots into locals (`if x == Ok(v)`).
     Binding,
+    /// An Option binding test (`if x == Some(v)`).
+    OptionBinding,
     /// A match-arm head, which also binds payload slots.
     Arm,
     /// A payload-free variant path, compared by value.
@@ -2953,6 +2955,15 @@ impl TPattern {
             pattern,
             enum_type: None,
             position: TPatternPosition::Binding,
+        }
+    }
+
+    /// An Option payload-binding test (`if x == Some(v)`).
+    pub fn option_binding(pattern: crate::AST::Pattern) -> TPattern {
+        TPattern {
+            pattern,
+            enum_type: None,
+            position: TPatternPosition::OptionBinding,
         }
     }
 

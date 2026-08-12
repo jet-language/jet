@@ -5894,12 +5894,21 @@ fn lower_method_call_impl(
             (recv.ty.clone(), method.to_string(), resolved_type_args.clone()),
         );
     }
+    let distinct_numeric_operator = cx
+        .distinct_types
+        .get(lookup_ty_name)
+        .is_some_and(|(_, numeric)| *numeric)
+        && !cx.distinct_ranges.contains_key(lookup_ty_name)
+        && matches!(method, "add" | "sub" | "mul" | "div")
+        && args.len() == 1;
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
-    // a plain user method is `user_<method>`. This mirrors `emit_method_call`'s
-    // `trait_methods` check exactly — decided here, total, never re-derived in emit.
+    // a plain user method is `user_<method>`. Numeric distinct operators are also
+    // emitted through the bare synthetic operator trait, even though sema does not
+    // register them as ordinary Jet methods.
     let method_ref = if cx
         .trait_methods
         .contains(&(lookup_ty_name.to_string(), method.to_string()))
+        || distinct_numeric_operator
     {
         TMethodRef::bare(method)
     } else {
@@ -5926,7 +5935,9 @@ fn lower_method_call_impl(
             type_args: resolved_type_args,
             args: targs,
             source_first_string_literal: first_string_literal_arg(args),
-            operator_line: None,
+            operator_line: distinct_numeric_operator.then(|| {
+                crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32
+            }),
         },
     }
 }

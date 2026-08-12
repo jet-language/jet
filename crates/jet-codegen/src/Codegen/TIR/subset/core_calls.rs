@@ -25,6 +25,13 @@ use std::collections::HashSet;
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
+    // D-CRYPTO-API1=A: expert crypto calls have total fixed signatures and a
+    // typed CoreCall emitter, but their registry rows intentionally do not
+    // advertise a beginner direct symbol. The expert import and #Unsafe gate
+    // are sema-owned; keep this coverage decision on the same fixed signature.
+    if module == "core.crypto.expert" && crate::Sema::core_fixed_sig(module, method).is_some() {
+        return true;
+    }
     // The AOT emitter uses the typed `JetLocalTime::parse` expression, while
     // the resident JIT has an explicit Result<LocalTime, String> adapter.
     // Keep this special route out of the generic direct-symbol table.

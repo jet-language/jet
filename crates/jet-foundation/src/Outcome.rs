@@ -326,16 +326,15 @@ pub fn jet_render_registered_diagnostic(
 /// E3001's registered runtime row. Keep this projection dependency-free: this
 /// file is embedded verbatim in AOT programs and re-exported by JIT hosts.
 const E3001_SOURCE: &str = "runtime";
-const E3001_WHY: &str = "The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled `CryptoError`. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).";
-const E3001_FIX: &str = "Fix the logic that led to the failure; handle `CryptoError` in `fn run`. Unhandled non-`Internal` crypto errors exit 70 after cleanup; unhandled `Internal` exits 101 after fail-closed cleanup.";
+const E3001_FIX: &str = "handle the CryptoError in fn run";
 
 /// Marshal an unhandled `CryptoError` into the one E3001 runtime report.
 pub fn jet_render_e3001_crypto(message: &str, internal: bool) -> JetRuntimeDiagnostic {
     jet_render_registered_diagnostic(
         "E3001",
         E3001_SOURCE,
-        format!("unhandled cryptographic error: {message}"),
-        E3001_WHY.to_string(),
+        "unhandled cryptographic error".to_string(),
+        message.to_string(),
         E3001_FIX.to_string(),
         if internal { 101 } else { 70 },
     )

@@ -54,8 +54,9 @@ fn report_authority_error(diagnostic: Diagnostic) -> ! {
 type CheckedWorkspaceSource = (AuthorityResolver, WorkspaceSource);
 
 fn checked_workspace_source(dir: &Path) -> Result<Option<CheckedWorkspaceSource>, Diagnostic> {
-    match AuthorityResolver::open(dir) {
-        Ok(resolver) => match resolver.resolve_workspace_source() {
+    match AuthorityResolver::open_for_authority_walk(dir) {
+        Ok(None) => Ok(None),
+        Ok(Some(resolver)) => match resolver.resolve_workspace_source() {
             Ok(Some(source)) => {
                 resolver
                     .revalidate_source(&source)
@@ -75,8 +76,9 @@ fn workspace_source_present(dir: &Path) -> Result<bool, Diagnostic> {
 }
 
 fn package_manifest_present(dir: &Path) -> Result<bool, Diagnostic> {
-    match AuthorityResolver::open(dir) {
-        Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
+    match AuthorityResolver::open_for_authority_walk(dir) {
+        Ok(None) => Ok(false),
+        Ok(Some(resolver)) => match resolver.checked_manifest(Path::new(".")) {
             Ok(manifest) => {
                 resolver
                     .revalidate_file(&manifest.file)
@@ -92,10 +94,8 @@ fn package_manifest_present(dir: &Path) -> Result<bool, Diagnostic> {
 }
 
 fn nearest_project_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = AuthorityResolver::open(start)
-        .map_err(|error| error.diagnostic())?
-        .root()
-        .to_path_buf();
+    let mut dir = AuthorityResolver::authority_walk_root(start)
+        .map_err(|error| error.diagnostic())?;
     loop {
         if package_manifest_present(&dir)?
             || env_file_present(&dir)?
@@ -103,20 +103,18 @@ fn nearest_project_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
         {
             return Ok(Some(dir));
         }
-        let Some(parent) = dir.parent() else {
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
             break;
         };
-        if parent == dir {
-            break;
-        }
-        dir = parent.to_path_buf();
+        dir = parent;
     }
     Ok(None)
 }
 
 fn env_file_present(dir: &Path) -> Result<bool, Diagnostic> {
-    match AuthorityResolver::open(dir) {
-        Ok(resolver) => match resolver.checked_file(Path::new(Syntax::ENV_FILE)) {
+    match AuthorityResolver::open_for_authority_walk(dir) {
+        Ok(None) => Ok(false),
+        Ok(Some(resolver)) => match resolver.checked_file(Path::new(Syntax::ENV_FILE)) {
             Ok(file) => {
                 resolver
                     .revalidate_file(&file)
@@ -156,21 +154,16 @@ fn nearest_workspace_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
 fn nearest_workspace_source(
     start: &Path,
 ) -> Result<Option<(PathBuf, AuthorityResolver, WorkspaceSource)>, Diagnostic> {
-    let mut dir = AuthorityResolver::open(start)
-        .map_err(|error| error.diagnostic())?
-        .root()
-        .to_path_buf();
+    let mut dir = AuthorityResolver::authority_walk_root(start)
+        .map_err(|error| error.diagnostic())?;
     loop {
         if let Some((resolver, source)) = checked_workspace_source(&dir)? {
             return Ok(Some((dir, resolver, source)));
         }
-        let Some(parent) = dir.parent() else {
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
             break;
         };
-        if parent == dir {
-            break;
-        }
-        dir = parent.to_path_buf();
+        dir = parent;
     }
     Ok(None)
 }

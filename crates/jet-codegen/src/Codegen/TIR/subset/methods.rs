@@ -1154,7 +1154,17 @@ pub(crate) fn method_call_in_subset(
         .extern_funcs
         .contains_key(&foreign_binding_method_key(ty, method));
     let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()));
-    if sig.is_none() && !binding_method {
+    let distinct_numeric_operator = cx
+        .distinct_types
+        .get(ty)
+        .is_some_and(|(_, numeric)| *numeric)
+        && !cx.distinct_ranges.contains_key(ty)
+        && matches!(method, "add" | "sub" | "mul" | "div")
+        && args.len() == 1;
+    let distinct_trait_method = cx.distinct_types.contains_key(ty)
+        && (cx.trait_methods.contains(&(ty.clone(), method.to_string()))
+            || distinct_numeric_operator);
+    if sig.is_none() && !binding_method && !distinct_trait_method {
         // No user method: a name a core/stdlib/builtin/special lowering would intercept
         // *before* the user dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/
         // alloc special cases) has bespoke name-keyed lowering — exclude it (those are
@@ -1174,6 +1184,7 @@ pub(crate) fn method_call_in_subset(
     if !is_covered_struct_ty(&recv_ty, cx)
         && !is_covered_enum_ty(&recv_ty, cx)
         && !is_covered_foreign_value_ty(&recv_ty, cx)
+        && !distinct_trait_method
     {
         return false;
     }

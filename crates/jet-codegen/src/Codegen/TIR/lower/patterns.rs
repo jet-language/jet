@@ -362,7 +362,12 @@ pub(crate) fn lower_fallible_match<'a>(
         // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
-        tarms.push(TPattern::binding(pattern));
+        let tir_pattern = if matches!(&subject_ty, Type::Option(_)) {
+            TPattern::option_binding(pattern)
+        } else {
+            TPattern::binding(pattern)
+        };
+        tarms.push(tir_pattern);
         bodies.push(LowerBody::scoped(&arm.body, body_env));
     }
     let has_else = else_body.is_some();

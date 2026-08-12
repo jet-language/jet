@@ -373,6 +373,7 @@ fn is_cloneable_rec(
                 name.as_str(),
                 "MutationPlan"
                     | "VaultWrite"
+                    | "ExpiringSecret"
                     | "ViewMut"
                     | "CellReadGuard"
                     | "CellEditGuard"

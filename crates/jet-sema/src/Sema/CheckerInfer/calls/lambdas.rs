@@ -707,10 +707,11 @@ use std::collections::HashSet;
             Some(Type::Fn {
                 params: param_types,
                 ret: ret_ty.map(Box::new),
-                // A lambda value is a concrete callback, not a demand for one — it
-                // carries no effect bound (D-EFF2 bounds ride callback *parameter*
-                // types, checked against this value at the call site).
-                effect_bound: None,
+                // A lambda value is a concrete callback, not a demand for one.
+                // A body sema proves effect-free publishes the empty bound so it
+                // satisfies `=[]=>` positions; anything else stays unbounded and
+                // the call-site D-EFF2 obligation solver decides.
+                effect_bound: crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new),
                 param_contract: exp_contract.cloned(),
                 call_metadata: exp_metadata.cloned(),
                 return_view_provenance: lambda_return_view_provenance,

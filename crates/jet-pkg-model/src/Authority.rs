@@ -307,41 +307,45 @@ pub struct AuthorityResolver {
 }
 
 impl AuthorityResolver {
+    /// Open a directory only when it can be a project/workspace authority.
+    ///
+    /// Upward discovery crosses unrelated parent directories. They are
+    /// discovery space, not authority objects: pinning them makes shared
+    /// directories such as `/tmp` fail closed on harmless metadata changes.
+    pub fn open_for_authority_walk(root: &Path) -> Result<Option<Self>, AuthorityError> {
+        let metadata = Self::inspect_root(root)?;
+        if is_shared_directory(&metadata) || !has_authority_candidate(root)? {
+            return Ok(None);
+        }
+        Self::open(root).map(Some)
+    }
+
+    /// Validate and canonicalize a walk start without pinning it. The caller
+    /// pins only a directory that proves it contains authority metadata.
+    pub fn authority_walk_root(root: &Path) -> Result<PathBuf, AuthorityError> {
+        Self::inspect_root(root)?;
+        Self::canonicalize_root(root)
+    }
+
+    /// Return the next parent that may participate in authority discovery.
+    /// Shared directories are never authority roots.
+    pub fn authority_walk_parent(path: &Path) -> Option<PathBuf> {
+        if is_shared_directory_path(path) {
+            return None;
+        }
+        let parent = path.parent()?;
+        if parent == path || is_shared_directory_path(parent) {
+            None
+        } else {
+            Some(parent.to_path_buf())
+        }
+    }
+
     /// Open and pin a regular authority root directory.
     pub fn open(root: &Path) -> Result<Self, AuthorityError> {
-        let metadata = fs::symlink_metadata(root).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                AuthorityError::Missing(root.to_path_buf())
-            } else {
-                AuthorityError::Io {
-                    path: root.to_path_buf(),
-                    operation: "inspect",
-                    detail: error.to_string(),
-                }
-            }
-        })?;
-        if metadata.file_type().is_symlink() {
-            return Err(AuthorityError::Symlink(root.to_path_buf()));
-        }
-        if !metadata.is_dir() {
-            return Err(AuthorityError::WrongKind {
-                path: root.to_path_buf(),
-                expected: KIND_DIRECTORY,
-                actual: kind_name(&metadata),
-            });
-        }
+        let metadata = Self::inspect_root(root)?;
         let expected_root_identity = FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
-        let canonical = fs::canonicalize(root).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                AuthorityError::Missing(root.to_path_buf())
-            } else {
-                AuthorityError::Io {
-                    path: root.to_path_buf(),
-                    operation: "resolve",
-                    detail: error.to_string(),
-                }
-            }
-        })?;
+        let canonical = Self::canonicalize_root(root)?;
         let final_metadata = fs::symlink_metadata(root).map_err(|error| AuthorityError::Io {
             path: root.to_path_buf(),
             operation: "revalidate",
@@ -379,6 +383,45 @@ impl AuthorityResolver {
             root: canonical,
             root_identity,
             root_handle: Arc::new(handle),
+        })
+    }
+
+    fn inspect_root(root: &Path) -> Result<Metadata, AuthorityError> {
+        let metadata = fs::symlink_metadata(root).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                AuthorityError::Missing(root.to_path_buf())
+            } else {
+                AuthorityError::Io {
+                    path: root.to_path_buf(),
+                    operation: "inspect",
+                    detail: error.to_string(),
+                }
+            }
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(AuthorityError::Symlink(root.to_path_buf()));
+        }
+        if !metadata.is_dir() {
+            return Err(AuthorityError::WrongKind {
+                path: root.to_path_buf(),
+                expected: KIND_DIRECTORY,
+                actual: kind_name(&metadata),
+            });
+        }
+        Ok(metadata)
+    }
+
+    fn canonicalize_root(root: &Path) -> Result<PathBuf, AuthorityError> {
+        fs::canonicalize(root).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                AuthorityError::Missing(root.to_path_buf())
+            } else {
+                AuthorityError::Io {
+                    path: root.to_path_buf(),
+                    operation: "resolve",
+                    detail: error.to_string(),
+                }
+            }
         })
     }
 
@@ -985,6 +1028,49 @@ impl AuthorityResolver {
     }
 }
 
+fn has_authority_candidate(root: &Path) -> Result<bool, AuthorityError> {
+    let entries = fs::read_dir(root)
+        .map_err(|error| AuthorityResolver::map_io(root, error, true))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| AuthorityError::Io {
+            path: root.to_path_buf(),
+            operation: "inspect",
+            detail: error.to_string(),
+        })?;
+        let name = entry.file_name();
+        let is_source = Path::new(&name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some(Syntax::FILE_EXT);
+        let is_stale_manifest = Syntax::STALE_MANIFEST_NAMES
+            .iter()
+            .any(|candidate| name.to_str() == Some(*candidate));
+        if is_source || is_stale_manifest {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn is_shared_directory_path(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| is_shared_directory(&metadata))
+        .unwrap_or(false)
+}
+
+fn is_shared_directory(metadata: &Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o002 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
 fn kind_name(metadata: &Metadata) -> &'static str {
     if metadata.is_dir() {
         KIND_DIRECTORY
@@ -1124,5 +1210,72 @@ fn is_symlink_error(error: &io::Error) -> bool {
     {
         let _ = error;
         false
+    }
+}
+
+#[cfg(test)]
+mod authority_walk_tests {
+    use super::AuthorityResolver;
+    use std::fs;
+
+    fn temp_root(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "jet-authority-walk-{tag}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn project_candidate_stays_pinned_but_shared_temp_does_not() {
+        let parent = temp_root("candidate-parent");
+        let root = parent.join("project");
+        let _ = fs::remove_dir_all(&parent);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+
+        let resolver = AuthorityResolver::open_for_authority_walk(&root)
+            .unwrap()
+            .expect("source directory is an authority candidate");
+        assert_eq!(resolver.root(), fs::canonicalize(&root).unwrap());
+
+        let temp = std::env::temp_dir();
+        assert!(
+            AuthorityResolver::open_for_authority_walk(&temp)
+                .unwrap()
+                .is_none(),
+            "shared temp must stay discovery space"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+        }
+        #[cfg(unix)]
+        assert!(
+            AuthorityResolver::authority_walk_parent(&root).is_none(),
+            "walk must stop before shared temp"
+        );
+
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn world_writable_candidate_is_not_an_authority_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("world-writable");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("workspace.jet"), "module workspace {}\n").unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+
+        assert!(
+            AuthorityResolver::open_for_authority_walk(&root)
+                .unwrap()
+                .is_none()
+        );
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

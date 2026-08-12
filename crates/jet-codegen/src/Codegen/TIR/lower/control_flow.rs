@@ -748,9 +748,14 @@ fn lower_if_cond_atom(
             };
             let (name, ty) = binding;
             let place = TLocal::user(&name);
+            let pattern = if matches!(&subj.ty, Type::Option(_)) {
+                TPattern::option_binding(pattern.clone())
+            } else {
+                TPattern::binding(pattern.clone())
+            };
             return (
                 TIfCond::IfLet {
-                    pattern: TPattern::binding(pattern.clone()),
+                    pattern,
                     subj,
                 },
                 Some((name, place, ty)),

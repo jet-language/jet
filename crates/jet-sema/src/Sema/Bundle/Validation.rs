@@ -1922,7 +1922,11 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
             })
             .collect(),
         ret: sig.return_type.clone().map(Box::new),
-        effect_bound: None,
+        // D-CABI-CALLBACK1 / D-EFF2: a function sema proved effect-free
+        // (`pure fn`, or an allocation-free panic-free scalar body) publishes
+        // the empty effect bound, so its value satisfies `=[]=>` callable
+        // positions without a second policing mechanism.
+        effect_bound: (sig.is_pure || sig.is_foreign_thread_safe).then(Vec::new),
         param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),
         call_metadata: Some(crate::AST::FunctionCallMetadata {
             names: sig.param_info.iter().map(|(name, _)| name.clone()).collect(),

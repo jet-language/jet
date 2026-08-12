@@ -1325,6 +1325,17 @@ fn unqualified_file_function_entries(
                         continue;
                     }
                 }
+                // D-ONEFORM1 (#1803): a member list may name a submodule
+                // (`use lib.[helper]` where `helper` is `module helper;` inside
+                // lib). A module member needs no function-signature entry; the
+                // qualified call path resolves it as a module alias.
+                if bundle.modules[target].items.iter().any(|item| match item {
+                    Item::Module(m) => m.name == orig,
+                    Item::CodeModule(cm) => cm.name == orig,
+                    _ => false,
+                }) {
+                    continue;
+                }
                 unreachable!(
                     "imported member missing after sema: module={module_idx} alias={module_alias} member={orig}"
                 );

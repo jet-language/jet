@@ -686,9 +686,8 @@ impl<'a> Checker<'a> {
             if it_scope {
                 self.push_scope();
                 if let Some(st) = subj_ty.clone() {
-                    self.declare(
+                    self.declare_in_scope(
                         Syntax::KW_IT,
-                        span,
                         LocalInfo {
                             def_span: span,
                             ty: st,

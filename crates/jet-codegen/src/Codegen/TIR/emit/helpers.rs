@@ -28,6 +28,13 @@ pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
         TPatternPosition::Binding => {
             crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern)
         }
+        TPatternPosition::OptionBinding => match &pattern.pattern {
+            crate::AST::Pattern::Present { binding, .. } => {
+                format!("Some({})", mangle(binding))
+            }
+            crate::AST::Pattern::Absent(_) => "None".to_string(),
+            _ => crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern),
+        },
         TPatternPosition::Arm => crate::Codegen::emit_match_pattern(
             cx,
             &pattern.pattern,
