@@ -19,6 +19,7 @@ use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
@@ -133,7 +134,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
 /// keeps long fluent APIs off the Rust call stack while preserving the normal
 /// method dispatcher for every link.
 fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    let mut calls = Vec::new();
+    let mut calls = TirWorklist::new();
     let mut cursor = e;
     while let Expr::MethodCall { receiver, .. } = cursor {
         calls.push(cursor);
@@ -533,7 +534,22 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Call(_) | Expr::CallValue { .. } | Expr::MethodCall { .. } => Vec::new(),
         Expr::TypedLit { body, .. } => {
             let mut children = Vec::new();
-            body.for_each_expr(|value| children.push(value));
+            match body {
+                TypedLitBody::Fields(fields) => {
+                    for (_, _, value) in fields.iter() {
+                        children.push(value);
+                    }
+                }
+                TypedLitBody::Elements(elements) => children.extend(elements.iter()),
+                TypedLitBody::Entries(entries) => {
+                    for (key, value) in entries.iter() {
+                        children.push(key);
+                        children.push(value);
+                    }
+                }
+                TypedLitBody::Value(value) => children.push(value),
+                TypedLitBody::Empty => {}
+            }
             children
         }
         Expr::OrFallback { value, fallback, .. } => {
@@ -826,12 +842,13 @@ struct ExprIfWork<'a> {
 }
 
 fn condition_terms<'a>(cond: &'a Expr) -> Vec<&'a Expr> {
-    let mut pending = vec![cond];
+    let mut work = TirWorklist::new();
+    work.push(cond);
     let mut terms = Vec::new();
-    while let Some(term) = pending.pop() {
+    while let Some(term) = work.pop() {
         if let Expr::Binary(BinOp::And, left, right, _) = term {
-            pending.push(right);
-            pending.push(left);
+            work.push(right);
+            work.push(left);
         } else {
             terms.push(term);
         }
@@ -1112,6 +1129,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
     expr_cache_take(root).expect("expression worklist lost its root")
 }
 
+#[inline(never)]
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     // Keep expression descent off the native stack. Value-if and inline-loop nodes
     // use the same continuation worklist as every other expression.
@@ -1354,6 +1372,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     }
 }
 
+#[inline(never)]
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width, _) => TExpr {
@@ -1586,15 +1605,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             postfix,
             ..
         } => {
-            let read = lower_expr(operand, cx, env);
-            let place = lower_incdec_place(operand, cx, env);
+            let (place, ty) = lower_incdec(operand, cx, env);
             TExpr {
-                ty: read.ty.clone(),
+                ty: ty.clone(),
                 kind: TExprKind::IncDec {
                     op: *op,
                     place,
                     postfix: *postfix,
-                    ty: read.ty,
+                    ty,
                 },
             }
         }
@@ -3962,22 +3980,24 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// Nested float unary/binary operands inherit the same width so TirBridge
 /// doesn't mix F32/F64 in `F32.{ -0.0 }` / `F32.{ max + max }`.
 fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
-    expr.ty = head.clone();
-    if !matches!(head, Type::Float | Type::Float32) {
-        return;
-    }
-    match &mut expr.kind {
-        TExprKind::Unary { operand, .. } => retag_numeric_width(operand, head),
-        TExprKind::Binary { lhs, rhs, .. } => {
-            retag_numeric_width(lhs, head);
-            retag_numeric_width(rhs, head);
+    let mut work = TirWorklist::new();
+    work.push(expr);
+    while let Some(expr) = work.pop() {
+        expr.ty = head.clone();
+        if !matches!(head, Type::Float | Type::Float32) {
+            continue;
         }
-        TExprKind::Clone(inner)
-        | TExprKind::ExplicitCopy(inner)
-        | TExprKind::MaterializeView(inner) => {
-            retag_numeric_width(inner, head)
+        match &mut expr.kind {
+            TExprKind::Unary { operand, .. } => work.push(operand),
+            TExprKind::Binary { lhs, rhs, .. } => {
+                work.push(rhs);
+                work.push(lhs);
+            }
+            TExprKind::Clone(inner)
+            | TExprKind::ExplicitCopy(inner)
+            | TExprKind::MaterializeView(inner) => work.push(inner),
+            _ => {}
         }
-        _ => {}
     }
 }
 

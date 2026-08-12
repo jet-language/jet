@@ -5,7 +5,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::Codegen::TIR::{
     self, JitProgram, TExpr, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda,
-    TLambdaBody, TStmt,
+    TLambdaBody, TirWorklist, TStmt,
 };
 use jet_foundation::AST::Type;
 use std::collections::{HashMap, HashSet};
@@ -287,6 +287,8 @@ fn lower_spawn_function(
             spawn_func_ids,
             spawn_lambdas,
             loop_stack: Vec::new(),
+            reachable_break_exits: HashSet::new(),
+            reachable_continue_blocks: HashSet::new(),
             dead: false,
             next_var: 0,
             method_struct: None,
@@ -407,41 +409,39 @@ fn lower_spawn_function(
 }
 
 fn block_has_valued_return(stmts: &[TStmt]) -> bool {
-    fn walk(stmts: &[TStmt]) -> bool {
-        for stmt in stmts {
-            match stmt {
-                TStmt::Return(Some(_)) => return true,
-                TStmt::If {
-                    then_body,
-                    else_body,
-                    ..
-                } => {
-                    if walk(then_body) || else_body.as_ref().is_some_and(|b| walk(b)) {
-                        return true;
-                    }
+    let mut work = TirWorklist::from_reversed(stmts.iter());
+    while let Some(stmt) = work.pop() {
+        match stmt {
+            TStmt::Return(Some(_)) => return true,
+            TStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if let Some(body) = else_body {
+                    work.extend(body.iter().rev());
                 }
-                TStmt::EnumMatch {
-                    arms,
-                    else_body,
-                    ..
-                } => {
-                    if arms.iter().any(|arm| walk(&arm.body))
-                        || else_body.as_ref().is_some_and(|b| walk(b))
-                    {
-                        return true;
-                    }
-                }
-                TStmt::Loop { body, .. } | TStmt::While { body, .. } => {
-                    if walk(body) {
-                        return true;
-                    }
-                }
-                _ => {}
+                work.extend(then_body.iter().rev());
             }
+            TStmt::EnumMatch {
+                arms,
+                else_body,
+                ..
+            } => {
+                if let Some(body) = else_body {
+                    work.extend(body.iter().rev());
+                }
+                for arm in arms.iter().rev() {
+                    work.extend(arm.body.iter().rev());
+                }
+            }
+            TStmt::Loop { body, .. } | TStmt::While { body, .. } => {
+                work.extend(body.iter().rev());
+            }
+            _ => {}
         }
-        false
     }
-    walk(stmts)
+    false
 }
 
 pub(crate) fn lower_callable_lambda(
@@ -527,6 +527,8 @@ pub(crate) fn lower_callable_lambda(
             spawn_func_ids,
             spawn_lambdas,
             loop_stack: Vec::new(),
+            reachable_break_exits: HashSet::new(),
+            reachable_continue_blocks: HashSet::new(),
             dead: false,
             next_var: 0,
             method_struct: None,
@@ -839,6 +841,8 @@ fn lower_function(
             spawn_func_ids,
             spawn_lambdas,
             loop_stack: Vec::new(),
+            reachable_break_exits: HashSet::new(),
+            reachable_continue_blocks: HashSet::new(),
             dead: false,
             next_var: 0,
             method_struct,
@@ -1030,6 +1034,8 @@ fn lower_generator_body(
             spawn_func_ids,
             spawn_lambdas,
             loop_stack: Vec::new(),
+            reachable_break_exits: HashSet::new(),
+            reachable_continue_blocks: HashSet::new(),
             dead: false,
             next_var: 0,
             method_struct: None,

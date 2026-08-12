@@ -58,6 +58,23 @@ fn require_multi_head_parity_prereqs() {
     );
 }
 
+/// Keep JIT trace state scoped to each test operation.
+fn with_jit_test_scope<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T + Send,
+    T: Send,
+{
+    let trace_tiers = jet_jit::trace_tiers_enabled();
+    jet_jit::reset_jit_trace_for_test();
+    jet_jit::set_trace_tiers(trace_tiers);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    let flags = jet_jit::jit_trace_flags_for_test();
+    let trace = jet_jit::take_last_trace();
+    jet_jit::merge_jit_trace_flags_for_test(flags);
+    jet_jit::publish_trace(trace);
+    result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+}
+
 /// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
 /// hand-curated subset — so the battery can never quietly shrink. Each example
 /// either runs in the interpreter (and its stdout/stderr/exit code must match
@@ -352,7 +369,6 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name(format!("dev-iter-{stem}"))
-        .stack_size(DEV_BATTERY_STACK)
         .spawn(move || {
             jet_jit::reset_jit_trace_for_test();
             let out = dev_iteration(&worker_file, false, use_interpreter);
@@ -718,8 +734,6 @@ impl DevBatteryStats {
     }
 }
 
-const DEV_BATTERY_STACK: usize = 32 * 1024 * 1024;
-
 fn assert_default_dev_jit_gap(stem: &str, file: &str) {
     jet_jit::reset_jit_trace_for_test();
     match dev_iteration_with_timeout(stem, file, false) {
@@ -851,7 +865,6 @@ fn run_dev_default_battery_parallel(
         let failures = Arc::clone(&failures);
         handles.push(
             std::thread::Builder::new()
-                .stack_size(DEV_BATTERY_STACK)
                 .spawn(move || {
                     let mut stats = DevBatteryStats::default();
                     loop {
@@ -973,7 +986,6 @@ fn run_interpreter_battery_parallel(
         let failures = Arc::clone(&failures);
         handles.push(
             std::thread::Builder::new()
-                .stack_size(DEV_BATTERY_STACK)
                 .spawn(move || {
                     let mut stats = DevBatteryStats::default();
                     loop {
@@ -1048,7 +1060,6 @@ fn interpreter_matches_compiled_binary() {
 fn dev_default_matches_compiled_binary() {
     let handle = std::thread::Builder::new()
         .name("dev-default-battery".into())
-        .stack_size(64 * 1024 * 1024)
         .spawn(|| {
             let _guard = dev_diff_lock().lock().unwrap();
             let have_rustc = have_rustc();
@@ -2980,8 +2991,8 @@ fn run_cranelift_resident_file_outcome(file: &str, tag: &str) -> RunOutcome {
         .unwrap_or_else(|reason| panic!("`{tag}` resident JIT failed: {reason}"))
 }
 
-/// Run one resident-JIT fixture on the same bounded stack used by the dev
-/// battery. A successful interpreter result is not resident-JIT evidence.
+/// Run one resident-JIT fixture on the JIT test state scope. A successful
+/// interpreter result is not resident-JIT evidence.
 fn run_cranelift_resident(src: &str, tag: &str) -> ProgramOutput {
     let p = std::env::temp_dir().join(format!("jet_jit_resident_{tag}.jet"));
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -2993,34 +3004,28 @@ fn run_cranelift_resident(src: &str, tag: &str) -> ProgramOutput {
 fn run_cranelift_resident_file(file: &str, tag: &str) -> ProgramOutput {
     let file = file.to_owned();
     let tag = tag.to_owned();
-    std::thread::Builder::new()
-        .name(format!("resident-{tag}"))
-        .stack_size(DEV_BATTERY_STACK)
-        .spawn(move || {
-            jet_jit::reset_jit_trace_for_test();
-            let outcome = run_cranelift_resident_file_outcome(&file, &tag);
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "`{tag}` must execute resident Cranelift"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-                "`{tag}` must not deopt to the interpreter or use fallback"
-            );
-            match outcome {
-                RunOutcome::Ran {
-                    stdout,
-                    stderr,
-                    exit_code,
-                } => ProgramOutput::ran(stdout, stderr, exit_code),
-                RunOutcome::Problems(ds) => {
-                    panic!("`{tag}` resident JIT returned diagnostics: {ds:?}")
-                }
+    with_jit_test_scope(move || {
+        jet_jit::reset_jit_trace_for_test();
+        let outcome = run_cranelift_resident_file_outcome(&file, &tag);
+        assert!(
+            jet_jit::jit_executed_for_test(),
+            "`{tag}` must execute resident Cranelift"
+        );
+        assert!(
+            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+            "`{tag}` must not deopt to the interpreter or use fallback"
+        );
+        match outcome {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(ds) => {
+                panic!("`{tag}` resident JIT returned diagnostics: {ds:?}")
             }
-        })
-        .expect("spawn resident-JIT proof worker")
-        .join()
-        .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+        }
+    })
 }
 
 fn run_default_dev_resident(file: &str, tag: &str) -> ProgramOutput {
@@ -3455,19 +3460,13 @@ fn progress_reporter_matches_interpreter_resident_jit_default_dev_and_aot() {
     let source = fs::read_to_string(file).unwrap();
     jet_jit::reset_jit_trace_for_test();
     let resident_source = source.clone();
-    let (resident, resident_flags, resident_trace) = std::thread::Builder::new()
-        .name("progress_reporter-resident".into())
-        .stack_size(64 * 1024 * 1024)
-        .spawn(move || {
-            jet_jit::set_trace_tiers(true);
-            let resident = run_cranelift_without_fallback(&resident_source, "progress_reporter");
-            let flags = jet_jit::jit_trace_flags_for_test();
-            let trace = jet_jit::take_last_trace();
-            (resident, flags, trace)
-        })
-        .expect("spawn progress resident worker")
-        .join()
-        .expect("progress resident worker panicked");
+    let (resident, resident_flags, resident_trace) = with_jit_test_scope(move || {
+        jet_jit::set_trace_tiers(true);
+        let resident = run_cranelift_without_fallback(&resident_source, "progress_reporter");
+        let flags = jet_jit::jit_trace_flags_for_test();
+        let trace = jet_jit::take_last_trace();
+        (resident, flags, trace)
+    });
     jet_jit::merge_jit_trace_flags_for_test(resident_flags);
     assert!(
         !jet_jit::fallback_invoked_for_test(),
@@ -4864,7 +4863,6 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -4924,7 +4922,6 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "33554432")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -4988,7 +4985,6 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -5120,7 +5116,6 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -5182,7 +5177,6 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -5236,7 +5230,6 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -5301,7 +5294,6 @@ fn ui_and_web_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1")
             .env("JET_UI_HEADLESS", "1");
         let output = command_output_with_timeout(
@@ -5704,7 +5696,6 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -5883,7 +5874,6 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -5912,7 +5902,6 @@ fn io_style_raw_nonunicode_no_color_uses_presence_semantics() {
     use std::os::unix::ffi::OsStringExt;
 
     std::thread::Builder::new()
-        .stack_size(32 * 1024 * 1024)
         .spawn(|| {
             let src =
                 "use core.io as io\nfn run() {\n    print(io.style(\"red\", \"plain\"))\n}\n";
@@ -6137,7 +6126,6 @@ fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
                 "--nocapture",
             ])
             .env(CHILD_STEM, stem)
-            .env("RUST_MIN_STACK", "8388608")
             .env("NO_COLOR", "1");
         let output = command_output_with_timeout(
             command,
@@ -7583,12 +7571,7 @@ fn resident_jit_safe_string_method_chain() {
 /// a ratchet baseline: any coverage movement is deliberate and reviewed.
 #[test]
 fn jit_coverage_audit() {
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(jit_coverage_audit_inner)
-        .expect("JIT coverage audit thread")
-        .join()
-        .expect("JIT coverage audit thread panicked");
+    with_jit_test_scope(jit_coverage_audit_inner);
 }
 
 fn jit_coverage_audit_inner() {
@@ -7691,12 +7674,7 @@ fn jit_covered_example_stems() -> Vec<String> {
 /// c139 M3+: three-way differential (JIT == interpreter == AOT) on resident-safe examples.
 #[test]
 fn cranelift_three_way_differential_battery() {
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(cranelift_three_way_differential_battery_inner)
-        .expect("three-way battery thread")
-        .join()
-        .expect("three-way battery thread panicked");
+    with_jit_test_scope(cranelift_three_way_differential_battery_inner);
 }
 
 fn cranelift_three_way_differential_battery_inner() {
@@ -7755,12 +7733,7 @@ fn cranelift_three_way_differential_battery_inner() {
 /// reason.
 #[test]
 fn jit_try_compile_manifest_matches() {
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(jit_try_compile_manifest_matches_inner)
-        .expect("JIT compile manifest thread")
-        .join()
-        .expect("JIT compile manifest thread panicked");
+    with_jit_test_scope(jit_try_compile_manifest_matches_inner);
 }
 
 fn jit_try_compile_manifest_matches_inner() {
@@ -8051,7 +8024,6 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
         handles.push(
             std::thread::Builder::new()
                 .name(format!("corpus-gate-{worker}"))
-                .stack_size(DEV_BATTERY_STACK)
                 .spawn(move || loop {
                     let Some(stem) = jobs.lock().unwrap().pop_front() else {
                         break;
@@ -8580,17 +8552,11 @@ fn cranelift_covers_shield_region() {
 
 #[test]
 fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
-    // Shield + channel cancel nests enough Cranelift/runtime frames that the
-    // default libtest worker stack overflows on this host; match other heavy
-    // Cranelift cases and run under a larger dedicated stack.
     // Prefer resident JIT; silent deopt to the interpreter is still I9-legal
     // when a nested Shield/channel shape is outside the resident subset.
-    std::thread::Builder::new()
-        .name("shield_cancel".into())
-        .stack_size(32 * 1024 * 1024)
-        .spawn(|| {
-            let out = run_cranelift_outcome(
-                r#"use core.tasks as tasks
+    with_jit_test_scope(|| {
+        let out = run_cranelift_outcome(
+            r#"use core.tasks as tasks
 fn run() {
     (sender, ch) := tasks.channel<Int>()
     (ack_sender, ack) := tasks.channel<Int>()
@@ -8607,13 +8573,10 @@ fn run() {
     ack.receive() ?? panic("closed")
 }
 "#,
-                "shield_cancel",
-            );
-            assert_eq!(out.stdout, "42\n");
-        })
-        .expect("spawn shield_cancel worker")
-        .join()
-        .expect("shield_cancel worker panicked");
+            "shield_cancel",
+        );
+        assert_eq!(out.stdout, "42\n");
+    });
 }
 
 #[test]
@@ -8890,7 +8853,6 @@ fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEn
     let (tx, rx) = std::sync::mpsc::channel();
     let worker = std::thread::Builder::new()
         .name("multi-head-diagnostic".into())
-        .stack_size(DEV_BATTERY_STACK)
         .spawn(move || {
             let mut bundle = jet::Loader::load_entry(&file)
                 .expect("missing-head fixture should load");
@@ -9958,20 +9920,15 @@ fn tower_1754_collection_parity_focus() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(|| {
-            let _guard = dev_diff_lock().lock().unwrap();
-            for stem in [
-                "collections/iter_adapters",
-                "collections/iter_tools_audit",
-                "collections/list_surface",
-                "effects/taint",
-            ] {
-                assert_cranelift_three_way(&example_path(stem), stem);
-            }
-        })
-        .expect("Tower #1754 parity worker")
-        .join()
-        .expect("Tower #1754 parity worker panicked");
+    with_jit_test_scope(|| {
+        let _guard = dev_diff_lock().lock().unwrap();
+        for stem in [
+            "collections/iter_adapters",
+            "collections/iter_tools_audit",
+            "collections/list_surface",
+            "effects/taint",
+        ] {
+            assert_cranelift_three_way(&example_path(stem), stem);
+        }
+    });
 }

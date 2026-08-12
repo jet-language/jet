@@ -77,12 +77,7 @@ fn run() {
 
 #[test]
 fn named_args_example_runs_on_resident_jit_and_forced_interpreter() {
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(named_args_example_runs_on_resident_jit_and_forced_interpreter_inner)
-        .expect("named_args tier proof thread")
-        .join()
-        .expect("named_args tier proof thread panicked");
+    named_args_example_runs_on_resident_jit_and_forced_interpreter_inner();
 }
 
 fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {

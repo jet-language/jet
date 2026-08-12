@@ -27,6 +27,7 @@ use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::TLetTy;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
@@ -146,8 +147,9 @@ fn collect_interrupt_callback_scan(
     cx: &Cx,
     names: &mut HashSet<String>,
 ) {
-    let mut pending = vec![root];
-    while let Some(task) = pending.pop() {
+    let mut work = TirWorklist::new();
+    work.push(root);
+    while let Some(task) = work.pop() {
         match task {
             InterruptScanTask::Expr(expr) => match expr {
                 Expr::MethodCall {
@@ -165,20 +167,20 @@ fn collect_interrupt_callback_scan(
                         }
                     }
                     for arg in args.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(&arg.expr));
+                        work.push(InterruptScanTask::Expr(&arg.expr));
                     }
-                    pending.push(InterruptScanTask::Expr(receiver));
+                    work.push(InterruptScanTask::Expr(receiver));
                 }
                 Expr::Call(call) => {
                     for arg in call.args.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(&arg.expr));
+                        work.push(InterruptScanTask::Expr(&arg.expr));
                     }
                 }
                 Expr::CallValue { callee, args, .. } => {
                     for arg in args.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(&arg.expr));
+                        work.push(InterruptScanTask::Expr(&arg.expr));
                     }
-                    pending.push(InterruptScanTask::Expr(callee));
+                    work.push(InterruptScanTask::Expr(callee));
                 }
                 // A normal lambda is its own function boundary. Its body gets one scan
                 // when that lambda is lowered; collecting/result loops are inline blocks
@@ -186,10 +188,10 @@ fn collect_interrupt_callback_scan(
                 Expr::Lambda(lam)
                     if lam.meta.collecting_loop || lam.meta.result_loop => match &lam.body {
                     crate::AST::LambdaBody::Expr(body) => {
-                        pending.push(InterruptScanTask::Expr(body));
+                        work.push(InterruptScanTask::Expr(body));
                     }
                     crate::AST::LambdaBody::Block(body) => {
-                        pending.push(InterruptScanTask::Stmts(body));
+                        work.push(InterruptScanTask::Stmts(body));
                     }
                 },
                 Expr::Lambda(_) => {}
@@ -206,34 +208,34 @@ fn collect_interrupt_callback_scan(
                 | Expr::Try(inner, _, _)
                 | Expr::Spread(inner, _)
                 | Expr::IncDec { operand: inner, .. } => {
-                    pending.push(InterruptScanTask::Expr(inner));
+                    work.push(InterruptScanTask::Expr(inner));
                 }
                 Expr::Binary(_, left, right, _) => {
-                    pending.push(InterruptScanTask::Expr(right));
-                    pending.push(InterruptScanTask::Expr(left));
+                    work.push(InterruptScanTask::Expr(right));
+                    work.push(InterruptScanTask::Expr(left));
                 }
                 Expr::CompareChain { operands, .. } => {
                     for operand in operands.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(operand));
+                        work.push(InterruptScanTask::Expr(operand));
                     }
                 }
                 Expr::ListLit(items, _) => {
                     for item in items.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(item));
+                        work.push(InterruptScanTask::Expr(item));
                     }
                 }
                 Expr::MemberSpread { base, .. } => {
-                    pending.push(InterruptScanTask::Expr(base));
+                    work.push(InterruptScanTask::Expr(base));
                 }
                 Expr::MapLit(entries, _) => {
                     for (key, value) in entries.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(value));
-                        pending.push(InterruptScanTask::Expr(key));
+                        work.push(InterruptScanTask::Expr(value));
+                        work.push(InterruptScanTask::Expr(key));
                     }
                 }
                 Expr::Index { base, index, .. } => {
-                    pending.push(InterruptScanTask::Expr(index));
-                    pending.push(InterruptScanTask::Expr(base));
+                    work.push(InterruptScanTask::Expr(index));
+                    work.push(InterruptScanTask::Expr(base));
                 }
                 Expr::Slice {
                     base,
@@ -243,49 +245,64 @@ fn collect_interrupt_callback_scan(
                     ..
                 } => {
                     if let Some(range) = range {
-                        pending.push(InterruptScanTask::Expr(range));
+                        work.push(InterruptScanTask::Expr(range));
                     }
-                    pending.push(InterruptScanTask::Expr(end));
-                    pending.push(InterruptScanTask::Expr(start));
-                    pending.push(InterruptScanTask::Expr(base));
+                    work.push(InterruptScanTask::Expr(end));
+                    work.push(InterruptScanTask::Expr(start));
+                    work.push(InterruptScanTask::Expr(base));
                 }
                 Expr::Range { start, end, .. } => {
-                    pending.push(InterruptScanTask::Expr(end));
-                    pending.push(InterruptScanTask::Expr(start));
+                    work.push(InterruptScanTask::Expr(end));
+                    work.push(InterruptScanTask::Expr(start));
                 }
                 Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
-                    pending.push(InterruptScanTask::Expr(base));
+                    work.push(InterruptScanTask::Expr(base));
                 }
                 Expr::StructLit { fields, .. } => {
                     for (_, _, value) in fields.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(value));
+                        work.push(InterruptScanTask::Expr(value));
                     }
                 }
-                Expr::TypedLit { body, .. } => {
-                    let mut values = Vec::new();
-                    body.for_each_expr(|value| values.push(value));
-                    for value in values.into_iter().rev() {
-                        pending.push(InterruptScanTask::Expr(value));
+                Expr::TypedLit { body, .. } => match body {
+                    crate::AST::TypedLitBody::Fields(fields) => {
+                        for (_, _, value) in fields.iter().rev() {
+                            work.push(InterruptScanTask::Expr(value));
+                        }
                     }
-                }
+                    crate::AST::TypedLitBody::Elements(elements) => {
+                        for value in elements.iter().rev() {
+                            work.push(InterruptScanTask::Expr(value));
+                        }
+                    }
+                    crate::AST::TypedLitBody::Entries(entries) => {
+                        for (key, value) in entries.iter().rev() {
+                            work.push(InterruptScanTask::Expr(value));
+                            work.push(InterruptScanTask::Expr(key));
+                        }
+                    }
+                    crate::AST::TypedLitBody::Value(value) => {
+                        work.push(InterruptScanTask::Expr(value));
+                    }
+                    crate::AST::TypedLitBody::Empty => {}
+                },
                 Expr::EnumLit { args, .. } => {
                     for arg in args.iter().rev() {
                         let value = match arg {
                             crate::AST::EnumLitArg::Positional(value)
                             | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
                         };
-                        pending.push(InterruptScanTask::Expr(value));
+                        work.push(InterruptScanTask::Expr(value));
                     }
                 }
                 Expr::Str(parts, _) => {
                     for part in parts.iter().rev() {
                         if let crate::AST::StrPart::Interp(value, _) = part {
-                            pending.push(InterruptScanTask::Expr(value));
+                            work.push(InterruptScanTask::Expr(value));
                         }
                     }
                 }
                 Expr::PatternTest { subject, .. } => {
-                    pending.push(InterruptScanTask::Expr(subject));
+                    work.push(InterruptScanTask::Expr(subject));
                 }
                 Expr::If {
                     cond,
@@ -295,49 +312,49 @@ fn collect_interrupt_callback_scan(
                     else_value,
                     ..
                 } => {
-                    pending.push(InterruptScanTask::Expr(else_value));
-                    pending.push(InterruptScanTask::Stmts(else_body));
-                    pending.push(InterruptScanTask::Expr(then_value));
-                    pending.push(InterruptScanTask::Stmts(then_body));
-                    pending.push(InterruptScanTask::Expr(cond));
+                    work.push(InterruptScanTask::Expr(else_value));
+                    work.push(InterruptScanTask::Stmts(else_body));
+                    work.push(InterruptScanTask::Expr(then_value));
+                    work.push(InterruptScanTask::Stmts(then_body));
+                    work.push(InterruptScanTask::Expr(cond));
                 }
                 Expr::TupleLit(fields, _, _) => {
                     for (_, value) in fields.iter().rev() {
-                        pending.push(InterruptScanTask::Expr(value));
+                        work.push(InterruptScanTask::Expr(value));
                     }
                 }
                 Expr::PtrFromAddr { addr, .. } => {
-                    pending.push(InterruptScanTask::Expr(addr));
+                    work.push(InterruptScanTask::Expr(addr));
                 }
                 Expr::OrFallback { value, .. } => {
-                    pending.push(InterruptScanTask::Expr(value));
+                    work.push(InterruptScanTask::Expr(value));
                 }
                 _ => {}
             },
             InterruptScanTask::Stmts(stmts) => {
                 for stmt in stmts.iter().rev() {
                     match stmt {
-                        Stmt::Expr(expr) => pending.push(InterruptScanTask::Expr(expr)),
+                        Stmt::Expr(expr) => work.push(InterruptScanTask::Expr(expr)),
                         Stmt::Val(binding) => {
-                            pending.push(InterruptScanTask::Expr(&binding.init));
+                            work.push(InterruptScanTask::Expr(&binding.init));
                         }
                         Stmt::Assign { value, .. } => {
-                            pending.push(InterruptScanTask::Expr(value));
+                            work.push(InterruptScanTask::Expr(value));
                         }
                         Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
-                            pending.push(InterruptScanTask::Expr(value));
+                            work.push(InterruptScanTask::Expr(value));
                         }
                         Stmt::While { cond, body, .. } => {
-                            pending.push(InterruptScanTask::Stmts(body));
-                            pending.push(InterruptScanTask::Expr(cond));
+                            work.push(InterruptScanTask::Stmts(body));
+                            work.push(InterruptScanTask::Expr(cond));
                         }
                         Stmt::For { kind, body, .. } => {
-                            pending.push(InterruptScanTask::Stmts(body));
+                            work.push(InterruptScanTask::Stmts(body));
                             if let ForKind::In { collection, step } = kind {
                                 if let Some(step) = step {
-                                    pending.push(InterruptScanTask::Expr(step));
+                                    work.push(InterruptScanTask::Expr(step));
                                 }
-                                pending.push(InterruptScanTask::Expr(collection));
+                                work.push(InterruptScanTask::Expr(collection));
                             }
                         }
                         Stmt::Switch {
@@ -347,13 +364,13 @@ fn collect_interrupt_callback_scan(
                             ..
                         } => {
                             if let Some(body) = else_body {
-                                pending.push(InterruptScanTask::Stmts(body));
+                                work.push(InterruptScanTask::Stmts(body));
                             }
                             for arm in arms.iter().rev() {
-                                pending.push(InterruptScanTask::Stmts(&arm.body));
-                                pending.push(InterruptScanTask::Expr(&arm.cond));
+                                work.push(InterruptScanTask::Stmts(&arm.body));
+                                work.push(InterruptScanTask::Expr(&arm.cond));
                             }
-                            pending.push(InterruptScanTask::Expr(subject));
+                            work.push(InterruptScanTask::Expr(subject));
                         }
                         Stmt::Loop { body, .. }
                         | Stmt::Unsafe { body, .. }
@@ -372,7 +389,7 @@ fn collect_interrupt_callback_scan(
                         | Stmt::AssumeDet { body, .. }
                         | Stmt::Transact { body, .. }
                         | Stmt::ComptimeBlock { body, .. } => {
-                            pending.push(InterruptScanTask::Stmts(body));
+                            work.push(InterruptScanTask::Stmts(body));
                         }
                         Stmt::CountedLoop {
                             init,
@@ -381,14 +398,14 @@ fn collect_interrupt_callback_scan(
                             body,
                             ..
                         } => {
-                            pending.push(InterruptScanTask::Stmts(body));
+                            work.push(InterruptScanTask::Stmts(body));
                             if let Some(step) = step {
-                                pending.push(InterruptScanTask::Stmts(
+                                work.push(InterruptScanTask::Stmts(
                                     std::slice::from_ref(step.as_ref()),
                                 ));
                             }
-                            pending.push(InterruptScanTask::Expr(cond));
-                            pending.push(InterruptScanTask::Expr(&init.init));
+                            work.push(InterruptScanTask::Expr(cond));
+                            work.push(InterruptScanTask::Expr(&init.init));
                         }
                         Stmt::ComptimeIf {
                             cond,
@@ -397,15 +414,15 @@ fn collect_interrupt_callback_scan(
                             ..
                         } => {
                             if let Some(body) = else_body {
-                                pending.push(InterruptScanTask::Stmts(body));
+                                work.push(InterruptScanTask::Stmts(body));
                             }
-                            pending.push(InterruptScanTask::Stmts(then_body));
-                            pending.push(InterruptScanTask::Expr(cond));
+                            work.push(InterruptScanTask::Stmts(then_body));
+                            work.push(InterruptScanTask::Expr(cond));
                         }
                         Stmt::ScopeMember { args, body, .. } => {
-                            pending.push(InterruptScanTask::Stmts(body));
+                            work.push(InterruptScanTask::Stmts(body));
                             for arg in args.iter().rev() {
-                                pending.push(InterruptScanTask::Expr(arg));
+                                work.push(InterruptScanTask::Expr(arg));
                             }
                         }
                         Stmt::ComptimeSwitch {
@@ -415,12 +432,12 @@ fn collect_interrupt_callback_scan(
                             ..
                         } => {
                             if let Some(body) = else_body {
-                                pending.push(InterruptScanTask::Stmts(body));
+                                work.push(InterruptScanTask::Stmts(body));
                             }
                             for arm in arms.iter().rev() {
-                                pending.push(InterruptScanTask::Stmts(&arm.body));
+                                work.push(InterruptScanTask::Stmts(&arm.body));
                             }
-                            pending.push(InterruptScanTask::Expr(subject));
+                            work.push(InterruptScanTask::Expr(subject));
                         }
                         _ => {}
                     }
@@ -431,8 +448,9 @@ fn collect_interrupt_callback_scan(
 }
 
 fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>) {
-    let mut pending = vec![stmts];
-    while let Some(stmts) = pending.pop() {
+    let mut work = TirWorklist::new();
+    work.push(stmts);
+    while let Some(stmts) = work.pop() {
         for stmt in stmts {
             match stmt {
                 Stmt::Val(binding) => {
@@ -444,7 +462,7 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                     if let Some(source) = interrupt_callback_ident(&init.init) {
                         aliases.push((init.name.clone(), source.to_string()));
                     }
-                    pending.push(body);
+                    work.push(body);
                 }
                 Stmt::While { body, .. }
                 | Stmt::For { body, .. }
@@ -464,13 +482,13 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                 | Stmt::Live { body, .. }
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Transact { body, .. }
-                | Stmt::ComptimeBlock { body, .. } => pending.push(body),
+                | Stmt::ComptimeBlock { body, .. } => work.push(body),
                 Stmt::Switch { arms, else_body, .. } => {
                     for arm in arms {
-                        pending.push(&arm.body);
+                        work.push(&arm.body);
                     }
                     if let Some(body) = else_body {
-                        pending.push(body);
+                        work.push(body);
                     }
                 }
                 Stmt::ComptimeIf {
@@ -478,20 +496,20 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                     else_body,
                     ..
                 } => {
-                    pending.push(then_body);
+                    work.push(then_body);
                     if let Some(body) = else_body {
-                        pending.push(body);
+                        work.push(body);
                     }
                 }
-                Stmt::ScopeMember { body, .. } => pending.push(body),
+                Stmt::ScopeMember { body, .. } => work.push(body),
                 Stmt::ComptimeSwitch {
                     arms, else_body, ..
                 } => {
                     for arm in arms {
-                        pending.push(&arm.body);
+                        work.push(&arm.body);
                     }
                     if let Some(body) = else_body {
-                        pending.push(body);
+                        work.push(body);
                     }
                 }
                 _ => {}
@@ -868,6 +886,7 @@ fn lower_stmts_with_markers(
     }
 }
 
+#[inline(never)]
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     // Child blocks are heap tasks. A nested source block therefore resumes its
     // parent through `LowerBlock::resume` instead of keeping the parent lowering
@@ -1300,6 +1319,7 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     expr
 }
 
+#[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
         ($stmt:expr) => {

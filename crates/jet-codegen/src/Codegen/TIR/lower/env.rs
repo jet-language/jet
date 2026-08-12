@@ -1,5 +1,6 @@
 use crate::AST::{Expr, LValue, Stmt, Type};
 use crate::Codegen::TIR::{TBindingOrigin, TLocal};
+use crate::Codegen::TIR::TirWorklist;
 use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -180,13 +181,14 @@ impl LowerEnv {
 }
 
 fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
-    let mut pending = vec![expr];
-    while let Some(expr) = pending.pop() {
+    let mut work = TirWorklist::new();
+    work.push(expr);
+    while let Some(expr) = work.pop() {
         match expr {
             Expr::Ident(candidate, _) if candidate == name => return true,
             Expr::Call(call) => {
                 for arg in call.args.iter().rev() {
-                    pending.push(&arg.expr);
+                    work.push(&arg.expr);
                 }
             }
             Expr::MethodCall { receiver, args, .. }
@@ -196,13 +198,13 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
                 ..
             } => {
                 for arg in args.iter().rev() {
-                    pending.push(&arg.expr);
+                    work.push(&arg.expr);
                 }
-                pending.push(receiver);
+                work.push(receiver);
             }
             Expr::Binary(_, left, right, _) => {
-                pending.push(right);
-                pending.push(left);
+                work.push(right);
+                work.push(left);
             }
             Expr::Unary(_, inner, _)
             | Expr::IncDec { operand: inner, .. }
@@ -215,11 +217,11 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => pending.push(inner),
-            Expr::OptField { base, .. } => pending.push(base),
+            | Expr::Try(inner, _, _) => work.push(inner),
+            Expr::OptField { base, .. } => work.push(base),
             Expr::Index { base, index, .. } => {
-                pending.push(index);
-                pending.push(base);
+                work.push(index);
+                work.push(base);
             }
             Expr::Slice {
                 base,
@@ -229,43 +231,56 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
                 ..
             } => {
                 if let Some(range) = range {
-                    pending.push(range);
+                    work.push(range);
                 } else {
-                    pending.push(end);
-                    pending.push(start);
+                    work.push(end);
+                    work.push(start);
                 }
-                pending.push(base);
+                work.push(base);
             }
             Expr::Range { start, end, .. } => {
-                pending.push(end);
-                pending.push(start);
+                work.push(end);
+                work.push(start);
             }
             Expr::ListLit(items, _) => {
                 for item in items.iter().rev() {
-                    pending.push(item);
+                    work.push(item);
                 }
             }
             Expr::MapLit(pairs, _) => {
                 for (key, value) in pairs.iter().rev() {
-                    pending.push(value);
-                    pending.push(key);
+                    work.push(value);
+                    work.push(key);
                 }
             }
             Expr::StructLit { fields, .. } => {
                 for (_, _, value) in fields.iter().rev() {
-                    pending.push(value);
+                    work.push(value);
                 }
             }
-            Expr::TypedLit { body, .. } => {
-                let mut values = Vec::new();
-                body.for_each_expr(|value| values.push(value));
-                for value in values.into_iter().rev() {
-                    pending.push(value);
+            Expr::TypedLit { body, .. } => match body {
+                crate::AST::TypedLitBody::Fields(fields) => {
+                    for (_, _, value) in fields.iter().rev() {
+                        work.push(value);
+                    }
                 }
-            }
+                crate::AST::TypedLitBody::Elements(elements) => {
+                    for value in elements.iter().rev() {
+                        work.push(value);
+                    }
+                }
+                crate::AST::TypedLitBody::Entries(entries) => {
+                    for (key, value) in entries.iter().rev() {
+                        work.push(value);
+                        work.push(key);
+                    }
+                }
+                crate::AST::TypedLitBody::Value(value) => work.push(value),
+                crate::AST::TypedLitBody::Empty => {}
+            },
             Expr::TupleLit(fields, _, _) => {
                 for (_, value) in fields.iter().rev() {
-                    pending.push(value);
+                    work.push(value);
                 }
             }
             Expr::EnumLit { args, .. } => {
@@ -274,13 +289,13 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
                         crate::AST::EnumLitArg::Positional(value)
                         | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
                     };
-                    pending.push(value);
+                    work.push(value);
                 }
             }
             Expr::Str(parts, _) => {
                 for part in parts.iter().rev() {
                     if let crate::AST::StrPart::Interp(value, _) = part {
-                        pending.push(value);
+                        work.push(value);
                     }
                 }
             }
@@ -313,8 +328,9 @@ pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
 /// in a `#Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
-/// auto-snapshotted at block entry and restored on a `?`-failure. Walks nested
-/// control flow (if/while/for/switch/loop/region/etc.) but stops at:
+/// auto-snapshotted at block entry and restored on a `?`-failure. Uses the
+/// shared heap worklist through nested control flow (if/while/for/switch/loop/
+/// region/etc.) but stops at:
 ///   • nested `#Transact` blocks — they establish their own rollback scope; and
 ///   • lambda bodies — a deferred execution context (the same reason `on_commit`
 ///     lambdas escape the enclosing transaction's effect check).
@@ -346,8 +362,8 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             }
         }
     }
-    let mut pending = body.iter().rev().collect::<Vec<_>>();
-    while let Some(s) = pending.pop() {
+    let mut work = TirWorklist::from_reversed(body.iter());
+    while let Some(s) = work.pop() {
         match s {
             Stmt::Assign { target, .. } => {
                 if let Some(root) = lvalue_root(target) {
@@ -372,17 +388,15 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
-            | Stmt::AssumeDet { body, .. } => {
-                pending.extend(body.iter().rev());
-            }
+            | Stmt::AssumeDet { body, .. } => work.extend(body.iter().rev()),
             Stmt::Switch {
                 arms, else_body, ..
             } => {
                 if let Some(eb) = else_body {
-                    pending.extend(eb.iter().rev());
+                    work.extend(eb.iter().rev());
                 }
                 for arm in arms.iter().rev() {
-                    pending.extend(arm.body.iter().rev());
+                    work.extend(arm.body.iter().rev());
                 }
             }
             // D-META-STAGE1=B (formerly D-CTMARKER1): build-time block erases; no runtime mutations.
@@ -393,9 +407,9 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                 ..
             } => {
                 if let Some(eb) = else_body {
-                    pending.extend(eb.iter().rev());
+                    work.extend(eb.iter().rev());
                 }
-                pending.extend(then_body.iter().rev());
+                work.extend(then_body.iter().rev());
             }
             // A nested `#Transact` owns its own rollback scope — don't pull its
             // mutations up into the enclosing block.
