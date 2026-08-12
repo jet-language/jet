@@ -1780,10 +1780,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .collect();
                 return TExpr {
                     ty: if type_args.is_empty() {
-                        Type::Named(type_name.clone())
+                        Type::Named(format!("{alias}.{type_name}"))
                     } else {
                         Type::Apply {
-                            name: type_name.clone(),
+                            name: format!("{alias}.{type_name}"),
                             args: type_args.clone(),
                         }
                     },

@@ -72,14 +72,16 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
     }
 }
 
-/// Build a map from pub type name → Rust module path for all types defined in
-/// imported file-modules of `module_idx`. Used by codegen to qualify cross-module
-/// type references (e.g. `Note` → `__jet_note::__jet_Note`).
+/// Build a map from imported type identity to its Rust module path. Qualified
+/// entries retain the written import alias (`note.Note`) so same-named exports
+/// remain distinct. A bare leaf is retained only while every visible import
+/// resolves it to one module.
 pub(crate) fn foreign_type_map(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
+    let mut bare_targets = HashMap::<String, Option<usize>>::new();
     let module = &bundle.modules[module_idx];
     let is_local = |name: &str| {
         module.items.iter().any(|item| match item {
@@ -88,25 +90,44 @@ pub(crate) fn foreign_type_map(
             _ => false,
         })
     };
+    let record_bare = |bare_targets: &mut HashMap<String, Option<usize>>,
+                       name: &str,
+                       target: usize| {
+        match bare_targets.entry(name.to_string()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Some(target));
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if entry.get().as_ref() != Some(&target) {
+                    entry.insert(None);
+                }
+            }
+        }
+    };
     for imp in &module.imports {
         if imp.is_c_import() {
             continue;
         }
         if let Some(target) = resolve_target(bundle, module_idx, imp) {
+            let alias = imp.import_alias();
             let rust_mod = mangle(&bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
                     Item::Struct(s)
-                        if bundle.name_ledger.visible(module_idx, target, &s.name)
-                            && !is_local(&s.name) =>
+                        if bundle.name_ledger.visible(module_idx, target, &s.name) =>
                     {
-                        map.insert(s.name.clone(), rust_mod.clone());
+                        map.insert(format!("{alias}.{}", s.name), rust_mod.clone());
+                        if !is_local(&s.name) {
+                            record_bare(&mut bare_targets, &s.name, target);
+                        }
                     }
                     Item::Enum(e)
-                        if bundle.name_ledger.visible(module_idx, target, &e.name)
-                            && !is_local(&e.name) =>
+                        if bundle.name_ledger.visible(module_idx, target, &e.name) =>
                     {
-                        map.insert(e.name.clone(), rust_mod.clone());
+                        map.insert(format!("{alias}.{}", e.name), rust_mod.clone());
+                        if !is_local(&e.name) {
+                            record_bare(&mut bare_targets, &e.name, target);
+                        }
                     }
                     Item::UnitFamily(family) => {
                         for member in family.distinct_defs() {
@@ -121,6 +142,11 @@ pub(crate) fn foreign_type_map(
                     _ => {}
                 }
             }
+        }
+    }
+    for (name, target) in bare_targets {
+        if let Some(target) = target {
+            map.insert(name, mangle(&bundle.modules[target].alias));
         }
     }
     map

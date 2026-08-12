@@ -29,16 +29,19 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
-        if let Some(sig) = self.registry.method(type_name, method) {
-            return Some((self.module_idx, sig.clone()));
+        let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+        let owner_mod = self.struct_owner_module(lookup_name, import_ns)?;
+        if owner_mod == self.module_idx {
+            return self
+                .registry
+                .method(lookup_name, method)
+                .cloned()
+                .map(|sig| (owner_mod, sig));
         }
-        let mods = self.modules?;
-        self.imports.values().find_map(|&idx| {
-            self.type_is_pub_in(idx, type_name)
-                .then(|| mods[idx].registry.method(type_name, method).cloned())
-                .flatten()
-                .map(|sig| (idx, sig))
-        })
+        self.modules
+            .and_then(|modules| modules.get(owner_mod))
+            .and_then(|module| module.registry.method(lookup_name, method).cloned())
+            .map(|sig| (owner_mod, sig))
     }
 
     pub(crate) fn instantiate_method_sig(
@@ -47,11 +50,37 @@ impl<'a> Checker<'a> {
         sig: &mut MethodSig,
         args: &[Type],
     ) {
+        let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
         let declared = self
-            .trait_reg
-            .struct_params
-            .get(type_name)
-            .or_else(|| self.trait_reg.enum_params.get(type_name));
+            .struct_owner_module(lookup_name, import_ns)
+            .and_then(|owner_mod| {
+                if owner_mod == self.module_idx {
+                    self.trait_reg
+                        .struct_params
+                        .get(lookup_name)
+                        .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+                } else {
+                    self.modules.and_then(|modules| {
+                        modules.get(owner_mod).and_then(|module| {
+                            module
+                                .trait_reg
+                                .struct_params
+                                .get(lookup_name)
+                                .or_else(|| module.trait_reg.enum_params.get(lookup_name))
+                        })
+                    })
+                }
+            })
+            .or_else(|| {
+                if import_ns.is_none() {
+                    self.trait_reg
+                        .struct_params
+                        .get(lookup_name)
+                        .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+                } else {
+                    None
+                }
+            });
         let Some(params) = declared else {
             return;
         };
@@ -205,7 +234,8 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
-        let method_name = format!("{type_name}.{method}");
+        let (_, lookup_name) = self.struct_type_name_parts(type_name);
+        let method_name = format!("{lookup_name}.{method}");
         if owner_mod != self.module_idx
             && !self
                 .name_ledger
@@ -220,8 +250,8 @@ impl<'a> Checker<'a> {
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
-                .get(type_name)
-                .or_else(|| self.trait_reg.enum_params.get(type_name))
+                .get(lookup_name)
+                .or_else(|| self.trait_reg.enum_params.get(lookup_name))
                 .cloned()
         } else {
             self.modules.and_then(|modules| {
@@ -229,8 +259,8 @@ impl<'a> Checker<'a> {
                     module
                         .trait_reg
                         .struct_params
-                        .get(type_name)
-                        .or_else(|| module.trait_reg.enum_params.get(type_name))
+                        .get(lookup_name)
+                        .or_else(|| module.trait_reg.enum_params.get(lookup_name))
                         .cloned()
                 })
             })
@@ -349,7 +379,7 @@ impl<'a> Checker<'a> {
             return msig.return_type.clone();
         }
         let pre_inferred_method = self.instantiate_method_type_args(
-            type_name,
+            lookup_name,
             method,
             &mut msig,
             method_type_args,
@@ -358,7 +388,7 @@ impl<'a> Checker<'a> {
             &mut call_access,
         );
         self.record_method_reference(type_name, method, span);
-        self.record_edge(super::effect_key(Some(type_name), method), span);
+        self.record_edge(super::effect_key(Some(lookup_name), method), span);
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",
@@ -369,7 +399,7 @@ impl<'a> Checker<'a> {
             ));
         }
         self.check_method_args(
-            type_name,
+            lookup_name,
             method,
             &msig,
             None,
@@ -954,7 +984,11 @@ impl<'a> Checker<'a> {
         let mut found = None;
         for (idx, st) in mods.iter().enumerate() {
             if st.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
-                found = Some(idx);
+                match found {
+                    None => found = Some(idx),
+                    Some(previous) if previous != idx => return None,
+                    Some(_) => {}
+                }
             }
         }
         found
@@ -1431,7 +1465,10 @@ impl<'a> Checker<'a> {
             }
             return Type::Named(type_name.to_string());
         };
-        let subst = self.struct_subst(type_name, type_args);
+        let subst_name = import_ns
+            .map(|alias| format!("{alias}.{type_name}"))
+            .unwrap_or_else(|| type_name.to_string());
+        let subst = self.struct_subst(&subst_name, type_args);
         let field_names: Vec<String> = def_fields.iter().map(|(n, ..)| n.clone()).collect();
         // D-PATCH1: `T.Patch` literals are partial — omitted fields mean "unchanged"
         // (encoded as `null` / `None`); provided values use the inner field type.
@@ -1640,25 +1677,36 @@ impl<'a> Checker<'a> {
                 name: nominal_name,
                 args: type_args.to_vec(),
             }
-        } else if self
-            .trait_reg
-            .struct_params
-            .get(type_name)
-            .is_some_and(|p| !p.is_empty())
-        {
-            Type::Apply {
-                name: nominal_name,
-                args: self
-                    .trait_reg
+        } else {
+            let declared_params = if owner_mod == self.module_idx {
+                self.trait_reg
                     .struct_params
                     .get(type_name)
-                    .unwrap()
-                    .iter()
-                    .map(|p| Type::Named(p.name.clone()))
-                    .collect(),
+                    .or_else(|| self.trait_reg.enum_params.get(type_name))
+                    .cloned()
+            } else {
+                self.modules.and_then(|mods| {
+                    mods.get(owner_mod).and_then(|module| {
+                        module
+                            .trait_reg
+                            .struct_params
+                            .get(type_name)
+                            .or_else(|| module.trait_reg.enum_params.get(type_name))
+                            .cloned()
+                    })
+                })
+            };
+            if let Some(params) = declared_params.filter(|params| !params.is_empty()) {
+                Type::Apply {
+                    name: nominal_name,
+                    args: params
+                        .iter()
+                        .map(|p| Type::Named(p.name.clone()))
+                        .collect(),
+                }
+            } else {
+                Type::Named(nominal_name)
             }
-        } else {
-            Type::Named(nominal_name)
         }
     }
 
@@ -2395,9 +2443,10 @@ impl<'a> Checker<'a> {
                 },
                 Pattern::Struct { fields, rest, .. },
             ) => {
+                let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
                 let all_fields: Option<Vec<String>> = self
-                    .struct_owner_module(type_name, None)
-                    .and_then(|m| self.struct_fields_of(m, type_name))
+                    .struct_owner_module(lookup_name, import_ns)
+                    .and_then(|m| self.struct_fields_of(m, lookup_name))
                     .map(|fs| fs.iter().map(|(name, ..)| name.clone()).collect());
                 let Some(all_fields) = all_fields else {
                     self.diags.push(Diagnostic::error(

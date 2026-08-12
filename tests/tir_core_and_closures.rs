@@ -734,22 +734,23 @@ fn run() {
     assert_eq!(stdout, "working\ncleanup\n");
 }
 
-/// c109 Phase 13: `tasks.spawn(() => …)` — the distinct `emit_spawn_lambda` form
-/// (`move |…|`, never `Box::new`). The spawned task computes a value joined back.
-/// Routes through the TIR with `JetTask::spawn(move || …)`.
+/// c109 Phase 13: a `task { … }` block — the distinct `emit_spawn_lambda` form
+/// (`move |…|`, never `Box::new`). The task computes a value joined back.
+/// Routes through the TIR with the Prelude task adapter.
 #[test]
 fn tasks_spawn_closure_core_call() {
     if !have_rustc() {
         return;
     }
     let src = "\
-use core.tasks as tasks
 fn compute() => Int {
     return 21
 }
 fn launch() => Int {
-    t :: tasks.spawn(() => compute())
-    return t.join()
+    task.group g {
+        handle :: task { return compute() }
+        return handle.join()
+    }
 }
 fn run() {
     print(launch())

@@ -186,20 +186,7 @@ cell :: 1337
     // the canonical list), then every remaining `unsafe` must be a gated form
     // (`unsafe {` or `unsafe fn`).
     let user = tir_support::strip_vetted_prelude_modules(&out.rust);
-    for line in user.lines() {
-        // Skip comment lines (the source-map path comment can contain the word).
-        if line.trim_start().starts_with("//") {
-            continue;
-        }
-        if let Some(col) = line.find("unsafe") {
-            let after = line[col..].trim_start_matches("unsafe").trim_start();
-            assert!(
-                after.starts_with('{') || after.starts_with("fn "),
-                "I1: ungated `unsafe` in generated code: {}",
-                line.trim()
-            );
-        }
-    }
+    tir_support::assert_user_unsafe_is_gated(&user);
 }
 
 #[test]
@@ -516,8 +503,8 @@ fn run() {
     assert_eq!(stdout, "200: m=GET p=/x\n");
 }
 
-/// c109 Phase 21: `tasks.spawn` + `Task<T>` value + `Task.join()` — the spawn/join
-/// surface (32_tasks). The spawn closure is Phase-11/13 covered; the new coverage is the
+/// c109 Phase 21: `task { … }` + `Task<T>` value + `Task.join()` — the task/join
+/// surface (32_tasks). The task block is Phase-11/13 covered; the new coverage is the
 /// `Task<Int>` binding value type + the `recv_type == None` `.join()` method.
 #[test]
 fn task_spawn_join() {
@@ -525,7 +512,6 @@ fn task_spawn_join() {
         return;
     }
     let src = "\
-use core.tasks as tasks
 fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n, first..last {
@@ -534,9 +520,11 @@ fn sum_range(first: Int, last: Int) => Int {
     return total
 }
 fn run() {
-    a :: tasks.spawn(() => sum_range(1, 25))
-    b :: tasks.spawn(() => sum_range(26, 50))
-    print((a.join() + b.join()))
+    task.group g {
+        a :: task { return sum_range(1, 25) }
+        b :: task { return sum_range(26, 50) }
+        print((a.join() + b.join()))
+    }
 }
 ";
     let (code, stdout) = build_and_run("tir_task_spawn_join", src);
@@ -626,30 +614,36 @@ fn work(value: Int, turns: Int) => Int {
     return total
 }
 fn run() {
-    first :: tasks.spawn(() => work(10, 10000))
-    second :: tasks.spawn(() => work(20, 1))
-    third :: tasks.spawn(() => work(30, 100))
-    results :: tasks.join_all([first, second, third])
-    print(results[0], results[1], results[2])
+    task.group g {
+        first :: task { return work(10, 10000) }
+        second :: task { return work(20, 1) }
+        third :: task { return work(30, 100) }
+        results :: tasks.join_all([first, second, third])
+        print(results[0], results[1], results[2])
+    }
 }
 ";
     assert_task_tier_parity("tir_task_join_all", src, "10\n20\n30\n");
 }
 
 #[test]
-fn task_join_all_allows_nested_loose_spawn_in_every_tier() {
+fn task_join_allows_nested_task_blocks_in_every_tier() {
     if !have_rustc() {
         return;
     }
     let src = "\
 use core.tasks as tasks
 fn nested(value: Int) => Int {
-    inner :: tasks.spawn(() => value + 1)
-    return tasks.join_all([inner])[0]
+    task.group g {
+        inner :: task { return value + 1 }
+        return tasks.join_all([inner])[0]
+    }
 }
 fn run() {
-    outer :: tasks.spawn(() => nested(40))
-    print(tasks.join_all([outer])[0])
+    task.group g {
+        outer :: task { return nested(40) }
+        print(tasks.join_all([outer])[0])
+    }
 }
 ";
     assert_task_tier_parity("tir_task_join_all_nested", src, "41\n");
@@ -664,8 +658,10 @@ fn task_join_all_parent_deadline_is_e3003_in_every_tier() {
 use core.tasks as tasks
 fn run() {
     #Context(deadline: 0) {
-        handle :: tasks.spawn(() => 10)
-        tasks.join_all([handle])
+        task.group g {
+            handle :: task { return 10 }
+            tasks.join_all([handle])
+        }
     }
     print(\"unreachable\")
 }
@@ -747,11 +743,13 @@ fn task_join_all_consumes_handles_once() {
     let valid = "\
 use core.tasks as tasks
 fn run() {
-    first :: tasks.spawn(() => 10)
-    second :: tasks.spawn(() => 20)
-    handles :: [first, second]
-    results :: tasks.join_all(^handles)
-    print(results.len())
+    task.group g {
+        first :: task { return 10 }
+        second :: task { return 20 }
+        handles :: [first, second]
+        results :: tasks.join_all(^handles)
+        print(results.len())
+    }
 }
 ";
     let compiled = jet::compile(valid).expect("join_all should consume the handle list");
@@ -764,8 +762,10 @@ fn run() {
     let duplicate = "\
 use core.tasks as tasks
 fn run() {
-    handle :: tasks.spawn(() => 10)
-    tasks.join_all([handle, handle])
+    task.group g {
+        handle :: task { return 10 }
+        tasks.join_all([handle, handle])
+    }
 }
 ";
     let diagnostics = jet::compile(duplicate).expect_err("one handle cannot be joined twice");
@@ -777,9 +777,11 @@ fn run() {
     let reused = "\
 use core.tasks as tasks
 fn run() {
-    handle :: tasks.spawn(() => 10)
-    tasks.join_all([handle])
-    handle.join()
+    task.group g {
+        handle :: task { return 10 }
+        tasks.join_all([handle])
+        handle.join()
+    }
 }
 ";
     let diagnostics = jet::compile(reused).expect_err("joined handle must stay consumed");
@@ -791,9 +793,11 @@ fn run() {
     let borrowed_list = "\
 use core.tasks as tasks
 fn run() {
-    handle :: tasks.spawn(() => 10)
-    handles :: [handle]
-    tasks.join_all(handles)
+    task.group g {
+        handle :: task { return 10 }
+        handles :: [handle]
+        tasks.join_all(handles)
+    }
 }
 ";
     let diagnostics =
@@ -811,9 +815,10 @@ fn task_detach() {
         return;
     }
     let src = "\
-use core.tasks
 fn run() {
-    tasks.spawn(() => 42).detach()
+    task.group g {
+        task { return 42 }.detach()
+    }
     print(\"launched\")
 }
 ";
@@ -824,8 +829,8 @@ fn run() {
 
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: the full channel surface —
 /// `tasks.channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
-/// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `take(..)`
-/// spawn closure), `Task.join()`, and `Receiver.receive() ?? panic(..)`
+/// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `task { … }`
+/// block), `Task.join()`, and `Receiver.receive() ?? panic(..)`
 /// (`Result<T, Closed>` unwrap).
 #[test]
 fn channel_send_receive() {
@@ -835,22 +840,24 @@ fn channel_send_receive() {
     let src = "\
 use core.tasks as tasks
 fn run() {
-(s1, ch) :: tasks.channel<Int>()
-    s2 :: ~s1
-    t1 :: tasks.spawn(() => {
-        s1.send(30)
-    })
-    t2 :: tasks.spawn(() => {
-        s2.send(12)
-    })
-    t1.join()
-    t2.join()
-    results := [Int].{}
-    results.push(ch.receive() ?? panic(\"channel closed\"))
-    results.push(ch.receive() ?? panic(\"channel closed\"))
-    results.sort()
-    loop x, results {
-        print(x)
+    task.group g {
+        (s1, ch) :: tasks.channel<Int>()
+        s2 :: ~s1
+        t1 :: task {
+            s1.send(30)
+        }
+        t2 :: task {
+            s2.send(12)
+        }
+        t1.join()
+        t2.join()
+        results := [Int].{}
+        results.push(ch.receive() ?? panic(\"channel closed\"))
+        results.push(ch.receive() ?? panic(\"channel closed\"))
+        results.sort()
+        loop x, results {
+            print(x)
+        }
     }
 }
 ";

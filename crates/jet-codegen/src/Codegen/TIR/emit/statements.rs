@@ -1163,7 +1163,7 @@ fn emit_tir_stmt(
             index,
             value,
         } => {
-            let ty = user_type_rust(type_name);
+            let ty = cx.rust_type(&Type::Named(type_name.clone()));
             let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);

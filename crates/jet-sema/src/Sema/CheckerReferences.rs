@@ -114,8 +114,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
-        let Some(owner) = self.struct_owner_module(type_name, None) else { return };
-        let name = format!("{type_name}.{method}");
+        let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+        let Some(owner) = self.struct_owner_module(lookup_name, import_ns) else { return };
+        let name = format!("{lookup_name}.{method}");
         let target = self
             .name_ledger
             .declaration(owner, &name)

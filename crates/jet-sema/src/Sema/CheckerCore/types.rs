@@ -168,10 +168,29 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
             type_name: &str,
             type_args: &[Type],
         ) -> HashMap<String, Type> {
+            let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
             let params = self
-                .trait_reg
-                .struct_params
-                .get(type_name)
+                .struct_owner_module(lookup_name, import_ns)
+                .and_then(|owner_mod| {
+                    if owner_mod == self.module_idx {
+                        self.trait_reg
+                            .struct_params
+                            .get(lookup_name)
+                            .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+                    } else {
+                        self.modules.and_then(|modules| {
+                            modules
+                                .get(owner_mod)
+                                .and_then(|module| {
+                                    module
+                                        .trait_reg
+                                        .struct_params
+                                        .get(lookup_name)
+                                        .or_else(|| module.trait_reg.enum_params.get(lookup_name))
+                                })
+                        })
+                    }
+                })
                 .cloned()
                 .unwrap_or_default();
             if params.is_empty() {

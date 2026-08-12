@@ -386,15 +386,11 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
             || cx.current_type_params.borrow().contains(n.as_str()))
 }
 
-/// Resolve a user nominal through the one codegen import map. A sema type may
-/// be bare (`Note`) in a declaration or qualified (`note.Note`) at a literal;
-/// both spellings must consult the same foreign module entry.
+/// Resolve a user nominal through the one codegen import map. Qualified names
+/// carry their import alias; bare names exist only when the import map proved
+/// that the leaf is unambiguous.
 pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
-    let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
-    cx.foreign_types
-        .get(name)
-        .or_else(|| cx.foreign_types.get(leaf))
-        .map(String::as_str)
+    cx.foreign_types.get(name).map(String::as_str)
 }
 
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
@@ -509,7 +505,8 @@ pub(crate) fn foreign_struct_lit_in_subset(
     if !cx.import_mods.contains_key(alias) {
         return false;
     }
-    if foreign_type_module(type_name, cx).is_none() {
+    let qualified_name = format!("{alias}.{type_name}");
+    if foreign_type_module(&qualified_name, cx).is_none() {
         return false;
     }
     type_args

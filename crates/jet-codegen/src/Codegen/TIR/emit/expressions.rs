@@ -2216,7 +2216,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Type::Apply { name, args } if !args.is_empty() => {
                     let head = match cx.foreign_types.get(name) {
                         Some(rust_mod) => {
-                            format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(name))
+                            let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                            format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(leaf))
                         }
                         None => {
                             if let Some((alias, leaf)) = name.split_once('.') {
@@ -2781,7 +2782,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             index,
             line,
         } => {
-            let ty = user_type_rust(type_name);
+            let ty = cx.rust_type(&Type::Named(type_name.clone()));
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(

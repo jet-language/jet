@@ -3597,17 +3597,17 @@ impl<'a> Checker<'a> {
                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
-                            if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, lookup_name, member)
-                            {
-                                self.diags.push(private_item(member, span));
-                                return None;
-                            } else if owner_mod != self.module_idx
-                                && Syntax::classify_identifier(member)
-                                    == Syntax::IdentifierClass::SoftPublic
-                            {
-                                self.diags.push(soft_public_use(member, span));
-                            }
+                        if owner_mod != self.module_idx
+                            && !self.field_is_pub_in(owner_mod, lookup_name, member)
+                        {
+                            self.diags.push(private_item(member, span));
+                            return None;
+                        } else if owner_mod != self.module_idx
+                            && Syntax::classify_identifier(member)
+                                == Syntax::IdentifierClass::SoftPublic
+                        {
+                            self.diags.push(soft_public_use(member, span));
+                        }
                         self.record_field_reference(owner_mod, lookup_name, member, span);
                         return Some(fty);
                     }
@@ -3640,29 +3640,30 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Apply { name, args } = t {
-            if let Some(owner_mod) = self.struct_owner_module(name, None) {
-                if let Some(fields) = self.struct_fields_of(owner_mod, name) {
+            let (owner_import_ns, lookup_name) = self.struct_type_name_parts(name);
+            if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
+                if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
                     let subst = self.struct_subst(name, args);
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
-                            if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, name, member)
-                            {
-                                self.diags.push(private_item(member, span));
-                                return None;
-                            } else if owner_mod != self.module_idx
-                                && Syntax::classify_identifier(member)
-                                    == Syntax::IdentifierClass::SoftPublic
-                            {
-                                self.diags.push(soft_public_use(member, span));
-                            }
-                        self.record_field_reference(owner_mod, name, member, span);
+                        if owner_mod != self.module_idx
+                            && !self.field_is_pub_in(owner_mod, lookup_name, member)
+                        {
+                            self.diags.push(private_item(member, span));
+                            return None;
+                        } else if owner_mod != self.module_idx
+                            && Syntax::classify_identifier(member)
+                                == Syntax::IdentifierClass::SoftPublic
+                        {
+                            self.diags.push(soft_public_use(member, span));
+                        }
+                        self.record_field_reference(owner_mod, lookup_name, member, span);
                         return Some(self.trait_reg.instantiate_type(&fty, &subst));
                     }
                     // D-FIELDPOL1: see the `Type::Named` branch above — a
                     // computed field resolves for reads even though it's
                     // absent from `fields`.
-                    if let Some(computed) = self.computed_field_types_of(owner_mod, name) {
+                    if let Some(computed) = self.computed_field_types_of(owner_mod, lookup_name) {
                         if let Some((_, cty)) = computed.get(member) {
                             return Some(self.trait_reg.instantiate_type(cty, &subst));
                         }
@@ -3681,12 +3682,14 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-            } else if let Some(fty) = core_generic_struct_field(name, member, args) {
-                // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
-                // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
-                // precedent: `Reader`/`Cursor`) means this fallback only runs when
-                // no user struct claimed the name above.
-                return Some(fty);
+            } else if owner_import_ns.is_none() {
+                if let Some(fty) = core_generic_struct_field(lookup_name, member, args) {
+                    // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
+                    // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
+                    // precedent: `Reader`/`Cursor`) means this fallback only runs when
+                    // no user struct claimed the name above.
+                    return Some(fty);
+                }
             }
         }
         if let Type::Tuple(fields) = t {

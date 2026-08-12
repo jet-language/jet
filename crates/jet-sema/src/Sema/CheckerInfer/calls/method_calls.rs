@@ -4307,7 +4307,8 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
-            let method_name = format!("{type_name}.{method}");
+            let (_, lookup_name) = self.struct_type_name_parts(&type_name);
+            let method_name = format!("{lookup_name}.{method}");
             if owner_mod != self.module_idx
                 && !self
                     .name_ledger
@@ -4337,7 +4338,7 @@ impl<'a> Checker<'a> {
             }
             let mut call_access = self.call_access_frame();
             let pre_inferred_method = self.instantiate_method_type_args(
-                &type_name,
+                lookup_name,
                 method,
                 &mut msig,
                 type_args,
@@ -4346,7 +4347,7 @@ impl<'a> Checker<'a> {
                 &mut call_access,
             );
             self.record_method_reference(&type_name, method, span);
-            self.record_edge(crate::Sema::effect_key(Some(&type_name), method), span);
+            self.record_edge(crate::Sema::effect_key(Some(lookup_name), method), span);
             if msig.is_static {
                 self.diags.push(Diagnostic::error(
                     "E0311",

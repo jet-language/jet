@@ -78,7 +78,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(t))
+                let leaf = t.rsplit_once('.').map_or(t, |(_, leaf)| leaf);
+                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(leaf))
             } else {
                 user_type_rust(t)
             }

@@ -275,174 +275,245 @@ pub fn run_default_multi(
     )
 }
 
-pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
-    fn strip_mod(src: &str, name: &str) -> String {
-        let Some(start) = src.find(&format!("mod {name}")) else {
-            return src.to_string();
-        };
-        let bytes = src.as_bytes();
-        let Some(open) = bytes[start..]
-            .iter()
-            .position(|byte| *byte == b'{')
-            .map(|offset| start + offset)
-        else {
-            return src.to_string();
-        };
-        fn raw_string_start(bytes: &[u8], i: usize) -> Option<(usize, usize)> {
-            let raw = if bytes.get(i) == Some(&b'r') {
-                i
-            } else if bytes.get(i) == Some(&b'b') && bytes.get(i + 1) == Some(&b'r') {
-                i + 1
-            } else {
-                return None;
-            };
-            let mut quote = raw + 1;
-            while bytes.get(quote) == Some(&b'#') {
-                quote += 1;
-            }
-            (bytes.get(quote) == Some(&b'"')).then_some((quote, quote - raw - 1))
-        }
-        #[derive(Clone, Copy)]
-        enum State {
-            Normal,
-            LineComment,
-            BlockComment(usize),
-            String,
-            RawString(usize),
-        }
-        let mut depth = 1usize;
-        let mut i = open + 1;
-        let mut end = src.len();
-        let mut state = State::Normal;
-        while i < bytes.len() {
-            match state {
-                State::Normal => {
-                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-                        state = State::LineComment;
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-                        state = State::BlockComment(1);
-                        i += 2;
-                        continue;
-                    }
-                    if let Some((quote, hashes)) = raw_string_start(bytes, i) {
-                        state = State::RawString(hashes);
-                        i = quote + 1;
-                        continue;
-                    }
-                    if bytes[i] == b'"' || (bytes[i] == b'b' && bytes.get(i + 1) == Some(&b'"')) {
-                        state = State::String;
-                        i += usize::from(bytes[i] == b'b') + 1;
-                        continue;
-                    }
-                    if bytes[i] == b'\'' {
-                        let mut j = i + 1;
-                        let mut escaped = false;
-                        let mut closed = false;
-                        while j < bytes.len() && bytes[j] != b'\n' {
-                            if escaped {
-                                escaped = false;
-                            } else if bytes[j] == b'\\' {
-                                escaped = true;
-                            } else if bytes[j] == b'\'' {
-                                closed = true;
-                                break;
-                            }
-                            j += 1;
-                        }
-                        if closed {
-                            i = j + 1;
-                            continue;
-                        }
-                        i += 1;
-                        continue;
-                    }
-                    match bytes[i] {
-                        b'{' => depth += 1,
-                        b'}' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                end = i + 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                State::LineComment => {
-                    if bytes[i] == b'\n' {
-                        state = State::Normal;
-                    }
-                }
-                State::BlockComment(comment_depth) => {
-                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-                        state = State::BlockComment(comment_depth + 1);
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
-                        i += 2;
-                        if comment_depth == 1 {
-                            state = State::Normal;
-                        } else {
-                            state = State::BlockComment(comment_depth - 1);
-                        }
-                        continue;
-                    }
-                }
-                State::String => {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    } else if bytes[i] == b'"' {
-                        state = State::Normal;
-                    }
-                }
-                State::RawString(hashes) => {
-                    if bytes[i] == b'"'
-                        && (0..hashes)
-                            .all(|offset| bytes.get(i + 1 + offset) == Some(&b'#'))
-                    {
-                        i += 1 + hashes;
-                        state = State::Normal;
-                        continue;
-                    }
-                }
-            }
+fn rust_skip_space_comments(bytes: &[u8], mut i: usize) -> usize {
+    loop {
+        while bytes.get(i).is_some_and(|byte| byte.is_ascii_whitespace()) {
             i += 1;
         }
-        format!("{}{}", &src[..start], &src[end..])
+        if bytes.get(i) == Some(&b'/') && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes.get(i) == Some(&b'/') && bytes.get(i + 1) == Some(&b'*') {
+            i += 2;
+            let mut depth = 1usize;
+            while i < bytes.len() && depth > 0 {
+                if bytes.get(i) == Some(&b'/') && bytes.get(i + 1) == Some(&b'*') {
+                    depth += 1;
+                    i += 2;
+                } else if bytes.get(i) == Some(&b'*') && bytes.get(i + 1) == Some(&b'/') {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        return i;
     }
-    fn strip_jet_cell(src: &str) -> String {
-        // Codegen emits this module as one contiguous source part: the opening
-        // marker in `CORELIB_KERNEL_PARTS`, `LocalCell.rs`, then this exact
-        // closing/re-export marker. Use that source boundary instead of
-        // guessing where a Rust token-tree brace belongs.
-        const BEGIN: &str = "\nmod jet_cell {\n";
-        const END: &str =
-            "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n";
-        let Some(start) = src.find(BEGIN) else {
-            return src.to_string();
-        };
-        let body_start = start + BEGIN.len();
-        let Some(relative_end) = src[body_start..].find(END) else {
-            return src.to_string();
-        };
-        let end = body_start + relative_end + END.len();
-        format!("{}{}", &src[..start], &src[end..])
+}
+
+fn rust_raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut marker = start;
+    if bytes.get(marker) == Some(&b'b') {
+        marker += 1;
     }
-    let s = strip_mod(rust_code, "jet_uninit_semantics");
-    let s = strip_mod(&s, "jet_mem");
-    let s = strip_jet_cell(&s);
-    let s = strip_mod(&s, "jet_txn");
-    let s = strip_mod(&s, "jet_term_unix");
-    let s = strip_mod(&s, "jet_term_windows");
-    let s = strip_mod(&s, "jet_process_pty");
-    let s = strip_mod(&s, "jet_os_unix");
-    let s = strip_mod(&s, "jet_atomic_windows");
-    let s = strip_mod(&s, "jet_gtk");
-    let s = strip_mod(&s, "jet_crypto_entropy");
+    if bytes.get(marker) != Some(&b'r') {
+        return None;
+    }
+    let mut quote = marker + 1;
+    while bytes.get(quote) == Some(&b'#') {
+        quote += 1;
+    }
+    if bytes.get(quote) != Some(&b'"') {
+        return None;
+    }
+    let hashes = quote - marker - 1;
+    let mut i = quote + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'"'
+            && (0..hashes).all(|offset| bytes.get(i + 1 + offset) == Some(&b'#'))
+        {
+            return Some(i + 1 + hashes);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn rust_quoted_end(bytes: &[u8], quote: usize) -> Option<usize> {
+    let mut i = quote + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i = i.saturating_add(2);
+        } else if bytes[i] == bytes[quote] {
+            return Some(i + 1);
+        } else if bytes[i] == b'\n' && bytes[quote] == b'\'' {
+            return None;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+fn rust_atom_end(bytes: &[u8], i: usize) -> Option<usize> {
+    if let Some(end) = rust_raw_string_end(bytes, i) {
+        return Some(end);
+    }
+    if bytes.get(i) == Some(&b'b')
+        && (bytes.get(i + 1) == Some(&b'"') || bytes.get(i + 1) == Some(&b'\''))
+    {
+        return rust_quoted_end(bytes, i + 1);
+    }
+    if bytes.get(i) == Some(&b'"') {
+        return rust_quoted_end(bytes, i);
+    }
+    if bytes.get(i) != Some(&b'\'') {
+        return None;
+    }
+    let Some(&next) = bytes.get(i + 1) else {
+        return None;
+    };
+    if next.is_ascii_alphanumeric() || next == b'_' {
+        let mut j = i + 2;
+        while bytes.get(j).is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_') {
+            j += 1;
+        }
+        return Some(if bytes.get(j) == Some(&b'\'') { j + 1 } else { j });
+    }
+    rust_quoted_end(bytes, i)
+}
+
+fn rust_token_spans(src: &str) -> Vec<(usize, usize)> {
+    let bytes = src.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        i = rust_skip_space_comments(bytes, i);
+        if i >= bytes.len() {
+            break;
+        }
+        if let Some(end) = rust_atom_end(bytes, i) {
+            i = end;
+            continue;
+        }
+        let start = i;
+        if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' {
+            i += 1;
+            while bytes
+                .get(i)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+        tokens.push((start, i));
+    }
+    tokens
+}
+
+fn rust_matching_brace(src: &str, open: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 1usize;
+    let mut i = open + 1;
+    while i < bytes.len() {
+        i = rust_skip_space_comments(bytes, i);
+        if i >= bytes.len() {
+            break;
+        }
+        if let Some(end) = rust_atom_end(bytes, i) {
+            i = end;
+            continue;
+        }
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn rust_module_span(src: &str, name: &str) -> Option<(usize, usize)> {
+    let tokens = rust_token_spans(src);
+    for (index, &(mod_start, _)) in tokens.iter().enumerate() {
+        if &src[mod_start..tokens[index].1] != "mod" || index + 2 >= tokens.len() {
+            continue;
+        }
+        let candidate = &src[tokens[index + 1].0..tokens[index + 1].1];
+        let matches = if name == "__jet___c_" {
+            candidate.starts_with(name)
+        } else {
+            candidate == name
+        };
+        if !matches || &src[tokens[index + 2].0..tokens[index + 2].1] != "{" {
+            continue;
+        }
+        let start = if index > 0
+            && &src[tokens[index - 1].0..tokens[index - 1].1] == "pub"
+        {
+            tokens[index - 1].0
+        } else {
+            mod_start
+        };
+        let end = rust_matching_brace(src, tokens[index + 2].0)?;
+        return Some((start, end));
+    }
+    None
+}
+
+fn strip_rust_module(src: &str, name: &str) -> String {
+    let Some((start, end)) = rust_module_span(src, name) else {
+        return src.to_string();
+    };
+    format!("{}{}", &src[..start], &src[end..])
+}
+
+fn strip_rust_reexport(src: &str, name: &str) -> String {
+    let tokens = rust_token_spans(src);
+    let prefix = ["pub", "use", "self", ":", ":", name, ":", ":"];
+    for index in 0..tokens.len() {
+        if index + prefix.len() >= tokens.len()
+            || !prefix.iter().enumerate().all(|(offset, expected)| {
+                &src[tokens[index + offset].0..tokens[index + offset].1] == *expected
+            })
+        {
+            continue;
+        }
+        let open = index + prefix.len();
+        if &src[tokens[open].0..tokens[open].1] != "{" {
+            continue;
+        }
+        let Some(close) = rust_matching_brace(src, tokens[open].0) else {
+            continue;
+        };
+        let Some(semicolon) = tokens
+            .iter()
+            .position(|&(start, end)| start >= close && &src[start..end] == ";")
+        else {
+            continue;
+        };
+        return format!("{}{}", &src[..tokens[index].0], &src[tokens[semicolon].1..]);
+    }
+    src.to_string()
+}
+
+pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
+    let s = strip_rust_module(rust_code, "jet_uninit_semantics");
+    let s = strip_rust_module(&s, "jet_mem");
+    let s = strip_rust_module(&s, "jet_cell");
+    let s = strip_rust_reexport(&s, "jet_cell");
+    let s = strip_rust_module(&s, "jet_txn");
+    let s = strip_rust_module(&s, "jet_term_unix");
+    let s = strip_rust_module(&s, "jet_term_windows");
+    let s = strip_rust_module(&s, "jet_process_pty");
+    let s = strip_rust_module(&s, "jet_os_unix");
+    let s = strip_rust_module(&s, "jet_atomic_windows");
+    let s = strip_rust_module(&s, "jet_gtk");
+    let s = strip_rust_module(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
     s = strip_marked_regions(
         &s,
@@ -452,9 +523,9 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "ffi_reporter");
-    while s.contains("mod __jet___c_") {
+    while rust_module_span(&s, "__jet___c_").is_some() {
         let before = s.clone();
-        s = strip_mod(&s, "__jet___c_");
+        s = strip_rust_module(&s, "__jet___c_");
         if s == before {
             break;
         }
@@ -462,44 +533,67 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s
 }
 
-fn strip_scheduler_native(src: &str) -> String {
-    let begin = "// jet:scheduler-native-begin";
-    let end = "// jet:scheduler-native-end";
-    match (src.find(begin), src.find(end)) {
-        (Some(b), Some(e)) if e >= b => {
-            let mut s = src[..b].to_string();
-            s.push_str(&src[e + end.len()..]);
-            s
+pub fn assert_user_unsafe_is_gated(src: &str) {
+    let tokens = rust_token_spans(src);
+    for (index, &(start, end)) in tokens.iter().enumerate() {
+        if &src[start..end] != "unsafe" {
+            continue;
         }
-        _ => src.to_string(),
+        let next = tokens
+            .get(index + 1)
+            .map(|&(next_start, next_end)| &src[next_start..next_end]);
+        assert!(
+            matches!(next, Some("{") | Some("fn")),
+            "I1: ungated `unsafe` in generated code at byte {start}"
+        );
     }
 }
 
+fn strip_scheduler_native(src: &str) -> String {
+    strip_marked_regions(src, "// jet:scheduler-native-begin", "// jet:scheduler-native-end")
+}
+
 fn strip_marked_regions(src: &str, begin: &str, end: &str) -> String {
-    let mut out = src.to_string();
-    loop {
-        let (Some(start), Some(end_pos)) = (out.find(begin), out.find(end)) else {
-            return out;
+    fn is_marker(line: &str, marker: &str) -> bool {
+        let Some(suffix) = line.strip_prefix(marker) else {
+            return false;
         };
-        if end_pos < start {
-            return out;
+        suffix.is_empty()
+            || suffix
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_whitespace() || character == '—')
+    }
+
+    let mut out = String::with_capacity(src.len());
+    let mut removing = false;
+    let mut found_pair = false;
+    for line in src.split_inclusive('\n') {
+        let marker = line.trim();
+        if !removing && is_marker(marker, begin) {
+            removing = true;
+            continue;
         }
-        let end_offset = end_pos + end.len();
-        out = format!("{}{}", &out[..start], &out[end_offset..]);
+        if removing {
+            if is_marker(marker, end) {
+                removing = false;
+                found_pair = true;
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    if removing || !found_pair {
+        src.to_string()
+    } else {
+        out
     }
 }
 
 fn strip_vetted_module(src: &str, name: &str) -> String {
     let begin = format!("// JET_VETTED_UNSAFE_BEGIN: {name}");
     let end = format!("// JET_VETTED_UNSAFE_END: {name}");
-    let Some(start) = src.find(&begin) else {
-        return src.to_string();
-    };
-    let Some(relative_end) = src[start + begin.len()..].find(&end) else {
-        return src.to_string();
-    };
-    let end_offset = start + begin.len() + relative_end + end.len();
-    format!("{}{}", &src[..start], &src[end_offset..])
+    strip_marked_regions(src, &begin, &end)
 }
 
 #[test]

@@ -772,8 +772,8 @@ fn wrap(s: String) => Msg {
 }
 fn render(m: Msg) => String {
     if m == {
-        Text(s) -> { return s }
-        Code(n) -> { return \"code\" }
+        .Text(s) -> { return s }
+        .Code(n) -> { return \"code\" }
     }
     return \"?\"
 }
@@ -806,8 +806,8 @@ fn wrap(inner: Tree) => Tree {
 }
 fn leaf_val(t: Tree) => Int {
     if t == {
-        Leaf(n) -> { return n }
-        Node(inner) -> { return 0 }
+        .Leaf(n) -> { return n }
+        .Node(inner) -> { return 0 }
     }
     return 0
 }
@@ -844,8 +844,8 @@ fn mk(p: Point) => Shape {
 }
 fn first(s: Shape) => Int {
     if s == {
-        Dot(p) -> { return p.x }
-        Line(n) -> { return n }
+        .Dot(p) -> { return p.x }
+        .Line(n) -> { return n }
     }
     return 0
 }
@@ -929,21 +929,19 @@ fn run() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: a PRELUDE struct (HTTPResponse/HTTPRequest) constructed via a struct
-/// literal. The `is_prelude_struct` emit branch renders a `Jet…` Rust head with PLAIN
-/// (unmangled) fields, and HTTPRequest injects a `params: BTreeMap::new()` field. The
-/// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so this
-/// asserts the EMITTED Rust contains the byte-exact construction (the example suite +
-/// the JET_NO_TIR full-suite diff prove it compiles & runs). The type is a covered value
-/// type as a param/return.
+/// c109 Phase 17: the canonical HTTP Prelude constructors preserve the request/response
+/// identity through TIR. The shared APIs own defaults and wire encoding; this test keeps
+/// the emitted calls byte-exact for both returned types.
 #[test]
 fn prelude_struct_construction() {
     let src = "\
+use core.http.client as client
+use core.http.server as server
 fn build_resp(body: String) => HTTPResponse {
-    return HTTPResponse.{status: \"200 OK\", body: body, headers: []}
+    return server.response(200, body)
 }
 fn build_req() => HTTPRequest {
-    return HTTPRequest.{method: \"GET\", path: \"/\", body: \"\", headers: []}
+    return client.request(\"GET\", \"http://localhost/\")
 }
 fn run() {
     r :: build_resp(\"hi\")
@@ -963,18 +961,16 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // HTTPResponse: prelude head (`…JetHTTPResponse`), PLAIN field names, no injected
-    // `params`. The `…` root prefix varies by emit layout — assert the prefix-independent
-    // construction body.
+    // HTTPResponse construction is owned by the server Prelude function.
     assert!(
-        out.rust.contains("JetHTTPResponse { status: \"200 OK\".to_string(), body: (*__jet_body), headers: std::collections::BTreeMap::new() }"),
-        "HTTPResponse construction not byte-exact:\n{}",
+        out.rust.contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
+        "HTTPResponse constructor call not byte-exact:\n{}",
         out.rust
     );
-    // HTTPRequest: prelude head, plain fields, injected route metadata appended verbatim.
+    // HTTPRequest construction is owned by the client Prelude function.
     assert!(
-        out.rust.contains("JetHTTPRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new(), route_template: None }"),
-        "HTTPRequest construction not byte-exact:\n{}",
+        out.rust.contains(r#"return jet_http_client_request_new(&("GET".to_string()), &("http://localhost/".to_string()));"#),
+        "HTTPRequest constructor call not byte-exact:\n{}",
         out.rust
     );
 }

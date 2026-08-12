@@ -52,47 +52,170 @@ impl<'a> Checker<'a> {
     /// owning module. The same rule is used by return checking below so a raw
     /// `Type` inequality cannot reintroduce E0113 after this check succeeds.
     pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
-        match (want, got) {
-            (Type::Named(want), Type::Named(got)) => {
-                let (want_ns, want_name) = self.struct_type_name_parts(want);
-                let (got_ns, got_name) = self.struct_type_name_parts(got);
-                want_name == got_name
-                    && matches!(
-                        (
-                            self.struct_owner_module(want_name, want_ns),
-                            self.struct_owner_module(got_name, got_ns),
-                        ),
-                        (Some(want_mod), Some(got_mod)) if want_mod == got_mod
-                    )
-            }
-            (
-                Type::Apply {
-                    name: want_name,
-                    args: want_args,
-                },
-                Type::Apply {
-                    name: got_name,
-                    args: got_args,
-                },
-            ) => {
-                let (want_ns, want_name) = self.struct_type_name_parts(want_name);
-                let (got_ns, got_name) = self.struct_type_name_parts(got_name);
-                want_name == got_name
-                    && want_args.len() == got_args.len()
-                    && matches!(
-                        (
-                            self.struct_owner_module(want_name, want_ns),
-                            self.struct_owner_module(got_name, got_ns),
-                        ),
-                        (Some(want_mod), Some(got_mod)) if want_mod == got_mod
-                    )
-                    && want_args
-                        .iter()
-                        .zip(got_args)
-                        .all(|(want, got)| want == got || self.nominal_type_identity(want, got))
-            }
-            _ => false,
+        fn transparent_tag(marker: &crate::AST::TagMarker) -> bool {
+            !matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+            )
         }
+
+        fn names(checker: &Checker<'_>, want: &str, got: &str) -> bool {
+            if want == got {
+                return true;
+            }
+            let (want_ns, want_name) = checker.struct_type_name_parts(want);
+            let (got_ns, got_name) = checker.struct_type_name_parts(got);
+            want_name == got_name
+                && matches!(
+                    (
+                        checker.struct_owner_module(want_name, want_ns),
+                        checker.struct_owner_module(got_name, got_ns),
+                    ),
+                    (Some(want_mod), Some(got_mod)) if want_mod == got_mod
+                )
+        }
+
+        fn nested(checker: &Checker<'_>, want: &Type, got: &Type) -> bool {
+            if want == got {
+                return true;
+            }
+            match (want, got) {
+                (Type::Named(want), Type::Named(got)) => names(checker, want, got),
+                (
+                    Type::Apply {
+                        name: want_name,
+                        args: want_args,
+                    },
+                    Type::Apply {
+                        name: got_name,
+                        args: got_args,
+                    },
+                ) => {
+                    names(checker, want_name, got_name)
+                        && want_args.len() == got_args.len()
+                        && want_args
+                            .iter()
+                            .zip(got_args)
+                            .all(|(want, got)| nested(checker, want, got))
+                }
+                (Type::List(want), Type::List(got))
+                | (Type::Shared(want), Type::Shared(got))
+                | (Type::Option(want), Type::Option(got)) => nested(checker, want, got),
+                (
+                    Type::Map {
+                        key: want_key,
+                        value: want_value,
+                        ..
+                    },
+                    Type::Map {
+                        key: got_key,
+                        value: got_value,
+                        ..
+                    },
+                ) => {
+                    nested(checker, want_key, got_key) && nested(checker, want_value, got_value)
+                }
+                (
+                    Type::Result {
+                        ok: want_ok,
+                        err: want_err,
+                    },
+                    Type::Result {
+                        ok: got_ok,
+                        err: got_err,
+                    },
+                ) => nested(checker, want_ok, got_ok) && nested(checker, want_err, got_err),
+                (
+                    Type::Fn {
+                        params: want_params,
+                        ret: want_ret,
+                        param_contract: want_contract,
+                        ..
+                    },
+                    Type::Fn {
+                        params: got_params,
+                        ret: got_ret,
+                        param_contract: got_contract,
+                        ..
+                    },
+                ) => {
+                    want_contract == got_contract
+                        && want_params.len() == got_params.len()
+                        && want_params
+                            .iter()
+                            .zip(got_params)
+                            .all(|(want, got)| nested(checker, want, got))
+                        && match (want_ret, got_ret) {
+                            (None, None) => true,
+                            (Some(want), Some(got)) => nested(checker, want, got),
+                            _ => false,
+                        }
+                }
+                (Type::Tuple(want), Type::Tuple(got)) => {
+                    want.len() == got.len()
+                        && want.iter().zip(got).all(|((want_name, want), (got_name, got))| {
+                            want_name == got_name && nested(checker, want, got)
+                        })
+                }
+                (
+                    Type::FixedList {
+                        elem: want_elem,
+                        len: want_len,
+                        len_symbol: want_symbol,
+                    },
+                    Type::FixedList {
+                        elem: got_elem,
+                        len: got_len,
+                        len_symbol: got_symbol,
+                    },
+                ) => {
+                    let length_identity = match (want_symbol, got_symbol) {
+                        (Some((want, _)), Some((got, _))) => want == got,
+                        (None, None) => want_len == got_len,
+                        _ => false,
+                    };
+                    length_identity && nested(checker, want_elem, got_elem)
+                }
+                (
+                    Type::Quantity {
+                        base: want_base,
+                        dimension: want_dimension,
+                    },
+                    Type::Quantity {
+                        base: got_base,
+                        dimension: got_dimension,
+                    },
+                ) => {
+                    want_dimension == got_dimension && nested(checker, want_base, got_base)
+                }
+                (Type::Union(want), Type::Union(got)) => {
+                    want.len() == got.len()
+                        && want
+                            .iter()
+                            .zip(got)
+                            .all(|(want, got)| nested(checker, want, got))
+                }
+                (Type::Tagged { marker, inner }, got) if transparent_tag(marker) => {
+                    nested(checker, inner, got)
+                }
+                (want, Type::Tagged { marker, inner }) if transparent_tag(marker) => {
+                    nested(checker, want, inner)
+                }
+                (
+                    Type::Tagged {
+                        marker: want_marker,
+                        inner: want_inner,
+                    },
+                    Type::Tagged {
+                        marker: got_marker,
+                        inner: got_inner,
+                    },
+                ) => want_marker == got_marker && nested(checker, want_inner, got_inner),
+                _ => false,
+            }
+        }
+
+        nested(self, want, got)
     }
 
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
@@ -336,37 +459,39 @@ impl<'a> Checker<'a> {
                         self.check_declared_type_rules(&substitute_type(target, &subst), span);
                         return;
                     }
-                    let is_core_generic = matches!(
-                        name.as_str(),
-                        "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
-                            // D-COLLBREADTH1=A: Set<T> and Deque<T>.
-                            | "Set" | "Bag" | "Deque"
-                            // D-ITERTOOLS1=A: expanded generic collection handles.
-                            | "SortedSet" | "PriorityQueue" | "Cache"
-                            | "BigInt" | "Decimal"
-                            // D-REACT1=B: reactive handle types.
-                            | "Signal" | "Derived" | "Computed"
-                            // D-EVENT1=D: first-party typed event/hook handles.
-                            | "Event" | "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome"
-                            | "DispatchReport"
-                            // D-STREAMYIELD1: generator return type.
-                            | "Stream"
-                            // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
-                            | "DecodeResult"
-                            // D-DATAFRAME1=A: reserved core.data generic value types.
-                            | "Table" | "Series" | "LazyFrame" | "DataJoin"
-                            // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
-                            | "Pool" | "Id"
-                            // D-LOCALCELL1=A: one-thread cell and projected guard types.
-                            | "Cell" | "CellReadGuard" | "CellEditGuard"
-                            // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
-                            // secret-lifetime wrapper.
-                            | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
-                            | Syntax::TYPE_SHARED_WEAK
-                            | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
-                    ) || is_core_view_generic(ty);
-                    if matches!(name.as_str(), "Vec" | "Matrix") {
-                        let expected = if name == "Vec" { 1 } else { 2 };
+                    let (import_ns, lookup_name) = self.struct_type_name_parts(name);
+                    let is_core_generic = import_ns.is_none()
+                        && (matches!(
+                            lookup_name,
+                            "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
+                                // D-COLLBREADTH1=A: Set<T> and Deque<T>.
+                                | "Set" | "Bag" | "Deque"
+                                // D-ITERTOOLS1=A: expanded generic collection handles.
+                                | "SortedSet" | "PriorityQueue" | "Cache"
+                                | "BigInt" | "Decimal"
+                                // D-REACT1=B: reactive handle types.
+                                | "Signal" | "Derived" | "Computed"
+                                // D-EVENT1=D: first-party typed event/hook handles.
+                                | "Event" | "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome"
+                                | "DispatchReport"
+                                // D-STREAMYIELD1: generator return type.
+                                | "Stream"
+                                // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
+                                | "DecodeResult"
+                                // D-DATAFRAME1=A: reserved core.data generic value types.
+                                | "Table" | "Series" | "LazyFrame" | "DataJoin"
+                                // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
+                                | "Pool" | "Id"
+                                // D-LOCALCELL1=A: one-thread cell and projected guard types.
+                                | "Cell" | "CellReadGuard" | "CellEditGuard"
+                                // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
+                                // secret-lifetime wrapper.
+                                | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
+                                | Syntax::TYPE_SHARED_WEAK
+                                | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+                        ) || is_core_view_generic(ty));
+                    if import_ns.is_none() && matches!(lookup_name, "Vec" | "Matrix") {
+                        let expected = if lookup_name == "Vec" { 1 } else { 2 };
                         if args.len() != expected
                             || args
                                 .iter()
@@ -379,7 +504,7 @@ impl<'a> Checker<'a> {
                                     if expected == 1 { "" } else { "s" }
                                 ),
                                 "compute aliases carry fixed dimensions that sema checks before codegen".to_string(),
-                                if name == "Vec" {
+                                if lookup_name == "Vec" {
                                     "write `Vec<N>` with one non-negative integer".to_string()
                                 } else {
                                     "write `Matrix<M, N>` with two non-negative integers".to_string()
@@ -389,7 +514,8 @@ impl<'a> Checker<'a> {
                         }
                         return;
                     }
-                    if name == "ExpiringSecret"
+                    if import_ns.is_none()
+                        && lookup_name == "ExpiringSecret"
                         && (args.len() != 1
                             || !args.first().is_some_and(
                                 crate::Sema::Diagnostics::is_expiring_secret_member_type,
@@ -403,13 +529,14 @@ impl<'a> Checker<'a> {
                             Some(span),
                         ));
                     }
-                    let imported_owner = self.modules.and_then(|modules| {
-                        self.imports.values().copied().find(|&idx| {
-                            modules[idx].registry.contains(name) && self.type_is_pub_in(idx, name)
-                        })
-                    });
+                    let imported_owner = self
+                        .struct_owner_module(lookup_name, import_ns)
+                        .filter(|&idx| {
+                            idx != self.module_idx && self.type_is_pub_in(idx, lookup_name)
+                        });
+                    let local_owner = import_ns.is_none() && self.registry.contains(lookup_name);
                     if !is_core_generic
-                        && !self.registry.contains(name)
+                        && !local_owner
                         && imported_owner.is_none()
                     {
                         self.diags.push(Diagnostic::error(
@@ -421,24 +548,27 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     if !is_core_generic {
-                        let expected = self
-                            .trait_reg
-                            .struct_params
-                            .get(name)
-                            .or_else(|| self.trait_reg.enum_params.get(name))
-                            .cloned()
-                            .or_else(|| {
-                                imported_owner.and_then(|idx| {
-                                    self.modules.and_then(|modules| {
-                                        modules[idx]
-                                            .trait_reg
-                                            .struct_params
-                                            .get(name)
-                                            .or_else(|| modules[idx].trait_reg.enum_params.get(name))
-                                            .cloned()
-                                    })
+                        let expected = if import_ns.is_none() {
+                            self.trait_reg
+                                .struct_params
+                                .get(lookup_name)
+                                .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+                                .cloned()
+                        } else {
+                            None
+                        }
+                        .or_else(|| {
+                            imported_owner.and_then(|idx| {
+                                self.modules.and_then(|modules| {
+                                    modules[idx]
+                                        .trait_reg
+                                        .struct_params
+                                        .get(lookup_name)
+                                        .or_else(|| modules[idx].trait_reg.enum_params.get(lookup_name))
+                                        .cloned()
                                 })
-                            });
+                            })
+                        });
                         if let Some(params) = expected {
                             if params.len() != args.len() {
                                 self.diags.push(Diagnostic::error(
@@ -478,7 +608,8 @@ impl<'a> Checker<'a> {
                         // D-MEM-VIEWRET1: `View<str>` is the named string-view
                         // spelling. `str` is not a free-standing type — only
                         // this View argument slot may name it.
-                        if name == "View"
+                        if import_ns.is_none()
+                            && lookup_name == "View"
                             && matches!(arg, Type::Named(inner) if inner == "str")
                         {
                             continue;
@@ -645,10 +776,7 @@ impl<'a> Checker<'a> {
         /// Returns true when a diagnostic was emitted (the mismatch is already
         /// reported); callers may add a context-specific error otherwise.
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
-            if want != got && self.nominal_type_identity(want, got) {
-                return false;
-            }
-            if want == got {
+            if self.nominal_type_identity(want, got) {
                 if !Type::obligations_satisfy(want, got) {
                     self.diags.push(Diagnostic::error(
                         "E0108",
