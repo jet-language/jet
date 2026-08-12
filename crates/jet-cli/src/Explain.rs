@@ -16,11 +16,11 @@ pub struct Explanation {
     pub stage: String,
     /// One-line meaning from the registry table (always present).
     pub meaning: String,
-    /// Plain-language "what happened", from a detailed table (when present).
+    /// Plain-language "what happened", from a detailed row (when present).
     pub what: Option<String>,
-    /// The rule behind it, from a detailed table (when present).
+    /// The rule behind it, from a detailed row (when present).
     pub why: Option<String>,
-    /// A concrete next step, from a detailed table (when present).
+    /// A concrete next step, from a detailed row (when present).
     pub fix: Option<String>,
     /// True when the registry marks the code as retired (kept for history).
     pub retired: bool,

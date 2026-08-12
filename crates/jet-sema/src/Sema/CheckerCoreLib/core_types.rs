@@ -770,7 +770,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == Syntax::TYPE_TYPE_INFO {
         return match field {
-            "name" | "module" | "identity" | "kind" => Some(Type::String),
+            "name" | "path" | "module" | "identity" | "kind" => Some(Type::String),
             "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),

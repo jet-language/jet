@@ -32,10 +32,24 @@ pub struct ProjectPart {
     pub state: ProjectPartState,
 }
 
+impl ProjectPart {
+    /// The source spelling accepted by `use` and shown by user-facing
+    /// projections. Keep the scanner's leaf `name` for lookup and storage.
+    pub fn canonical_name(&self) -> String {
+        format!("{}{}", Syntax::PROJECT_IMPORT_PREFIX, self.name)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectPartConflict {
     pub name: String,
     pub paths: Vec<PathBuf>,
+}
+
+impl ProjectPartConflict {
+    pub fn canonical_name(&self) -> String {
+        format!("{}{}", Syntax::PROJECT_IMPORT_PREFIX, self.name)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -56,9 +70,17 @@ impl ProjectPartScanFailure {
             .replace('\\', "/");
         Diagnostic::error(
             "E0603",
-            format!("can't load project module `{name}` from `{path}`"),
+            format!(
+                "can't load project module `{}{}` from `{path}`",
+                Syntax::PROJECT_IMPORT_PREFIX,
+                name
+            ),
             format!("`{path}` has a source error: {}", self.problem.what),
-            format!("fix `{path}` first, then import `project.{name}` again"),
+            format!(
+                "fix `{path}` first, then import `{}{}` again",
+                Syntax::PROJECT_IMPORT_PREFIX,
+                name
+            ),
             Some(span),
         )
     }
@@ -79,7 +101,10 @@ impl ProjectPartConflict {
             .join(", ");
         Diagnostic::error(
             "E0606",
-            format!("project module `{}` is declared more than once", self.name),
+            format!(
+                "project module `{}` is declared more than once",
+                self.canonical_name()
+            ),
             "a project module name must resolve to one declaration".to_string(),
             format!("keep one `module {}` declaration; found {paths}", self.name),
             span,

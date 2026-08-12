@@ -21,7 +21,7 @@ pub use program_imports::{
     core_list_prefix, import_item_alias,
 };
 pub use crate::Names::{
-    mangle, mangle_path, mangle_variant, member_name, user_trait_rust, user_type_rust, NameLedger,
+    mangle, mangle_path, member_name, NameLedger,
 };
 
 #[path = "AST/items.rs"]

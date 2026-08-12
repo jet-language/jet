@@ -377,23 +377,23 @@ fn finding_to_diagnostic(snapshot: &TypedSnapshot, finding: &Finding) -> Diagnos
         .iter()
         .find(|s| s.id == finding.span_id)
         .map(|s| Span::new(s.start as usize, s.end as usize));
-    let what = format!(
-        "compiler-extension `{}` ({}): {}",
-        finding.rule, finding.severity, finding.message
-    );
-    let why = "a configured compiler-extension component reported this finding after type checking (D-DX5-HOOK1)".to_string();
-    let fix = "address the finding, or unset JET_COMPILER_EXTENSION to skip the extension".to_string();
     // V1 maps every guest finding to a lint (L1401). Teams wall via
     // `policy.lints.deny` (D-LINTPOLICY1).
-    Diagnostic::lint("L1401", what, why, fix, span)
+    Diagnostic::from_row(
+        "L1401",
+        &[
+            ("rule", finding.rule.as_str()),
+            ("severity", finding.severity.as_str()),
+            ("message", finding.message.as_str()),
+        ],
+        span,
+    )
 }
 
 fn host_failure(message: &str, span: Option<Span>) -> Diagnostic {
-    Diagnostic::error(
+    Diagnostic::from_row(
         "E1402",
-        format!("compiler-extension failed: {message}"),
-        "the configured compiler-extension component could not complete analyze, or returned an invalid response (D-DX5-HOOK1)".to_string(),
-        "fix the component, or unset JET_COMPILER_EXTENSION to skip the extension".to_string(),
+        &[("message", message)],
         span,
     )
 }

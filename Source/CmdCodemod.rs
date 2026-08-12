@@ -872,7 +872,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         .filter_map(|atom| match atom {
             Atom::Capture(name, variadic) => Some((
                 name.clone(),
-                format!("__jet_codemod_capture_{}", name),
+                jet_foundation::Names::mangle(&format!("codemod_capture_{name}")),
                 *variadic,
             )),
             Atom::Literal(_) => None,

@@ -1365,7 +1365,7 @@ pub(crate) fn str_match_scan_closure_ex(
     let mut tuple_vars: Vec<String> = holes
         .iter()
         .map(|(n, _)| {
-            crate::Syntax::generated_name(&format!(
+            jet_foundation::Names::mangle(&format!(
                 "sm_{}",
                 crate::Syntax::generated_suffix(&mangle(n))
             ))
@@ -1496,7 +1496,7 @@ pub(crate) fn bin_match_scan_closure_ex(
     let mut tuple_vars: Vec<String> = holes
         .iter()
         .map(|(n, _)| {
-            crate::Syntax::generated_name(&format!(
+            jet_foundation::Names::mangle(&format!(
                 "bm_{}",
                 crate::Syntax::generated_suffix(&mangle(n))
             ))

@@ -162,11 +162,7 @@ pub(crate) fn emit_cli_report(
     fix: String,
     json: bool,
 ) {
-    let diagnostic = jet::Diagnostics::Diagnostic::registered_with_problem(code, &what, None)
-        .unwrap_or_else(|| {
-            jet::Diagnostics::Diagnostic::error(code, what, why, fix, None)
-                .at_moment(jet::Diagnostics::ReportMoment::Tool)
-        });
+    let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None);
     if json {
         print!("{}", jet::render_all_json("", "", &[diagnostic]));
     } else {
@@ -881,7 +877,7 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
             .map(|part| {
                 format!(
                     "{{\"name\":\"{}\",\"path\":\"{}\",\"state\":\"{}\"}}",
-                    esc(&part.name),
+                    esc(&part.canonical_name()),
                     esc(&relative(&part.path)),
                     part.state.name()
                 )
@@ -900,7 +896,7 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
                     .join(",");
                 format!(
                     "{{\"name\":\"{}\",\"paths\":[{}]}}",
-                    esc(&conflict.name),
+                    esc(&conflict.canonical_name()),
                     paths
                 )
             })
@@ -915,7 +911,7 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
             println!(
                 "{:<9} {:<24} {}",
                 part.state.name(),
-                part.name,
+                part.canonical_name(),
                 relative(&part.path)
             );
         }

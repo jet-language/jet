@@ -1037,7 +1037,7 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
 pub fn error_conv_fn_name(from: &str, to: &str) -> String {
     let f = from.replace('.', "_");
     let t = to.replace('.', "_");
-    Syntax::generated_name(&format!("errconv_{f}_to_{t}"))
+    jet_foundation::Names::mangle(&format!("errconv_{f}_to_{t}"))
 }
 
 pub(crate) fn already_defined(name: &str, span: Span) -> Diagnostic {

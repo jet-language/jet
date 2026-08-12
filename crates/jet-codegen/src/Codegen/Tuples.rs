@@ -27,7 +27,7 @@ pub(crate) fn tuple_struct_name(fields: &[(String, Type)]) -> String {
         name.hash(&mut hasher);
         ty.name().hash(&mut hasher);
     }
-    crate::Syntax::generated_name(&format!("JetTup_{:x}", hasher.finish()))
+    jet_foundation::Names::mangle(&format!("JetTup_{:x}", hasher.finish()))
 }
 
 pub(crate) fn tuple_fields_plain(fields: &[(String, Box<Type>)]) -> Vec<(String, Type)> {

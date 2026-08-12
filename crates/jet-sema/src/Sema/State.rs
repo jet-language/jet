@@ -904,16 +904,9 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
 /// making it a dead end — a value in this state can never advance further.
 /// This is a warning (not an error) so a half-built machine still compiles.
 pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "L0151",
-        format!("`{state}` (in `state {type_name}`) has no outgoing transition"),
-        format!(
-            "typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — \
-             a value that reaches `{state}` can never advance to another state"
-        ),
-        format!(
-            "add `#Transition({state}, NextState) fn …` on `{type_name}`, or remove `{state}` from the declaration"
-        ),
+        &[("state", state), ("type", type_name)],
         Some(span),
     )
 }
@@ -922,16 +915,9 @@ pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
 /// different states, so from here the compiler can no longer say which state it
 /// is in. A warning, not an error: the code may never need the state again.
 pub fn l0152(value: &str, one: &str, other: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "L0152",
-        format!("`{value}` ends in state `{one}` on one path and `{other}` on another"),
-        format!(
-            "typestate (D-STATE1): after two paths meet, a state holds only when both paths agree — \
-             here they do not, so `{value}` is untracked from this point and later state checks on it stay silent"
-        ),
-        format!(
-            "bring both paths to the same state before they meet, or do the work that needs `{one}` or `{other}` inside the path that reaches it"
-        ),
+        &[("value", value), ("one", one), ("other", other)],
         Some(span),
     )
 }

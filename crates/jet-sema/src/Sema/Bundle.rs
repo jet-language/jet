@@ -1353,7 +1353,7 @@ fn populate_name_ledger(
 }
 
 /// D-MOD2: inside an inline `module math { … }`, a call to a sibling function
-/// `helper(x)` must lower to the mangled `math__helper`. This pre-pass rewrites
+/// `helper(x)` must lower to the mangled `__jet_math__helper`. This pre-pass rewrites
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
     pipeline_check_bundle_opts_for_output(bundle, mode, false, false, None, None).0
@@ -1403,7 +1403,9 @@ fn validate_script_entry_bodies(bundle: &mut ProgramBundle, diags: &mut Vec<Diag
                     .to_string(),
                 Some(run.name_span),
             );
-            diagnostic.edit = script_conflict_edit(&module.source, &body, &run);
+            if let Some(edit) = script_conflict_edit(&module.source, &body, &run) {
+                diagnostic.set_structured_edit(edit);
+            }
             diags.push(diagnostic);
         } else {
             module

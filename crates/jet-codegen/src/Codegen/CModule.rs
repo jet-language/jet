@@ -28,7 +28,7 @@ const UTF8_RETURN_PANIC: &str =
 /// `cx.rust_type` already prepends that prefix itself for the handful of
 /// reserved/builtin type names it special-cases (e.g. `Point` → `JetPoint`);
 /// only the generic user-struct/enum/distinct fallback (`Codegen/Context.rs`,
-/// `Type::Named(name) => user_type_rust(name)`) does not, since ordinarily
+/// `Type::Named(name) => mangle_path(name)`) does not, since ordinarily
 /// that fallback fires for a type local to the CURRENT module (no prefix
 /// needed there). Detect which case this is by whether the resolved name
 /// already carries the prefix.

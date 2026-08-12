@@ -133,13 +133,13 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         if repr_c {
             out.push_str(&format!(
                 "#[repr(C)]\npub struct {}{} {{\n",
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 type_params
             ));
         } else {
             out.push_str(&format!(
                 "pub struct {}{} {{\n",
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 type_params
             ));
         }
@@ -147,14 +147,14 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!(
             "#[repr(C)]\n#[derive({})]\npub struct {}{} {{\n",
             rust_derives.join(", "),
-            user_type_rust(&s.name),
+            mangle_path(&s.name),
             type_params
         ));
     } else {
         out.push_str(&format!(
             "#[derive({})]\npub struct {}{} {{\n",
             rust_derives.join(", "),
-            user_type_rust(&s.name),
+            mangle_path(&s.name),
             type_params
         ));
     }
@@ -207,7 +207,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             out.push_str(&format!(
                 "impl{} JetShow for {}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
                 tp_bounds,
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 tp_plain,
                 show_body
             ));
@@ -229,7 +229,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             out.push_str(&format!(
                 "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
                 debug_tp_bounds,
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 tp_plain,
                 debug_body
             ));
@@ -241,7 +241,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             out.push_str(&format!(
                 "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
                 tp_bounds,
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 tp_plain,
             ));
         }
@@ -254,7 +254,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         if cx.auto_printable.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{impl_generic} JetShow for {}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 show_body
             ));
         }
@@ -262,7 +262,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         if cx.auto_debug.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{impl_generic} JetDebug for {}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
                 debug_body
             ));
         }
@@ -272,7 +272,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         {
             out.push_str(&format!(
                 "impl{impl_generic} JetDisplay for {}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
-                user_type_rust(&s.name),
+                mangle_path(&s.name),
             ));
         }
     }
@@ -294,8 +294,8 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     // D-FIELDPOL1: a computed field is never a stored column.
     let fields: Vec<&Field> = s.fields.iter().filter(|f| f.computed.is_none()).collect();
     let name = &s.name;
-    let rust_name = user_type_rust(name);
-    let cn = crate::Syntax::generated_path(&format!("{name}_columns"));
+    let rust_name = mangle_path(name);
+    let cn = jet_foundation::Names::mangle_path(&format!("{name}_columns"));
 
     let mut rust_derives: Vec<&str> = vec!["Debug"];
     if cx.cloneable.contains(name) {
@@ -457,7 +457,7 @@ fn cli_option_spec_line(
 }
 
 fn cli_helper_name(kind: &str, type_name: &str) -> String {
-    crate::Syntax::generated_path(&format!("cli_{kind}_{type_name}"))
+    jet_foundation::Names::mangle_path(&format!("cli_{kind}_{type_name}"))
 }
 
 /// D-CLIFLAG1: emit `__jet_cli_spec_<Name>`/`__jet_cli_decode_<Name>` for a
@@ -467,7 +467,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     let Some(schema) = jet_foundation::CLISchema::command_schema(s) else {
         return;
     };
-    let cn = user_type_rust(&s.name);
+    let cn = mangle_path(&s.name);
     let root = &cx.root_prefix;
 
     let mut spec_body = String::new();
@@ -593,9 +593,9 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
     {
         return;
     }
-    let base_rust = user_type_rust(&s.name);
+    let base_rust = mangle_path(&s.name);
     let patch_name = format!("{}.Patch", s.name);
-    let patch_rust = user_type_rust(&patch_name);
+    let patch_rust = mangle_path(&patch_name);
 
     let mut apply_fields = Vec::new();
     let mut diff_fields = Vec::new();
@@ -840,7 +840,7 @@ fn emit_cli_subcommand_entry(
             // Sema's E1307 already rejects this shape; unreachable at codegen.
             continue;
         };
-        let tag = mangle_variant(&v.name);
+        let tag = mangle_path(&v.name);
         let ctor = format!("{enum_rust}::{tag}(__payload)");
         let call_arg = arg_expr(&ctor);
         let invoke = emit_entry_invocation(
@@ -967,7 +967,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     let (encode_unions, decode_unions) = union_codec_needs(items);
     for members in unions {
         let name = crate::AST::union_enum_name(&members);
-        let rust_name = user_type_rust(&name);
+        let rust_name = mangle_path(&name);
         let empty = std::collections::HashSet::new();
         let has_shared_guard = members
             .iter()
@@ -1188,7 +1188,7 @@ fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
-    let rust_name = user_type_rust(&e.name);
+    let rust_name = mangle_path(&e.name);
     let has_view_payload = enum_has_view_payload(cx, e);
     let has_mutable_view_payload = e.variants.iter().any(|variant| match &variant.payload {
         VariantPayload::Unit => false,
@@ -1245,18 +1245,18 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         match &v.payload {
             VariantPayload::Unit => {
                 if let Some(d) = v.discriminant {
-                    out.push_str(&format!("    {} = {},\n", mangle_variant(&v.name), d));
+                    out.push_str(&format!("    {} = {},\n", mangle_path(&v.name), d));
                 } else {
-                    out.push_str(&format!("    {},\n", mangle_variant(&v.name)));
+                    out.push_str(&format!("    {},\n", mangle_path(&v.name)));
                 }
             }
             VariantPayload::Single(t, _) => {
                 let ty = cx.enum_field_rust_with_view_lifetime(&e.name, &v.name, t);
                 let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
-                out.push_str(&format!("    {}({}){},\n", mangle_variant(&v.name), ty, d));
+                out.push_str(&format!("    {}({}){},\n", mangle_path(&v.name), ty, d));
             }
             VariantPayload::Named(fs) => {
-                out.push_str(&format!("    {} {{\n", mangle_variant(&v.name)));
+                out.push_str(&format!("    {} {{\n", mangle_path(&v.name)));
                 for f in fs {
                     let key = format!("{}.{}", v.name, f.name);
                     let ty = cx.enum_field_rust_with_view_lifetime(&e.name, &key, &f.ty);
@@ -1669,7 +1669,7 @@ pub(crate) fn emit_type_impl(
     out.push_str(&format!(
         "impl{} {}{} {{\n",
         tp_impl,
-        user_type_rust(type_name),
+        mangle_path(type_name),
         tp_use
     ));
     for method in &lowered {
@@ -1760,8 +1760,8 @@ pub(crate) fn emit_trait_impl(
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
-        Generics::user_trait_rust(&block.trait_name),
-        user_type_rust(type_name),
+        crate::Codegen::mangle(&block.trait_name),
+        mangle_path(type_name),
         tp_use
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
@@ -1793,17 +1793,17 @@ pub(crate) fn emit_trait_impl(
     if block.trait_name == crate::Syntax::TRAIT_DISPLAY {
         out.push_str(&format!(
             "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",
-            user_type_rust(type_name),
-            user_type_rust(type_name),
-            Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
+            mangle_path(type_name),
+            mangle_path(type_name),
+            crate::Codegen::mangle(crate::Syntax::TRAIT_DISPLAY),
         ));
     }
     if block.trait_name == crate::Syntax::TRAIT_DEBUG {
         out.push_str(&format!(
             "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
-            user_type_rust(type_name),
+            mangle_path(type_name),
             tp_use,
-            user_type_rust(type_name),
+            mangle_path(type_name),
             tp_use,
         ));
     }
@@ -1817,7 +1817,7 @@ fn enum_jet_render_body(e: &EnumDef) -> String {
     let method = "jet_debug";
     let mut arms = String::new();
     for v in &e.variants {
-        let pat = mangle_variant(&v.name);
+        let pat = mangle_path(&v.name);
         match &v.payload {
             VariantPayload::Unit => {
                 arms.push_str(&format!(
@@ -1927,8 +1927,8 @@ pub(crate) fn emit_external_trait_impl(
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
-        Generics::user_trait_rust(trait_name),
-        user_type_rust(&i.type_name),
+        crate::Codegen::mangle(trait_name),
+        mangle_path(&i.type_name),
         tp_use,
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
@@ -1980,17 +1980,17 @@ pub(crate) fn emit_external_trait_impl(
     if trait_name == crate::Syntax::TRAIT_DISPLAY {
         out.push_str(&format!(
             "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",
-            user_type_rust(&i.type_name),
-            user_type_rust(&i.type_name),
-            Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
+            mangle_path(&i.type_name),
+            mangle_path(&i.type_name),
+            crate::Codegen::mangle(crate::Syntax::TRAIT_DISPLAY),
         ));
     }
     if trait_name == crate::Syntax::TRAIT_DEBUG {
         out.push_str(&format!(
             "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
-            user_type_rust(&i.type_name),
+            mangle_path(&i.type_name),
             tp_use,
-            user_type_rust(&i.type_name),
+            mangle_path(&i.type_name),
             tp_use,
         ));
     }
@@ -2028,7 +2028,7 @@ fn emit_trait_method(
 /// newtype for a distinct type declaration. The inner field is `pub` so
 /// codegen can access it for `.raw()` (lowers to `.0`).
 pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
-    let rust_name = user_type_rust(&d.name);
+    let rust_name = mangle_path(&d.name);
     let base_rust = cx.rust_type(&d.base);
     // Backend representation derives only. The distinct type's Jet
     // Equatable/Comparable implementations come from the sema source path.

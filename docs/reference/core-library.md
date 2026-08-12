@@ -1120,6 +1120,7 @@ fn run() {
     p :: Point.{ x: 3, y: 4 }
     v :: reflect.of(p)
     print(v.type_name())    // "Point"
+    print(v.path())         // the canonical typeable path, e.g. "reflect_value.Point"
     print(v.display())      // "(3, 4)" — exactly what "{p}" would print
     loop f; v.fields() {
         print("{f.name()} = {f.value()}")
@@ -1132,6 +1133,7 @@ fn run() {
 | Method | Signature | Returns |
 |--------|-----------|---------|
 | `.type_name()` | `() → String` | the value's declared type name |
+| `.path()` | `() → String` | the canonical typeable path; `.type_name()` remains its leaf |
 | `.display()` | `() → String` | the same string `"{x}"` interpolation shows |
 | `.fields()` | `() → [Field]` | one entry per struct field; `[]` for anything else (primitives, enums, tuples, lists) |
 
@@ -3669,7 +3671,7 @@ share that source-owned TIR path.
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#RenameAll(camel)` |
 | `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
-| `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
+| `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.path()`/`.display()`/`.fields()` |
 | `examples/features/syntax/maturity_tags.jet` | `#Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

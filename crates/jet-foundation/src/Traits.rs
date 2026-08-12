@@ -2321,7 +2321,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::List(inner) => format!("Vec<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Named(n) if n.is_empty() => "Self".to_string(),
         Type::Named(n) if assoc.contains(n) => format!("Self::{n}"),
-        Type::Named(n) => crate::Names::user_type_rust(n),
+        Type::Named(n) => crate::Names::mangle_path(n),
         Type::Apply { name, args } if name == "View" && args.len() == 1 => {
             if matches!(&args[0], Type::Named(inner) if inner == "str") {
                 "&str".to_string()
@@ -2334,7 +2334,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         }
         Type::Apply { name, args } => format!(
             "{}<{}>",
-            crate::Names::user_type_rust(name),
+            crate::Names::mangle_path(name),
             args.iter()
                 .map(|a| rust_type_name_assoc(a, assoc))
                 .collect::<Vec<_>>()
@@ -2345,7 +2345,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::TraitObject(t) => format!(
             "Box<dyn {}>",
             t.iter()
-                .map(|name| crate::Names::user_type_rust(name))
+                .map(|name| crate::Names::mangle_path(name))
                 .collect::<Vec<_>>()
                 .join(" + ")
         ),
@@ -2375,7 +2375,7 @@ pub fn emit_trait_def(
     out: &mut String,
     render_view_return: impl Fn(&Type, &HashSet<String>) -> String,
 ) {
-    out.push_str(&format!("pub trait {} {{\n", crate::Names::user_trait_rust(&t.name)));
+    out.push_str(&format!("pub trait {} {{\n", crate::Names::mangle(&t.name)));
     // D-LIB2: declare each associated type; method sigs below render uses of it
     // as `Self::Name`, and each impl emits `type Name = <concrete>;`.
     let assoc: HashSet<String> = t.assoc_types.iter().map(|(n, _)| n.clone()).collect();

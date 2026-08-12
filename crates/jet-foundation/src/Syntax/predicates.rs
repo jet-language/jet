@@ -96,7 +96,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
     "core.term",
     // D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): runtime reflection floor —
-    // `reflect.of(x) -> Value` with `.type_name()`/`.display()`/`.fields()`.
+    // `reflect.of(x) -> Value` with `.type_name()`/`.path()`/`.display()`/`.fields()`.
     "core.reflect",
     // D-FRONTENDAPI1=A: read-only compiler facts are available only to
     // compile-time build code; no runtime compiler object is emitted.
@@ -590,11 +590,19 @@ mod generated_name_tests {
         assert_eq!(generated_path("__jet_grades.curve"), "__jet_grades__curve");
         assert_eq!(generated_suffix("__jet_run"), "run");
     }
-
     #[test]
     fn canonical_core_names_are_reserved_for_generated_names() {
         for name in ["Decimal", "Duration", "Date", "LocalDate", "LocalTime", "JSONError"] {
             assert!(is_reserved_generated_name(name), "unreserved canonical Core name `{name}`");
         }
+    }
+
+    #[test]
+    fn underscore_ladder_has_one_source_classification() {
+        assert_eq!(classify_identifier("_"), IdentifierClass::Ordinary);
+        assert_eq!(classify_identifier("_name"), IdentifierClass::SoftPublic);
+        assert_eq!(classify_identifier("__name"), IdentifierClass::Reserved);
+        assert_eq!(classify_identifier("__name__"), IdentifierClass::Reserved);
+        assert_eq!(classify_identifier("name_"), IdentifierClass::Ordinary);
     }
 }

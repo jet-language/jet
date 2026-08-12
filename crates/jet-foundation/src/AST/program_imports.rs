@@ -498,7 +498,7 @@ pub enum TryConvert {
     /// Holds the mangled Rust function name emitted by codegen.
     Typed(String),
     /// D-UNIONTYPE1=A: source error is one member of the return's anonymous union.
-    /// Codegen wraps with `user_<enum>::<tag>(e)`.
+    /// Codegen wraps with the canonical `__jet_<enum>::__jet_<tag>(e)` path.
     WidenUnion { enum_name: String, tag: String },
 }
 

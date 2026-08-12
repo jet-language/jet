@@ -1156,7 +1156,7 @@ pub(crate) fn check_module_bodies(
                     for inner in body.iter_mut() {
                         if let Item::Func(f) = inner {
                             // Inline-module calls use their registered mangled
-                            // identity (`module__fn`). Preserve any top-level
+                            // identity (`__jet_module__fn`). Preserve any top-level
                             // same-name summary while the shared body checker
                             // emits this function's local summary.
                             let previous = summaries.remove(&f.name);

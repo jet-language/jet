@@ -2219,7 +2219,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 )
             };
             let binding_name = if is_resource {
-                crate::Syntax::generated_name(&format!("resource_{}_{}", b.name, b.name_span.start))
+                jet_foundation::Names::mangle(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
                 b.name.clone()
             };

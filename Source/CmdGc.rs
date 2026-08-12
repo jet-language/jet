@@ -475,8 +475,7 @@ fn fail(error: TraceError, mode: OutputMode) -> ! {
         format!("{}.", error.detail.trim_end_matches('.')),
         format!("{fix}."),
         None,
-    )
-    .at_moment(jet::Diagnostics::ReportMoment::Tool);
+    );
     if mode.json {
         print!("{}", jet::render_all_json("", "", &[diagnostic]));
     } else {

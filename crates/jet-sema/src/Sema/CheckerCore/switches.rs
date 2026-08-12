@@ -533,7 +533,7 @@ impl<'a> Checker<'a> {
                 // Attach a structured insert so LSP/CLI can add compilable arms.
                 if !multi_head {
                     if let Some(at) = insert_at {
-                        diag.edit = Some(TextEdit {
+                        diag.set_structured_edit(TextEdit {
                             span: at,
                             new_text: missing_arms_text(st, &missing, subj_name),
                         });

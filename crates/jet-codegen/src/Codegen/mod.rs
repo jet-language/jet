@@ -21,7 +21,7 @@ use crate::AST::{
 };
 use std::collections::HashSet;
 
-pub(crate) use jet_foundation::Names::{mangle, mangle_path as mangle_variant, user_type_rust};
+pub(crate) use jet_foundation::Names::{mangle, mangle_path};
 
 mod CModule;
 mod Context;

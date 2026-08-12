@@ -1,6 +1,6 @@
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
-use crate::Codegen::user_type_rust;
+use crate::Codegen::mangle_path;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_let_ty_clause;
 use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
@@ -1198,7 +1198,7 @@ fn emit_tir_stmt(
             index,
             value,
         } => {
-            let ty = cx.rust_type(&Type::Named(type_name.clone()));
+            let ty = mangle_path(type_name);
             let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
@@ -1360,8 +1360,8 @@ fn emit_tir_stmt(
                     coll_type,
                     iter_type,
                 }) => {
-                    let coll_rust = user_type_rust(coll_type);
-                    let iter_rust = user_type_rust(iter_type);
+                    let coll_rust = mangle_path(coll_type);
+                    let iter_rust = mangle_path(iter_type);
                     out.push_str(&format!(
                         "{}{{ let mut __jet_it = <{coll_rust} as __jet_Iterable>::iter(({collection_str}));\n",
                         pad,
@@ -1756,7 +1756,7 @@ fn emit_tir_stmt(
                             Some(ty) => {
                                 out.push_str(&format!(
                                     "{}{{ let __snap = ({}).snapshot(); {}jet_txn::snapshot_custom(&mut {}, &mut {}, __snap, {}::restore); }}\n",
-                                    inner_pad, place, cx.root_prefix, handle, place, user_type_rust(&ty.name())
+                                    inner_pad, place, cx.root_prefix, handle, place, mangle_path(&ty.name())
                                 ));
                             }
                         }

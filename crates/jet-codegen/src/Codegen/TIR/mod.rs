@@ -45,7 +45,7 @@ pub(crate) use lower::*;
 pub(crate) use subset::*;
 
 use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp, VariantPayload};
-use crate::Codegen::{mangle, mangle_variant, user_type_rust};
+use crate::Codegen::{mangle, mangle_path};
 
 thread_local! {
     static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
@@ -146,6 +146,8 @@ pub struct JitProgram {
     pub struct_fields: std::collections::HashMap<String, Vec<String>>,
     /// M5: field types parallel to `struct_fields` order.
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
+    /// Canonical typeable paths used by interpreter reflection.
+    pub reflect_paths: std::collections::HashMap<String, String>,
     /// Declared generic parameter names per struct, in source order.
     pub struct_type_params: std::collections::HashMap<String, Vec<String>>,
     /// M5: mangled variant names per enum type (discriminant order).
@@ -253,11 +255,11 @@ fn register_enum_variants(
         enum_name.to_string(),
         variants
             .iter()
-            .map(|variant| mangle_variant(&variant.name))
+            .map(|variant| mangle_path(&variant.name))
             .collect(),
     );
     for variant in variants {
-        let pattern = format!("{}::{}", user_type_rust(enum_name), mangle_variant(&variant.name));
+        let pattern = format!("{}::{}", mangle_path(enum_name), mangle_path(&variant.name));
         enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
     }
 }
@@ -276,14 +278,14 @@ fn register_imported_enum_variants(
         identity.clone(),
         variants
             .iter()
-            .map(|variant| mangle_variant(&variant.name))
+            .map(|variant| mangle_path(&variant.name))
             .collect(),
     );
     for variant in variants {
         let pattern = format!(
             "{}::{}",
-            user_type_rust(&identity),
-            mangle_variant(&variant.name)
+            mangle_path(&identity),
+            mangle_path(&variant.name)
         );
         let payload = payload_types_for_variant(&variant.payload)
             .into_iter()
@@ -1803,6 +1805,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
     let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
     let canonical_calls = cx.jit_canonical_calls.borrow().clone();
+    let reflect_paths = cx.reflect_paths.clone();
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -1811,6 +1814,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         spawn_lambdas,
         struct_fields,
         struct_field_types,
+        reflect_paths,
         struct_type_params,
         enum_variants,
         enum_variant_payload_types,
@@ -4734,6 +4738,7 @@ pub enum THandleOp {
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s `Value` handle — plain
     /// inherent-method passthrough, same shape as `ArgsSpecHelp`.
     ReflectValueTypeName,
+    ReflectValuePath,
     ReflectValueDisplay,
     ReflectValueFields,
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x).fields()`'s `Field` handle.

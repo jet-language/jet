@@ -166,6 +166,11 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
+    // Derive bodies receive the same canonical path that later reflection and
+    // tooling projections read. The final population pass remains below for
+    // aliases and references discovered during registration.
+    populate_name_ledger(bundle, &states, &mut name_ledger);
+
     // D-METADERIVE1=A orphan law needs a bundle-wide provider view: a derive
     // may be supplied by the entry module for an imported type, or imported
     // for an entry-local type.  Clone provider bodies/helpers before mutating
@@ -446,7 +451,7 @@ fn check_bundle_opts_for_output_inner(
                 Item::CodeModule(cm) => {
                     if let Some(body) = &cm.body {
                         // D-MOD2: register inline module functions under mangled names
-                        // (`math__double`) so call-site sema can check them.
+                        // (`__jet_math__double`) so call-site sema can check them.
                         st.code_modules.insert(cm.name.clone(), cm.name.clone());
                         st.code_module_identities.insert(
                             cm.name.clone(),
@@ -561,8 +566,14 @@ fn check_bundle_opts_for_output_inner(
                                 _ => None,
                             })
                             .unwrap_or_default();
-                        let type_info =
-                            crate::Comptime::build_struct_type_info_with_states(s, &states);
+                        let type_path = name_ledger
+                            .canonical_path(idx, &s.name)
+                            .expect("derive target missing from the name ledger");
+                        let type_info = crate::Comptime::build_struct_type_info_with_path(
+                            s,
+                            &states,
+                            &type_path,
+                        );
 
                         match crate::Comptime::evaluate_derive_body(
                             body,
@@ -904,7 +915,7 @@ fn check_bundle_opts_for_output_inner(
             };
             let st = &mut states[idx];
             if let Some(canonical) = st.code_modules.get(module_alias.as_str()) {
-                // Inline module: items are mangled as `{alias}__{item}`.
+                // Inline module: items are mangled as `__jet_{alias}__{item}`.
                 for (orig, alias_opt) in items {
                     let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
                     let mangled = jet_foundation::Names::member_name(canonical, orig);

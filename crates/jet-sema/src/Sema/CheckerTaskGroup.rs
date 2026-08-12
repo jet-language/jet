@@ -64,7 +64,7 @@ impl TaskGroupCtx {
     fn next_synth(&mut self) -> String {
         let n = self.synth_counter;
         self.synth_counter += 1;
-        Syntax::generated_name(&format!("tg_{n}"))
+        jet_foundation::Names::mangle(&format!("tg_{n}"))
     }
 }
 

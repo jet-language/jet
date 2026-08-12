@@ -1655,6 +1655,25 @@ impl Type {
         }
     }
 
+    /// User-facing leaf spelling of a nominal type. Generic arguments keep
+    /// their full spelling; only the nominal head loses its module qualifier.
+    pub fn leaf_name(&self) -> String {
+        match self {
+            Type::Named(name) => name
+                .rsplit_once('.')
+                .map_or_else(|| name.clone(), |(_, leaf)| leaf.to_string()),
+            Type::Apply { name, .. } => {
+                let full = self.name();
+                let leaf = name
+                    .rsplit_once('.')
+                    .map_or(name.as_str(), |(_, leaf)| leaf);
+                full.strip_prefix(name.as_str())
+                    .map_or(full.clone(), |suffix| format!("{leaf}{suffix}"))
+            }
+            _ => self.name(),
+        }
+    }
+
     /// Base name for struct/enum/trait references (without generic args).
     pub fn base_name(&self) -> Option<&str> {
         match self {
@@ -1869,6 +1888,15 @@ mod tests {
         assert_eq!(bare.name(), "fn(Bool) => Int");
         assert_eq!(labelled.name(), "fn(*, force: Bool) => Int");
         assert_eq!(labelled.show(), "fn(*, force: Bool) => Int");
+        assert_eq!(Type::Named("dep.Point".to_string()).leaf_name(), "Point");
+        assert_eq!(
+            Type::Apply {
+                name: "dep.Box".to_string(),
+                args: vec![Type::Named("other.Item".to_string())],
+            }
+            .leaf_name(),
+            "Box<other.Item>"
+        );
     }
 
     #[test]

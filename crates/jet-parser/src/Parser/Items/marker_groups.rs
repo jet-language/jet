@@ -444,7 +444,7 @@ impl<'a> Parser<'a> {
                     Some(Span::new(group_span.start, close.end)),
                 );
                 if let Some(marker) = Self::marker_fix_source(&group[0]) {
-                    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+                    diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
                         span: Span::new(group_span.start, close.end),
                         new_text: format!("#{marker}"),
                     });
@@ -530,7 +530,7 @@ impl<'a> Parser<'a> {
                     .map(Self::marker_fix_source)
                     .collect::<Option<Vec<_>>>()
                 {
-                    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+                    diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
                         span,
                         new_text: format!("#[{}]", rendered.join(", ")),
                     });

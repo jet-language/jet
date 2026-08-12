@@ -28,6 +28,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Schema::load_snapshot;
 use crate::Traits::TraitRegistry;
+use jet_foundation::Names::mangle;
 use crate::AST::{
     AccessConvention, Expr, Func, Item, LambdaBody, MigrationOp, Param, ProgramBundle, Stmt, Type,
 };
@@ -39,14 +40,14 @@ use std::path::Path;
 /// index (source order, per type), and the field — so codegen and this desugar
 /// agree without a shared side-table.
 fn converter_fn_name(type_name: &str, block_idx: usize, field: &str) -> String {
-    format!("__migrate_conv_{}_{}_{}", type_name, block_idx, field)
+    mangle(&format!("migrate_conv_{type_name}_{block_idx}_{field}"))
 }
 
 /// D-MIGRATE4: the mangled name of the synthetic zero-arg default function an
 /// `add f: T = val` op lowers to. Same determinism contract as
 /// `converter_fn_name`.
 fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String {
-    format!("__migrate_add_{}_{}_{}", type_name, block_idx, field)
+    mangle(&format!("migrate_add_{type_name}_{block_idx}_{field}"))
 }
 
 /// D-MIGRATE4: rewrite each runtime-relevant migration op on a decodable
@@ -54,8 +55,8 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 /// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
 /// them, and so the op expressions are type-checked and lowered through the
 /// normal pipeline:
-///   - `change … via { (old) => body }` → `fn __migrate_conv_<T>_<i>_<f>(old: Old) => New`
-///   - `add f: T = val`                 → `fn __migrate_add_<T>_<i>_<f>() => T`
+///   - `change … via { (old) => body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) => New`
+///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() => T`
 /// The op's `conv_fn`/`default_fn` is set to the synthetic name. Types that
 /// never decode at runtime (no `Decode` derive, or generic) get nothing — the
 /// migration stays a compile-time intent check only, and codegen emits nothing

@@ -3,7 +3,7 @@ use crate::Generics;
 use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
-use crate::Codegen::user_type_rust;
+use crate::Codegen::mangle_path;
 use crate::Codegen::TIR::emit::collect_select_arms;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
@@ -1089,7 +1089,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 };
                 return format!(
                     "{}::__jet_{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
-                    Generics::user_trait_rust(trait_name),
+                    crate::Codegen::mangle(trait_name),
                     emit_tir_expr(recv, cx),
                     cx.file,
                 );
@@ -2261,14 +2261,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Type::Apply { name, args } if !args.is_empty() => {
                     let head = match cx.foreign_types.get(name) {
                         Some(rust_mod) => {
-                            let leaf = crate::Codegen::nominal_leaf(name);
-                            format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(leaf))
+                            format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(name))
                         }
                         None => {
-                            if matches!(name.as_str(), "DkimConfig" | "SMTPConfig") {
+                            if let Some((alias, leaf)) = name.split_once('.') {
+                                cx.import_mods.get(alias).map_or_else(
+                                    || mangle_path(name),
+                                    |rust_mod| {
+                                        format!(
+                                            "{}{}::{}",
+                                            cx.root_prefix,
+                                            rust_mod,
+                                            mangle_path(leaf)
+                                        )
+                                    },
+                                )
+                            } else if matches!(name.as_str(), "DkimConfig" | "SMTPConfig") {
                                 format!("{}jet_email::{}", cx.root_prefix, name)
                             } else {
-                                user_type_rust(name)
+                                mangle_path(name)
                             }
                         }
                     };
@@ -2341,7 +2352,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
                 Some((trait_name, _)) => {
-                    let trait_rust = crate::Generics::user_trait_rust(trait_name);
+                    let trait_rust = crate::Codegen::mangle(trait_name);
                     format!("Box::new({lit}) as Box<dyn {trait_rust}>")
                 }
                 None => lit,
@@ -2620,7 +2631,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let trait_rust = match &e.ty {
                 Type::List(inner) => match inner.as_ref() {
                     Type::TraitObject(names) if names.len() == 1 => {
-                        Some(crate::Generics::user_trait_rust(&names[0]))
+                        Some(crate::Codegen::mangle(&names[0]))
                     }
                     _ => None,
                 },
@@ -2814,7 +2825,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             index,
             line,
         } => {
-            let ty = cx.rust_type(&Type::Named(type_name.clone()));
+            let ty = mangle_path(type_name);
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(
@@ -2937,7 +2948,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-UNIONTYPE1=A: member error → anonymous union wrap.
                 TTryConvert::WidenUnion { enum_name, tag } => format!(
                     "jet_trace_err({}.map_err(|e| {}::{tag}(e)), {}, {}, {})?",
-                    v, user_type_rust(enum_name), file, line, fn_name
+                    v, mangle_path(enum_name), file, line, fn_name
                 ),
                 // Error types match — bare propagate.
                 TTryConvert::None => {
@@ -3856,6 +3867,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-ANY-JAI1 (c7jaiany §6): Value/Field are plain inherent-method
                 // passthroughs, same shape as `ArgsSpecHelp`.
                 THandleOp::ReflectValueTypeName => format!("({}).type_name()", recv),
+                THandleOp::ReflectValuePath => format!("({}).path()", recv),
                 THandleOp::ReflectValueDisplay => format!("({}).display()", recv),
                 THandleOp::ReflectValueFields => format!("({}).fields()", recv),
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
@@ -5005,7 +5017,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let mut bind_vars: Vec<String> = holes
                         .iter()
                         .map(|(n, _)| {
-                            crate::Syntax::generated_name(&format!(
+                            jet_foundation::Names::mangle(&format!(
                                 "sm_{}",
                                 crate::Syntax::generated_suffix(&mangle(n))
                             ))
@@ -5053,7 +5065,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let mut bind_vars: Vec<String> = holes
                         .iter()
                         .map(|(n, _)| {
-                            crate::Syntax::generated_name(&format!(
+                            jet_foundation::Names::mangle(&format!(
                                 "bm_{}",
                                 crate::Syntax::generated_suffix(&mangle(n))
                             ))

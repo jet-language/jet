@@ -1,5 +1,6 @@
 use super::super::*;
 use super::bindings::desugar_layout_anchors;
+use jet_foundation::Names::mangle;
 
 impl<'a> Parser<'a> {
     /// D-LOOPEVAL1: parse a finite `loop … -> …` as an immediately invoked,
@@ -176,7 +177,7 @@ impl<'a> Parser<'a> {
                     span: start,
                 }];
             }
-            let result_label = Syntax::generated_name(&format!("value_loop_{}", start.start));
+            let result_label = mangle(&format!("value_loop_{}", start.start));
             rewrite_collect_root_exits(&mut body, &result_label, 0);
             let loop_stmt = if let Some((init, cond, step)) = counted {
                 Stmt::CountedLoop {
@@ -282,7 +283,7 @@ impl<'a> Parser<'a> {
         // `break` exits the comprehension as one control construct. Give the
         // generated root a private label and retarget only exits owned by the
         // user body; exits inside an explicitly nested user loop remain local.
-        let collect_label = Syntax::generated_name(&format!("collect_loop_{}", start.start));
+        let collect_label = mangle(&format!("collect_loop_{}", start.start));
         rewrite_collect_root_exits(&mut body, &collect_label, 0);
 
         let loop_stmt = if let Some((init, cond, step)) = counted {

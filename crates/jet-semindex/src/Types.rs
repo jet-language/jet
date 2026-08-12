@@ -268,6 +268,8 @@ pub struct TypeDossier {
 pub struct SymbolDef {
     pub identity: String,
     pub name: String,
+    /// Canonical typeable spelling from the sema name ledger.
+    pub qualified_name: String,
     pub module_path: String,
     pub def_span: SourceSpan,
     pub kind: SymbolKind,

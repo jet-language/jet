@@ -351,6 +351,41 @@ fn visibility_key(
     Some((4, 0, 0))
 }
 
+pub(crate) fn canonical_symbol_name(
+    bundle: &ProgramBundle,
+    module_path: &str,
+    name: &str,
+    owner: Option<&str>,
+    span: Option<(usize, usize)>,
+) -> String {
+    let Some(module_idx) = bundle
+        .modules
+        .iter()
+        .position(|module| module.display == module_path || module.alias == module_path)
+    else {
+        return owner.map_or_else(|| name.to_string(), |owner| format!("{owner}.{name}"));
+    };
+    let ledger = &bundle.name_ledger;
+    if let Some((start, end)) = span {
+        if let Some(path) = ledger.canonical_path_at(module_idx, start, end) {
+            return path;
+        }
+    }
+    match owner {
+        Some(owner) => {
+            let owner_path = ledger
+                .display_path(module_idx, owner, Some(module_idx))
+                .or_else(|| ledger.canonical_path(module_idx, owner))
+                .unwrap_or_else(|| owner.to_string());
+            format!("{owner_path}.{name}")
+        }
+        None => ledger
+            .display_path(module_idx, name, Some(module_idx))
+            .or_else(|| ledger.canonical_path(module_idx, name))
+            .unwrap_or_else(|| name.to_string()),
+    }
+}
+
 pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> SemanticSymbolIndex {
     let mut symbols = language_symbols();
     for module in &bundle.modules {
@@ -383,10 +418,13 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                 _ => None,
             }
         });
-        let qualified_name = owner
-            .as_ref()
-            .map(|owner| format!("{owner}.{}", def.name))
-            .unwrap_or_else(|| def.name.clone());
+        let qualified_name = canonical_symbol_name(
+            bundle,
+            &def.module_path,
+            &def.name,
+            owner.as_deref(),
+            Some((def.def_span.start, def.def_span.end)),
+        );
         let (kind, signature) = semantic_shape(&def.name, &def.kind, owner.as_deref());
         let mut docs = sources
             .get(def.module_path.as_str())

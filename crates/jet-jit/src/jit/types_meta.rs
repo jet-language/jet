@@ -661,7 +661,7 @@ fn result_option_facts(
 
 pub(crate) fn jit_fn_name(name: &str) -> String {
     let suffix = jet_foundation::Syntax::generated_suffix(name);
-    jet_foundation::Syntax::generated_name(&format!("jit_fn_{}", suffix.replace("::", "__")))
+    jet_foundation::Names::mangle(&format!("jit_fn_{}", suffix.replace("::", "__")))
 }
 
 pub(crate) struct JitMeta<'a> {
@@ -681,6 +681,7 @@ pub(crate) struct JitMeta<'a> {
     distinct_ranges: &'a HashMap<String, (i64, i64)>,
     result_option_targets: HashSet<String>,
     result_option_params: HashSet<(String, usize)>,
+    reflect_paths: &'a HashMap<String, String>,
 }
 
 impl<'a> JitMeta<'a> {
@@ -701,6 +702,7 @@ impl<'a> JitMeta<'a> {
             distinct_ranges: &program.distinct_ranges,
             result_option_targets,
             result_option_params,
+            reflect_paths: &program.reflect_paths,
         }
     }
 
@@ -715,6 +717,17 @@ impl<'a> JitMeta<'a> {
 
     pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {
         clif_ty_with_distinct(ty, self.distinct_bases)
+    }
+
+    pub(crate) fn reflect_path(&self, ty: &Type) -> String {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => self
+                .reflect_paths
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ty.leaf_name()),
+            _ => ty.leaf_name(),
+        }
     }
 
     pub(crate) fn trait_method_owners(
@@ -1210,7 +1223,7 @@ impl<'a> JitMeta<'a> {
             return vec![index];
         }
         let source_prefix = format!("{variant}.");
-        let generated_prefix = jet_foundation::Syntax::generated_path(&source_prefix);
+        let generated_prefix = jet_foundation::Names::mangle_path(&source_prefix);
         self.enum_variants
             .get(enum_name)
             .into_iter()

@@ -1006,6 +1006,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Expr::Ident(type_name, type_span) = &**receiver {
+                let display_type_name = self.display_type_name(type_name, None);
                 // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
                 // tree. Point at `DataTree` (no alias, I8) before generic resolution.
                 if type_name == "Data" {
@@ -1195,9 +1196,9 @@ impl<'a> Checker<'a> {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
                                     "E0104",
-                                    format!("`{type_name}.{method}` takes one value, got {}", args.len()),
+                                    format!("`{display_type_name}.{method}` takes one value, got {}", args.len()),
                                     "a distinct conversion wraps exactly one value of its base type".to_string(),
-                                    format!("write `{type_name}.{method}(value)`"),
+                                    format!("write `{display_type_name}.{method}(value)`"),
                                     Some(span),
                                 ));
                                 for arg in args.iter_mut() {
@@ -1211,7 +1212,7 @@ impl<'a> Checker<'a> {
                             if got.as_ref().is_some_and(|got| got != &base) {
                                 self.diags.push(Diagnostic::error(
                                     "E0108",
-                                    format!("argument to `{type_name}.{method}` should be {}, not {}", base.name(), got.as_ref().unwrap().name()),
+                                    format!("argument to `{display_type_name}.{method}` should be {}, not {}", base.name(), got.as_ref().unwrap().name()),
                                     "the source name fixes the conversion input type".to_string(),
                                     format!("pass a {} value", base.name()),
                                     Some(args[0].expr.span()),
@@ -1230,9 +1231,9 @@ impl<'a> Checker<'a> {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
                                     "E0104",
-                                    format!("`{type_name}.{method}` takes one value, got {}", args.len()),
+                                    format!("`{display_type_name}.{method}` takes one value, got {}", args.len()),
                                     "a distinct conversion wraps exactly one value of its base type".to_string(),
-                                    format!("write `{type_name}.{method}(value)`"),
+                                    format!("write `{display_type_name}.{method}(value)`"),
                                     Some(span),
                                 ));
                                 for arg in args.iter_mut() {
@@ -1246,7 +1247,7 @@ impl<'a> Checker<'a> {
                             if got.as_ref().is_some_and(|got| got != &source) {
                                 self.diags.push(Diagnostic::error(
                                     "E0108",
-                                    format!("argument to `{type_name}.{method}` should be {}, not {}", source.name(), got.as_ref().unwrap().name()),
+                                    format!("argument to `{display_type_name}.{method}` should be {}, not {}", source.name(), got.as_ref().unwrap().name()),
                                     "the source name fixes the conversion input type".to_string(),
                                     format!("pass a {} value", source.name()),
                                     Some(args[0].expr.span()),
@@ -1294,8 +1295,8 @@ impl<'a> Checker<'a> {
                                     if n < lo || n > hi {
                                         self.diags.push(Diagnostic::error(
                                             "E0135",
-                                            format!("`{n}` is outside `{type_name}`'s range {lo}..{hi}"),
-                                            format!("a range type only holds values inside its bounds; `{n}` can never be a `{type_name}`"),
+                                            format!("`{n}` is outside `{display_type_name}`'s range {lo}..{hi}"),
+                                            format!("a range type only holds values inside its bounds; `{n}` can never be a `{display_type_name}`"),
                                             format!("use a value in `{lo}..{hi}`, or widen the type's range"),
                                             Some(literal_span),
                                         ));
@@ -4297,12 +4298,12 @@ impl<'a> Checker<'a> {
                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
                 .flatten();
                 let fix = materializer.map_or_else(
-                    || format!("define it inside `struct {type_name}` or `impl {type_name}`"),
+                    || format!("define it inside `struct {display_type_name}` or `impl {display_type_name}`"),
                     |method| format!("call `{method}` first"),
                 );
                 self.diags.push(Diagnostic::error(
                     "E0102",
-                    format!("`{}` has no method `{}`", type_name, method),
+                    format!("`{}` has no method `{}`", display_type_name, method),
                     "check the method name on this type".to_string(),
                     fix,
                     Some(span),
@@ -4314,6 +4315,7 @@ impl<'a> Checker<'a> {
             };
             let (_, method_type_name) = self.struct_type_name_parts(&type_name);
             let method_name = format!("{method_type_name}.{method}");
+            let display_type_name = self.display_type_name(&type_name, Some(owner_mod));
             if owner_mod != self.module_idx
                 && !self
                     .name_ledger
@@ -4360,9 +4362,9 @@ impl<'a> Checker<'a> {
             if msig.is_static {
                 self.diags.push(Diagnostic::error(
                     "E0311",
-                    format!("`{}` is a static method on `{}`", method, type_name),
+                    format!("`{}` is a static method on `{}`", method, display_type_name),
                     "static methods belong to the type name, not a value".to_string(),
-                    format!("write `{}.{method}(...)` instead", type_name),
+                    format!("write `{}.{method}(...)` instead", display_type_name),
                     Some(span),
                 ));
             }

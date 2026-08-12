@@ -2,16 +2,13 @@
 //!
 //! Contract (docs/spec/diagnostics.md): every Diagnostic has a stable code,
 //! a `what` (one line, plain language), a `why` (the rule behind it), and
-//! a `fix` (a concrete next step, copy-pasteable when possible).
+//! a `fix` (a concrete next step, copy-pasteable when possible). Typed rows
+//! own those templates and all machine metadata; this module only fills holes
+//! and marshals the result into a report.
 //!
 //! Render format uses sentence capitalization — `Error` / `Why:` / `Fix:`
 //! (owner, 2026-06-11) — and width-aware caret columns so the underline
 //! lines up even when the source line holds wide characters or emoji.
-
-use std::sync::OnceLock;
-
-const DIAGNOSTICS_SPEC: &str = include_str!("../../../docs/spec/diagnostics.md");
-static CANONICAL_DIAGNOSTIC_CODES: OnceLock<Vec<&'static str>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -86,86 +83,6 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub const REPORT_SCHEMA: &str = "jet.report/v1";
-
-/// A code that the canonical diagnostics registry has explicitly registered.
-/// Compiler diagnostics must cross this typed boundary before they become
-/// user-facing reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DiagnosticCode(&'static str);
-
-impl DiagnosticCode {
-    pub fn parse(code: &str) -> Option<Self> {
-        canonical_diagnostic_codes()
-            .iter()
-            .copied()
-            .find(|registered| *registered == code)
-            .map(Self)
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        self.0
-    }
-
-    fn from_input(code: &str) -> Self {
-        if let Some(code) = Self::parse(code) {
-            return code;
-        }
-        match code {
-            "__CT_ERR_PROPAGATE__" => Self("__CT_ERR_PROPAGATE__"),
-            "__CT_EARLY_RETURN__" => Self("__CT_EARLY_RETURN__"),
-            _ => crate::ice!(None, "unregistered diagnostic code `{code}`"),
-        }
-    }
-}
-
-impl From<&str> for DiagnosticCode {
-    fn from(code: &str) -> Self {
-        Self::from_input(code)
-    }
-}
-
-impl From<&String> for DiagnosticCode {
-    fn from(code: &String) -> Self {
-        Self::from_input(code)
-    }
-}
-
-impl From<String> for DiagnosticCode {
-    fn from(code: String) -> Self {
-        Self::from_input(&code)
-    }
-}
-
-fn canonical_diagnostic_codes() -> &'static [&'static str] {
-    CANONICAL_DIAGNOSTIC_CODES
-        .get_or_init(|| {
-            let mut in_registry = false;
-            let mut codes = Vec::new();
-            for line in DIAGNOSTICS_SPEC.lines() {
-                let trimmed = line.trim();
-                if trimmed == "## Error code registry" {
-                    in_registry = true;
-                    continue;
-                }
-                if in_registry && trimmed.starts_with("## ") {
-                    break;
-                }
-                if !in_registry || !trimmed.starts_with('|') {
-                    continue;
-                }
-                let mut cells = trimmed.split('|').map(str::trim);
-                let _ = cells.next();
-                let Some(code) = cells.next() else {
-                    continue;
-                };
-                if code != "Code" && (code.starts_with('E') || code.starts_with('L')) {
-                    codes.push(code);
-                }
-            }
-            codes
-        })
-        .as_slice()
-}
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
 pub const MAX_SOURCE_NESTING: usize = 256;
@@ -242,7 +159,8 @@ pub struct Diagnostic {
     pub why: String,
     pub fix: String,
     pub span: Option<Span>,
-    /// Mechanical fix when the `fix` line is a simple replace/remove (S14).
+    /// Mechanical fix projected from the diagnostic row's structured-fix
+    /// metadata (S14).
     pub edit: Option<TextEdit>,
     /// Extra indented detail (e.g. tool output for E0704).
     pub detail: Option<String>,
@@ -273,62 +191,85 @@ pub mod internal {
 }
 
 impl Diagnostic {
-    /// If `fix` is `replace \`from\` with \`to\`` or `remove \`tok\` …`, attach
-    /// a span edit for LSP/CLI autocorrect (M6 phase 4).
-    pub fn attach_teaching_edit(&mut self) {
-        if self.edit.is_some() {
-            return;
-        }
-        let span = match self.span {
-            Some(s) => s,
-            None => return,
-        };
-        let new_text = if let Some(rest) = self.fix.strip_prefix("replace `") {
-            if let Some((_from, rest2)) = rest.split_once("` with `") {
-                rest2.strip_suffix('`').map(str::to_string)
-            } else {
-                None
-            }
-        } else if let Some(rest) = self.fix.strip_prefix("remove `") {
-            rest.split_once('`').map(|_| String::new())
-        } else {
-            None
-        };
-        if let Some(text) = new_text {
-            self.edit = Some(TextEdit {
-                span,
-                new_text: text,
-            });
-        }
-    }
-}
-
-impl Diagnostic {
     /// E3403: ambient randomness or wall-clock state in pure evaluation.
     pub fn e3403(what: &str, span: Option<Span>) -> Self {
-        Self::error(
-            "E3403",
-            format!(
-                "`{what}` is non-deterministic and cannot appear in a pure evaluation"
-            ),
-            "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
-            "remove this call, or remove the enclosing function's explicit `=[]=>` bound"
-                .to_string(),
+        let what = format!(
+            "`{what}` is non-deterministic and cannot appear in a pure evaluation"
+        );
+        Self::from_row("E3403", &[("what", &what)], span)
+    }
+
+    /// Build a report from a typed row and its named hole values. The row
+    /// supplies all product wording and any structured fix metadata.
+    pub fn from_row(
+        code: impl Into<String>,
+        holes: &[(&str, &str)],
+        span: Option<Span>,
+    ) -> Self {
+        let code = code.into();
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+        let rendered = row.render(holes);
+        Diagnostic {
+            moment: row.moment,
+            severity: row.severity,
+            code,
+            what: rendered.what,
+            why: rendered.why,
+            fix: rendered.fix,
             span,
-        )
+            edit: row_edit(row, span),
+            detail: None,
+            structured: None,
+        }
+    }
+
+    /// Attach a dynamic edit whose kind is authorized by the typed row.
+    /// Emitters may supply only the source-derived replacement text and span;
+    /// the row still owns whether this report has a generated fix channel.
+    pub fn set_structured_edit(&mut self, edit: TextEdit) {
+        let row = crate::Registry::diagnostic(&self.code)
+            .unwrap_or_else(|| panic!("diagnostic `{}` has no typed row", self.code));
+        assert!(
+            matches!(
+                row.structured_fix,
+                Some(
+                    crate::Registry::StructuredFix::GeneratedMarkerGroup
+                        | crate::Registry::StructuredFix::GeneratedMissingArms
+                        | crate::Registry::StructuredFix::GeneratedScriptRun
+                )
+            ),
+            "diagnostic `{}` has no row-owned generated structured fix",
+            self.code
+        );
+        self.edit = Some(edit);
     }
 
     /// Build a report from the one typed row. The supplied strings are the
-    /// row's holes after sema has filled them; code, severity, and moment never
-    /// come from a second call-site policy.
+    /// row's already-filled dynamic values; code, severity, moment, and any
+    /// row-declared structured fix still come from the typed row.
     pub fn error(
-        code: impl Into<DiagnosticCode>,
+        code: impl Into<String>,
         what: String,
         why: String,
         fix: String,
         span: Option<Span>,
     ) -> Self {
-        Self::from_parts(code.into().as_str().to_string(), what, why, fix, span)
+        let code = code.into();
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+        Diagnostic {
+            moment: row.moment,
+            severity: row.severity,
+            code,
+            what,
+            why,
+            fix,
+            span,
+            edit: row_edit(row, span),
+            detail: None,
+            structured: None,
+        }
     }
 
     /// Build a compile-time error emitted by a programmable build rule.
@@ -349,19 +290,9 @@ impl Diagnostic {
         if code.chars().any(char::is_control) {
             return Err("custom diagnostic code must not contain control characters");
         }
-        Ok(Self::from_parts(code, what, why, fix, span))
-    }
-
-    fn from_parts(
-        code: String,
-        what: String,
-        why: String,
-        fix: String,
-        span: Option<Span>,
-    ) -> Self {
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
-        let mut d = Diagnostic {
+        Ok(Self {
             moment: row.moment,
             severity: row.severity,
             code,
@@ -369,42 +300,10 @@ impl Diagnostic {
             why,
             fix,
             span,
-            edit: None,
+            edit: row_edit(row, span),
             detail: None,
             structured: None,
-        };
-        d.attach_teaching_edit();
-        d
-    }
-
-    /// Resolve a spanless driver problem through the registered row when that
-    /// row publishes a `{problem}` hole. The driver supplies only the problem;
-    /// What, Why, Fix, severity, and moment stay owned by the registry.
-    pub fn registered_with_problem(
-        code: &str,
-        problem: &str,
-        span: Option<Span>,
-    ) -> Option<Self> {
-        let row = crate::Registry::diagnostic(code)?;
-        if !row.what.contains("{problem}") {
-            return None;
-        }
-        let fill = |template: &'static str| template.replace("{problem}", problem);
-        let report = crate::Outcome::jet_render_registered_diagnostic(
-            row.code,
-            row.stage,
-            fill(row.what),
-            fill(row.why),
-            fill(row.fix),
-            crate::ExitCodes::USER_ERROR,
-        );
-        Some(Self::error(
-            report.code,
-            report.what,
-            report.why,
-            report.fix,
-            span,
-        ))
+        })
     }
 
     /// The TIR interpreter's internal control-flow sentinels: each unwinds a
@@ -419,7 +318,7 @@ impl Diagnostic {
     /// instead of panicking on the code every one of them would otherwise
     /// trigger by construction.
     fn internal_sentinel(code: &'static str, what: String, why: String, span: Option<Span>) -> Self {
-        let mut d = Diagnostic {
+        Diagnostic {
             moment: ReportMoment::Run,
             severity: Severity::Error,
             code: code.to_string(),
@@ -430,9 +329,7 @@ impl Diagnostic {
             edit: None,
             detail: None,
             structured: None,
-        };
-        d.attach_teaching_edit();
-        d
+        }
     }
 
     /// See `internal_sentinel`.
@@ -451,11 +348,9 @@ impl Diagnostic {
     }
 
     pub fn e0956_unsupported(what: &str, span: Span) -> Self {
-        Self::error(
+        Self::from_row(
             "E0956",
-            format!("{what} can't run at compile time yet"),
-            "the canonical TIR evaluator doesn't cover this construct yet".to_string(),
-            "use a simpler form, or run via `jet build` / `jet run`".to_string(),
+            &[("what", what)],
             Some(span),
         )
     }
@@ -468,49 +363,41 @@ impl Diagnostic {
         member: &str,
         span: Option<Span>,
     ) -> Self {
-        Self::error(
+        Self::from_row(
             "E0959",
-            format!(
-                "`{type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
-            ),
-            "D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists".to_string(),
-            "read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts".to_string(),
+            &[("type", type_name), ("member", member)],
             span,
         )
     }
 
     pub fn source_nesting_exceeded(depth: usize, span: Span) -> Self {
-        Self::error(
+        let depth = depth.to_string();
+        Self::from_row(
             "E1403",
-            format!(
-                "this code nests {depth} levels deep; the limit is {MAX_SOURCE_NESTING}"
-            ),
-            "each nested source form needs one compiler checking frame, and unbounded depth could overflow the compiler stack"
-                .to_string(),
-            "pull inner parts out into named bindings or helper functions".to_string(),
+            &[("depth", &depth)],
             Some(span),
         )
     }
 
     pub fn lint(
-        code: impl Into<DiagnosticCode>,
+        code: impl Into<String>,
         what: String,
         why: String,
         fix: String,
         span: Option<Span>,
     ) -> Self {
         let code = code.into();
-        let row = crate::Registry::diagnostic(code.as_str())
-            .unwrap_or_else(|| panic!("diagnostic `{}` has no typed row", code.as_str()));
+        let row = crate::Registry::diagnostic(&code)
+            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         Diagnostic {
             moment: row.moment,
             severity: row.severity,
-            code: code.as_str().to_string(),
+            code,
             what,
             why,
             fix,
             span,
-            edit: None,
+            edit: row_edit(row, span),
             detail: None,
             structured: None,
         }
@@ -518,11 +405,6 @@ impl Diagnostic {
 
     pub fn with_detail(mut self, detail: String) -> Self {
         self.detail = Some(detail);
-        self
-    }
-
-    pub fn at_moment(mut self, moment: ReportMoment) -> Self {
-        self.moment = moment;
         self
     }
 
@@ -535,12 +417,16 @@ impl Diagnostic {
         expected: &'static str,
         actual: i128,
     ) -> Self {
-        let mut diagnostic = Self::error(
+        let mut diagnostic = Self::from_row(
             "E2702",
-            "crypto API misuse".to_string(),
-            why,
-            fix,
+            &[("why", why.as_str()), ("fix", fix.as_str())],
             Some(span),
+        );
+        assert_eq!(
+            crate::Registry::diagnostic("E2702")
+                .and_then(|row| row.structured_fix),
+            Some(crate::Registry::StructuredFix::CryptoMisuse),
+            "E2702 must keep its typed crypto structured fix"
         );
         diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
             reason,
@@ -558,12 +444,16 @@ impl Diagnostic {
         reason: CryptoMisuseReason,
         operation: &'static str,
     ) -> Self {
-        let mut diagnostic = Self::error(
+        let mut diagnostic = Self::from_row(
             "E2702",
-            "crypto API misuse".to_string(),
-            why,
-            fix,
+            &[("why", why.as_str()), ("fix", fix.as_str())],
             Some(span),
+        );
+        assert_eq!(
+            crate::Registry::diagnostic("E2702")
+                .and_then(|row| row.structured_fix),
+            Some(crate::Registry::StructuredFix::CryptoMisuse),
+            "E2702 must keep its typed crypto structured fix"
         );
         diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
             reason,
@@ -746,6 +636,24 @@ impl Diagnostic {
         }
         o.push('}');
         o
+    }
+}
+
+fn row_edit(row: &crate::Registry::DiagnosticRow, span: Option<Span>) -> Option<TextEdit> {
+    let span = span?;
+    match row.structured_fix? {
+        crate::Registry::StructuredFix::Replace { to, .. } => Some(TextEdit {
+            span,
+            new_text: to.to_string(),
+        }),
+        crate::Registry::StructuredFix::Remove { .. } => Some(TextEdit {
+            span,
+            new_text: String::new(),
+        }),
+        crate::Registry::StructuredFix::CryptoMisuse
+        | crate::Registry::StructuredFix::GeneratedMarkerGroup
+        | crate::Registry::StructuredFix::GeneratedMissingArms
+        | crate::Registry::StructuredFix::GeneratedScriptRun => None,
     }
 }
 
@@ -1094,31 +1002,6 @@ pub fn display_char_width(c: char) -> usize {
     1
 }
 
-#[cfg(test)]
-mod diagnostic_code_tests {
-    use super::{Diagnostic, DiagnosticCode};
-
-    #[test]
-    fn canonical_registry_includes_runtime_control_codes() {
-        assert_eq!(DiagnosticCode::parse("E3003").unwrap().as_str(), "E3003");
-        assert_eq!(DiagnosticCode::parse("E3004").unwrap().as_str(), "E3004");
-        assert_eq!(DiagnosticCode::parse("L0507").unwrap().as_str(), "L0507");
-        assert!(DiagnosticCode::parse("__CT_ERR_PROPAGATE__").is_none());
-    }
-
-    #[test]
-    fn established_comptime_sentinels_keep_their_private_escape() {
-        let diagnostic = Diagnostic::error(
-            "__CT_ERR_PROPAGATE__",
-            String::new(),
-            String::new(),
-            String::new(),
-            None,
-        );
-        assert_eq!(diagnostic.code, "__CT_ERR_PROPAGATE__");
-    }
-}
-
 /// Render a batch of diagnostics, blank line between each.
 pub fn render_all(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     let rendered: Vec<String> = diags.iter().map(|d| d.render(file, src)).collect();
@@ -1275,25 +1158,39 @@ mod crypto_diagnostic_contract_tests {
 
     #[test]
     fn constructors_take_metadata_from_the_typed_row() {
-        let error = Diagnostic::error(
-            "E0102",
-            "nothing named `pirnt` exists here".into(),
-            "only known functions can be called".into(),
-            "did you mean `print`?".into(),
-            None,
-        );
+        let error = Diagnostic::from_row("E0102", &[], None);
         assert_eq!(error.severity, Severity::Error);
         assert_eq!(error.moment, ReportMoment::Compile);
 
-        let lint = Diagnostic::lint(
-            "L2001",
-            "an item is deprecated".into(),
-            "the edition keeps it during migration".into(),
-            "use the replacement".into(),
-            None,
-        );
+        let lint = Diagnostic::from_row("L2001", &[], None);
         assert_eq!(lint.severity, Severity::Lint);
         assert_eq!(lint.moment, ReportMoment::Compile);
+    }
+
+    #[test]
+    fn structured_edit_comes_from_the_row_not_fix_prose() {
+        let diagnostic = Diagnostic::from_row("E0373", &[], Some(Span::new(3, 4)));
+        assert_eq!(
+            diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
+            Some(",")
+        );
+    }
+
+    #[test]
+    fn migrated_rows_render_named_holes_without_a_second_message() {
+        let lint = Diagnostic::from_row(
+            "L0503",
+            &[("place", "total"), ("op", "+=")],
+            Some(Span::new(0, 5)),
+        );
+        assert_eq!(
+            lint.what,
+            "prefer `total += …` instead of repeating the left side"
+        );
+        assert_eq!(lint.fix, "write `total += …`");
+
+        let unsupported = Diagnostic::e0956_unsupported("a compiler fact", Span::new(0, 1));
+        assert_eq!(unsupported.what, "`a compiler fact` can't run at compile time yet");
     }
 
     #[test]

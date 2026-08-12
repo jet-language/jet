@@ -2079,7 +2079,11 @@ fn resolve_module_import(
                 Some(failure) => Err(failure.diagnostic(local_name, project_root, span)),
                 None => Err(Diagnostic::error(
                     "E0603",
-                    format!("can't find a project module named `{local_name}`"),
+                    format!(
+                        "can't find a project module named `{}{}`",
+                        Syntax::PROJECT_IMPORT_PREFIX,
+                        local_name,
+                    ),
                     "project-local imports resolve declared module names, not filenames"
                         .to_string(),
                     format!("declare `module {local_name} {{ ... }}` under this project"),
@@ -2223,7 +2227,7 @@ fn find_module_files(name: &str, project_root: &Path) -> Result<Vec<PathBuf>, Di
     Ok(found)
 }
 
-/// File stems become Rust `mod user_<alias>` names, so the alias must be a
+/// File stems become generated Rust `mod __jet_<alias>` names, so the alias must be a
 /// valid identifier: non-alphanumeric characters map to `_`, and a leading
 /// digit gets a `_` prefix.
 fn default_module_alias(path: &Path) -> String {
@@ -2546,7 +2550,7 @@ mod stale_manifest_name_tests {
             assert!(
                 diagnostics.iter().any(|diagnostic| {
                     diagnostic.code == "E0603"
-                        && diagnostic.what.contains("project module `_bench`")
+                        && diagnostic.what.contains("project module `project._bench`")
                         && diagnostic.what.contains("broken.jet")
                         && diagnostic.span.is_some()
                 }),
@@ -2565,7 +2569,7 @@ mod stale_manifest_name_tests {
         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
         assert!(diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "E0603"
-                && diagnostic.what == "can't find a project module named `_bench`"
+                && diagnostic.what == "can't find a project module named `project._bench`"
         }));
     }
 

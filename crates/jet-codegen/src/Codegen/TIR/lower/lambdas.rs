@@ -30,7 +30,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 fn lambda_jit_name(start: usize, end: usize) -> String {
-    crate::Syntax::generated_name(&format!("lambda_{start}_{end}"))
+    mangle(&format!("lambda_{start}_{end}"))
 }
 
 fn reactive_capture_name(name: &str) -> String {

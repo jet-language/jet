@@ -20,7 +20,7 @@ use super::JitRuntime;
 use crate::{Cell, Collections};
 
 fn spawn_body_name(index: usize) -> String {
-    jet_foundation::Syntax::generated_name(&format!("jit_spawn_body_{index}"))
+    jet_foundation::Names::mangle(&format!("jit_spawn_body_{index}"))
 }
 
 fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
@@ -404,7 +404,7 @@ fn lower_spawn_function(
                 _ => None,
             }
         })
-        .unwrap_or_else(|| jet_foundation::Syntax::generated_name("jit_spawn_body"));
+        .unwrap_or_else(|| jet_foundation::Names::mangle("jit_spawn_body"));
     super::tier_cache::note_defined(&export, &ctx);
     module.clear_context(&mut ctx);
     Ok(())

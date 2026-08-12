@@ -7,7 +7,7 @@ use crate::Syntax;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
         /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
-        /// The function was registered as `{alias}__{method}` in `self.funcs`.
+        /// The function was registered as `__jet_{alias}__{method}` in `self.funcs`.
         pub(crate) fn infer_code_module_call(
             &mut self,
             alias: &str,

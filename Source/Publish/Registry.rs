@@ -337,12 +337,12 @@ fn checkout_cleanup_problem(path: &Path, error: &io::Error) -> String {
 }
 
 fn checkout_cleanup_diagnostic(path: &Path, error: &io::Error) -> Diagnostic {
-    jet_foundation::Diagnostics::Diagnostic::registered_with_problem(
+    let problem = checkout_cleanup_problem(path, error);
+    jet_foundation::Diagnostics::Diagnostic::from_row(
         "E2105",
-        &checkout_cleanup_problem(path, error),
+        &[("problem", problem.as_str())],
         None,
     )
-        .expect("E2105 must remain registered with a problem hole")
 }
 
 fn attach_checkout_cleanup_failure(

@@ -81,11 +81,6 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
     }
 }
 
-/// User trait → Rust trait name.
-pub fn user_trait_rust(name: &str) -> String {
-    crate::Names::mangle(name)
-}
-
 /// Substitute type parameters in `ty` using `subst`.
 pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     match ty {
@@ -342,7 +337,7 @@ pub fn rust_type_param_list(
                     } else if is_builtin_trait(b) {
                         rust_trait_bound(b).map(str::to_string)
                     } else {
-                        Some(user_trait_rust(b))
+                        Some(crate::Names::mangle(b))
                     }
                 })
                 .collect();
@@ -356,7 +351,7 @@ pub fn rust_type_param_list(
                             rust_trait_bound(b).unwrap_or("").to_string()
                         }
                         _ if is_builtin_trait(b) => rust_trait_bound(b).unwrap_or("").to_string(),
-                        _ => user_trait_rust(b),
+                        _ => crate::Names::mangle(b),
                     };
                     if !rb.is_empty() && !bounds.contains(&rb) {
                         bounds.push(rb);
