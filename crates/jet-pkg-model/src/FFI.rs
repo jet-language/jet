@@ -916,15 +916,9 @@ mod net_tls_close_tests {
     }
 
     mod smtp_adapter {
-        fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
-            let mut out = [0u8; 32];
-            for (index, byte) in data.iter().enumerate() {
-                out[index % 32] = out[index % 32].wrapping_mul(31).wrapping_add(*byte);
-            }
-            out
-        }
         #[allow(unused_imports)]
-        pub use jet_foundation::Outcome::*;
+        pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
+        include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
         include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
     }
 
@@ -1106,7 +1100,7 @@ mod net_tls_close_tests {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
             limits: email::Limits::safe(),
-            dkim: Err(jet_foundation::Outcome::JetAbsent),
+            dkim: Err(smtp_adapter::JetAbsent),
         }
     }
 

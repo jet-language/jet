@@ -14,7 +14,46 @@ mod kernel {
 
 use kernel::jet_email;
 
-pub(super) fn evaluate(
+#[derive(Clone, Copy)]
+pub struct RuntimeFns {
+    pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
+    pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
+    pub tls_handshake_step: fn(i64) -> Result<bool, String>,
+    pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
+    pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,
+    pub tls_write_all: fn(i64, &Vec<u8>) -> Result<(), String>,
+    pub tls_close: fn(i64) -> Result<(), String>,
+    pub wipe: fn(&mut Vec<u8>),
+    pub sha256: fn(&[u8]) -> [u8; 32],
+    pub ed25519_sign: fn(&Vec<u8>, &[u8]) -> Result<Vec<u8>, String>,
+    pub cancelled: fn() -> bool,
+    pub remaining_ms: fn() -> Option<i64>,
+    pub accepted_at: fn() -> String,
+}
+
+fn kernel_runtime(runtime: RuntimeFns) -> jet_email::RuntimeFns {
+    jet_email::RuntimeFns {
+        tls_begin: runtime.tls_begin,
+        tls_begin_ca: runtime.tls_begin_ca,
+        tls_handshake_step: runtime.tls_handshake_step,
+        tls_set_poll_timeout: runtime.tls_set_poll_timeout,
+        tls_read: runtime.tls_read,
+        tls_write_all: runtime.tls_write_all,
+        tls_close: runtime.tls_close,
+        wipe: runtime.wipe,
+        sha256: runtime.sha256,
+        ed25519_sign: runtime.ed25519_sign,
+        cancelled: runtime.cancelled,
+        remaining_ms: runtime.remaining_ms,
+        accepted_at: runtime.accepted_at,
+    }
+}
+
+fn copy_secret(value: &Vec<u8>) -> Vec<u8> {
+    value.clone()
+}
+
+pub fn evaluate(
     method: &str,
     args: &[CtValue],
     span: Span,
@@ -25,6 +64,39 @@ pub(super) fn evaluate(
         "message" => email_message(args, span),
         "envelope" => email_envelope(args, span),
         "serialize" => email_serialize(args, span),
+        _ => return None,
+    };
+    Some(result)
+}
+
+pub fn evaluate_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let result = match method {
+        "envelope" if args.is_empty() => {
+            let message = match message_from_value(recv, span) {
+                Ok(message) => message,
+                Err(error) => return Some(Err(error)),
+            };
+            Ok(envelope_value(message.envelope()))
+        }
+        "with_envelope" if args.len() == 1 => {
+            let message = match message_from_value(recv, span) {
+                Ok(message) => message,
+                Err(error) => return Some(Err(error)),
+            };
+            let envelope = match envelope_from_value(&args[0], span) {
+                Ok(envelope) => envelope,
+                Err(error) => return Some(Err(error)),
+            };
+            Ok(result(message.with_envelope(&envelope), |value| {
+                message_value(&value)
+            }))
+        }
+        "send" => return None,
         _ => return None,
     };
     Some(result)
@@ -168,6 +240,16 @@ fn envelope_value(envelope: &jet_email::Envelope) -> CtValue {
     ])
 }
 
+fn envelope_from_value(value: &CtValue, span: Span) -> Result<jet_email::Envelope, Diagnostic> {
+    let from = field(value, "Envelope", "from")
+        .ok_or_else(|| unsupported("email Envelope sender is missing", span))
+        .and_then(|value| address_from_value(value, span))?;
+    let recipients = field(value, "Envelope", "recipients")
+        .ok_or_else(|| unsupported("email Envelope recipient list is missing", span))
+        .and_then(|value| address_list(value, span))?;
+    Ok(jet_email::Envelope { from, recipients })
+}
+
 fn message_value(message: &jet_email::Message) -> CtValue {
     structure("Message", vec![
         ("from", address_value(&message.from)),
@@ -215,7 +297,7 @@ fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message,
         .and_then(|value| attachment_list(value, span))?;
     let to = list("to")?;
     let bcc = list("bcc")?;
-    jet_email::message(
+    let message = jet_email::message(
         &from,
         &to,
         &bcc,
@@ -226,108 +308,29 @@ fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message,
     )
     .map_err(|error| {
         unsupported(
-            &format!("email Message is invalid: {}", error_reason(&error)),
+            &format!("email Message is invalid: {}", jet_email::error_reason(&error)),
             span,
         )
-    })
-}
-
-fn error_parts(
-    error: jet_email::Error,
-) -> (&'static str, String, Option<String>, Option<i64>, String) {
-    macro_rules! parts {
-        ($variant:literal, $operation:expr, $server:expr, $code:expr, $reason:expr) => {
-            ($variant, $operation, $server, $code, $reason)
-        };
-    }
-    match error {
-        jet_email::Error::Configuration {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Configuration", operation, server, code, reason),
-        jet_email::Error::DNS {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("DNS", operation, server, code, reason),
-        jet_email::Error::Connect {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Connect", operation, server, code, reason),
-        jet_email::Error::TLS {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("TLS", operation, server, code, reason),
-        jet_email::Error::Auth {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Auth", operation, server, code, reason),
-        jet_email::Error::Protocol {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Protocol", operation, server, code, reason),
-        jet_email::Error::Rejected {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Rejected", operation, server, code, reason),
-        jet_email::Error::Transient {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Transient", operation, server, code, reason),
-        jet_email::Error::TimedOut {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("TimedOut", operation, server, code, reason),
-        jet_email::Error::Cancelled {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("Cancelled", operation, server, code, reason),
-        jet_email::Error::DeliveryUnknown {
-            operation,
-            server,
-            code,
-            reason,
-        } => parts!("DeliveryUnknown", operation, server, code, reason),
-    }
-}
-
-fn error_reason(error: &jet_email::Error) -> &str {
-    match error {
-        jet_email::Error::Configuration { reason, .. }
-        | jet_email::Error::DNS { reason, .. }
-        | jet_email::Error::Connect { reason, .. }
-        | jet_email::Error::TLS { reason, .. }
-        | jet_email::Error::Auth { reason, .. }
-        | jet_email::Error::Protocol { reason, .. }
-        | jet_email::Error::Rejected { reason, .. }
-        | jet_email::Error::Transient { reason, .. }
-        | jet_email::Error::TimedOut { reason, .. }
-        | jet_email::Error::Cancelled { reason, .. }
-        | jet_email::Error::DeliveryUnknown { reason, .. } => reason,
+    })?;
+    match field(value, "Message", "envelope") {
+        Some(value) => {
+            let envelope = envelope_from_value(value, span)?;
+            message.with_envelope(&envelope).map_err(|error| {
+                unsupported(
+                    &format!(
+                        "email Message envelope is invalid: {}",
+                        jet_email::error_reason(&error)
+                    ),
+                    span,
+                )
+            })
+        }
+        None => Ok(message),
     }
 }
 
 fn error_value(error: jet_email::Error) -> CtValue {
-    let (variant, operation, server, code, reason) = error_parts(error);
+    let (variant, _disc, operation, server, code, reason) = jet_email::error_parts(error);
     CtValue::Enum {
         type_name: "EmailError".to_string(),
         variant: variant.to_string(),
@@ -399,4 +402,365 @@ fn email_message(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
 fn email_serialize(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let message = message_from_value(one(args, 0, "serialize", span)?, span)?;
     Ok(result(jet_email::serialize(&message), CtValue::Bytes))
+}
+
+fn enum_args<'a>(
+    value: &'a CtValue,
+    type_name: &str,
+    variant: &str,
+) -> Option<&'a [(Option<String>, CtValue)]> {
+    match value {
+        CtValue::Enum {
+            type_name: actual,
+            variant: actual_variant,
+            args,
+        } if actual == type_name && actual_variant == variant => Some(args.as_slice()),
+        _ => None,
+    }
+}
+
+fn enum_arg<'a>(args: &'a [(Option<String>, CtValue)], name: &str) -> Option<&'a CtValue> {
+    args.iter().find_map(|(field, value)| {
+        (field.as_deref() == Some(name)).then_some(value)
+    })
+}
+
+fn int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
+    match value {
+        CtValue::Int(value) => Ok(*value),
+        _ => Err(unsupported(&format!("email {what} must be Int"), span)),
+    }
+}
+
+fn secret(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "Secret" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "bytes").then_some(value))
+            .ok_or_else(|| unsupported("email Secret.bytes is missing", span))
+            .and_then(|value| bytes(value, span)),
+        _ => bytes(value, span),
+    }
+}
+
+fn string_list(value: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(unsupported("email expected a String list", span));
+    };
+    values
+        .iter()
+        .map(|value| string(value, span).map(str::to_string))
+        .collect()
+}
+
+fn optional<T>(
+    value: &CtValue,
+    span: Span,
+    map: impl FnOnce(&CtValue) -> Result<T, Diagnostic>,
+) -> Result<Option<T>, Diagnostic> {
+    match value {
+        CtValue::Failed(CtReport::Clean(_)) => Ok(None),
+        CtValue::Present(value) => map(value).map(Some),
+        _ => Err(unsupported("email optional value is invalid", span)),
+    }
+}
+
+fn limits_from_value(value: &CtValue, span: Span) -> Result<jet_email::Limits, Diagnostic> {
+    let field_int = |name| {
+        field(value, "Limits", name)
+            .ok_or_else(|| unsupported(&format!("email Limits.{name} is missing"), span))
+            .and_then(|value| int(value, &format!("Limits.{name}"), span))
+    };
+    Ok(jet_email::Limits {
+        max_reply_line_bytes: field_int("max_reply_line_bytes")?,
+        max_reply_lines: field_int("max_reply_lines")?,
+        max_capabilities: field_int("max_capabilities")?,
+        max_recipients: field_int("max_recipients")?,
+        max_message_bytes: field_int("max_message_bytes")?,
+        max_auth_challenge_bytes: field_int("max_auth_challenge_bytes")?,
+    })
+}
+
+pub fn limits_safe_value() -> CtValue {
+    let limits = jet_email::Limits::safe();
+    structure(
+        "Limits",
+        vec![
+            ("max_reply_line_bytes", CtValue::Int(limits.max_reply_line_bytes)),
+            ("max_reply_lines", CtValue::Int(limits.max_reply_lines)),
+            ("max_capabilities", CtValue::Int(limits.max_capabilities)),
+            ("max_recipients", CtValue::Int(limits.max_recipients)),
+            ("max_message_bytes", CtValue::Int(limits.max_message_bytes)),
+            (
+                "max_auth_challenge_bytes",
+                CtValue::Int(limits.max_auth_challenge_bytes),
+            ),
+        ],
+    )
+}
+
+fn auth_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<jet_email::SMTPAuth<Vec<u8>>, Diagnostic> {
+    if enum_args(value, "SMTPAuth", "None").is_some() {
+        return Ok(jet_email::SMTPAuth::None);
+    }
+    let Some(args) = enum_args(value, "SMTPAuth", "Password") else {
+        return Err(unsupported("email SMTPAuth is invalid", span));
+    };
+    let username = enum_arg(args, "username")
+        .ok_or_else(|| unsupported("email SMTPAuth.username is missing", span))
+        .and_then(|value| string(value, span).map(str::to_string))?;
+    let password = enum_arg(args, "password")
+        .ok_or_else(|| unsupported("email SMTPAuth.password is missing", span))
+        .and_then(|value| secret(value, span))?;
+    Ok(jet_email::SMTPAuth::Password { username, password })
+}
+
+fn trust_from_value(value: &CtValue, span: Span) -> Result<jet_email::TLSTrust, Diagnostic> {
+    if enum_args(value, "TLSTrust", "System").is_some() {
+        return Ok(jet_email::TLSTrust::System);
+    }
+    let Some(args) = enum_args(value, "TLSTrust", "SystemPlusCa") else {
+        return Err(unsupported("email TLSTrust is invalid", span));
+    };
+    let pem = enum_arg(args, "pem")
+        .ok_or_else(|| unsupported("email TLSTrust.pem is missing", span))
+        .and_then(|value| bytes(value, span))?;
+    Ok(jet_email::TLSTrust::SystemPlusCa { pem })
+}
+
+fn dkim_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<jet_email::DkimConfig<Vec<u8>>, Diagnostic> {
+    let domain = field(value, "DkimConfig", "domain")
+        .ok_or_else(|| unsupported("email DkimConfig.domain is missing", span))
+        .and_then(|value| string(value, span).map(str::to_string))?;
+    let selector = field(value, "DkimConfig", "selector")
+        .ok_or_else(|| unsupported("email DkimConfig.selector is missing", span))
+        .and_then(|value| string(value, span).map(str::to_string))?;
+    let private_key = field(value, "DkimConfig", "private_key")
+        .ok_or_else(|| unsupported("email DkimConfig.private_key is missing", span))
+        .and_then(|value| secret(value, span))?;
+    let signed_headers = field(value, "DkimConfig", "signed_headers")
+        .ok_or_else(|| unsupported("email DkimConfig.signed_headers is missing", span))
+        .and_then(|value| string_list(value, span))?;
+    Ok(jet_email::DkimConfig {
+        domain,
+        selector,
+        private_key,
+        signed_headers,
+    })
+}
+
+fn smtp_config_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<jet_email::SMTPConfig<Vec<u8>>, Diagnostic> {
+    let host = field(value, "SMTPConfig", "host")
+        .ok_or_else(|| unsupported("email SMTPConfig.host is missing", span))
+        .and_then(|value| string(value, span).map(str::to_string))?;
+    let port = field(value, "SMTPConfig", "port")
+        .ok_or_else(|| unsupported("email SMTPConfig.port is missing", span))
+        .and_then(|value| int(value, "SMTPConfig.port", span))?;
+    let security = match field(value, "SMTPConfig", "security") {
+        Some(value) if enum_args(value, "SMTPSecurity", "StartTls").is_some() => {
+            jet_email::SMTPSecurity::StartTls
+        }
+        Some(value) if enum_args(value, "SMTPSecurity", "TLS").is_some() => {
+            jet_email::SMTPSecurity::TLS
+        }
+        _ => return Err(unsupported("email SMTPConfig.security is invalid", span)),
+    };
+    let auth = field(value, "SMTPConfig", "auth")
+        .ok_or_else(|| unsupported("email SMTPConfig.auth is missing", span))
+        .and_then(|value| auth_from_value(value, span))?;
+    let recipient_policy = match field(value, "SMTPConfig", "recipient_policy") {
+        Some(value) if enum_args(value, "RecipientPolicy", "RequireAll").is_some() => {
+            jet_email::RecipientPolicy::RequireAll
+        }
+        Some(value) if enum_args(value, "RecipientPolicy", "DeliverAccepted").is_some() => {
+            jet_email::RecipientPolicy::DeliverAccepted
+        }
+        _ => return Err(unsupported("email SMTPConfig.recipient_policy is invalid", span)),
+    };
+    let trust = field(value, "SMTPConfig", "trust")
+        .ok_or_else(|| unsupported("email SMTPConfig.trust is missing", span))
+        .and_then(|value| trust_from_value(value, span))?;
+    let limits = field(value, "SMTPConfig", "limits")
+        .ok_or_else(|| unsupported("email SMTPConfig.limits is missing", span))
+        .and_then(|value| limits_from_value(value, span))?;
+    let dkim = field(value, "SMTPConfig", "dkim")
+        .ok_or_else(|| unsupported("email SMTPConfig.dkim is missing", span))
+        .and_then(|value| optional(value, span, |value| dkim_from_value(value, span)))?
+        .map_or(Err(kernel::JetAbsent), Ok);
+    Ok(jet_email::SMTPConfig {
+        host,
+        port,
+        security,
+        auth,
+        recipient_policy,
+        trust,
+        limits,
+        dkim,
+    })
+}
+
+fn mailer_value(handle: usize) -> CtValue {
+    structure("Mailer", vec![("handle", CtValue::Int(handle as i64 + 1))])
+}
+
+fn mailer_handle(value: &CtValue) -> Option<usize> {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "Mailer" => fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("handle", CtValue::Int(value)) if *value > 0 => {
+                    Some(*value as usize - 1)
+                }
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn ambient_mailers() -> &'static std::sync::Mutex<Vec<Option<jet_email::Mailer>>> {
+    use std::sync::OnceLock;
+    static MAILERS: OnceLock<std::sync::Mutex<Vec<Option<jet_email::Mailer>>>> = OnceLock::new();
+    MAILERS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn store_mailer(mailer: jet_email::Mailer) -> CtValue {
+    let mut mailers = ambient_mailers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    mailers.push(Some(mailer));
+    mailer_value(mailers.len() - 1)
+}
+
+fn address_value_owned(address: jet_email::Address) -> CtValue {
+    let jet_email::Address { display, mailbox } = address;
+    structure(
+        "Address",
+        vec![
+            (
+                "display",
+                display.map_or(CtValue::absent(Type::String), |display| {
+                    CtValue::Present(Box::new(CtValue::Str(display)))
+                }),
+            ),
+            ("mailbox", CtValue::Str(mailbox)),
+        ],
+    )
+}
+
+fn recipient_report_value(report: jet_email::RecipientReport) -> CtValue {
+    let jet_email::RecipientReport {
+        address,
+        accepted,
+        code,
+        message,
+    } = report;
+    structure(
+        "RecipientReport",
+        vec![
+            ("address", address_value_owned(address)),
+            ("accepted", CtValue::Bool(accepted)),
+            ("code", CtValue::Int(code)),
+            ("message", CtValue::Str(message)),
+        ],
+    )
+}
+
+fn send_report_value(report: jet_email::SendReport) -> CtValue {
+    let jet_email::SendReport {
+        server,
+        accepted,
+        rejected,
+        response_code,
+        response,
+        accepted_at,
+    } = report;
+    structure(
+        "SendReport",
+        vec![
+            ("server", CtValue::Str(server)),
+            (
+                "accepted",
+                CtValue::List(accepted.into_iter().map(recipient_report_value).collect()),
+            ),
+            (
+                "rejected",
+                CtValue::List(rejected.into_iter().map(recipient_report_value).collect()),
+            ),
+            ("response_code", CtValue::Int(response_code)),
+            ("response", CtValue::Str(response)),
+            ("accepted_at", CtValue::Str(accepted_at)),
+        ],
+    )
+}
+
+pub fn ambient_core_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+    runtime: RuntimeFns,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = evaluate(method, args, span) {
+        return Some(result);
+    }
+    let result = match method {
+        "smtp" => {
+            let mut config = match args.first() {
+                Some(value) => match smtp_config_from_value(value, span) {
+                    Ok(config) => config,
+                    Err(error) => return Some(Err(error)),
+                },
+                None => return Some(Err(unsupported("email.smtp(): missing config", span))),
+            };
+            let email_runtime = kernel_runtime(runtime);
+            let smtp_result = jet_email::smtp(&config, copy_secret, email_runtime);
+            jet_email::wipe_config_secrets(&mut config, email_runtime);
+            result(smtp_result, store_mailer)
+        }
+        "smtp_from_env" if args.is_empty() => result(
+            jet_email::smtp_from_env(kernel_runtime(runtime)),
+            store_mailer,
+        ),
+        _ => return None,
+    };
+    Some(Ok(result))
+}
+
+pub fn ambient_handle(
+    op: &str,
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let method = op.strip_prefix("EmailMethod:")?;
+    if method != "send" {
+        return evaluate_method(recv, method, args, span);
+    }
+    let Some(index) = mailer_handle(recv) else {
+        return Some(Err(unsupported("email Mailer receiver", span)));
+    };
+    let message = match args.first() {
+        Some(value) => match message_from_value(value, span) {
+            Ok(message) => message,
+            Err(error) => return Some(Err(error)),
+        },
+        None => return Some(Err(unsupported("email Mailer.send(): missing message", span))),
+    };
+    let mut mailers = ambient_mailers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(Some(mut mailer)) = mailers.get_mut(index).map(Option::take) else {
+        return Some(Err(unsupported("email Mailer handle", span)));
+    };
+    let send_result = mailer.send(message);
+    mailers[index] = Some(mailer);
+    Some(Ok(result(send_result, send_report_value)))
 }

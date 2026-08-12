@@ -138,7 +138,7 @@ fn launder(v:&[u8])->String{let text=String::from_utf8_lossy(v);if text.contains
 fn c_escape(v:&str)->String{let mut out=String::new();for b in v.bytes(){match b{b'\\'=>out.push_str("\\\\"),b'"'=>out.push_str("\\\""),b'\n'=>out.push_str("\\n"),b'\r'=>out.push_str("\\r"),b'\t'=>out.push_str("\\t"),0x20..=0x7e=>out.push(b as char),_=>out.push_str(&format!("\\{:03o}",b))}}out}
 fn ident(v:&str)->bool{let mut chars=v.chars();matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')&&chars.all(|c|c.is_ascii_alphanumeric()||c=='_')}
 fn powershell_ident(v:&str)->bool{let mut chars=v.chars();matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')&&chars.all(|c|c.is_ascii_alphanumeric()||c=='_'||c=='-')}
-fn reserved_jet_function(v:&str)->bool{matches!(v,"open"|"take_error"|"cancel"|"close"|"abi"|"Session"|"PowerShellError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
+fn reserved_jet_function(v:&str)->bool{matches!(v,"open"|"take_error"|"cancel"|"close"|"abi"|"json"|"Session"|"PowerShellError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
 fn require_supported_host(unix:bool)->Result<(),BindError>{if unix{Ok(())}else{Err(BindError::Source("persistent PowerShell bindings require a POSIX host process supervisor".into()))}}
 
 #[cfg(test)]

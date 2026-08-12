@@ -48,6 +48,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
         THandleOp::ProcessSpecMethod { method } => return format!("ProcessSpec:{method}"),
         THandleOp::ProcessChildMethod { method } => return format!("ProcessChild:{method}"),
+        THandleOp::EmailMethod { method } => return format!("EmailMethod:{method}"),
         THandleOp::TerminalSessionResize => "TerminalSessionResize",
         THandleOp::DBWithPolicy => "DBWithPolicy",
         THandleOp::ServiceRuntimeSend => "ServiceRuntimeSend",
@@ -856,7 +857,13 @@ pub(super) fn eval_handle(
         THandleOp::ExpiringMethod { .. } => Err(unsupported("handle `ExpiringMethod`", span)),
         THandleOp::SketchMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::UrlMimeMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
-        THandleOp::EmailMethod { method } => apply_method(recv, method, args.to_vec(), span),
+        THandleOp::EmailMethod { method } => {
+            crate::Comptime::EmailAdapter::evaluate_method(recv, method, args, span)
+                .map_or_else(
+                    || apply_method(recv, method, args.to_vec(), span),
+                    |result| result,
+                )
+        }
         THandleOp::RegexMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::HTTPClientMethod { .. } => Err(unsupported("handle `HTTPClientMethod`", span)),
         THandleOp::HTTPServerMethod { .. } => Err(unsupported("handle `HTTPServerMethod`", span)),

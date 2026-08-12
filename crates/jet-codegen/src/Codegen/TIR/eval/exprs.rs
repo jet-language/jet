@@ -6669,6 +6669,11 @@ impl<'a> EvalCtx<'a> {
                     }
                     crate::Codegen::TIR::TStaticOwner::Prelude { path, .. } => {
                         if let Some(value) =
+                            crate::Comptime::email_safe_static_for_tir(path, &method.name)
+                        {
+                            return Ok(value);
+                        }
+                        if let Some(value) =
                             crate::Comptime::xml_safe_static_for_tir(path, &method.name)
                         {
                             return Ok(value);
