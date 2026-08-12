@@ -841,6 +841,7 @@ impl CtValue {
                     .filter(|(n, _)| {
                         !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
                             && n == "elem_type")
+                            && !(type_name == "Tensor" && n == "__jet_tensor_handle")
                     })
                     .cloned()
                     .collect();

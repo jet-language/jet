@@ -10,8 +10,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Cell as LocalCell, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt,
-    JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text, Time,
+    Archive, Cell as LocalCell, Collections, Compress, Compute, Concurrency, CoreHost, Crypto,
+    Encoding, Fmt, JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text, Time,
     TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
@@ -96,6 +96,7 @@ pub(crate) struct JitRuntime {
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
+    pub(crate) compute: Compute::ComputeState,
     /// Compile-time string handles baked into Cranelift as `iconst` ids.
     /// `reset_run_heap` and the run-cache artifact must preserve these — clearing
     /// them leaves warm `jet run` hits with empty panic/require text (I9).
@@ -1815,6 +1816,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
     register_host_symbols(&mut builder);
     Collections::register_collections_symbols(&mut builder);
+    Compute::register_compute_symbols(&mut builder);
     Memory::register_memory_symbols(&mut builder);
     LocalCell::register_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
@@ -1852,6 +1854,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Ffi::register_ffi_host_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
+    let compute = Compute::declare_compute_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
     let cell = LocalCell::declare_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
@@ -1889,6 +1892,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let host = declare_host_fns(
         &mut module,
         coll,
+        compute,
         memory,
         cell,
         conc,
@@ -2296,6 +2300,7 @@ host_fns! {
     }
     #extra {
         coll: Collections::CollectionsHostFns,
+        compute: Compute::ComputeHostFns,
         memory: Memory::MemoryHostFns,
         cell: LocalCell::CellHostFns,
         conc: Concurrency::ConcurrencyHostFns,

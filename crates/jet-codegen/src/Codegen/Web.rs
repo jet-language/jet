@@ -642,6 +642,7 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
         TIR::TExprKind::Unary { operand, .. }
         | TIR::TExprKind::Clone(operand)
+        | TIR::TExprKind::ExplicitCopy(operand)
         | TIR::TExprKind::MaterializeView(operand)
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
@@ -1020,7 +1021,12 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         | E::Unit | E::DefaultLit | E::CtLit(_) | E::Uninit => true,
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
-        E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
+        E::Unary { operand, .. }
+        | E::Clone(operand)
+        | E::ExplicitCopy(operand)
+        | E::MaterializeView(operand)
+        | E::DistinctRaw(operand)
+        | E::Print(operand) => web_expr_supported(operand),
         E::Borrow { place, .. } => web_expr_supported(place),
         E::DistinctCtor { arg, .. } => web_expr_supported(arg),
         E::DistinctConvert {
@@ -3429,7 +3435,7 @@ fn wasm_emit_expr(
             wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, file_prefix, reconstructions)?),
-        TIR::TExprKind::Clone(inner) => format!(
+        TIR::TExprKind::Clone(inner) | TIR::TExprKind::ExplicitCopy(inner) => format!(
             "({}).clone()",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
@@ -4829,7 +4835,10 @@ fn tir_js_abi_int_expr(
                 tir_js_abi_int_expr(rhs, funcs, file_prefix)?
             ))
         }
-        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => {
+        E::Clone(inner)
+        | E::ExplicitCopy(inner)
+        | E::MaterializeView(inner)
+        | E::DistinctRaw(inner) => {
             tir_js_abi_int_expr(inner, funcs, file_prefix)
         }
         _ => Ok(format!(
@@ -5019,7 +5028,10 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             &operand.ty,
             &tir_js_expr(operand, funcs, file_prefix)?,
         ),
-        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::Clone(inner)
+        | E::ExplicitCopy(inner)
+        | E::MaterializeView(inner)
+        | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
         E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
         E::DistinctConvert {

@@ -469,7 +469,9 @@ pub enum Expr {
     /// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb. Produces a fresh,
     /// independent value from `x` (a temporary; never needs `^`, never trips
     /// E0209). Legal on any expression, most useful on a named binding.
-    /// Lowers to Rust `x.clone()` (E0211 if the type isn't cloneable).
+    /// Lowers to the canonical Prelude copy operation for Tensor values and
+    /// to ordinary clone/materialization for other cloneable values (E0211 if
+    /// the type is not cloneable).
     Copy(Box<Expr>, Span),
     /// Bare place acquisition is elaborated to `Read` by sema; written
     /// `&place` parses as `Write`. This never carries call-argument meaning.

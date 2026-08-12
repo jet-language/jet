@@ -313,6 +313,8 @@ fn lower_spawn_function(
             task_groups: Vec::new(),
             in_lexical_exit: false,
             txn_stack: Vec::new(),
+            compute_resources: Vec::new(),
+            compute_retrack_names: HashSet::new(),
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -521,6 +523,8 @@ pub(crate) fn lower_callable_lambda(
             task_groups: Vec::new(),
             in_lexical_exit: false,
             txn_stack: Vec::new(),
+            compute_resources: Vec::new(),
+            compute_retrack_names: HashSet::new(),
         };
         let mut arg_i = 0usize;
         if capturing {
@@ -824,6 +828,8 @@ fn lower_function(
             task_groups: Vec::new(),
             in_lexical_exit: false,
             txn_stack: Vec::new(),
+            compute_resources: Vec::new(),
+            compute_retrack_names: HashSet::new(),
         };
         let enter = lctx
             .module
@@ -1011,6 +1017,8 @@ fn lower_generator_body(
             task_groups: Vec::new(),
             in_lexical_exit: false,
             txn_stack: Vec::new(),
+            compute_resources: Vec::new(),
+            compute_retrack_names: HashSet::new(),
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
             let var = lctx.fresh_var(types::I64);

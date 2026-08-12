@@ -554,14 +554,20 @@ extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
 }
 
 extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
-    Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_float(list, idx) {
-        Some(value) => value,
-        None => {
-            if rt.heap.list_len(list).is_none() {
-                jet_foundation::ice!(None, "jit list get f64: bad handle");
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(value) = crate::Compute::try_get_list_f64(rt, list, idx) {
+            return value;
+        }
+        match rt.heap.list_get_float(list, idx) {
+            Some(value) => value,
+            None => {
+                if rt.heap.list_len(list).is_none() {
+                    jet_foundation::ice!(None, "jit list get f64: bad handle");
+                }
+                rt.set_trap("index out of bounds: the index is outside the list");
+                0.0
             }
-            rt.set_trap("index out of bounds: the index is outside the list");
-            0.0
+        }
         }
     })
 }
@@ -652,6 +658,9 @@ extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
 
 extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, _line: u32) {
     Concurrency::with_runtime_mut(|rt| {
+        if crate::Compute::try_set_list_f64(rt, list, idx, v) {
+            return;
+        }
         if rt.heap.list_len(list).is_none() {
             jet_foundation::ice!(None, "jit list set f64: bad handle");
         }

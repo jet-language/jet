@@ -1,5 +1,5 @@
 //! Exhaustive TExprKind evaluation (#777).
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
@@ -19,7 +19,8 @@ use super::local_cell::{internal_index, project_mut, project_pair_mut, project_r
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
     progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
-    unsupported, EvalCallable, EvalCtx, Flow,
+    unsupported, view_mut_owner_value, view_mut_window_args, EvalCallable, EvalCtx, Flow,
+    ViewMutPathStep,
 };
 
 struct EvalOptionValue(CtValue);
@@ -870,6 +871,195 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
+    fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
+        fn visit(ctx: &EvalCtx<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            if ty.is_compute_tensor_family() {
+                return true;
+            }
+            match ty {
+                Type::Tagged { inner, .. }
+                | Type::List(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Option(inner) => visit(ctx, inner, seen),
+                Type::Map { value, .. } => visit(ctx, value, seen),
+                Type::Result { ok, err } => visit(ctx, ok, seen) || visit(ctx, err, seen),
+                Type::Tuple(fields) => fields.iter().any(|(_, field)| visit(ctx, field, seen)),
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let result = ctx.struct_field_types.get(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, field)| visit(ctx, field, seen))
+                    });
+                    seen.remove(name);
+                    result
+                }
+                _ => false,
+            }
+        }
+
+        visit(self, ty, &mut HashSet::new())
+    }
+
+    fn clone_structural_untyped(&self, value: CtValue) -> Result<CtValue, Diagnostic> {
+        match value {
+            CtValue::Struct {
+                type_name,
+                fields,
+            } if type_name == "Tensor" || type_name == "JetTensor" => {
+                crate::Comptime::ComputeLite::tensor_clone_value(
+                    &CtValue::Struct { type_name, fields },
+                    self.span(),
+                )
+            }
+            CtValue::Struct { type_name, fields } => Ok(CtValue::Struct {
+                type_name,
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((name, self.clone_structural_untyped(value)?))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            }),
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => Ok(CtValue::Enum {
+                type_name,
+                variant,
+                args: args
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((name, self.clone_structural_untyped(value)?))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            }),
+            CtValue::List(values) => Ok(CtValue::List(
+                values
+                    .into_iter()
+                    .map(|value| self.clone_structural_untyped(value))
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            )),
+            CtValue::Map(values) => Ok(CtValue::Map(
+                values
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, self.clone_structural_untyped(value)?)))
+                    .collect::<Result<_, Diagnostic>>()?,
+            )),
+            CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                self.clone_structural_untyped(*value)?,
+            ))),
+            CtValue::Failed(CtReport::Told(value)) => Ok(CtValue::Failed(CtReport::Told(
+                Box::new(self.clone_structural_untyped(*value)?),
+            ))),
+            other => Ok(other),
+        }
+    }
+
+    fn clone_structural_fields(
+        &self,
+        type_name: String,
+        fields: Vec<(String, CtValue)>,
+        field_types: Option<&[(String, Type)]>,
+    ) -> Result<CtValue, Diagnostic> {
+        let fields = fields
+            .into_iter()
+            .map(|(name, value)| {
+                let cloned = field_types
+                    .and_then(|types| types.iter().find(|(field, _)| field == &name))
+                    .map_or_else(
+                        || self.clone_structural_untyped(value),
+                        |(_, ty)| self.clone_structural_value(value, ty),
+                    )?;
+                Ok((name, cloned))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        Ok(CtValue::Struct { type_name, fields })
+    }
+
+    pub(super) fn clone_structural_value(
+        &self,
+        value: CtValue,
+        ty: &Type,
+    ) -> Result<CtValue, Diagnostic> {
+        if ty.is_compute_tensor_family() {
+            return crate::Comptime::ComputeLite::tensor_clone_value(&value, self.span());
+        }
+        match ty {
+            Type::Tagged { inner, .. } => self.clone_structural_value(value, inner),
+            Type::Shared(_) => Ok(value),
+            Type::Apply { name, .. }
+                if name == crate::Syntax::TYPE_SHARED_WEAK
+                    || name == crate::Syntax::TYPE_SHARED_GUARD => Ok(value),
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => match value {
+                CtValue::List(values) => Ok(CtValue::List(
+                    values
+                        .into_iter()
+                        .map(|value| self.clone_structural_value(value, inner))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                )),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Map { value: inner, .. } => match value {
+                CtValue::Map(values) => Ok(CtValue::Map(
+                    values
+                        .into_iter()
+                        .map(|(key, value)| {
+                            Ok((key, self.clone_structural_value(value, inner)?))
+                        })
+                        .collect::<Result<_, Diagnostic>>()?,
+                )),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Option(inner) => match value {
+                CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                    self.clone_structural_value(*value, inner)?,
+                ))),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Result { ok, err } => match value {
+                CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                    self.clone_structural_value(*value, ok)?,
+                ))),
+                CtValue::Failed(CtReport::Told(value)) => Ok(CtValue::Failed(CtReport::Told(
+                    Box::new(self.clone_structural_value(*value, err)?),
+                ))),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Tuple(types) => match value {
+                CtValue::Struct { type_name, fields } => {
+                    let fields = fields
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (name, value))| {
+                            let ty = types
+                                .iter()
+                                .find(|(field, _)| field == &name)
+                                .map(|(_, ty)| ty.as_ref())
+                                .or_else(|| types.get(index).map(|(_, ty)| ty.as_ref()));
+                            let cloned = match ty {
+                                Some(ty) => self.clone_structural_value(value, ty)?,
+                                None => self.clone_structural_untyped(value)?,
+                            };
+                            Ok((name, cloned))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?;
+                    Ok(CtValue::Struct { type_name, fields })
+                }
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Named(_) | Type::Apply { .. } => match value {
+                CtValue::Struct { type_name, fields } => {
+                    let field_types = self.struct_field_types.get(&type_name).map(Vec::as_slice);
+                    self.clone_structural_fields(type_name, fields, field_types)
+                }
+                other => self.clone_structural_untyped(other),
+            },
+            _ => self.clone_structural_untyped(value),
+        }
+    }
+
     // #1799: these calls read or mutate runtime-owned clock/global state. A
     // build-time fold uses a throwaway evaluator, so materializing any of them
     // would freeze state that the running program cannot resync. Runtime and
@@ -1847,6 +2037,40 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    fn eval_view_mut_place(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Option<(String, Vec<ViewMutPathStep>)>, Diagnostic> {
+        match &expr.kind {
+            TExprKind::Local(local) => Ok(Some((local.name.clone(), Vec::new()))),
+            TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+                self.eval_view_mut_place(place, scope)
+            }
+            TExprKind::Field { recv, field, .. } => {
+                let Some((base, mut path)) = self.eval_view_mut_place(recv, scope)? else {
+                    return Ok(None);
+                };
+                path.push(ViewMutPathStep::Field(field.clone()));
+                Ok(Some((base, path)))
+            }
+            TExprKind::Index {
+                base,
+                index,
+                is_map: false,
+                ..
+            } => {
+                let Some((root, mut path)) = self.eval_view_mut_place(base, scope)? else {
+                    return Ok(None);
+                };
+                let value = self.eval_expr(index, scope)?;
+                path.push(ViewMutPathStep::Index(as_int(&value, self.span())?));
+                Ok(Some((root, path)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn eval_expr(
         &mut self,
         expr: &'a TExpr,
@@ -1856,6 +2080,9 @@ impl<'a> EvalCtx<'a> {
         let mut expr = expr;
         let mut transparent_depth = 0;
         while let TExprKind::Clone(inner) = &expr.kind {
+            if expr.ty.is_compute_tensor_family() || self.clone_contains_compute_tensor(&expr.ty) {
+                break;
+            }
             if let Err(diagnostic) = self.enter_source_nesting() {
                 for _ in 0..=transparent_depth {
                     self.leave_source_nesting();
@@ -2733,7 +2960,12 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Unit)
             }
             TExprKind::Drop(inner) => {
-                let _ = self.eval_expr(inner, scope)?;
+                let value = self.eval_expr(inner, scope)?;
+                if inner.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_drop_value(&value, self.span())?;
+                } else if inner.ty.is_compute_view_mut() {
+                    crate::Comptime::ComputeLite::tensor_window_drop_value(&value, self.span())?;
+                }
                 Ok(CtValue::Unit)
             }
             TExprKind::Close(inner) => {
@@ -2875,68 +3107,88 @@ impl<'a> EvalCtx<'a> {
                 else_body,
                 else_value,
             } => {
+                let branch_scope_names = scope.keys().cloned().collect();
                 if self.eval_if_cond(cond, scope)? {
-                    match self.exec_stmts(then_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
+                    match self.exec_stmts_value_with_names(
+                        then_body,
+                        then_value,
+                        scope,
+                        &branch_scope_names,
+                    )? {
+                        Flow::Return(v) => Ok(v),
                         other => {
                             self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
+                            Err(unsupported("pending loop control", self.span()))
                         }
                     }
-                    self.eval_expr(then_value, scope)
                 } else {
-                    match self.exec_stmts(else_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
+                    match self.exec_stmts_value_with_names(
+                        else_body,
+                        else_value,
+                        scope,
+                        &branch_scope_names,
+                    )? {
+                        Flow::Return(v) => Ok(v),
                         other => {
                             self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
+                            Err(unsupported("pending loop control", self.span()))
                         }
                     }
-                    self.eval_expr(else_value, scope)
                 }
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
-                let is_tensor = matches!(&recv.ty, Type::Named(name) if name == "Tensor")
-                    || matches!(&recv.ty, Type::Apply { name, .. } if name == "Tensor");
+                let is_tensor = recv.ty.is_compute_tensor_family();
                 if matches!(
                     op,
                     crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
                         | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
                 ) {
-                    let base_name = match &recv.kind {
-                        TExprKind::Local(local) => local.name.clone(),
-                        TExprKind::Borrow { place, .. } => match &place.kind {
-                            TExprKind::Local(local) => local.name.clone(),
-                            _ => {
-                                return Err(unsupported("view-mut base", self.span()));
-                            }
-                        },
-                        _ => return Err(unsupported("view-mut base", self.span())),
+                    let Some((base_name, path)) = self.eval_view_mut_place(recv, scope)?
+                    else {
+                        return Err(unsupported("view-mut base", self.span()));
                     };
-                    let base_value = scope
+                    let root = scope
                         .get(&base_name)
-                        .cloned()
                         .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?;
+                    let base_value = super::project_list_place(root, &path, self.span())?.clone();
+                    let mut fields = vec![
+                        ("base".into(), CtValue::Str(base_name)),
+                    ];
+                    if !path.is_empty() {
+                        fields.push(("path".into(), super::encode_view_mut_path(&path)));
+                    }
                     if is_tensor {
                         let evaluated_args = args
                             .iter()
                             .map(|arg| self.eval_expr(arg, scope))
                             .collect::<Result<Vec<_>, _>>()?;
                         let (start, end_exclusive) =
-                            crate::Comptime::ComputeLite::tensor_view_window(
+                            crate::Comptime::ComputeLite::tensor_view_mut_window(
                                 &base_value,
                                 &evaluated_args,
                                 self.span(),
                             )?;
+                        let start = i64::try_from(start)
+                            .map_err(|_| unsupported("view-mut start is too large", self.span()))?;
+                        let end = i64::try_from(end_exclusive)
+                            .map_err(|_| unsupported("view-mut end is too large", self.span()))?
+                            .checked_sub(1)
+                            .unwrap_or(-1);
                         return Ok(CtValue::Struct {
                             type_name: "__JetViewMut".into(),
-                            fields: vec![
-                                ("base".into(), CtValue::Str(base_name)),
-                                ("start".into(), CtValue::Int(start as i64)),
-                                ("end".into(), CtValue::Int(end_exclusive as i64 - 1)),
-                            ],
+                            fields: {
+                                fields.push(("start".into(), CtValue::Int(start)));
+                                fields.push(("end".into(), CtValue::Int(end)));
+                                fields.push(("window".into(), CtValue::List(evaluated_args)));
+                                fields.push((
+                                    "__jet_tensor_window_handle".into(),
+                                    crate::Comptime::ComputeLite::tensor_window_handle(
+                                        &base_value,
+                                        self.span(),
+                                    )?,
+                                ));
+                                fields
+                            },
                         });
                     }
                     let CtValue::List(xs) = base_value else {
@@ -2959,14 +3211,14 @@ impl<'a> EvalCtx<'a> {
                         }
                         (start, end + 1)
                     };
-                    let end = end_exclusive - 1;
+                    let end = i64::try_from(end_exclusive)
+                        .map_err(|_| unsupported("view-mut end is too large", self.span()))?
+                        - 1;
+                    fields.push(("start".into(), CtValue::Int(start)));
+                    fields.push(("end".into(), CtValue::Int(end)));
                     return Ok(CtValue::Struct {
                         type_name: "__JetViewMut".into(),
-                        fields: vec![
-                            ("base".into(), CtValue::Str(base_name)),
-                            ("start".into(), CtValue::Int(start)),
-                            ("end".into(), CtValue::Int(end)),
-                        ],
+                        fields,
                     });
                 }
                 if matches!(
@@ -3601,7 +3853,18 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::ListLit(elems) => self.eval_list_lit_expr(expr, elems, scope),
-            TExprKind::Clone(inner) => self.eval_expr(inner, scope),
+            TExprKind::Clone(inner) => {
+                let value = self.eval_expr(inner, scope)?;
+                self.clone_structural_value(value, &expr.ty)
+            }
+            TExprKind::ExplicitCopy(inner) => {
+                let value = self.eval_expr(inner, scope)?;
+                if expr.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_copy_value(&value, self.span())
+                } else {
+                    Ok(value)
+                }
+            }
             TExprKind::Present(inner) => {
                 Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?)))
             }
@@ -3657,6 +3920,17 @@ impl<'a> EvalCtx<'a> {
                     } = &b
                     {
                         if type_name == "__JetViewMut" {
+                            let owner = view_mut_owner_value(fields, scope, self.span())?;
+                            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                                let window = view_mut_window_args(fields)
+                                    .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                                return crate::Comptime::ComputeLite::tensor_view_get_value(
+                                    &owner,
+                                    window,
+                                    idx,
+                                    self.span(),
+                                );
+                            }
                             let window =
                                 materialize_view_mut_window(fields, scope, self.span())?;
                             let CtValue::List(xs) = window else {
@@ -3807,7 +4081,7 @@ impl<'a> EvalCtx<'a> {
                     argv.push(self.eval_expr(&a.value, scope)?);
                 }
                 if method.name == "clone" {
-                    return Ok(r);
+                    return self.clone_structural_value(r, &recv.ty);
                 }
                 if method.name == "apply" {
                     if let (
